@@ -33,6 +33,7 @@ pub const MetadataMap = collections.HashMap(Element, []const Comptime.ValuePtr);
 const LookupMap = collections.HashMap(defines.DeclPtr, TypecheckStatus);
 
 pub const Flags = enum(u3) {
+    ConcreteValue = 1,
     LValue = 2,
 
     pub fn flag(flagToGet: Flags) u3 {
@@ -335,15 +336,28 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
     }
 
     const expr = ast.expressions.get(expressionPtr);
+    defer _ = self.setFlag(.ConcreteValue, switch (expr.type) {
+        .Identifier, .Indexing, .Scoping => true,
+        else => false,
+    });
+
     return switch (expr.type) {
         .Identifier => {
+            defer _ = self.setFlag(.ConcreteValue, true);
+
             self.lastToken = expr.value;
             const decl = self.symbols.findDecl(.{ .file = self.currentFile, .expr = expressionPtr });
             return self.typecheckDecl(decl, maybeExpected);
         },
-        .Indexing => self.typecheckIndexing(expr.value),
+        .Indexing => {
+            defer _ = self.setFlag(.ConcreteValue, true);
+            return self.typecheckIndexing(expr.value);
+        },
         .Call => self.typecheckCall(expr.value, maybeExpected),
-        .Scoping => self.typecheckScoping(expressionPtr),
+        .Scoping => {
+            defer _ = self.setFlag(.ConcreteValue, true);
+            return self.typecheckScoping(expressionPtr);
+        },
         .ExpressionList => self.typecheckExpressionList(expr.value, maybeExpected),
         .Literal => self.typecheckValue(try self.executer.eval(expressionPtr, maybeExpected), maybeExpected),
 
@@ -365,7 +379,10 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
 
         .Mark => self.typecheckMark(.Expression, expressionPtr, expr.value, maybeExpected),
 
-        .Dot => self.typecheckDot(expr.value),
+        .Dot => {
+            defer  _ = self.setFlag(.ConcreteValue, true);
+            return self.typecheckDot(expr.value);
+        },
 
         .Assignment => |t| {
             self.report("Unable to typecheck expression '{s}'.", .{@tagName(t)});
@@ -585,12 +602,14 @@ fn typecheckStructInitialization(self: *Typechecker, ast: *const Parser.AST, str
 
 fn typecheckArrayInitialization(self: *Typechecker, ast: *const Parser.AST, arr: *const Types.Array, range: defines.Range) Error!void {
     if (arr.len != range.len()) {
-        self.report("Mismatching elemen counts in array initialization. Expected {d}, received {d}.", .{
+        self.report("Mismatching element counts in array initialization. Expected {d}, received {d}.", .{
             arr.len,
             range.len(),
         });
         return Error.InitializerCountMismatch;
     }
+
+    defer _ = self.setFlag(.ConcreteValue, true);
 
     for (0..arr.len) |index| {
         const item = try self.typecheckValue(
@@ -888,6 +907,8 @@ pub fn typecheckBuiltinCall(self: *Typechecker, extraPtr: defines.ExpressionPtr,
         BI("cast") => self.typecheckCast(extraPtr, maybeExpected),
         BI("as") => self.typecheckTypeForwarding(extraPtr, maybeExpected),
         BI("typeOf") => self.executer.getValue(try self.executer.evalTypeOf(extraPtr)).Type,
+        BI("compileError") => Comptime.Builtin.Type("noreturn"),
+        BI("compileLog") => Comptime.Builtin.Type("void"),
         BI("unreachable") => Comptime.Builtin.Type("noreturn"),
         else => {
             self.report("Builtin '{s}' is not suitable in this context.", .{Resolver.builtins[declPtr]});
@@ -1069,12 +1090,15 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
                     self.report("Unable to resolve the type of undefined value.", .{});
                     return Error.MissingTypeSpecifier;
                 },
+            BuiltinIndex("unreachable") => return Comptime.Builtin.Type("noreturn"),
             else => {
                 self.report("Builtin '{s}' is not implemented.", .{Resolver.builtins[decl.type]});
                 return Error.NotImplemented;
             },
         };
     }
+
+    defer _ = self.setFlag(.ConcreteValue, true);
 
     const allocator = self.arena.allocator();
 
@@ -1094,6 +1118,9 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
 
     const ast = self.context.getAST(self.currentFile);
     const tokens = self.context.getTokens(ast.tokens);
+
+    self.callstack.push(declPtr);
+    defer _ = self.callstack.pop();
 
     if (isPresent.found_existing) {
         switch (isPresent.value_ptr.status) {
@@ -1117,13 +1144,7 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
         .status = .InProgress,
         .types = 0,
     };
-
-    errdefer {
-        isPresent.value_ptr.status = .NotChecked;
-        _ = self.callstack.pop();
-    }
-
-    self.callstack.push(declPtr);
+    errdefer isPresent.value_ptr.status = .NotChecked;
 
     const types = try switch (decl.kind) {
         .Variable => self.typecheckVariable(&decl),
@@ -1144,7 +1165,6 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
         .types = types,
     };
 
-    _ = self.callstack.pop();
     return types;
 }
 
@@ -1167,7 +1187,21 @@ pub fn typecheckDot(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!TypeI
 
     switch (memberToken.type) {
         .Ampersand => {
-            return common.debug.NotImplemented(@src());
+            if (!self.getFlag(.ConcreteValue)) {
+                self.report("Attempt to take the address of non-concrete value.", .{ });
+                return Error.AddressOfTemporaryValue;
+            }
+
+            // @Beware
+            //      Must be kept in sync with the ConcreteValue check.
+            //      Hence we assume lhs is something that we can take the address of.
+            return self.registerType(.{
+                .Pointer = .{
+                    .size = .Single,
+                    .mutable = self.mutable(objectTypeID),
+                    .child = objectTypeID,
+                },
+            });
         },
         .Star => {
             switch (self.typeTable.get(objectTypeID)) {
@@ -1189,6 +1223,11 @@ pub fn typecheckDot(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!TypeI
             }
         },
         else => { },
+    }
+
+    if (!self.getFlag(.ConcreteValue)) {
+        self.report("Field access on non-concrete (temporary) values are not (yet) supported.", .{ });
+        return Error.NotImplemented;
     }
 
     const member = memberToken.lexeme(self.context, self.currentFile);
@@ -2434,7 +2473,7 @@ pub fn determineExpected(maybeExpected: ?TypeID) ?TypeID {
         else null;
 }
 
-fn setFlag(self: *Typechecker, comptime flag: Flags, bit: bool) bool {
+pub fn setFlag(self: *Typechecker, comptime flag: Flags, bit: bool) bool {
     defer self.flags.setValue(Flags.flag(flag), bit);
     return self.flags.isSet(Flags.flag(flag));
 }

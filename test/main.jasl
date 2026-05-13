@@ -1,3 +1,1 @@
-import initialization as i;
-
-let main = #(@noComptime) false;
+import std;

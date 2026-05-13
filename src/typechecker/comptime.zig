@@ -131,11 +131,12 @@ pub fn eval(self: *Comptime, exprPtr: defines.ExpressionPtr, maybeExpected: ?Typ
     };
 
     if (self.cache.get(key)) |cached| {
-        return self.appendValue(self.getValue(cached));
+        return cached;
     }
 
     // TODO: Complete after proper typed AST
     const expr = ast.expressions.get(exprPtr);
+
     const addr = switch (expr.type) {
         .Identifier =>
             if (expr.value == 0) AnyType
@@ -664,10 +665,12 @@ fn evalBuiltinCall(self: *Comptime, extraPtr: defines.OpaquePtr, declPtr: define
         BI("cast") => self.evalCast(extraPtr, maybeExpected),
         BI("as") => self.evalTypeForwarding(extraPtr, maybeExpected),
         BI("typeOf") => self.evalTypeOf(extraPtr),
+        BI("compileError") => self.evalCompileError(extraPtr),
         BI("unreachable") => {
             self.report("Reached unreachable code.", .{});
             return Error.UnreachableCodePath;
         },
+        BI("compileLog") => self.evalCompileLog(extraPtr),
         else => {
             self.report("Builtin '{s}' is not suitable in this context.", .{Resolver.builtins[declPtr]});
             return Error.ComptimeNotPossible;
@@ -695,6 +698,10 @@ fn evalBuiltin(self: *Comptime, decl: *const Resolver.Declaration, maybeExpected
                     self.report("Unable to infer the type of undefined value.", .{});
                     return Error.MissingTypeSpecifier;
                 },
+            BI("unreachable") => {
+                self.report("Reached unreachable code.", .{});
+                return Error.UnreachableCodePath;
+            },
             else => {
                 self.report("Builtin '{s}' is not suitable in this context.", .{Resolver.builtins[decl.type]});
                 return Error.IllegalSyntax;
@@ -885,9 +892,8 @@ fn evalEnumType(self: *Comptime, expr: defines.ExpressionPtr) Error!ValuePtr {
         },
     };
 
-    const typeID = try self.typechecker.registerType(newType);
     return self.appendValue(.{
-        .Type = typeID
+        .Type = try self.typechecker.registerType(newType)
     });
 }
 
@@ -940,7 +946,7 @@ fn evalStructType(self: *Comptime, expr: defines.ExpressionPtr) Error!ValuePtr {
     };
 
     return self.appendValue(.{
-        .Type = (try self.typechecker.registerType(newType)),
+        .Type = try self.typechecker.registerType(newType),
     });
 }
 
@@ -1050,7 +1056,7 @@ fn evalUnionType(self: *Comptime, expr: defines.ExpressionPtr) Error!ValuePtr {
     };
 
     return self.appendValue(.{
-        .Type = (try self.typechecker.registerType(newType)),
+        .Type = try self.typechecker.registerType(newType),
     });
 }
 
@@ -1073,6 +1079,75 @@ fn evalCast(self: *Comptime, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID
     const thingToCast = try self.expectDefined(ast.extra[thingToCastRange.at(0)], null);
 
     return self.castValue(thingToCast, targetType);
+}
+
+pub fn evalCompileLog(self: *Comptime, extraPtr: defines.OpaquePtr) Error!ValuePtr {
+    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+
+    const expressionList = ast.expressions.items(.value)[ast.extra[extraPtr + 1]];
+    const args = defines.Range{
+        .start = ast.extra[expressionList],
+        .end = ast.extra[expressionList + 1],
+    };
+
+    if (args.len() != 1) {
+        self.report("'compileLog' expects a single expression argument, received {d}.", .{
+            args.len(),
+        });
+        return Error.ArgumentCountMismatch;
+    }
+
+    const message = switch (self.getValue(try self.eval(ast.extra[args.at(0)], null))) {
+        .String => |str| str,
+        else => {
+            self.report("Expected a string message in compile log.", .{});
+            return Error.TypeMismatch;
+        },
+    };
+
+    if (self.getFlag(.Attempting)) {
+        return VoidValue;
+    }
+
+    common.log.info("COMPILE LOG: {s}", .{message});
+    const token = self.typechecker.context.getTokens(self.typechecker.currentFile).get(self.typechecker.lastToken);
+    const position = token.position(self.typechecker.context, self.typechecker.currentFile);
+
+    common.log.info(("." ** 4) ++ " In {s} {d}:{d}", .{
+        self.typechecker.context.getFileName(self.typechecker.currentFile),
+        position.line,
+        position.column,
+    });
+    token.printLocation(self.arena.allocator(), self.typechecker.context, self.typechecker.currentFile, position, self.typechecker.callstack.size == 1);
+    return VoidValue;
+}
+
+pub fn evalCompileError(self: *Comptime, extraPtr: defines.OpaquePtr) Error {
+    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+
+    const expressionList = ast.expressions.items(.value)[ast.extra[extraPtr + 1]];
+    const args = defines.Range{
+        .start = ast.extra[expressionList],
+        .end = ast.extra[expressionList + 1],
+    };
+
+    if (args.len() != 1) {
+        self.report("'compileError' expects a single expression argument, received {d}.", .{
+            args.len(),
+        });
+        return Error.ArgumentCountMismatch;
+    }
+
+    const message = switch (self.getValue(try self.eval(ast.extra[args.at(0)], null))) {
+        .String => |str| str,
+        else => {
+            self.report("Expected a string message in compile error.", .{});
+            return Error.TypeMismatch;
+        },
+    };
+
+    self.report("USERSPACE ERROR: {s}", .{message});
+    return Error.UserspaceError;
 }
 
 pub fn evalTypeOf(self: *Comptime, extraPtr: defines.OpaquePtr) Error!ValuePtr {
@@ -1285,28 +1360,26 @@ fn evalScoping(self: *Comptime, expr: defines.ExpressionPtr) Error!ValuePtr {
 }
 
 fn evalCall(self: *Comptime, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID) Error!ValuePtr {
-    _ = try self.typechecker.typecheckCall(extraPtr, maybeExpected);
-
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
 
-    if (ast.expressions.items(.type)[ast.extra[extraPtr]] == .Identifier) blk: {
-        if (self.typechecker.symbols.resolutionMap.get(.{
-            .file = self.typechecker.currentFile,
-            .expr = ast.extra[extraPtr], 
-        })) |builtinPtr| {
-            const decl = self.typechecker.symbols.declarations.get(builtinPtr);
+    if (self.typechecker.symbols.resolutionMap.get(.{
+        .file = self.typechecker.currentFile,
+        .expr = ast.extra[extraPtr], 
+    })) |builtinPtr| blk: {
+        const decl = self.typechecker.symbols.declarations.get(builtinPtr);
 
-            if (decl.kind != .Builtin) {
-                break :blk;
-            }
-
-            if (Builtin.isBuiltinType(decl.type)) {
-                break :blk;
-            }
-
-            return self.evalBuiltinCall(extraPtr, decl.type, maybeExpected);
+        if (decl.kind != .Builtin) {
+            break :blk;
         }
+
+        if (Builtin.isBuiltinType(decl.type)) {
+            break :blk;
+        }
+
+        return self.evalBuiltinCall(extraPtr, decl.type, maybeExpected);
     }
+
+    _ = try self.typechecker.typecheckCall(extraPtr, maybeExpected);
 
     const maybeFunction = self.getValue(try self.expectDefined(ast.extra[extraPtr], null));
     const function = switch (maybeFunction) {
@@ -1461,7 +1534,7 @@ fn evalArrType(self: *Comptime, extraPtr: defines.OpaquePtr) Error!ValuePtr {
     };
 
     return self.appendValue(.{
-        .Type = (try self.typechecker.registerType(newType)),
+        .Type = try self.typechecker.registerType(newType),
     });
 }
 
@@ -1687,8 +1760,9 @@ pub fn deinit(self: *Comptime) void {
 
 pub fn dumpMem(self: *const Comptime) void {
     if (common.debug.isDebug and self.typechecker.context.settings.hasFlag("--dump-memory")) {
+        common.log.debug("MemDump:", .{});
         for (self.memory.items, 0..) |item, addr| {
-            common.log.debug("{d}: {any}{s}", .{
+            common.log.debug("    {d}: {any}{s}", .{
                 addr,
                 item,
                 if (addr == self.memory.items.len - 1) "\n" else "",
