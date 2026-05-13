@@ -365,8 +365,9 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
 
         .Mark => self.typecheckMark(.Expression, expressionPtr, expr.value, maybeExpected),
 
-        .Assignment,
-        .Dot => |t| {
+        .Dot => self.typecheckDot(expr.value),
+
+        .Assignment => |t| {
             self.report("Unable to typecheck expression '{s}'.", .{@tagName(t)});
             return Error.TypecheckingFailure;
         }
@@ -1147,6 +1148,95 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
     return types;
 }
 
+pub fn typecheckDot(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!TypeID {
+    // @Beware
+    // @Important
+    // TODO:
+    //      This doesn't allow member function calls yet! Add them!
+    //      Also, currently you can't do someArr[index].&, which should've been fine.
+
+    const ast = self.context.getAST(self.currentFile);
+    const tokens = self.context.getTokens(ast.tokens);
+
+    const objectExprPtr = ast.extra[extraPtr];
+    const memberPtr = ast.extra[extraPtr + 1];
+
+    const memberToken = tokens.get(memberPtr);
+
+    const objectTypeID = try self.typecheckExpression(objectExprPtr, null);
+
+    switch (memberToken.type) {
+        .Ampersand => {
+            return common.debug.NotImplemented(@src());
+        },
+        .Star => {
+            switch (self.typeTable.get(objectTypeID)) {
+                .Pointer => |ptr| switch (ptr.size) {
+                    .Single, .C => return ptr.child,
+                    else => {
+                        self.report("Attempt to dereference a slice of type '{s}', use indexing or access the pointer value instead.", .{
+                            self.typeName(self.arena.allocator(), objectTypeID),
+                        });
+                        return Error.DereferenceOfSliceType;
+                    }
+                },
+                else => {
+                    self.report("Attempt to dereference a non-pointer value of type '{s}'", .{
+                        self.typeName(self.arena.allocator(), objectTypeID),
+                    });
+                    return Error.DereferenceOfNonPointerValue;
+                }
+            }
+        },
+        else => { },
+    }
+
+    const member = memberToken.lexeme(self.context, self.currentFile);
+    const objectType = self.typeTable.get(objectTypeID);
+
+    switch (objectType) {
+        .Pointer => |ptr| if (ptr.size == .Slice) {
+            if (std.mem.eql(u8, member, "len")) {
+                return Comptime.Builtin.Type("u32");
+            }
+            else if (std.mem.eql(u8, member, "ptr")) {
+                return self.registerType(.{
+                    .Pointer = .{
+                        .size = .C,
+                        .mutable = ptr.mutable,
+                        .child = ptr.child,
+                    },
+                });
+            }
+        },
+        .Array => |arr| {
+            if (std.mem.eql(u8, member, "len")) {
+                return Comptime.Builtin.Type("u32");
+            }
+            else if (std.mem.eql(u8, member, "ptr")) {
+                return self.registerType(.{
+                    .Pointer = .{
+                        .size = .C,
+                        .mutable = arr.mutable,
+                        .child = arr.child,
+                    },
+                });
+            }
+        },
+        else => { },
+    }
+
+    const index = try self.fieldIndex(objectTypeID, member);
+
+    const fields = switch (objectType) {
+        .Union => |uni| uni.fields,
+        .Struct => |str| str.fields,
+        else => return common.debug.ShouldBeImpossible(@src()),
+    };
+    return fields[index].valueType;
+
+}
+
 pub fn typecheckMark(
     self: *Typechecker,
     kind: Element.Kind,
@@ -1185,9 +1275,8 @@ pub fn typecheckMark(
         const varDef = ast.statements.get(marked);
         try self.setMetadata(kind, ast.extra[varDef.value + 1], metadata);
     }
-    else {
-        try self.setMetadata(kind, marked, metadata);
-    }
+
+    try self.setMetadata(kind, marked, metadata);
 
     return
         if (kind == .Statement) common.debug.NotImplemented(@src())
@@ -1208,7 +1297,14 @@ pub fn typecheckSlicing(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!T
             },
         }),
         .Pointer => |ptr| switch (ptr.size) {
-            .C, .Slice => maybeSliceableType,
+            .Slice => maybeSliceableType,
+            .C => self.registerType(.{
+                .Pointer = .{
+                    .size = .Slice,
+                    .mutable = ptr.mutable,
+                    .child = ptr.child,
+                },
+            }),
             .Single => {
                 self.report("Attempt to slice a singular pointer '{s}'.", .{
                     self.typeName(self.arena.allocator(), maybeSliceableType),
@@ -1342,6 +1438,8 @@ pub fn typecheckBinary(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!Ty
             break :res Comptime.Builtin.Type("bool");
         },
         .Plus, .Minus, .Slash, .Star => {
+            // @Important TODO: allow pointer arithmetic on C style pointers.
+
             if (!(self.isInt(lhs) or self.isFloat(lhs))) {
                 self.report("Non-numeric type '{s}' on the left hand side of arithmetic operation.", .{
                     self.typeName(self.arena.allocator(), lhs),
@@ -2208,10 +2306,10 @@ pub fn tryGetFieldIndex(self: *Typechecker, from: TypeID, fieldName: []const u8)
             break :blk &.{};
         },
         else => {
-            self.report("Definition index can only be used for structs, enums and unions. Received '{s}' instead.", .{
+            self.report("Given type '{s}' contains no fields.", .{
                 self.typeName(self.arena.allocator(), from),
             });
-            return Error.IllegalSyntax;
+            return Error.FieldNotFound;
         },
     };
 
@@ -2352,7 +2450,7 @@ fn setMetadata(
     element: defines.EitherPtr(defines.ExpressionPtr, defines.StatementPtr),
     metadata: []const Comptime.ValuePtr,
 ) Error!void {
-    return self.metadata.putNoClobber(self.arena.allocator(), .{
+    return self.metadata.put(self.arena.allocator(), .{
         .kind = kind,
         .value = element,
     }, metadata) catch Error.AllocatorFailure;

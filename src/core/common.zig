@@ -74,7 +74,7 @@ pub const CompilerError = error {
     RedundantTypeForwarding,
     ArgumentCountMismatch,
     RedundantCast,
-    CastOfUndefinedValue,
+    UseOfUndefinedValue,
     CastOfIncastableValue,
     ModuleNotInScope,
     FieldNotFound,
@@ -112,5 +112,9 @@ pub const CompilerError = error {
     SlicingOfNonSliceableValue,
     IllegalSlicing,
     RedundantMark,
+    AddressOfTemporaryValue,
+    DereferenceOfNonPointerValue,
+    DereferenceOfSliceType,
+    UnionLayoutViolation,
     Terminate,
 };

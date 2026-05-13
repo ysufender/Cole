@@ -33,7 +33,3 @@ let f: Struct = (true, @Field1, ());
 let g: Struct = (true, Enum::Field1, ());
 let h: Struct = (true, Enum(@Field1), ());
 let j: Struct = (true, Enum(Enum::Field1), ());
-
-let randomArray: [4]u32 = (12, 12, 11, 0);
-
-pub let e = #(@noComptime, "Some random metadata") Union;

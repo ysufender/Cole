@@ -31,10 +31,22 @@ pub const TypeInfo = union(enum) {
 
     /// Like type, comptime_int, comptime_float, enum_literal
     // @CompilerOnly
-    pub fn isComptime(self: TypeInfo) bool {
+    pub fn isComptime(self: TypeInfo, typeTable: *const Typechecker.TypeTable) bool {
         return switch (self) {
             .Array, .Type, .ComptimeInt, .ComptimeFloat, .EnumLiteral => true,
-            .Struct, .Union, .Enum => self.isZeroBit(),
+            .Enum => self.isZeroBit(),
+            .Struct, .Union => self.isZeroBit() or blk: {
+                const fields = if (std.meta.activeTag(self) == .Struct) self.Struct.fields else self.Union.fields;
+
+                for (fields) |field| {
+                    if (!field.isComptime) {
+                        break :blk false;
+                    }
+                }
+
+                break :blk true;
+            },
+            .Pointer => |ptr| typeTable.get(ptr.child).isComptime(typeTable),
             else => false,
         };
     }
