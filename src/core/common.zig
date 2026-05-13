@@ -75,6 +75,7 @@ pub const CompilerError = error {
     ArgumentCountMismatch,
     RedundantCast,
     CastOfUndefinedValue,
+    CastOfIncastableValue,
     ModuleNotInScope,
     FieldNotFound,
     ShouldBeImpossible,
@@ -110,5 +111,6 @@ pub const CompilerError = error {
     DivisionByZero,
     SlicingOfNonSliceableValue,
     IllegalSlicing,
+    RedundantMark,
     Terminate,
 };

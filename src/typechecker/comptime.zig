@@ -63,6 +63,7 @@ pub const Value = union(enum) {
         Type: TypeID,
         To: ValuePtr,
     },
+    String: []const u8,
     Slice: struct {
         const Self = @This();
 
@@ -73,14 +74,6 @@ pub const Value = union(enum) {
         pub fn at(self: *const Self, index: u32) ValuePtr {
             assert(index < self.Size);
             return self.To + index;
-        }
-
-        pub fn subslice(self: *const Self, start: u32, end: u32) Self {
-            return .{
-                .Type = self.Type,
-                .Size = end - start,
-                .To = self.To + start,
-            };
         }
     },
     Function: TypeID, // TODO: Function Ptrs, after typechecker ast of course.
@@ -130,7 +123,7 @@ pub fn attemptEval(self: *Comptime, exprPtr: defines.ExpressionPtr, maybeExpecte
 pub fn eval(self: *Comptime, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeID) Error!ValuePtr {
     const typechecker = self.typechecker;
     const file = typechecker.currentFile;
-    const ast = typechecker.context.getAST(self.typechecker.currentFile);
+    const ast = typechecker.context.getAST(file);
 
     const key = Resolver.ResolutionKey{
         .file = file,
@@ -181,9 +174,10 @@ pub fn eval(self: *Comptime, exprPtr: defines.ExpressionPtr, maybeExpected: ?Typ
 
         .Slicing => try self.evalSlicing(expr.value),
 
+        .Mark => try self.evalMark(.Expression, exprPtr, expr.value, maybeExpected),
+
         .Assignment,
         .Dot,
-        .Mark,
         .Lambda, .FunctionDefinition => |t| {
             self.report("Unable to resolve comptime expression. ({s})", .{
                 @tagName(t)
@@ -196,6 +190,56 @@ pub fn eval(self: *Comptime, exprPtr: defines.ExpressionPtr, maybeExpected: ?Typ
     self.cache.putNoClobber(self.arena.allocator(), key, @intCast(addr))
         catch return Error.AllocatorFailure;
     return addr;
+}
+
+pub fn evalMark(
+    self: *Comptime,
+    kind: Typechecker.Element.Kind,
+    ptr: defines.EitherPtr(defines.ExpressionPtr, defines.StatementPtr),
+    extraPtr: defines.OpaquePtr,
+    maybeExpected: ?TypeID,
+) Error!ValuePtr {
+    _ = try self.typechecker.typecheckMark(kind, ptr, extraPtr, maybeExpected);
+
+    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+
+    const metadata = self.typechecker.getMetadata(kind, ast.extra[extraPtr + 2])
+        orelse return common.debug.ShouldBeImpossible(@src()); 
+
+    for (metadata) |dataPtr| {
+        const data = self.getValue(dataPtr);
+        switch (data) {
+            .Enum => |enm| {
+                if (enm.Type != Builtin.Type("builtin_metadata")) {
+                    continue;
+                }
+
+                switch (enm.Value) {
+                    Builtin.Metadata("@noComptime").? => {
+                        self.report("Unable to comptime evaluate {s}, it is marked '@noComptime'.", .{
+                            if (kind == .Statement) "statement" else "expression",
+                        });
+                        return Error.ComptimeNotPossible;
+                    },
+                    Builtin.Metadata("@comptime").? => {
+                        if (!self.getFlag(.Attempting)) {
+                            self.report("Redundant @comptime mark in already comptime scope.", .{});
+                            return Error.RedundantMark;
+                        }
+
+                        _ = self.setFlag(.Attempting, false);
+                    },
+                    else => { },
+                }
+            },
+            else => { },
+        }
+    }
+
+    return switch (kind) {
+        .Statement => common.debug.NotImplemented(@src()),
+        .Expression => self.eval(ast.extra[extraPtr + 2], maybeExpected),
+    };
 }
 
 pub fn evalSlicing(self: *Comptime, extraPtr: defines.OpaquePtr) Error!ValuePtr {
@@ -223,8 +267,23 @@ pub fn evalSlicing(self: *Comptime, extraPtr: defines.OpaquePtr) Error!ValuePtr 
         return Error.IndexOutOfBounds;
     }
 
+
     return self.appendValue(.{
-        .Slice = slice.subslice(@intCast(startIndex), @intCast(endIndex)),
+        .Slice = .{
+            .Type = switch (self.typechecker.typeTable.get(slice.Type)) {
+                .Array => |arr| try self.typechecker.registerType(.{
+                    .Array = .{
+                        .child = arr.child,
+                        .mutable = arr.mutable,
+                        .len = @intCast(endIndex - startIndex),
+                    },
+                }),
+                .Pointer => slice.Type,
+                else => return common.debug.ShouldBeImpossible(@src()),
+            },
+            .Size = @intCast(endIndex - startIndex),
+            .To = @intCast(slice.To + startIndex),
+        },
     });
 }
 
@@ -592,46 +651,47 @@ fn evalLiteral(self: *Comptime, tokenPtr: defines.TokenPtr, maybeExpected: ?Type
             },
             else => unreachable,
         }},
-        .String => .{
-            .Slice = .{
-                .Type = comptime Builtin.Type("string"),
-                .Size = @intCast(lexeme.len),
-                .To = 0,
-            },
-        },
+        .String => .{ .String = lexeme },
         .EnumLiteral =>
-            if (Typechecker.determineExpected(maybeExpected)) |expected| switch (self.typechecker.typeTable.get(expected)) {
-                .Enum => |enm| ret: for (enm.fields, 0..) |field, index| {
-                    if (std.mem.eql(u8, field, lexeme[1..])) {
-                        break :ret Value{
-                            .Enum = .{
-                                .Type = expected,
-                                .Value = @intCast(index),
-                            },
-                        };
+            if (Typechecker.determineExpected(maybeExpected)) |expected|
+                if (Builtin.Metadata(lexeme)) |metadata| .{
+                    .Enum = .{
+                        .Type = Builtin.Type("builtin_metadata"),
+                        .Value = metadata,
                     }
-                } else {
-                    self.report("Couldn't find enumeration '{s}' in '{s}'.", .{
-                        lexeme[1..],
-                        self.typechecker.typeName(self.arena.allocator(), expected),
-                    });
-                    return Error.FieldNotFound;
-                },
-                else => {
-                    self.report("Failed to resolve the type of enum literal '{s}'. Context requires type '{s}'.", .{
-                        lexeme,
-                        self.typechecker.typeName(self.arena.allocator(), expected),
-                    });
-                    return Error.TypeMismatch;
-                },
-            }
+                }
+                else switch (self.typechecker.typeTable.get(expected)) {
+                    .Enum => |enm| ret: for (enm.fields, 0..) |field, index| {
+                        if (std.mem.eql(u8, field, lexeme[1..])) {
+                            break :ret Value{
+                                .Enum = .{
+                                    .Type = expected,
+                                    .Value = @intCast(index),
+                                },
+                            };
+                        }
+                    } else {
+                        self.report("Couldn't find enumeration '{s}' in '{s}'.", .{
+                            lexeme[1..],
+                            self.typechecker.typeName(self.arena.allocator(), expected),
+                        });
+                        return Error.FieldNotFound;
+                    },
+                    else => {
+                        self.report("Failed to resolve the type of enum literal '{s}'. Context requires type '{s}'.", .{
+                            lexeme,
+                            self.typechecker.typeName(self.arena.allocator(), expected),
+                        });
+                        return Error.TypeMismatch;
+                    },
+                }
             else {
                 self.report("Couldn't infer the type of enum literal '{s}'.", .{
                     lexeme,
                 });
                 return Error.InferenceError;
             },
-        else => unreachable,
+        else => return common.debug.ShouldBeImpossible(@src()),
     };
 
     return self.appendValue(value);
@@ -1209,33 +1269,52 @@ fn evalIndexing(self: *Comptime, extraPtr: defines.OpaquePtr) Error!ValuePtr {
     const indexPtr = try self.expectDefined(ast.extra[extraPtr + 1], null);
     const index = self.getValue(indexPtr);
 
-    if (slice.Slice.Size <= index.Int) {
+    const size = switch (slice) {
+        .Slice => |s| s.Size,
+        .String => |s| s.len,
+        else => return common.debug.ShouldBeImpossible(@src()),
+    };
+
+    if (size <= index.Int) {
         self.report("Index out of bounds. Size: {d}, Index: {d}.", .{
-            slice.Slice.Size,
+            size,
             index.Int,
         });
         return Error.IndexOutOfBounds;
     }
 
     return
-        if (lValue) ret: {
-            const ptrType = TypeInfo{
-                .Pointer = .{
-                    .mutable = true,
-                    .child = self.typechecker.typeTable.get(slice.Slice.Type).Pointer.child,
-                    .size = .Single,
-                },
-            };
-            const ptrTypeID = (try self.typechecker.registerType(ptrType));
+        if (lValue) ret: switch (slice) {
+            .String => {
+                self.report("Attempt to mutate immutable string literal.", .{});
+                break :ret Error.MutabilityViolation;
+            },
+            .Slice => {
+                const ptrType = TypeInfo{
+                    .Pointer = .{
+                        .mutable = true,
+                        .child = self.typechecker.typeTable.get(slice.Slice.Type).Pointer.child,
+                        .size = .Single,
+                    },
+                };
+                const ptrTypeID = (try self.typechecker.registerType(ptrType));
 
-            break :ret self.appendValue(.{
-                .Pointer = .{
-                    .Type = ptrTypeID,
-                    .To = slice.Slice.at(@intCast(index.Int)),
-                },
-            });
+                break :ret self.appendValue(.{
+                    .Pointer = .{
+                        .Type = ptrTypeID,
+                        .To = slice.Slice.at(@intCast(index.Int)),
+                    },
+                });
+            },
+            else => common.debug.ShouldBeImpossible(@src()),
         }
-        else slice.Slice.at(@intCast(index.Int));
+        else switch (slice) {
+            .String => |s| self.appendValue(.{
+                .Int = s[@intCast(index.Int)],
+            }),
+            .Slice => slice.Slice.at(@intCast(index.Int)),
+            else => common.debug.ShouldBeImpossible(@src()),
+        };
 }
 
 fn evalMutType(self: *Comptime, exprPtr: defines.OpaquePtr) Error!ValuePtr {
@@ -1536,13 +1615,13 @@ pub const Builtin = struct {
     }
 
     pub fn TypeName(btype: TypeID) []const u8 {
-        assert(btype < builtins.len);
-        return builtins[btype].name;
+        assert(btype < builtinTypes.len);
+        return builtinTypes[btype].name;
     }
 
     pub fn Type(btype: []const u8) TypeID {
         if (@typeInfo(@TypeOf(.{btype})).@"struct".fields[0].is_comptime) comptime {
-            for (builtins, 0..) |item, index| {
+            for (builtinTypes, 0..) |item, index| {
                 if (std.mem.eql(u8, item.name, btype)) {
                     return index;
                 }
@@ -1551,17 +1630,37 @@ pub const Builtin = struct {
             @compileError("Unknown type.");
         };
 
-        for (builtins, 0..) |item, i| {
+        for (builtinTypes, 0..) |item, i| {
             if (std.mem.eql(u8, item.name, btype)) {
                 return @intCast(i);
             }
         }
 
-        unreachable;
+        common.debug.ShouldBeImpossible(@src()) catch unreachable;
+    }
+
+    pub fn Metadata(metadata: []const u8) ?defines.Offset {
+        if (@typeInfo(@TypeOf(.{metadata})).@"struct".fields[0].is_comptime) comptime {
+            for (builtinMetadata, 0..) |item, index| {
+                if (std.mem.eql(u8, item, metadata)) {
+                    return index;
+                }
+            }
+
+            @compileError("Unknown metadata.");
+        };
+
+        for (builtinMetadata, 0..) |item, index| {
+            if (std.mem.eql(u8, item, metadata)) {
+                return @intCast(index);
+            }
+        }
+        
+        return null;
     }
 };
 
-pub const builtins = [_]struct {
+pub const builtinTypes = [_]struct {
     name: []const u8,
     info: TypeInfo,
 }{
@@ -1598,6 +1697,13 @@ pub const builtins = [_]struct {
     .{ .name = "mut any", .info = .{ .Any = true } },
     // incomplete
     .{ .name = "incomplete", .info = .{ .Struct = .{ .mutable = false, .name = "incomplete", .fields = &.{}, .definitions = &.{}, .scope = 0 } } },
-    // entry point
-    .{ .name = "entry_point", .info = .{ .Function = .{.mutable = false, .argTypes = &.{}, .returnType = 1 } } },
+    // entry_point
+    .{ .name = "entry_point", .info = .{ .Function = .{ .mutable = false, .argTypes = &.{}, .returnType = 1 } } },
+    // builtin_metadata
+    .{ .name = "builtin_metadata", .info = .{ .Enum = .{ .mutable = false, .name = "builtin_metadata", .fields = &.{}, .definitions = &.{}, .scope = 0 } } },
+};
+
+pub const builtinMetadata = [_][]const u8 {
+    "@noComptime",
+    "@comptime",
 };

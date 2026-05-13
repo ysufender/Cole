@@ -24,9 +24,9 @@ pub fn ShouldBeImpossible(comptime src: std.builtin.SourceLocation) Error {
         src.column,
     }), .{});
 
-    return Error.NotImplemented;
+    return Error.ShouldBeImpossible;
 }
 
-pub fn hello(comptime num: comptime_int) void {
-    common.log.debug(std.fmt.comptimePrint("Hello {d}", .{num}), .{});
+pub fn hello(num: usize) void {
+    common.log.debug("Hello {d}", .{num});
 }

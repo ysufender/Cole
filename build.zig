@@ -32,7 +32,7 @@ fn addTargets(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
     for (targets) |query| {
         const target   = b.resolveTargetQuery(query);
 
-        const targetName = print(b.allocator, "jaslc-{s}-{s}-{s}", .{
+        const targetName = print(b.allocator, "{s}-{s}-{s}", .{
             toLower(b.allocator, @tagName(optimize)) catch unreachable,
             @tagName(target.result.os.tag),
             @tagName(target.result.cpu.arch),
@@ -52,12 +52,7 @@ fn addTargets(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
         opts.addOption([]const u8, "version", versionString);
 
         const exe = b.addExecutable(.{
-            .name = print(b.allocator, "jaslc-{s}-{s}-{s}-{s}", .{
-                versionString,
-                toLower(b.allocator, @tagName(optimize)) catch unreachable,
-                @tagName(target.result.os.tag),
-                @tagName(target.result.cpu.arch),
-            }) catch unreachable,
+            .name = "jaslc",
             .version = version,
             .root_module = b.createModule(
                 if (optimize == .Debug) .{
@@ -79,7 +74,12 @@ fn addTargets(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
         });
         exe.root_module.addEmbedPath(b.path(resourcePath));
         exe.root_module.addOptions("config", opts);
-        const install = b.addInstallArtifact(exe, .{});
+        const install = b.addInstallArtifact(exe, .{
+            .dest_dir = .{ .override = .{ .custom = b.pathJoin(&.{
+                targetName,
+                versionString,
+            }) } }
+        });
 
         const step = b.step(targetName, print(
             b.allocator,

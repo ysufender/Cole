@@ -913,25 +913,29 @@ fn mark(self: *Parser, comptime stmt: bool) if (stmt) StatementResult else Expre
         else try self.ifExpression();
 
     if (stmt) switch (self.statementMap.items(.type)[marked]) {
-        .While, .VariableDefinition => {},
+        .For, .While, .VariableDefinition => {},
         else  => |t| {
-            self.report("Statement metadata can only be attached to extern, variable definition and while statements. Received '{s}'", .{@tagName(t)});
+            self.report("Statement metadata can only be attached to loops and definitions. Received '{s}'", .{@tagName(t)});
             return error.IllegalSyntax;
         },
-    }
-    else switch (self.expressionMap.items(.type)[marked]) {
-        .StructDefinition, .EnumDefinition, .UnionDefinition, .FunctionDefinition, => {},
-        else  => |t| {
-            self.report("Expression metadata can only be attached to type definitions and functions. Received '{s}'", .{@tagName(t)});
-            return error.IllegalSyntax;
-        },
+    };
+
+    // @Beware maybe maybe maybe
+    if (false) {
+        if (!stmt) switch (self.expressionMap.items(.type)[marked]) {
+            .StructDefinition, .EnumDefinition, .UnionDefinition, .FunctionDefinition, => {},
+            else  => |t| {
+                self.report("Expression metadata can only be attached to type definitions and functions. Received '{s}'", .{@tagName(t)});
+                return error.IllegalSyntax;
+            },
+        };
     }
 
-    if (marks.start == marks.end) {
+    if (marks.len() == 0) {
         return marked;
     }
 
-    self.stats.meta += marks.end - marks.start;
+    self.stats.meta += marks.len();
 
     const start: u32 = @intCast(self.extra.items.len);
     self.extra.append(self.allocator(), marks.start) catch return error.AllocatorFailure;
@@ -1368,10 +1372,15 @@ fn compilerHint(self: *Parser) common.CompilerError!defines.Range {
             self.scratch.append(self.allocator(), try self.ifExpression()) catch return error.AllocatorFailure;
             if (!self.match(&.{.Comma})) break :loop;
         }
-
         _ = try self.consume(.RParen, error.MissingParenthesis, "Expected ')' in compiler hint.");
 
         const range = try self.commitScratch(scratchStart);
+
+        if (range.len() == 0) {
+            self.report("Redundant empty mark.", .{});
+            return common.CompilerError.RedundantMark;
+        }
+
         break :blk range;
     }
     else .{

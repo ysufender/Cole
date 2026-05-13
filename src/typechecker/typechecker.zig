@@ -29,7 +29,7 @@ const eql = std.meta.eql;
 pub const TypeTable = MultiArrayList(TypeInfo);
 pub const TypeMap = collections.HashMap(TypeInfo, TypeID);
 pub const ResolutionMap = collections.HashMap(defines.DeclPtr, TypeID);
-pub const MetadataMap = collections.HashMap(Element, []const defines.ExpressionPtr);
+pub const MetadataMap = collections.HashMap(Element, []const Comptime.ValuePtr);
 const LookupMap = collections.HashMap(defines.DeclPtr, TypecheckStatus);
 
 pub const Flags = enum(u3) {
@@ -51,10 +51,12 @@ const TypecheckStatus = struct {
 };
 
 pub const Element = struct {
-    kind: enum {
+    pub const Kind = enum {
         Statement,
         Expression,
-    },
+    };
+
+    kind: Kind,
     value: defines.OpaquePtr,
 };
 
@@ -150,10 +152,10 @@ pub fn init(
 
     const counts = context.counts;
     const total = counts.integer + counts.float + counts.string + counts.bool;
-    const typeCount = counts.types * 3 + @as(u32, @intCast(Comptime.builtins.len));
+    const typeCount = counts.types * 3 + @as(u32, @intCast(Comptime.builtinTypes.len));
 
     var typeTable = TypeTable{};
-    typeTable.ensureTotalCapacity(allocator, typeCount + @as(u32, @intCast(Comptime.builtins.len)))
+    typeTable.ensureTotalCapacity(allocator, typeCount + @as(u32, @intCast(Comptime.builtinTypes.len)))
         catch return Error.AllocatorFailure;
     var reso = ResolutionMap.empty;
     var typeMap = TypeMap.empty;
@@ -161,11 +163,11 @@ pub fn init(
     var lookup = LookupMap.empty;
 
     reso.ensureTotalCapacity(allocator, symbolTable.declarations.len) catch return Error.AllocatorFailure;
-    typeMap.ensureTotalCapacity(allocator, typeCount + @as(u32, @intCast(Comptime.builtins.len))) catch return Error.AllocatorFailure;
+    typeMap.ensureTotalCapacity(allocator, typeCount + @as(u32, @intCast(Comptime.builtinTypes.len))) catch return Error.AllocatorFailure;
     lookup.ensureTotalCapacity(allocator, symbolTable.declarations.len) catch return Error.AllocatorFailure;
     metadata.ensureTotalCapacity(allocator, counts.meta * 3) catch return Error.AllocatorFailure;
 
-    inline for (Comptime.builtins, 0..) |builtin, id| {
+    inline for (Comptime.builtinTypes, 0..) |builtin, id| {
         typeTable.appendAssumeCapacity(builtin.info);
         typeMap.putAssumeCapacityNoClobber(builtin.info, @intCast(id));
     }
@@ -361,9 +363,10 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
 
         .Slicing => self.typecheckSlicing(expr.value),
 
+        .Mark => self.typecheckMark(.Expression, expressionPtr, expr.value, maybeExpected),
+
         .Assignment,
-        .Dot,
-        .Mark => |t| {
+        .Dot => |t| {
             self.report("Unable to typecheck expression '{s}'.", .{@tagName(t)});
             return Error.TypecheckingFailure;
         }
@@ -422,6 +425,7 @@ pub fn typecheckValue(self: *Typechecker, val: Comptime.ValuePtr, maybeExpected:
         .Void => Comptime.Builtin.Type("void"),
         .Undefined => |undef| undef,
         .Slice => |slice| slice.Type,
+        .String => Comptime.Builtin.Type("string"),
     };
 }
 
@@ -1143,6 +1147,53 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
     return types;
 }
 
+pub fn typecheckMark(
+    self: *Typechecker,
+    kind: Element.Kind,
+    ptr: defines.EitherPtr(defines.StatementPtr, defines.ExpressionPtr),
+    extraPtr: defines.OpaquePtr,
+    maybeExpected: ?TypeID
+) Error!TypeID {
+    // In case of the mark of a mark, ptr is the marked this, which is the
+    // current mark.
+    if (self.getMetadata(kind, ptr)) |_| {
+        self.report("Redundant marking of already marked {s}.", .{
+            if (kind == .Statement) "statement" else "expression",
+        });
+        return Error.RedundantMark;
+    }
+
+    const ast = self.context.getAST(self.currentFile);
+
+    const marks = defines.Range{
+        .start = ast.extra[extraPtr], 
+        .end = ast.extra[extraPtr + 1], 
+    };
+
+    const metadata = self.arena.allocator().alloc(Comptime.ValuePtr, marks.len())
+        catch return Error.AllocatorFailure;
+
+    for (0..marks.len()) |index| {
+        metadata[index] = try self.executer.eval(
+            ast.extra[marks.at(@intCast(index))],
+            Comptime.Builtin.Type("builtin_metadata")
+        );
+    }
+
+    const marked = ast.extra[extraPtr + 2];
+    if (kind == .Statement and ast.statements.items(.type)[marked] == .VariableDefinition) {
+        const varDef = ast.statements.get(marked);
+        try self.setMetadata(kind, ast.extra[varDef.value + 1], metadata);
+    }
+    else {
+        try self.setMetadata(kind, marked, metadata);
+    }
+
+    return
+        if (kind == .Statement) common.debug.NotImplemented(@src())
+        else self.typecheckExpression(marked, maybeExpected);
+}
+
 pub fn typecheckSlicing(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!TypeID {
     const ast = self.context.getAST(self.currentFile);
 
@@ -1151,8 +1202,8 @@ pub fn typecheckSlicing(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!T
     const resultType = switch (maybeSliceable) {
         .Array => |arr| try self.registerType(.{
             .Pointer = .{
-                .mutable = arr.mutable,
                 .size = .Slice,
+                .mutable = arr.mutable,
                 .child = arr.child,
             },
         }),
@@ -1753,7 +1804,7 @@ pub fn assertCastable(self: *Typechecker, from: TypeID, to: TypeID) Error!void {
             .Function => { },
             else => return Error.IncompatibleTypes,
         },
-        .EnumLiteral => return common.debug.ShouldBeImpossible(@src()),
+        .EnumLiteral => return Error.CastOfIncastableValue,
         .Any, .Type,
         .Noreturn, .Array,
         .Void => return Error.IncompatibleTypes,
@@ -1907,7 +1958,7 @@ pub fn assertComparable(self: *const Typechecker, this: TypeID, that: TypeID) Er
             else => Error.ComparisonOnIncompatibleTypes,
         },
         .Bool, .Type => functional.throwIf(std.meta.activeTag(thatType) != std.meta.activeTag(thisType), Error.ComparisonOnIncompatibleTypes),
-        .EnumLiteral => common.debug.ShouldBeImpossible(@src()),
+        .EnumLiteral => { }, // @Maybe TODO: do not allow this
         else => Error.ComparisonOnNonComparableType,
     };
 }
@@ -2292,4 +2343,28 @@ fn setFlag(self: *Typechecker, comptime flag: Flags, bit: bool) bool {
 
 fn getFlag(self: *Typechecker, comptime flag: Flags) bool {
     return self.flags.isSet(Flags.flag(flag));
+}
+
+/// Assumes metadata doesn't exist for given element
+fn setMetadata(
+    self: *Typechecker,
+    kind: Element.Kind,
+    element: defines.EitherPtr(defines.ExpressionPtr, defines.StatementPtr),
+    metadata: []const Comptime.ValuePtr,
+) Error!void {
+    return self.metadata.putNoClobber(self.arena.allocator(), .{
+        .kind = kind,
+        .value = element,
+    }, metadata) catch Error.AllocatorFailure;
+}
+
+pub fn getMetadata(
+    self: *const Typechecker,
+    elementType: Element.Kind,
+    value: defines.EitherPtr(defines.ExpressionPtr, defines.StatementPtr)
+) ?[]const defines.ExpressionPtr {
+    return self.metadata.get(.{
+        .kind = elementType,
+        .value = value,
+    });
 }
