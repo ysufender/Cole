@@ -233,10 +233,12 @@ pub fn evalDot(self: *Comptime, extraPtr: defines.OpaquePtr) Error!ValuePtr {
             const index = try self.typechecker.fieldIndex(uni.Type, member);
             const unionType = self.typechecker.typeTable.get(uni.Type).Union;
 
-            if (unionType.isTagged and index != uni.Tag) {
+            // @Beware Union.Tag starts from 0 but the tag field of the union is 
+            // at 0 so you should always add 1.
+            if (unionType.isTagged and index != uni.Tag + 1) {
                 self.report("Attempt to access union field '{s}' while '{s}' is active on type '{s}'.", .{
                     member,
-                    unionType.fields[uni.Tag].name,
+                    unionType.fields[uni.Tag + 1].name,
                     unionType.name,
                 });
                 return Error.UnionLayoutViolation;
@@ -885,10 +887,10 @@ fn evalEnumType(self: *Comptime, expr: defines.ExpressionPtr) Error!ValuePtr {
             .name = try self.generateRandomName(.Enum),
             .fields = fields,
             .definitions = try self.handleScopeDecls(ast, tokens, defRange),
-            .scope = self.typechecker.symbols.findGetDecl(.{
+            .scope = self.typechecker.symbols.findDecl(.{
                 .file = self.typechecker.currentFile,
                 .expr = expr,
-            }).scope
+            })
         },
     };
 
@@ -938,10 +940,10 @@ fn evalStructType(self: *Comptime, expr: defines.ExpressionPtr) Error!ValuePtr {
             .name = try self.generateRandomName(.Struct),
             .fields = fields,
             .definitions = try self.handleScopeDecls(ast, tokens, defRange),
-            .scope = self.typechecker.symbols.findGetDecl(.{
+            .scope = self.typechecker.symbols.findDecl(.{
                 .file = self.typechecker.currentFile,
                 .expr = expr,
-            }).scope
+            })
         },
     };
 
@@ -992,10 +994,10 @@ fn evalUnionType(self: *Comptime, expr: defines.ExpressionPtr) Error!ValuePtr {
             .name = try self.generateRandomName(.Enum),
             .definitions = &.{},
             .fields = tags,
-            .scope = self.typechecker.symbols.findGetDecl(.{
+            .scope = self.typechecker.symbols.findDecl(.{
                 .file = self.typechecker.currentFile,
                 .expr = expr,
-            }).scope
+            })
         },
     };
 
@@ -1048,10 +1050,10 @@ fn evalUnionType(self: *Comptime, expr: defines.ExpressionPtr) Error!ValuePtr {
             .name = try self.generateRandomName(.Union),
             .fields = fields,
             .definitions = defs,
-            .scope = self.typechecker.symbols.findGetDecl(.{
+            .scope = self.typechecker.symbols.findDecl(.{
                 .file = self.typechecker.currentFile,
                 .expr = expr,
-            }).scope,
+            }),
         }
     };
 
@@ -1250,12 +1252,14 @@ fn constructStruct(
     str: *const types.Struct,
     range: defines.Range,
 ) Error!ValuePtr {
-    const start = self.memory.items.len;
+    var start: isize = -1;
     for (0..range.len()) |idx| {
-        _ = try self.expectDefined(
+        const addr = try self.eval(
             ast.extra[range.at(@intCast(idx))],
             str.fields[idx].valueType
         );
+
+        start = if (start == -1) addr else start;
     }
 
     return self.appendValue(.{
@@ -1263,7 +1267,7 @@ fn constructStruct(
             .Type = typeID,
             .Fields = defines.Range{
                 .start = @intCast(start),
-                .end = @intCast(self.memory.items.len),
+                .end = @intCast(start + range.len()),
             },
         },
     });
@@ -1276,16 +1280,15 @@ fn constructUnion(
     uni: *const types.Union,
     range: defines.Range,
 ) Error!ValuePtr {
-    const tag = self.getValue(try self.expectDefined(ast.extra[range.at(0)], uni.tag)).Enum.Value;
+    const tag = self.getValue(try self.eval(ast.extra[range.at(0)], uni.tag)).Enum.Value;
     const fieldType = uni.fields[tag + 1].valueType;
-    const value = self.memory.items.len;
-    _ = try self.constructFromList(fieldType, range.subRange(1));
+    const value = try self.constructFromList(fieldType, range.subRange(1));
 
     return self.appendValue(.{
         .Union = .{
             .Type = typeID,
             .Tag = tag,
-            .Value = @intCast(value),
+            .Value = value,
         },
     });
 }
@@ -1296,7 +1299,7 @@ fn constructArrayFromList(self: *Comptime, arr: TypeID, child: TypeID, range: de
     var address: i64 = -1;
 
     for (range.start..range.end) |ptr| {
-        const addr = try self.expectDefined(ast.extra[ptr], child);
+        const addr = try self.eval(ast.extra[ptr], child);
 
         address = if (address == -1) addr else address;
     }

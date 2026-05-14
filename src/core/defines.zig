@@ -43,6 +43,14 @@ pub const Range = struct {
             .end = start + self.len() - from,
         };
     }
+
+    pub fn subRangeN(self: Range, from: u32, count: u32) Range {
+        const start = self.start + from;
+        return .{
+            .start = start,
+            .end = start + count,
+        };
+    }
 };
 
 pub const ExpressionPtr = u32;

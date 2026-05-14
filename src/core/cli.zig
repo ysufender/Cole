@@ -46,8 +46,8 @@ const flags = std.StaticStringMap(Flags).initComptime(&(.{
 
     .{ "--dump-memory", .Flag },
 
-})
-);
+    .{ "--dump-stats", .Flag },
+}));
 
 const helpText =
     @embedFile("../res/help.txt")

@@ -1,1 +1,9 @@
 import std;
+
+let Test = union(enum) {
+    testing: float,
+    testing2: float,
+};
+
+let test = Test(@testing, 1.0);
+let main = Test(@testing, undefined);

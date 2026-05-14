@@ -1,1 +1,0 @@
-p 'typechecker.typechecker.typeName'(self, ((struct 'mem.Allocator' (*'heap.ArenaAllocator.allocator') *struct 'heap.ArenaAllocator')(self->arena), expected)

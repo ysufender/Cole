@@ -36,7 +36,8 @@ tokenMap: TokenMap,
 // ASTs
 astMap: ASTMap,
 
-arena: std.heap.ArenaAllocator,
+sourceArena: std.heap.ArenaAllocator,
+generalArena: std.heap.ArenaAllocator,
 io: std.Io,
 
 counts: struct {
@@ -59,39 +60,49 @@ counts: struct {
 settings: CompilerSettings,
 
 pub fn init(baseAllocator: std.mem.Allocator, mainInit: std.process.Init) Error!Context {
-    var arena = std.heap.ArenaAllocator.init(baseAllocator);
-    errdefer arena.deinit();
+    var sourceArena = std.heap.ArenaAllocator.init(baseAllocator);
+    errdefer sourceArena.deinit();
 
-    const allocator = arena.allocator();
+    var generalArena = std.heap.ArenaAllocator.init(baseAllocator);
+    errdefer generalArena.deinit();
 
-    const settings = cli.parseCLI(allocator, mainInit.minimal.args, mainInit.io) catch |err| {
+    const sourceAllocator = sourceArena.allocator();
+    const generalAllocator = generalArena.allocator();
+
+    const settings = cli.parseCLI(generalAllocator, mainInit.minimal.args, mainInit.io) catch |err| {
         if (err != error.Terminate) {
             log.err("Couldn't parse CLI input.", .{});
         }
         return err;
     };
-    settings.print(allocator);
+    settings.print(generalAllocator);
 
     var resolved = ResolveMap.empty;
-    resolved.ensureTotalCapacity(allocator, 512) catch return error.AllocatorFailure;
+    resolved.ensureTotalCapacity(generalAllocator, 512) catch return error.AllocatorFailure;
 
-    const self = Context{
-        .filenameMap = FileNameMap.initCapacity(allocator, 512) catch return error.AllocatorFailure,
-        .fileMap = FileMap.initCapacity(allocator, 512) catch return error.AllocatorFailure,
-        .tokenMap = TokenMap.initCapacity(allocator, 512) catch return error.AllocatorFailure,
-        .astMap = ASTMap.initCapacity(allocator, 512) catch return error.AllocatorFailure,
-        .arena = arena,
+    return .{
+        .filenameMap = FileNameMap.initCapacity(sourceAllocator, 512) catch return error.AllocatorFailure,
+        .fileMap = FileMap.initCapacity(sourceAllocator, 512) catch return error.AllocatorFailure,
+        .tokenMap = TokenMap.initCapacity(generalAllocator, 512) catch return error.AllocatorFailure,
+        .astMap = ASTMap.initCapacity(generalAllocator, 512) catch return error.AllocatorFailure,
+        .generalArena = generalArena,
+        .sourceArena = sourceArena,
         .io = mainInit.io,
         .resolved = resolved,
         .settings = settings,
         .counts = .{},
     };
-
-    return self;
 }
 
+/// Deinit files, file names, ASTs and token lists.
 pub fn deinit(self: *Context) void {
-    self.arena.deinit();
+    self.generalArena.deinit();
+    self.sourceArena.deinit();
+}
+
+/// Deinit ASTs and token lists, keeping the sources.
+pub fn deinitGeneralArena(self: *Context) void {
+    self.generalArena.deinit();
 }
 
 pub fn openRead(self: *Context, file: []const u8) Error!defines.FilePtr {
@@ -101,7 +112,7 @@ pub fn openRead(self: *Context, file: []const u8) Error!defines.FilePtr {
         return id;
     }
 
-    self.filenameMap.append(self.arena.allocator(), path) catch return error.AllocatorFailure;
+    self.filenameMap.append(self.sourceArena.allocator(), path) catch return error.AllocatorFailure;
 
     var sourceFile = std.Io.Dir.openFileAbsolute(self.io, path, .{ }) catch {
         log.err("Couldn't open source file '{s}'.", .{file});
@@ -116,15 +127,15 @@ pub fn openRead(self: *Context, file: []const u8) Error!defines.FilePtr {
     };
 
     self.fileMap.append(
-        self.arena.allocator(),
-        fileReader.interface.readAlloc(self.arena.allocator(), sourceSize) catch |err| {
+        self.sourceArena.allocator(),
+        fileReader.interface.readAlloc(self.generalArena.allocator(), sourceSize) catch |err| {
             log.err("Couldn't read file {s}\n\tInfo: {s}", .{path, @errorName(err)});
             return error.IOError;
         }
     ) catch return error.AllocatorFailure;
 
     self.resolved.putNoClobber(
-        self.arena.allocator(),
+        self.generalArena.allocator(),
         path,
         @intCast(self.fileMap.items.len - 1)
     ) catch return error.AllocatorFailure;
@@ -152,7 +163,7 @@ pub fn getFileName(self: *const Context, file: defines.FilePtr) []const u8 {
 pub fn registerTokens(self: *Context, tokens: Lexer.TokenList.Slice) Error!defines.TokenPtr {
     self.counts.tokens += tokens.len;
 
-    self.tokenMap.append(self.arena.allocator(), try collections.deepCopy(tokens, self.arena.allocator())) catch return error.AllocatorFailure;
+    self.tokenMap.append(self.generalArena.allocator(), try collections.deepCopy(tokens, self.generalArena.allocator())) catch return error.AllocatorFailure;
 
     return @intCast(self.tokenMap.items.len - 1);
 }
@@ -164,7 +175,7 @@ pub fn getTokens(self: *const Context, tokens: defines.TokenPtr) *const Lexer.To
 
 pub fn registerAST(self: *Context, ast: Parser.AST) Error!defines.ASTPtr {
     const ptr: defines.ASTPtr = @intCast(self.astMap.items.len);
-    _ = self.astMap.addOne(self.arena.allocator()) catch return error.AllocatorFailure;
+    _ = self.astMap.addOne(self.generalArena.allocator()) catch return error.AllocatorFailure;
 
     self.counts.modules += 1;
     self.counts.expressions += ast.expressions.len;
@@ -179,7 +190,7 @@ pub fn registerAST(self: *Context, ast: Parser.AST) Error!defines.ASTPtr {
 
     self.counts.meta += ast.stats.meta;
 
-    self.astMap.items[ptr] = try collections.deepCopy(ast, self.arena.allocator());
+    self.astMap.items[ptr] = try collections.deepCopy(ast, self.generalArena.allocator());
 
     return ptr;
 }
@@ -220,7 +231,7 @@ pub fn realpath(self: *Context, file: []const u8) Error![]const u8 {
         return error.FileNotFound;
     };
 
-    return self.arena.allocator().dupe(u8, path) catch error.AllocatorFailure;
+    return self.sourceArena.allocator().dupe(u8, path) catch error.AllocatorFailure;
 }
 
 pub fn getFileId(self: *Context, file: []const u8) defines.FilePtr {

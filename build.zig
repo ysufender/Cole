@@ -20,6 +20,8 @@ pub fn build(b: *std.Build) void {
     addTargets(b, .ReleaseFast);
     addTargets(b, .ReleaseSafe);
     addTargets(b, .ReleaseSmall);
+
+    addDebugTarget(b);
 }
 
 fn addTargets(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
@@ -89,6 +91,38 @@ fn addTargets(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
         step.dependOn(&install.step);
         step.dependOn(b.getInstallStep());
     }
+}
+
+fn addDebugTarget(b: *std.Build) void {
+    const target   = b.standardTargetOptions(.{});
+
+    const targetName = "debug";
+
+    const opts = b.addOptions();
+    opts.addOption(bool, "isDebug", true);
+    opts.addOption([]const u8, "version", "debug");
+
+    const exe = b.addExecutable(.{
+        .name = "jaslc-debug",
+        .version = version,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main.zig"),
+            .target = target,
+            .optimize = .Debug,
+            .link_libc  = target.result.os.tag == .windows,
+            .error_tracing = true,
+            .omit_frame_pointer = false,
+        }),
+        .use_llvm = true,
+        .use_lld = true,
+    });
+    exe.root_module.addEmbedPath(b.path(resourcePath));
+    exe.root_module.addOptions("config", opts);
+    const install = b.addInstallArtifact(exe, .{});
+
+    const step = b.step(targetName, "Build for debug on native platform");
+    step.dependOn(&install.step);
+    step.dependOn(b.getInstallStep());
 }
 
 fn configureBuild(b: *std.Build) void {

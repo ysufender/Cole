@@ -17,7 +17,8 @@ pub fn main(init: std.process.Init) void {
     MainProcInit = init;
 
     innerMain(
-        if (platform.isPosix) blk: {
+        if (common.debug.isDebug) init.arena.allocator()
+        else if (platform.isPosix) blk: {
             var hugepage = perfAllc.HugePageAllocator.init(init.gpa);
             common.log.debug("Using huge pages.", .{});
             break :blk hugepage.allocator();
@@ -51,10 +52,6 @@ pub fn main(init: std.process.Init) void {
 }
 
 fn innerMain(allocator: std.mem.Allocator, init: std.process.Init) common.CompilerError!void {
-    var globalArena = std.heap.ArenaAllocator.init(allocator);
-    const safe = globalArena.allocator();
-    defer globalArena.deinit();
-
     // Init Context
     var context = try common.CompilerContext.init(allocator, init);
     defer context.deinit();
@@ -73,7 +70,7 @@ fn innerMain(allocator: std.mem.Allocator, init: std.process.Init) common.Compil
     );
     const ast = try parser.parse();
 
-    if (context.settings.hasFlag("--print-ast")) {
+    if (common.debug.isDebug and context.settings.hasFlag("--print-ast")) {
         debug.ASTPrinter.printAST(ast, &context);
     }
 
@@ -82,35 +79,16 @@ fn innerMain(allocator: std.mem.Allocator, init: std.process.Init) common.Compil
     }
 
     var prepass = try Prepass.init(&context, ast, allocator);
-    const modules = try prepass.prepass(safe);
-    //const modules = try prepass.prepass(allocator);
-    //defer collections.deepFree(modules, allocator) catch { };
+    const modules = try prepass.prepass(allocator);
 
-    if (context.settings.hasFlag("--print-ast-full")) {
+    if (common.debug.isDebug and context.settings.hasFlag("--print-ast-full")) {
         debug.ASTPrinter.printASTs(&context, &modules);
     }
 
     var resolver = try Resolver.init(allocator, &context, &modules);
-    const resolved = try resolver.resolve(safe);
-    //const resolved = try resolver.resolve(allocator);
-    //defer collections.deepFree(resolved, allocator) catch { };
+    const resolved = try resolver.resolve(allocator);
 
-    if (context.settings.hasFlag("--print-resolution")) {
-        common.log.info("--print-resolution: Not implemented.", .{});
-    }
-
-    if (context.settings.hasFlag("--resolve-only")) {
-        return;
-    }
-
-    var typechecker = try Typechecker.init(allocator, &context, &modules, &resolved);
-    _ = try typechecker.typecheck(safe);
-
-    if (context.settings.hasFlag("--typecheck-only")) {
-        return;
-    }
-
-    if (false) {
+    defer if (common.debug.isDebug and context.settings.hasFlag("--dump-stats")) {
         context.stats();
 
         var miterator = modules.modules.iterator();
@@ -134,7 +112,23 @@ fn innerMain(allocator: std.mem.Allocator, init: std.process.Init) common.Compil
                 decl.node,
             });
         }
+    };
+
+    if (context.settings.hasFlag("--resolve-only")) {
+        return;
     }
+
+    var typechecker = try Typechecker.init(allocator, &context, &modules, &resolved);
+    _ = try typechecker.typecheck(allocator);
+
+    if (context.settings.hasFlag("--typecheck-only")) {
+        return;
+    }
+
+    // @Note codegen shouldn't depend on anything but the typechecker
+    // output from now on. Also it shouldn't error too. Validation
+    // has ended.
+    context.deinit();
 }
 
 pub var MainProcInit: std.process.Init = undefined;

@@ -1,12 +1,6 @@
 # Effekt
 out
 
-# Nix
-result
-result-*
-build/
-*.json
-
 #zig
 .zig-cache
 zig-out

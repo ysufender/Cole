@@ -525,7 +525,7 @@ fn resolveExpression(self: *Resolver, exprPtr: defines.ExpressionPtr) Error!void
             });
 
             self.resolved.putNoClobber(allocator, .{
-                .file = ast.tokens,
+                .file = self.dataIndex(),
                 .expr = exprPtr,
             }, body) catch return Error.AllocatorFailure;
 
@@ -562,7 +562,7 @@ fn resolveExpression(self: *Resolver, exprPtr: defines.ExpressionPtr) Error!void
             });
 
             self.resolved.putNoClobber(allocator, .{
-                .file = ast.tokens,
+                .file = self.dataIndex(),
                 .expr = exprPtr,
             }, body) catch return Error.AllocatorFailure;
 
@@ -599,7 +599,7 @@ fn resolveExpression(self: *Resolver, exprPtr: defines.ExpressionPtr) Error!void
             });
 
             self.resolved.putNoClobber(allocator, .{
-                .file = ast.tokens,
+                .file = self.dataIndex(),
                 .expr = exprPtr,
             }, body) catch return Error.AllocatorFailure;
 
@@ -651,6 +651,11 @@ fn resolveExpression(self: *Resolver, exprPtr: defines.ExpressionPtr) Error!void
                 .parent = self.currentScope,
                 .kind = .Block,
             });
+
+            self.resolved.putNoClobber(allocator, .{
+                .file = self.dataIndex(),
+                .expr = exprPtr,
+            }, function) catch return Error.AllocatorFailure;
 
             const previous = self.currentScope;
             defer self.currentScope = previous;

@@ -210,15 +210,15 @@ fn debugLog(self: *Typechecker) void {
 }
 
 pub fn typecheck(self: *Typechecker, allocator: Allocator) Error!Resolution {
-    defer self.arena.deinit();
-    defer self.executer.deinit();
-
     if (!self.modules.getItem("root", .symbolPtrs).contains("main")) {
         self.report("Couldn't find an entry point in the root module.", .{});
         return Error.MissingDefinition;
     }
 
     self.executer = try Comptime.init(self, allocator);
+
+    defer self.arena.deinit();
+    defer self.executer.deinit();
 
     // TODO:                                             This part is not really nice, fix it.
     const mainPtr = self.symbols.lookup.get(.{ .scope = self.modules.modules.len - 1, .name = "main" }).?;
@@ -343,21 +343,13 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
 
     return switch (expr.type) {
         .Identifier => {
-            defer _ = self.setFlag(.ConcreteValue, true);
-
             self.lastToken = expr.value;
             const decl = self.symbols.findDecl(.{ .file = self.currentFile, .expr = expressionPtr });
             return self.typecheckDecl(decl, maybeExpected);
         },
-        .Indexing => {
-            defer _ = self.setFlag(.ConcreteValue, true);
-            return self.typecheckIndexing(expr.value);
-        },
+        .Indexing => return self.typecheckIndexing(expr.value),
         .Call => self.typecheckCall(expr.value, maybeExpected),
-        .Scoping => {
-            defer _ = self.setFlag(.ConcreteValue, true);
-            return self.typecheckScoping(expressionPtr);
-        },
+        .Scoping => return self.typecheckScoping(expressionPtr),
         .ExpressionList => self.typecheckExpressionList(expr.value, maybeExpected),
         .Literal => self.typecheckValue(try self.executer.eval(expressionPtr, maybeExpected), maybeExpected),
 
@@ -379,10 +371,7 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
 
         .Mark => self.typecheckMark(.Expression, expressionPtr, expr.value, maybeExpected),
 
-        .Dot => {
-            defer  _ = self.setFlag(.ConcreteValue, true);
-            return self.typecheckDot(expr.value);
-        },
+        .Dot => return self.typecheckDot(expr.value),
 
         .Assignment => |t| {
             self.report("Unable to typecheck expression '{s}'.", .{@tagName(t)});
@@ -528,7 +517,7 @@ pub fn typecheckExpressionListRange(self: *Typechecker, range: defines.Range, ex
 
 fn typecheckGeneralInitialization(self: *Typechecker, ast: *const Parser.AST, expected: TypeID, range: defines.Range) Error!void {
     for (range.start..range.end) |extraPtr| {
-        const elem = try self.typecheckExpression(ast.extra[extraPtr], Comptime.Builtin.Type("void"));
+        const elem = try self.typecheckExpression(ast.extra[extraPtr], expected);
 
         if (self.suitable(expected, elem)) {
             continue;
@@ -673,6 +662,8 @@ fn typecheckUnionInitialization(self: *Typechecker, ast: *const Parser.AST, uni:
 }
 
 pub fn typecheckScoping(self: *Typechecker, expr: defines.ExpressionPtr) Error!TypeID {
+    defer _ = self.setFlag(.ConcreteValue, true);
+
     if (self.symbols.resolutionMap.get(.{
         .file = self.currentFile,
         .expr = expr,
@@ -717,7 +708,7 @@ pub fn typecheckScoping(self: *Typechecker, expr: defines.ExpressionPtr) Error!T
     for (defs) |def| {
         if (std.mem.eql(u8, def.name, member)) {
             if (def.public or self.symbols.canAccess(self.currentScope, scope)) {
-                return self.discoverScopeDef(lhsTypePtr, &def);
+                return self.discoverScopeDef(lhsTypePtr, &def, scope);
             }
 
             self.report("'{s}::{s}' is inaccessible due to its visibility level.", .{
@@ -736,17 +727,10 @@ pub fn typecheckScoping(self: *Typechecker, expr: defines.ExpressionPtr) Error!T
     return Error.MissingDefinition;
 }
 
-pub fn discoverScopeDef(self: *Typechecker, from: TypeID, member: *const Types.FieldInfo) Error!TypeID {
+pub fn discoverScopeDef(self: *Typechecker, from: TypeID, member: *const Types.FieldInfo, scope: defines.ScopePtr) Error!TypeID {
     if (member.valueType != Comptime.Builtin.Type("incomplete")) {
         return member.valueType;
     }
-
-    const scope = switch (self.typeTable.get(from)) {
-        .Enum => |enm| enm.scope,
-        .Struct => |str| str.scope,
-        .Union => |uni| uni.scope,
-        else => return common.debug.ShouldBeImpossible(@src()),
-    };
 
     const decl = self.symbols.lookup.get(.{
         .scope = scope,
@@ -1001,6 +985,8 @@ pub fn typecheckTypeForwarding(self: *Typechecker, extraPtr: defines.OpaquePtr, 
 }
 
 pub fn typecheckIndexing(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!TypeID {
+    defer _ = self.setFlag(.ConcreteValue, true);
+
     const lValue = self.getFlag(.LValue);
 
     const ast = self.context.getAST(self.currentFile);
@@ -1171,9 +1157,7 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
 pub fn typecheckDot(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!TypeID {
     // @Beware
     // @Important
-    // TODO:
-    //      This doesn't allow member function calls yet! Add them!
-    //      Also, currently you can't do someArr[index].&, which should've been fine.
+    // TODO: This doesn't allow member function calls yet! Add them!
 
     const ast = self.context.getAST(self.currentFile);
     const tokens = self.context.getTokens(ast.tokens);
@@ -1192,6 +1176,8 @@ pub fn typecheckDot(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!TypeI
                 return Error.AddressOfTemporaryValue;
             }
 
+            _ = self.setFlag(.ConcreteValue, false);
+
             // @Beware
             //      Must be kept in sync with the ConcreteValue check.
             //      Hence we assume lhs is something that we can take the address of.
@@ -1204,6 +1190,7 @@ pub fn typecheckDot(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!TypeI
             });
         },
         .Star => {
+            _ = self.setFlag(.ConcreteValue, false);
             switch (self.typeTable.get(objectTypeID)) {
                 .Pointer => |ptr| switch (ptr.size) {
                     .Single, .C => return ptr.child,
@@ -1266,9 +1253,19 @@ pub fn typecheckDot(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!TypeI
     }
 
     const index = try self.fieldIndex(objectTypeID, member);
+    _ = self.setFlag(.ConcreteValue, true);
 
     const fields = switch (objectType) {
-        .Union => |uni| uni.fields,
+        .Union => |uni| blk: { 
+            if (index == 0) {
+                self.report("No field named 'tag' in type '{s}'.", .{
+                    self.typeName(self.arena.allocator(), objectTypeID),
+                });
+                return Error.FieldNotFound;
+            }
+
+            break :blk uni.fields;
+        },
         .Struct => |str| str.fields,
         else => return common.debug.ShouldBeImpossible(@src()),
     };
