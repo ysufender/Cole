@@ -28,7 +28,6 @@ const eql = std.meta.eql;
 
 pub const TypeTable = MultiArrayList(TypeInfo);
 pub const TypeMap = collections.HashMap(TypeInfo, TypeID);
-pub const ResolutionMap = collections.HashMap(defines.DeclPtr, TypeID);
 pub const MetadataMap = collections.HashMap(Element, []const Comptime.ValuePtr);
 const LookupMap = collections.HashMap(defines.DeclPtr, TypecheckStatus);
 
@@ -61,63 +60,9 @@ pub const Element = struct {
     value: defines.OpaquePtr,
 };
 
-pub const Constant = struct {
-    pub const Type = enum {
-        Integer,
-        Float,
-        String,
-        Bool,
-        Aggregate,
-    };
-
-    type: Type,
-    value: defines.OpaquePtr,
-};
-
-pub const Constants = struct {
-    pub const List = collections.MultiArrayList(Constant);
-    pub const Integer = std.ArrayList(u32);
-    pub const Float = std.ArrayList(f32);
-    pub const String = std.ArrayList([]const u8);
-    pub const Bool = std.ArrayList(bool);
-    pub const Aggregate = std.ArrayList([]const Constant);
-
-    pub const Slice = struct {
-        all: List.Slice,
-        ints: Integer.Slice,
-        floats: Float.Slice,
-        strings: String.Slice,
-        bools: Bool.Slice,
-        aggs: Aggregate.Slice,
-    };
-
-    all: List,
-    ints: Integer,
-    floats: Float,
-    strings: String,
-    bools: Bool,
-    aggs: Aggregate,
-
-    pub fn slice(self: *const Constants) Slice {
-        return .{
-            .all = self.all.slice(),
-            .ints = self.ints.items,
-            .floats = self.floats.items,
-            .strings = self.strings.items,
-            .bools = self.bools.items,
-            .aggs = self.aggs.items,
-        };
-    }
-};
-
 pub const Resolution = struct {
+    // TODO: Continue
     types: TypeTable.Slice,
-    resolutionMap: ResolutionMap,
-    constants: Constants.Slice,
-
-    pub fn get(self: *const Resolution, key: defines.DeclPtr) TypeID {
-        return self.resolutionMap.get(key).?;
-    }
 };
 
 const Typechecker = @This();
@@ -127,12 +72,10 @@ context: *Context,
 modules: *const ModuleList,
 symbols: *const Resolver.Resolution,
 
-constants: Constants,
 typeTable: TypeTable,
 typeMap: TypeMap,
 lookup: LookupMap,
 metadata: MetadataMap,
-reso: ResolutionMap,
 
 executer: Comptime,
 
@@ -152,18 +95,15 @@ pub fn init(
     const allocator = arena.allocator();
 
     const counts = context.counts;
-    const total = counts.integer + counts.float + counts.string + counts.bool;
     const typeCount = counts.types * 3 + @as(u32, @intCast(Comptime.builtinTypes.len));
 
     var typeTable = TypeTable{};
     typeTable.ensureTotalCapacity(allocator, typeCount + @as(u32, @intCast(Comptime.builtinTypes.len)))
         catch return Error.AllocatorFailure;
-    var reso = ResolutionMap.empty;
     var typeMap = TypeMap.empty;
     var metadata = MetadataMap.empty;
     var lookup = LookupMap.empty;
 
-    reso.ensureTotalCapacity(allocator, symbolTable.declarations.len) catch return Error.AllocatorFailure;
     typeMap.ensureTotalCapacity(allocator, typeCount + @as(u32, @intCast(Comptime.builtinTypes.len))) catch return Error.AllocatorFailure;
     lookup.ensureTotalCapacity(allocator, symbolTable.declarations.len) catch return Error.AllocatorFailure;
     metadata.ensureTotalCapacity(allocator, counts.meta * 3) catch return Error.AllocatorFailure;
@@ -177,18 +117,9 @@ pub fn init(
         .context = context,
         .modules = modules,
         .typeTable = typeTable,
-        .reso = reso,
         .typeMap = typeMap,
         .metadata = metadata,
         .lookup = lookup,
-        .constants = .{
-            .all = try Constants.List.init(allocator, total * 2),
-            .ints = Constants.Integer.initCapacity(allocator, (counts.integer * 3) / 2) catch return Error.AllocatorFailure,
-            .floats = Constants.Float.initCapacity(allocator, (counts.float * 3) / 2) catch return Error.AllocatorFailure,
-            .strings = Constants.String.initCapacity(allocator, (counts.string * 3) / 2) catch return Error.AllocatorFailure,
-            .bools = Constants.Bool.initCapacity(allocator, (counts.bool * 3) / 2) catch return Error.AllocatorFailure,
-            .aggs = Constants.Aggregate.initCapacity(allocator, total / 2) catch return Error.AllocatorFailure,
-        },
         .flags = FlagMap.initEmpty(),
         .executer = undefined,
         .symbols = symbolTable,
@@ -235,8 +166,6 @@ pub fn typecheck(self: *Typechecker, allocator: Allocator) Error!Resolution {
 
     return collections.deepCopy(Resolution{
         .types = self.typeTable.slice(), 
-        .resolutionMap = self.reso,
-        .constants = self.constants.slice(),
     }, allocator);
 }
 
@@ -1666,11 +1595,6 @@ fn typecheckSwitchOnUnion(
                 self.fieldIndex(itemTypeID, field) catch return common.debug.ShouldBeImpossible(@src())
             ].valueType;
 
-            self.reso.putNoClobber(self.arena.allocator(),
-                captureDecl,
-                captureType,
-            ) catch return Error.AllocatorFailure;
-
             self.lookup.putNoClobber(self.arena.allocator(), captureDecl, .{
                 .status = .Checked,
                 .types = captureType,
@@ -1782,9 +1706,6 @@ fn typecheckSwitchOnEnum(
                 .file = self.currentFile,
                 .expr = firstCapture,
             });
-
-            self.reso.putNoClobber(self.arena.allocator(), captureDecl, itemTypeID)
-                catch return Error.AllocatorFailure;
 
             self.lookup.putNoClobber(self.arena.allocator(), captureDecl, .{
                 .status = .Checked,

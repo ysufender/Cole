@@ -5,5 +5,4 @@ let Test = union(enum) {
     testing2: float,
 };
 
-let test = Test(@testing, 1.0);
-let main = Test(@testing, undefined);
+let main = Test(@testing, 2.0);

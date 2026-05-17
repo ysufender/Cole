@@ -28,23 +28,12 @@ pub const Range = struct {
         return self.start + index;
     }
 
-    pub fn into(self: Range, from: anytype) @TypeOf(from) {
-        return from[self.start..self.end];
-    }
-
-    pub fn get(self: Range, from: anytype, index: u32) @typeInfo(@TypeOf(from)).pointer.child {
-        return from[self.at(index)];
-    }
-
     pub fn subRange(self: Range, from: u32) Range {
-        const start = self.start + from;
-        return .{
-            .start = start,
-            .end = start + self.len() - from,
-        };
+        return self.subRangeN(from, self.len() - from);
     }
 
     pub fn subRangeN(self: Range, from: u32, count: u32) Range {
+        assert(from < self.len() and from + count <= self.len());
         const start = self.start + from;
         return .{
             .start = start,
@@ -66,6 +55,13 @@ pub const DeclPtr = u32;
 
 pub fn EitherPtr(_: type, _: type) type {
     return OpaquePtr;
+}
+
+pub fn EitherType(This: type, That: type) type {
+    return union(enum) {
+        This: This,
+        That: That,
+    };
 }
 
 pub const rehashLimit = 512;

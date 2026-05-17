@@ -3,6 +3,7 @@ const log = @import("log.zig");
 const hashmap = @import("../util/hashmap.zig");
 
 const Error = @import("../core/common.zig").CompilerError;
+const Backend = @import("../codegen/backend.zig").Backend;
 
 pub const FlagSet = hashmap.HashMap([]const u8, void);
 
@@ -12,6 +13,7 @@ inputFile: []const u8,
 workingDir: []const u8,
 includeDirs: [][]const u8,
 maxErr: u32,
+backend: Backend,
 flags: FlagSet,
 
 pub fn print(self: *const Self, allocator: std.mem.Allocator) void {

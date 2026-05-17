@@ -3,6 +3,7 @@ const common = @import("common.zig");
 const hashmap = @import("../util/hashmap.zig");
 const collections = @import("../util/collections.zig");
 
+const Backend = @import("../codegen/backend.zig").Backend;
 const Error = common.CompilerError;
 
 const Flags = enum {
@@ -12,6 +13,7 @@ const Flags = enum {
     MaxErr,
     None,
     Include,
+    Backend,
     Flag,
 };
 
@@ -30,6 +32,9 @@ const flags = std.StaticStringMap(Flags).initComptime(&(.{
 
     .{ "--include", .Include },
     .{ "-I", .Include },
+
+    .{ "--backend", .Backend },
+    .{ "-B", .Backend },
 
     .{ "--parse-only", .Flag },
 
@@ -64,15 +69,10 @@ pub fn parseCLI(allocator: std.mem.Allocator, _args: std.process.Args, io: std.I
     var workingDir: []const u8 = undefined;
     var includeDirs = NMap.empty;
     var maxErr: u32 = 5;
-    var settings = common.CompilerSettings{
-        .flags = .empty,
-        .workingDir = "",
-        .includeDirs = &.{},
-        .inputFile = "",
-        .maxErr = 0,
-    };
+    var targetBackend = undefined;
+    var cliFlags = common.CompilerSettings.FlagSet.empty;
 
-    settings.flags.ensureTotalCapacity(allocator, 128) catch return Error.AllocatorFailure;
+    cliFlags.ensureTotalCapacity(allocator, 128) catch return Error.AllocatorFailure;
 
     includeDirs.ensureTotalCapacity(allocator, 512) catch return Error.AllocatorFailure;
 
@@ -80,8 +80,15 @@ pub fn parseCLI(allocator: std.mem.Allocator, _args: std.process.Args, io: std.I
         switch (hash(flag)) {
             .Help => return printHelp(),
             .Version => return printHeader(),
+            .Backend => {
+                const backend = args.next() orelse return Error.MissingFlag;
+                targetBackend = std.meta.stringToEnum(Backend, backend) orelse {
+                    common.log.err("{s} is not a supported backend.", .{backend});
+                    return Error.UnknownFlag;
+                };
+            },
             .Working => {
-                const dir = if (args.next()) |next| next else return Error.MissingFlag;
+                const dir = args.next() orelse return Error.MissingFlag;
 
                 std.process.setCurrentPath(io, dir) catch |err| {
                     common.log.err("Failed to set working directory to '{s}',\n\tProvided information: {s}", .{dir, @errorName(err)});
@@ -119,7 +126,7 @@ pub fn parseCLI(allocator: std.mem.Allocator, _args: std.process.Args, io: std.I
                 }
             },
 
-            .Flag => try settings.setFlag(flag),
+            .Flag => cliFlags.put(flag) catch return Error.AllocatorFailure,
 
             else =>
                 if (maybeFile != null) {
@@ -154,7 +161,7 @@ pub fn parseCLI(allocator: std.mem.Allocator, _args: std.process.Args, io: std.I
                 allocator
             ),
             .maxErr = maxErr,
-            .flags = settings.flags,
+            .flags = cliFlags,
         }
         else {
             common.log.err("jaslc expects an input file.", .{});
