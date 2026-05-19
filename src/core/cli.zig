@@ -69,7 +69,7 @@ pub fn parseCLI(allocator: std.mem.Allocator, _args: std.process.Args, io: std.I
     var workingDir: []const u8 = undefined;
     var includeDirs = NMap.empty;
     var maxErr: u32 = 5;
-    var targetBackend = undefined;
+    var targetBackend = Backend.C;
     var cliFlags = common.CompilerSettings.FlagSet.empty;
 
     cliFlags.ensureTotalCapacity(allocator, 128) catch return Error.AllocatorFailure;
@@ -126,7 +126,7 @@ pub fn parseCLI(allocator: std.mem.Allocator, _args: std.process.Args, io: std.I
                 }
             },
 
-            .Flag => cliFlags.put(flag) catch return Error.AllocatorFailure,
+            .Flag => cliFlags.put(allocator, flag, {}) catch return Error.AllocatorFailure,
 
             else =>
                 if (maybeFile != null) {
@@ -162,6 +162,7 @@ pub fn parseCLI(allocator: std.mem.Allocator, _args: std.process.Args, io: std.I
             ),
             .maxErr = maxErr,
             .flags = cliFlags,
+            .backend = targetBackend,
         }
         else {
             common.log.err("jaslc expects an input file.", .{});

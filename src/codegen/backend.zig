@@ -1,9 +1,5 @@
-pub const Backend = enum {
-    c,
-};
+pub const C = @import("c/backend.zig");
 
-pub fn importBackend(comptime backend: Backend) type {
-    return switch (backend) {
-        .c => @import("c.zig"),
-    };
-}
+pub const Backend = enum {
+    C,
+};

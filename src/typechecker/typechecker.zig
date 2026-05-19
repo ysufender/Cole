@@ -4,6 +4,7 @@ const defines = @import("../core/defines.zig");
 const collections = @import("../util/collections.zig");
 const functional = @import("../util/functional.zig");
 const Types = @import("type.zig");
+const backend = @import("../codegen/backend.zig");
 
 const Printer = @import("../debug/ast_printer.zig").PrintContext;
 const Parser = @import("../parser/parser.zig");
@@ -61,8 +62,10 @@ pub const Element = struct {
 };
 
 pub const Resolution = struct {
-    // TODO: Continue
     types: TypeTable.Slice,
+    constants: []const backend.C.JIR.Constant,
+    functions: []const backend.C.JIR.Function,
+    jir: []const backend.C.JIR.JIRNode,
 };
 
 const Typechecker = @This();

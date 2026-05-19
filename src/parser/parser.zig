@@ -166,6 +166,7 @@ pub const Stats = struct {
     bool: u32 = 0,
     types: u32 = 0,
     meta: u32 = 0,
+    functions: u32 = 0,
 };
 
 const Parser = @This();
@@ -982,6 +983,8 @@ fn function(self: *Parser) ExpressionResult {
                 .value = start,
             });
 
+            self.stats.functions += 1;
+
             return expr;
         },
         .Pipe => {
@@ -999,6 +1002,8 @@ fn function(self: *Parser) ExpressionResult {
             self.extra.append(self.allocator(), params.start) catch return error.AllocatorFailure;
             self.extra.append(self.allocator(), params.end) catch return error.AllocatorFailure;
             self.extra.append(self.allocator(), body) catch return error.AllocatorFailure;
+
+            self.stats.functions += 1;
 
             const expr = try self.alloc(Expression);
             self.expressionMap.set(expr, .{

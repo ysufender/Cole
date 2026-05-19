@@ -5,6 +5,7 @@ const common = @import("../core/common.zig");
 const defines = @import("../core/defines.zig");
 const collections = @import("../util/collections.zig");
 const types = @import("type.zig");
+const backend = @import("../codegen/backend.zig");
 
 const assert = std.debug.assert;
 
@@ -21,6 +22,7 @@ const TypeInfo = types.TypeInfo;
 const FlagMap = std.bit_set.IntegerBitSet(8);
 const Cache = collections.HashMap(Resolver.ResolutionKey, ValuePtr);
 const Memory = std.ArrayList(Value);
+const FunctionList = collections.MultiArrayList(backend.C.JIR.Function);
 
 pub const ValuePtr = u32;
 
@@ -85,10 +87,16 @@ const Comptime = @This();
 
 cache: Cache,
 typechecker: *Typechecker,
+
 arena: Arena,
 gpa: Allocator,
+
 flags: FlagMap,
+
+functions: FunctionList,
+
 memory: Memory,
+
 rng: std.Random.DefaultPrng,
 
 pub fn init(typechecker: *Typechecker, gpa: Allocator) Error!Comptime {
@@ -109,8 +117,9 @@ pub fn init(typechecker: *Typechecker, gpa: Allocator) Error!Comptime {
         .cache = cache,
         .memory = memory,
         .flags = FlagMap.initEmpty(),
-        .arena = arena,
+        .functions = FunctionList.init(allocator, typechecker.context.counts.functions),
         .rng = .init(5315),
+        .arena = arena,
     };
 }
 

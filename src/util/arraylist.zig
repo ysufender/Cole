@@ -8,10 +8,11 @@ const Error = @import("../core/common.zig").CompilerError;
 
 /// Faster for structs compared to std.MultiArrayList, not tested for unions
 pub fn MultiArrayList(comptime T: type) type {
-    return switch (@typeInfo(T)) {
-        .@"struct" => StructMultiArrayList(T),
-        else => @compileError("MultiArrayList is only available to structs."),
-    };
+    if (@typeInfo(T) != .@"struct") {
+        @compileError("MultiArrayList is only available to structs.");
+    }
+
+    return StructMultiArrayList(T);
 }
 
 fn StructMultiArrayList(comptime T: type) type {
