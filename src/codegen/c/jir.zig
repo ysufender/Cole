@@ -30,11 +30,23 @@ const Node = struct {
         FunctionDef, // ok
         VariableDef, // ok
         Assignment, // ok
-        Store,  // ok
+        Store, // ok
         Reference, // StringPtr
         Dereference, // Ptr
         Call, // Ptr, []const Ptr
         Literal, // Constant.Ptr
+        Add, // Ptr, Ptr
+        Sub, // Ptr, Ptr
+        Div, // Ptr, Ptr
+        Mul, // Ptr, Ptr
+        LeftShift, // Ptr
+        RightShift, // Ptr
+        And, // Ptr, Ptr
+        Or, // Ptr, Ptr
+        Label, // StringPtr
+        /// To make use of ternary operator.
+        Conditional, // Ptr, Ptr, Ptr
+        Dot,
     };
 
     type: Type,
@@ -132,6 +144,38 @@ pub const Builder = struct {
         return self.nodes.append(self.allocator, .{
             .type = .Store,
             .value = start,
+        });
+    }
+
+    pub fn reference(self: *Builder, decl: StringPtr) Error!void {
+        return self.nodes.append(self.allocator, .{
+            .type = .Reference,
+            .value = decl,
+        });
+    }
+
+    pub fn dereference(self: *Builder, expr: Ptr) Error!void {
+        return self.nodes.append(self.allocator, .{
+            .type = .Dereference,
+            .value = expr,
+        });
+    }
+
+    pub fn call(self: *Builder, expr: Ptr, args: []const Ptr) Error!void {
+        const start: u32 = @intCast(self.data.items.len);
+        self.data.append(self.allocator, expr) catch return Error.AllocatorFailure;
+        // arg count can be found from the resulting type of expr.
+        self.data.appendSlice(self.allocator, args) catch return Error.AllocatorFailure;
+        return self.nodes.append(self.allocator, .{
+            .type = .Call,
+            .value = start,
+        });
+    }
+
+    pub fn literal(self: *Builder, constant: Constant.Ptr) Error!void {
+        return self.nodes.append(self.allocator, .{
+            .type = .Literal,
+            .value = constant,
         });
     }
 };
