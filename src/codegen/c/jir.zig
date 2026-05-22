@@ -31,22 +31,30 @@ const Node = struct {
         VariableDef, // ok
         Assignment, // ok
         Store, // ok
-        Reference, // StringPtr
-        Dereference, // Ptr
-        Call, // Ptr, []const Ptr
-        Literal, // Constant.Ptr
-        Add, // Ptr, Ptr
-        Sub, // Ptr, Ptr
-        Div, // Ptr, Ptr
-        Mul, // Ptr, Ptr
-        LeftShift, // Ptr
-        RightShift, // Ptr
-        And, // Ptr, Ptr
-        Or, // Ptr, Ptr
-        Label, // StringPtr
-        /// To make use of ternary operator.
-        Conditional, // Ptr, Ptr, Ptr
-        Dot,
+        Reference, // ok
+        Dereference, // ok
+        Call, // ok
+        Literal, // ok
+        Add, // ok
+        Sub, // ok
+        Div, // ok
+        Mul, // ok
+        LeftShift, // ok
+        RightShift, // ok
+        And, // ok
+        Or, // ok
+        Label, // ok
+        Dot, // ok
+        Grouping, // ok
+        Goto, // ok
+        Lesser, // ok
+        LesserEqual, // ok
+        Greater, // ok
+        GreaterEqual, // ok
+        Equal, // ok
+        NotEqual, // ok
+        Invert, // ok
+        Xor, // ok
     };
 
     type: Type,
@@ -96,24 +104,6 @@ pub const Builder = struct {
         return @intCast(res.index);
     }
 
-    pub fn getInternedString(self: *const Builder, index: defines.StringPtr)  []const u8 {
-        return self.strings.keys()[index];
-    }
-
-    pub fn typeDef(self: *Builder, typeID: TypeID) Error!void {
-        return self.nodes.append(self.allocator, .{
-            .type = .TypeDef,
-            .value = typeID,
-        });
-    }
-
-    pub fn functionDef(self: *Builder, function: Function.Ptr) Error!void {
-        return self.nodes.append(self.allocator, .{
-            .type = .FunctionDef,
-            .value = function,
-        });
-    }
-
     pub fn variableDef(self: *Builder, typeID: TypeID, initializer: ?Ptr) Error!void {
         const start: u32 = @intCast(self.data.items.len);
         self.data.append(self.allocator, typeID) catch return Error.AllocatorFailure;
@@ -127,55 +117,58 @@ pub const Builder = struct {
         });
     }
 
-    pub fn assignment(self: *Builder, decl: StringPtr, expr: Ptr) Error!void {
-        const start: u32 = @intCast(self.data.items.len);
-        self.data.append(self.allocator, decl) catch return Error.AllocatorFailure;
-        self.data.append(self.allocator, expr) catch return Error.AllocatorFailure;
-        return self.nodes.append(self.allocator, .{
-            .type = .Assignment,
-            .value = start,
-        });
-    }
+    pub inline fn getInternedString(self: *const Builder, index: defines.StringPtr)  []const u8 { return self.strings.keys()[index]; }
+    pub inline fn typeDef(self: *Builder, typeID: TypeID) Error!void { return self.commonSingle(.TypeDef, typeID); }
+    pub inline fn functionDef(self: *Builder, function: Function.Ptr) Error!void { return self.commonSingle(.FunctionDef, function); }
+    pub inline fn assignment(self: *Builder, decl: StringPtr, expr: Ptr) Error!void { return self.commonBinary(.Assignment, decl, expr); }
+    pub inline fn store(self: *Builder, decl: Ptr, expr: Ptr) Error!void { return self.commonBinary(.Store, decl, expr); }
+    pub inline fn reference(self: *Builder, decl: StringPtr) Error!void { return self.commonSingle(.Reference, decl); }
+    pub inline fn dereference(self: *Builder, expr: Ptr) Error!void { return self.commonSingle(.Dereference, expr); }
+    pub inline fn call(self: *Builder, expr: Ptr, args: []const Ptr) Error!void { return self.commonBinary(.Call, expr, args); }
+    pub inline fn literal(self: *Builder, constant: Constant.Ptr) Error!void { return self.commonSingle(.Literal, constant); }
+    pub inline fn add(self: *Builder, lhs: Ptr, rhs: Ptr) Error!void { return self.commonBinary(.Add, lhs, rhs); }
+    pub inline fn sub(self: *Builder, lhs: Ptr, rhs: Ptr) Error!void { return self.commonBinary(.Sub, lhs, rhs); }
+    pub inline fn div(self: *Builder, lhs: Ptr, rhs: Ptr) Error!void { return self.commonBinary(.Div, lhs, rhs); }
+    pub inline fn mul(self: *Builder, lhs: Ptr, rhs: Ptr) Error!void { return self.commonBinary(.Mul, lhs, rhs); }
+    pub inline fn lshift(self: *Builder, lhs: Ptr, rhs: Ptr) Error!void { return self.commonBinary(.LeftShift, lhs, rhs); }
+    pub inline fn rshift(self: *Builder, lhs: Ptr, rhs: Ptr) Error!void { return self.commonBinary(.RightShift, lhs, rhs); }
+    pub inline fn @"and"(self: *Builder, lhs: Ptr, rhs: Ptr) Error!void { return self.commonBinary(.And, lhs, rhs); }
+    pub inline fn @"or"(self: *Builder, lhs: Ptr, rhs: Ptr) Error!void { return self.commonBinary(.Or, lhs, rhs); }
+    pub inline fn label(self: *Builder, name: StringPtr) Error!void { return self.commonSingle(.Label, name); }
+    pub inline fn dot(self: *Builder, object: Ptr, field: StringPtr) Error!void { return self.commonBinary(.Dot, object, field); }
+    pub inline fn grouping(self: *Builder, expr: Ptr) Error!void { return self.commonSingle(.Grouping, expr); }
+    pub inline fn lesser(self: *Builder, lhs: Ptr, rhs: StringPtr) Error!void { return self.commonBinary(.Dot, lhs, rhs); }
+    pub inline fn lesserEqual(self: *Builder, lhs: Ptr, rhs: StringPtr) Error!void { return self.commonBinary(.Dot, lhs, rhs); }
+    pub inline fn greater(self: *Builder, lhs: Ptr, rhs: StringPtr) Error!void { return self.commonBinary(.Dot, lhs, rhs); }
+    pub inline fn greaterEqual(self: *Builder, lhs: Ptr, rhs: StringPtr) Error!void { return self.commonBinary(.Dot, lhs, rhs); }
+    pub inline fn equal(self: *Builder, lhs: Ptr, rhs: StringPtr) Error!void { return self.commonBinary(.Dot, lhs, rhs); }
+    pub inline fn notEqual(self: *Builder, lhs: Ptr, rhs: StringPtr) Error!void { return self.commonBinary(.Dot, lhs, rhs); }
+    pub inline fn invert(self: *Builder, expr: Ptr) Error!void { return self.commonSingle(.Grouping, expr); }
+    pub inline fn xor(self: *Builder, lhs: Ptr, rhs: StringPtr) Error!void { return self.commonBinary(.Dot, lhs, rhs); }
 
-    pub fn store(self: *Builder, decl: Ptr, expr: Ptr) Error!void {
-        const start: u32 = @intCast(self.data.items.len);
-        self.data.append(self.allocator, decl) catch return Error.AllocatorFailure;
-        self.data.append(self.allocator, expr) catch return Error.AllocatorFailure;
+    inline fn commonSingle(
+        self: *Builder,
+        comptime nodeType: Node.Type,
+        expr: Ptr,
+    ) Error!void {
         return self.nodes.append(self.allocator, .{
-            .type = .Store,
-            .value = start,
-        });
-    }
-
-    pub fn reference(self: *Builder, decl: StringPtr) Error!void {
-        return self.nodes.append(self.allocator, .{
-            .type = .Reference,
-            .value = decl,
-        });
-    }
-
-    pub fn dereference(self: *Builder, expr: Ptr) Error!void {
-        return self.nodes.append(self.allocator, .{
-            .type = .Dereference,
+            .type = nodeType,
             .value = expr,
         });
     }
 
-    pub fn call(self: *Builder, expr: Ptr, args: []const Ptr) Error!void {
+    inline fn commonBinary(
+        self: *Builder,
+        comptime nodeType: Node.Type,
+        lhs: Ptr,
+        rhs: Ptr
+    ) Error!void {
         const start: u32 = @intCast(self.data.items.len);
-        self.data.append(self.allocator, expr) catch return Error.AllocatorFailure;
-        // arg count can be found from the resulting type of expr.
-        self.data.appendSlice(self.allocator, args) catch return Error.AllocatorFailure;
+        self.data.append(self.allocator, lhs) catch return Error.AllocatorFailure;
+        self.data.append(self.allocator, rhs) catch return Error.AllocatorFailure;
         return self.nodes.append(self.allocator, .{
-            .type = .Call,
+            .type = nodeType,
             .value = start,
-        });
-    }
-
-    pub fn literal(self: *Builder, constant: Constant.Ptr) Error!void {
-        return self.nodes.append(self.allocator, .{
-            .type = .Literal,
-            .value = constant,
         });
     }
 };

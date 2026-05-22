@@ -1,3 +1,6 @@
+// @Note Lowering to C IR is requested from the typechecker,
+// but it is done by the lowerer.zig
+
 const std = @import("std");
 const common = @import("../core/common.zig");
 const defines = @import("../core/defines.zig");
@@ -160,6 +163,13 @@ pub fn typecheck(self: *Typechecker, allocator: Allocator) Error!Resolution {
 
     // TODO:                                             This part is not really nice, fix it.
     const mainPtr = self.symbols.lookup.get(.{ .scope = self.modules.modules.len - 1, .name = "main" }).?;
+    const mainDecl = self.symbols.getDecl(mainPtr);
+
+    if (mainDecl.public) {
+        self.report("Expected entry point 'main' to be private.", .{});
+        return Error.PublicEntryPoint;
+    }
+
     const mainType = try self.typecheckDecl(mainPtr, null);
     if (mainType != Comptime.Builtin.Type("entry_point")) {
         const main = self.symbols.getDecl(mainPtr);

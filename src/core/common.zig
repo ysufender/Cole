@@ -116,6 +116,7 @@ pub const CompilerError = error {
     DereferenceOfNonPointerValue,
     DereferenceOfSliceType,
     UnionLayoutViolation,
+    PublicEntryPoint,
     UserspaceError,
     Terminate,
 };
