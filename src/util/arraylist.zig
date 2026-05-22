@@ -145,6 +145,18 @@ fn StructMultiArrayList(comptime T: type) type {
 
                 return true;
             }
+
+            pub fn flatten(self: *const Slice, allocator: Allocator) Error![]const T {
+                const flattened = allocator.alloc(T, self.len)
+                    catch return Error.AllocatorFailure;
+
+                // @Maybe looping for each field may increase cache hits.
+                for (0..self.len) |i| {
+                    flattened[i] = self.get(i);
+                }
+
+                return flattened;
+            }
         };
 
         inner: Inner,
@@ -221,22 +233,15 @@ fn StructMultiArrayList(comptime T: type) type {
         }
 
         pub fn items(self: *const Self, comptime field: std.meta.FieldEnum(Inner)) []@typeInfo(std.meta.fieldInfo(Inner, field).type).pointer.child {
-            return @field(self.inner, std.meta.fieldInfo(Inner, field).name)[0..self.len];
+            return self.slice().items(field);
         }
 
         pub fn get(self: *const Self, index: u32) T {
-            assert(index < self.len);
-
-            var ret: T = undefined;
-
-            inline for (fields) |field| {
-                @field(ret, field.name) = @field(self.inner, field.name)[0..self.len][index];
-            }
-
-            return ret;
+            return self.slice().get(index);
         }
 
         pub fn set(self: *Self, index: u32, value: T) void {
+            assert(index < self.len);
             inline for (fields) |field| {
                 @field(self.inner, field.name)[index] = @field(value, field.name);
             }
@@ -261,6 +266,10 @@ fn StructMultiArrayList(comptime T: type) type {
                 .len = self.len,
                 .inner = self.inner,
             };
+        }
+
+        pub fn flatten(self: *const Self, allocator: Allocator) Error![]const T {
+            return self.slice().flatten(allocator);
         }
 
         /// Returns a readonly slice without releasing ownership

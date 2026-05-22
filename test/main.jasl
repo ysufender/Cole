@@ -1,8 +1,0 @@
-import std;
-
-let Test = union(enum) {
-    testing: float,
-    testing2: float,
-};
-
-let main = Test(@testing, 2.0);

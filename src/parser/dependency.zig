@@ -134,7 +134,7 @@ const Self = @This();
 modules: *const ModuleList,
 context: *Context,
 arena: std.heap.ArenaAllocator,
-resolved: std.StringHashMapUnmanaged(defines.Offset),
+resolved: std.array_hash_map.String(defines.Offset),
 
 pub fn init(context: *Context, modules: *const ModuleList) Self {
     return .{

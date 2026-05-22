@@ -26,5 +26,5 @@ fn Context(comptime Key: type) type {
 }
 
 pub fn HashMap(comptime Key: type, comptime Value: type) type {
-    return std.HashMapUnmanaged(Key, Value, Context(Key), std.hash_map.default_max_load_percentage);
+    return std.hash_map.HashMapUnmanaged(Key, Value, Context(Key), std.hash_map.default_max_load_percentage);
 }

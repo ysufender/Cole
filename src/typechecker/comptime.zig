@@ -117,10 +117,16 @@ pub fn init(typechecker: *Typechecker, gpa: Allocator) Error!Comptime {
         .cache = cache,
         .memory = memory,
         .flags = FlagMap.initEmpty(),
-        .functions = FunctionList.init(allocator, typechecker.context.counts.functions),
+        .functions = try FunctionList.init(allocator, typechecker.context.counts.functions),
         .rng = .init(5315),
         .arena = arena,
     };
+}
+
+pub fn queryConstants(self: *const Comptime, allocator: Allocator) Error!backend.C.JIR.Constants {
+    _ = allocator;
+    _ = self;
+    return &.{};
 }
 
 pub fn attemptEval(self: *Comptime, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeID) ?ValuePtr {
@@ -237,9 +243,9 @@ pub fn evalDot(self: *Comptime, extraPtr: defines.OpaquePtr) Error!ValuePtr {
                 },
             })
             else common.debug.ShouldBeImpossible(@src()),
-        .Struct => |str| str.Fields.at(try self.typechecker.fieldIndex(str.Type, member)),
+        .Struct => |str| str.Fields.at(try self.typechecker.fieldIndex(str.Type, try self.typechecker.builder.internString(member))),
         .Union => |uni| {
-            const index = try self.typechecker.fieldIndex(uni.Type, member);
+            const index = try self.typechecker.fieldIndex(uni.Type, try self.typechecker.builder.internString(member));
             const unionType = self.typechecker.typeTable.get(uni.Type).Union;
 
             // @Beware Union.Tag starts from 0 but the tag field of the union is 
@@ -247,8 +253,8 @@ pub fn evalDot(self: *Comptime, extraPtr: defines.OpaquePtr) Error!ValuePtr {
             if (unionType.isTagged and index != uni.Tag + 1) {
                 self.report("Attempt to access union field '{s}' while '{s}' is active on type '{s}'.", .{
                     member,
-                    unionType.fields[uni.Tag + 1].name,
-                    unionType.name,
+                    self.typechecker.builder.getInternedString(unionType.fields[uni.Tag + 1].name),
+                    self.typechecker.builder.getInternedString(unionType.name),
                 });
                 return Error.UnionLayoutViolation;
             }
@@ -701,7 +707,7 @@ fn evalBuiltin(self: *Comptime, decl: *const Resolver.Declaration, maybeExpected
                         self.constructUndefined(expected)
                     else  {
                         self.report("Given type '{s}' can't be undefined.", .{
-                            self.typechecker.typeName(self.arena.allocator(), expected),
+                            try self.typechecker.typeName(self.arena.allocator(), expected),
                         });
                         return Error.MissingTypeSpecifier;
                     }
@@ -755,14 +761,14 @@ fn evalLiteral(self: *Comptime, tokenPtr: defines.TokenPtr, maybeExpected: ?Type
                     } else {
                         self.report("Couldn't find enumeration '{s}' in '{s}'.", .{
                             lexeme[1..],
-                            self.typechecker.typeName(self.arena.allocator(), expected),
+                            try self.typechecker.typeName(self.arena.allocator(), expected),
                         });
                         return Error.FieldNotFound;
                     },
                     else => {
                         self.report("Failed to resolve the type of enum literal '{s}'. Context requires type '{s}'.", .{
                             lexeme,
-                            self.typechecker.typeName(self.arena.allocator(), expected),
+                            try self.typechecker.typeName(self.arena.allocator(), expected),
                         });
                         return Error.TypeMismatch;
                     },
@@ -937,7 +943,7 @@ fn evalStructType(self: *Comptime, expr: defines.ExpressionPtr) Error!ValuePtr {
 
         fields[index] = types.FieldInfo{
             .public = symbol.public,
-            .name = symbolName,
+            .name = try self.typechecker.builder.internString(symbolName),
             .valueType = fieldType,
             .isComptime = self.typechecker.typeTable.get(fieldType).isComptime(&self.typechecker.typeTable),
         };
@@ -1027,7 +1033,7 @@ fn evalUnionType(self: *Comptime, expr: defines.ExpressionPtr) Error!ValuePtr {
     if (tagged) {
         fields[0] = .{
             .public = false,
-            .name = "tag",
+            .name = try self.typechecker.builder.internString("tag"),
             .valueType = tag,
             .isComptime = false,
         };
@@ -1043,7 +1049,7 @@ fn evalUnionType(self: *Comptime, expr: defines.ExpressionPtr) Error!ValuePtr {
 
         fields[index + @intFromBool(tagged)] = types.FieldInfo{
             .public = symbol.public,
-            .name = symbolName,
+            .name = try self.typechecker.builder.internString(symbolName),
             .valueType = fieldType,
             .isComptime = self.typechecker.typeTable.get(fieldType).isComptime(&self.typechecker.typeTable),
         };
@@ -1344,7 +1350,7 @@ fn evalScoping(self: *Comptime, expr: defines.ExpressionPtr) Error!ValuePtr {
 
     const scope = switch (self.typechecker.typeTable.get(res)) {
         .Enum => |enm| ret: {
-            if (try self.typechecker.tryGetFieldIndex(res, member)) |found| {
+            if (try self.typechecker.tryGetFieldIndex(res, try self.typechecker.builder.internString(member))) |found| {
                 return self.appendValue(.{
                     .Enum = .{
                         .Type = res,
@@ -1359,7 +1365,7 @@ fn evalScoping(self: *Comptime, expr: defines.ExpressionPtr) Error!ValuePtr {
         .Union => |uni| uni.scope,
         else => {
             self.report("Attempt to scope on type '{s}', which contains no scope.", .{
-                self.typechecker.typeName(self.arena.allocator(), res),
+                try self.typechecker.typeName(self.arena.allocator(), res),
             });
             return Error.ScopingOnNonScopedType;
         },
@@ -1503,7 +1509,7 @@ fn evalMutType(self: *Comptime, exprPtr: defines.OpaquePtr) Error!ValuePtr {
     }
     else {
         self.report("Redundant 'mut' specifier on already mutable type '{s}'.", .{
-            self.typechecker.typeName(self.typechecker.arena.allocator(), inner.Type)
+            try self.typechecker.typeName(self.typechecker.arena.allocator(), inner.Type)
         });
         return Error.InvalidSpecifier;
     }
@@ -1527,7 +1533,7 @@ fn evalArrType(self: *Comptime, extraPtr: defines.OpaquePtr) Error!ValuePtr {
             },
         else => {
             self.report("Expected a 'comptime_int' value as size specifier. Got '{s}' instead.", .{
-                self.typechecker.typeName(self.arena.allocator(),
+                try self.typechecker.typeName(self.arena.allocator(),
                     try self.typechecker.typecheckValue(ptr, null),
                 ),
             });
@@ -1557,7 +1563,7 @@ pub fn expectType(self: *Comptime, exprPtr: defines.ExpressionPtr) Error!ValuePt
         .Type => valuePtr,
         else => {
             self.report("Expected a type expression, got '{s}' instead.", .{
-                self.typechecker.typeName(self.arena.allocator(), try self.typechecker.typecheckValue(valuePtr, null))
+                try self.typechecker.typeName(self.arena.allocator(), try self.typechecker.typecheckValue(valuePtr, null))
             });
             return Error.UnexpectedNonTypeExpression;
         }
@@ -1570,7 +1576,7 @@ fn expectDefined(self: *Comptime, exprPtr: defines.ExpressionPtr, maybeExpected:
     return switch (value) {
         .Undefined => {
             self.report("Attempt to perform operations on undefined value of type '{s}'.", .{
-                self.typechecker.typeName(self.arena.allocator(), try self.typechecker.typecheckValue(valuePtr, null))
+                try self.typechecker.typeName(self.arena.allocator(), try self.typechecker.typecheckValue(valuePtr, null))
             });
             return Error.UseOfUndefinedValue;
         },
@@ -1582,7 +1588,7 @@ pub fn constructUndefined(self: *Comptime, valueType: TypeID) Error!ValuePtr {
     return switch (self.typechecker.typeTable.get(valueType)) {
         .Function, .Type, .Any, .Noreturn, .EnumLiteral => {
             self.report("Given type '{s}' can't be undefined.", .{
-                self.typechecker.typeName(self.arena.allocator(), valueType)
+                try self.typechecker.typeName(self.arena.allocator(), valueType)
             });
             return Error.IllegalSyntax;
         },
@@ -1590,12 +1596,14 @@ pub fn constructUndefined(self: *Comptime, valueType: TypeID) Error!ValuePtr {
     };
 }
 
-fn generateRandomName(self: *Comptime, comptime mode: @TypeOf(.EnumLiteral)) Error![]const u8 {
+fn generateRandomName(self: *Comptime, comptime mode: @TypeOf(.EnumLiteral)) Error!u32 {
     const randint = self.rng.next();
 
-    return std.fmt.allocPrint(self.arena.allocator(), "$$anon_"++@tagName(mode)++"_{d}", .{
+    const res = std.fmt.allocPrint(self.arena.allocator(), "$$anon_"++@tagName(mode)++"_{d}", .{
         randint
-    }) catch Error.AllocatorFailure;
+    }) catch return Error.AllocatorFailure;
+
+    return self.typechecker.builder.internString(res);
 }
 
 // @Beware, scope declarations must be comptime since they are technically
@@ -1623,7 +1631,7 @@ fn handleScopeDecls(
 
         defs.appendAssumeCapacity(types.FieldInfo{
             .public = sig.public,
-            .name = symbolName,
+            .name = try self.typechecker.builder.internString(symbolName),
             .valueType = Builtin.Type("incomplete"),
             .isComptime = false,
             // .valueType = (try self.typechecker.expectType(sig.type)),
@@ -1870,11 +1878,11 @@ pub const builtinTypes = [_]struct {
     // mut any
     .{ .name = "mut any", .info = .{ .Any = true } },
     // incomplete
-    .{ .name = "incomplete", .info = .{ .Struct = .{ .mutable = false, .name = "incomplete", .fields = &.{}, .definitions = &.{}, .scope = 0 } } },
+    .{ .name = "incomplete", .info = .{ .Struct = .{ .mutable = false, .name = Resolver.BuiltinIndex("any") + 3, .fields = &.{}, .definitions = &.{}, .scope = 0 } } },
     // entry_point
     .{ .name = "entry_point", .info = .{ .Function = .{ .mutable = false, .argTypes = &.{}, .returnType = 1 } } },
     // builtin_metadata
-    .{ .name = "builtin_metadata", .info = .{ .Enum = .{ .mutable = false, .name = "builtin_metadata", .fields = &.{}, .definitions = &.{}, .scope = 0 } } },
+    .{ .name = "builtin_metadata", .info = .{ .Enum = .{ .mutable = false, .name = Resolver.BuiltinIndex("any") + 5, .fields = &.{}, .definitions = &.{}, .scope = 0 } } },
 };
 
 pub const builtinMetadata = [_][]const u8 {

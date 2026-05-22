@@ -25,21 +25,7 @@ const TokenMap = std.ArrayList(Lexer.TokenList.Slice);
 const ASTMap = std.ArrayList(Parser.AST);
 const ResolveMap = std.StringHashMapUnmanaged(defines.FilePtr);
 
-// Source Files
-filenameMap: FileNameMap,
-fileMap: FileMap,
-resolved: ResolveMap,
-
-// Tokens
-tokenMap: TokenMap,
-
-// ASTs
-astMap: ASTMap,
-
-arena: std.heap.ArenaAllocator,
-io: std.Io,
-
-counts: struct {
+pub const Counts = struct {
     topLevels: u32 = 0,
     modules: u32 = 0,
     tokens: u32 = 0,
@@ -64,7 +50,23 @@ counts: struct {
         }
         return total;
     }
-},
+};
+
+// Source Files
+filenameMap: FileNameMap,
+fileMap: FileMap,
+resolved: ResolveMap,
+
+// Tokens
+tokenMap: TokenMap,
+
+// ASTs
+astMap: ASTMap,
+
+arena: std.heap.ArenaAllocator,
+io: std.Io,
+
+counts: Counts,
 
 settings: CompilerSettings,
 

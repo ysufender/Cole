@@ -68,7 +68,7 @@ pub const TypeInfo = union(enum) {
 
 pub const FieldInfo = struct {
     public: bool,
-    name: []const u8,
+    name: defines.StringPtr,
     valueType: TypeID,
     isComptime: bool,
 
@@ -76,7 +76,7 @@ pub const FieldInfo = struct {
     pub fn eql(this: *const FieldInfo, that: FieldInfo, typechecker: *const Typechecker) bool {
         return
             (this.public and !that.public or this.public == that.public)
-            and std.mem.eql(u8, this.name, that.name)
+            and this.name == that.name
             and typechecker.typeTable.items(.tags)[this.valueType] == typechecker.typeTable.items(.tags)[that.valueType]
             and (
                 typechecker.mutable(this.valueType) and !typechecker.mutable(that.valueType)
@@ -88,7 +88,7 @@ pub const FieldInfo = struct {
 
 pub const Struct = struct {
     mutable: bool,
-    name: []const u8,
+    name: defines.StringPtr,
     fields: []const FieldInfo,
     definitions: []const FieldInfo,
 
@@ -104,7 +104,7 @@ pub const Union = struct {
     /// unions.
     tag: TypeID,
     mutable: bool,
-    name: []const u8,
+    name: defines.StringPtr,
     fields: []const FieldInfo,
     definitions: []const FieldInfo,
 
@@ -114,7 +114,7 @@ pub const Union = struct {
 
 pub const Enum = struct {
     mutable: bool,
-    name: []const u8,
+    name: defines.StringPtr,
     fields: []const []const u8,
     definitions: []const FieldInfo,
 

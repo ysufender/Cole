@@ -23,29 +23,29 @@ pub const AnyType = 0;
 // performant with collections.MultiArrayList(T)
 pub const Expression = struct {
     pub const Type = enum {
-        Assignment,
+        Assignment, // ok
         Binary,
-        Literal,
+        Literal, // ok
         Indexing,
         Slicing,
         Identifier,
         Unary,
-        StructDefinition,
-        EnumDefinition,
-        UnionDefinition,
-        FunctionDefinition,
-        Mark,
-        Lambda,
-        Call,
+        StructDefinition, // ok
+        EnumDefinition, // ok
+        UnionDefinition, // ok
+        FunctionDefinition, // ok
+        Mark, // ok
+        Lambda, // ok
+        Call, // ok
         Conditional,
         Switch,
-        MutableType,
-        CPointerType,
-        PointerType,
-        SliceType,
-        ArrayType,
-        FunctionType,
-        Scoping,
+        MutableType, // ok
+        CPointerType, // ok
+        PointerType, // ok
+        SliceType, // ok
+        ArrayType, // ok
+        FunctionType, // ok
+        Scoping, // ok
         ExpressionList,
         Dot,
     };
