@@ -1,4 +1,4 @@
-// @Note Lowering to C IR is requested from the typechecker,
+// @Note Lowering to C IR is requested by the typechecker,
 // but it is done by the lowerer.zig
 
 const std = @import("std");
@@ -9,7 +9,7 @@ const functional = @import("../util/functional.zig");
 const Types = @import("type.zig");
 const backend = @import("../codegen/backend.zig");
 
-const Printer = @import("../debug/ast_printer.zig").PrintContext;
+const Lowerer = @import("lowerer.zig");
 const Parser = @import("../parser/parser.zig");
 const Comptime = @import("comptime.zig");
 const Resolver = @import("resolver.zig");
@@ -38,6 +38,7 @@ const LookupMap = collections.HashMap(defines.DeclPtr, TypecheckStatus);
 pub const Flags = enum(u3) {
     ConcreteValue = 1,
     LValue = 2,
+    Codegen = 3,
 
     pub fn flag(flagToGet: Flags) u3 {
         return @intFromEnum(flagToGet);
@@ -51,7 +52,7 @@ const TypecheckStatus = struct {
         NotChecked,
     },
 
-    types: TypeID,
+    result: TypeID,
 };
 
 pub const Element = struct {
@@ -87,6 +88,7 @@ callstack: Callstack,
 flags: FlagMap,
 
 builder: backend.C.JIR.Builder,
+lowerer: Lowerer,
 typenameMap: std.AutoHashMapUnmanaged(TypeID, defines.StringPtr),
 
 pub fn init(
@@ -129,13 +131,14 @@ pub fn init(
         .lookup = lookup,
         .flags = FlagMap.initEmpty(),
         .executer = undefined,
+        .builder = builder,
+        .lowerer = undefined,
         .symbols = symbolTable,
         .currentFile = 0,
         .currentScope = 0,
         .lastToken = 0,
         .callstack = .{},
         .typenameMap = .empty,
-        .builder = builder,
         .arena = arena,
     };
 }
@@ -157,6 +160,7 @@ pub fn typecheck(self: *Typechecker, allocator: Allocator) Error!Resolution {
 
     self.builder.allocator = self.arena.allocator();
     self.executer = try Comptime.init(self, allocator);
+    self.lowerer = Lowerer.init(self);
 
     defer self.arena.deinit();
     defer self.executer.deinit();
@@ -1036,11 +1040,9 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
     const prevToken = self.lastToken;
     const prevFile = self.currentFile;
     const prevScope = self.currentScope;
-    if (decl.kind != .Builtin) {
-        self.currentFile = self.modules.modules.items(.dataIndex)[self.symbols.scopes.items(.module)[decl.scope]];
-        self.lastToken = decl.token;
-        self.currentScope = decl.scope;
-    }
+    self.currentFile = self.modules.modules.items(.dataIndex)[self.symbols.scopes.items(.module)[decl.scope]];
+    self.lastToken = decl.token;
+    self.currentScope = decl.scope;
     defer self.lastToken = prevToken;
     defer self.currentFile = prevFile;
     defer self.currentScope = prevScope;
@@ -1056,8 +1058,8 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
     if (isPresent.found_existing) {
         switch (isPresent.value_ptr.status) {
             .Checked =>
-                if (isPresent.value_ptr.types != Comptime.Builtin.Type("incomplete"))
-                    return isPresent.value_ptr.types
+                if (isPresent.value_ptr.result != Comptime.Builtin.Type("incomplete"))
+                    return isPresent.value_ptr.result
                 else  { },
             .InProgress => {
                 if (!self.executer.getFlag(.CanCycle)) {
@@ -1073,11 +1075,11 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
 
     isPresent.value_ptr.* = .{
         .status = .InProgress,
-        .types = 0,
+        .result = 0,
     };
     errdefer isPresent.value_ptr.status = .NotChecked;
 
-    const types = try switch (decl.kind) {
+    const declType = try switch (decl.kind) {
         .Variable => self.typecheckVariable(&decl),
         .Namespace => {
             self.report("Operations on namespaces are not allowed.", .{});
@@ -1093,10 +1095,12 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
 
     isPresent.value_ptr.* = .{
         .status = .Checked,
-        .types = types,
+        .result = declType,
     };
+    
+    try self.lowerer.declaration(&decl);
 
-    return types;
+    return declType;
 }
 
 pub fn typecheckDot(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!TypeID {
@@ -1120,12 +1124,10 @@ pub fn typecheckDot(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!TypeI
                 self.report("Attempt to take the address of non-concrete value.", .{ });
                 return Error.AddressOfTemporaryValue;
             }
-
             _ = self.setFlag(.ConcreteValue, false);
 
-            // @Beware
-            //      Must be kept in sync with the ConcreteValue check.
-            //      Hence we assume lhs is something that we can take the address of.
+            // @Beware Must be kept in sync with the ConcreteValue check.
+            // Hence we assume lhs is something that we can take the address of.
             return self.registerType(.{
                 .Pointer = .{
                     .size = .Single,
@@ -1615,7 +1617,7 @@ fn typecheckSwitchOnUnion(
 
             self.lookup.putNoClobber(self.arena.allocator(), captureDecl, .{
                 .status = .Checked,
-                .types = captureType,
+                .result = captureType,
             }) catch return Error.AllocatorFailure;
         }
 
@@ -1727,7 +1729,7 @@ fn typecheckSwitchOnEnum(
 
             self.lookup.putNoClobber(self.arena.allocator(), captureDecl, .{
                 .status = .Checked,
-                .types = itemTypeID,
+                .result = itemTypeID,
             }) catch return Error.AllocatorFailure;
         }
 

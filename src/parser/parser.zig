@@ -24,12 +24,12 @@ pub const AnyType = 0;
 pub const Expression = struct {
     pub const Type = enum {
         Assignment, // ok
-        Binary,
+        Binary, // ok
         Literal, // ok
-        Indexing,
-        Slicing,
-        Identifier,
-        Unary,
+        Indexing, // ok
+        Slicing, // ok
+        Identifier, // ok
+        Unary, // ok
         StructDefinition, // ok
         EnumDefinition, // ok
         UnionDefinition, // ok
@@ -37,8 +37,8 @@ pub const Expression = struct {
         Mark, // ok
         Lambda, // ok
         Call, // ok
-        Conditional,
-        Switch,
+        Conditional, // ok
+        Switch, // ok
         MutableType, // ok
         CPointerType, // ok
         PointerType, // ok
@@ -46,8 +46,8 @@ pub const Expression = struct {
         ArrayType, // ok
         FunctionType, // ok
         Scoping, // ok
-        ExpressionList,
-        Dot,
+        ExpressionList, // ok
+        Dot, // ok
     };
 
     type: Type,

@@ -98,6 +98,12 @@ pub const Builder = struct {
         }, allocator);
     }
 
+    pub fn addConstant(self: *Builder, constant: Constant) Error!Constant.Ptr {
+        const res = self.constants.addOne(self.allocator) catch return Error.AllocatorFailure;
+        self.constants.set(res, constant);
+        return res;
+    }
+
     pub fn internString(self: *Builder, str: []const u8) Error!defines.StringPtr {
         const res = self.strings.getOrPutValue(self.allocator, str, {})
             catch return Error.AllocatorFailure;
@@ -118,43 +124,45 @@ pub const Builder = struct {
     }
 
     pub inline fn getInternedString(self: *const Builder, index: defines.StringPtr)  []const u8 { return self.strings.keys()[index]; }
-    pub inline fn typeDef(self: *Builder, typeID: TypeID) Error!void { return self.commonSingle(.TypeDef, typeID); }
-    pub inline fn functionDef(self: *Builder, function: Function.Ptr) Error!void { return self.commonSingle(.FunctionDef, function); }
-    pub inline fn assignment(self: *Builder, decl: StringPtr, expr: Ptr) Error!void { return self.commonBinary(.Assignment, decl, expr); }
-    pub inline fn store(self: *Builder, decl: Ptr, expr: Ptr) Error!void { return self.commonBinary(.Store, decl, expr); }
-    pub inline fn reference(self: *Builder, decl: StringPtr) Error!void { return self.commonSingle(.Reference, decl); }
-    pub inline fn dereference(self: *Builder, expr: Ptr) Error!void { return self.commonSingle(.Dereference, expr); }
-    pub inline fn call(self: *Builder, expr: Ptr, args: []const Ptr) Error!void { return self.commonBinary(.Call, expr, args); }
-    pub inline fn literal(self: *Builder, constant: Constant.Ptr) Error!void { return self.commonSingle(.Literal, constant); }
-    pub inline fn add(self: *Builder, lhs: Ptr, rhs: Ptr) Error!void { return self.commonBinary(.Add, lhs, rhs); }
-    pub inline fn sub(self: *Builder, lhs: Ptr, rhs: Ptr) Error!void { return self.commonBinary(.Sub, lhs, rhs); }
-    pub inline fn div(self: *Builder, lhs: Ptr, rhs: Ptr) Error!void { return self.commonBinary(.Div, lhs, rhs); }
-    pub inline fn mul(self: *Builder, lhs: Ptr, rhs: Ptr) Error!void { return self.commonBinary(.Mul, lhs, rhs); }
-    pub inline fn lshift(self: *Builder, lhs: Ptr, rhs: Ptr) Error!void { return self.commonBinary(.LeftShift, lhs, rhs); }
-    pub inline fn rshift(self: *Builder, lhs: Ptr, rhs: Ptr) Error!void { return self.commonBinary(.RightShift, lhs, rhs); }
-    pub inline fn @"and"(self: *Builder, lhs: Ptr, rhs: Ptr) Error!void { return self.commonBinary(.And, lhs, rhs); }
-    pub inline fn @"or"(self: *Builder, lhs: Ptr, rhs: Ptr) Error!void { return self.commonBinary(.Or, lhs, rhs); }
-    pub inline fn label(self: *Builder, name: StringPtr) Error!void { return self.commonSingle(.Label, name); }
-    pub inline fn dot(self: *Builder, object: Ptr, field: StringPtr) Error!void { return self.commonBinary(.Dot, object, field); }
-    pub inline fn grouping(self: *Builder, expr: Ptr) Error!void { return self.commonSingle(.Grouping, expr); }
-    pub inline fn lesser(self: *Builder, lhs: Ptr, rhs: StringPtr) Error!void { return self.commonBinary(.Dot, lhs, rhs); }
-    pub inline fn lesserEqual(self: *Builder, lhs: Ptr, rhs: StringPtr) Error!void { return self.commonBinary(.Dot, lhs, rhs); }
-    pub inline fn greater(self: *Builder, lhs: Ptr, rhs: StringPtr) Error!void { return self.commonBinary(.Dot, lhs, rhs); }
-    pub inline fn greaterEqual(self: *Builder, lhs: Ptr, rhs: StringPtr) Error!void { return self.commonBinary(.Dot, lhs, rhs); }
-    pub inline fn equal(self: *Builder, lhs: Ptr, rhs: StringPtr) Error!void { return self.commonBinary(.Dot, lhs, rhs); }
-    pub inline fn notEqual(self: *Builder, lhs: Ptr, rhs: StringPtr) Error!void { return self.commonBinary(.Dot, lhs, rhs); }
-    pub inline fn invert(self: *Builder, expr: Ptr) Error!void { return self.commonSingle(.Grouping, expr); }
-    pub inline fn xor(self: *Builder, lhs: Ptr, rhs: StringPtr) Error!void { return self.commonBinary(.Dot, lhs, rhs); }
+    pub inline fn typeDef(self: *Builder, typeID: TypeID) Error!Ptr { return self.commonSingle(.TypeDef, typeID); }
+    pub inline fn functionDef(self: *Builder, function: Function.Ptr) Error!Ptr { return self.commonSingle(.FunctionDef, function); }
+    pub inline fn assignment(self: *Builder, decl: StringPtr, expr: Ptr) Error!Ptr { return self.commonBinary(.Assignment, decl, expr); }
+    pub inline fn store(self: *Builder, decl: Ptr, expr: Ptr) Error!Ptr { return self.commonBinary(.Store, decl, expr); }
+    pub inline fn reference(self: *Builder, decl: StringPtr) Error!Ptr { return self.commonSingle(.Reference, decl); }
+    pub inline fn dereference(self: *Builder, expr: Ptr) Error!Ptr { return self.commonSingle(.Dereference, expr); }
+    pub inline fn call(self: *Builder, expr: Ptr, args: []const Ptr) Error!Ptr { return self.commonBinary(.Call, expr, args); }
+    pub inline fn literal(self: *Builder, constant: Constant.Ptr) Error!Ptr { return self.commonSingle(.Literal, constant); }
+    pub inline fn add(self: *Builder, lhs: Ptr, rhs: Ptr) Error!Ptr { return self.commonBinary(.Add, lhs, rhs); }
+    pub inline fn sub(self: *Builder, lhs: Ptr, rhs: Ptr) Error!Ptr { return self.commonBinary(.Sub, lhs, rhs); }
+    pub inline fn div(self: *Builder, lhs: Ptr, rhs: Ptr) Error!Ptr { return self.commonBinary(.Div, lhs, rhs); }
+    pub inline fn mul(self: *Builder, lhs: Ptr, rhs: Ptr) Error!Ptr { return self.commonBinary(.Mul, lhs, rhs); }
+    pub inline fn lshift(self: *Builder, lhs: Ptr, rhs: Ptr) Error!Ptr { return self.commonBinary(.LeftShift, lhs, rhs); }
+    pub inline fn rshift(self: *Builder, lhs: Ptr, rhs: Ptr) Error!Ptr { return self.commonBinary(.RightShift, lhs, rhs); }
+    pub inline fn @"and"(self: *Builder, lhs: Ptr, rhs: Ptr) Error!Ptr { return self.commonBinary(.And, lhs, rhs); }
+    pub inline fn @"or"(self: *Builder, lhs: Ptr, rhs: Ptr) Error!Ptr { return self.commonBinary(.Or, lhs, rhs); }
+    pub inline fn label(self: *Builder, name: StringPtr) Error!Ptr { return self.commonSingle(.Label, name); }
+    pub inline fn dot(self: *Builder, object: Ptr, field: StringPtr) Error!Ptr { return self.commonBinary(.Dot, object, field); }
+    pub inline fn grouping(self: *Builder, expr: Ptr) Error!Ptr { return self.commonSingle(.Grouping, expr); }
+    pub inline fn lesser(self: *Builder, lhs: Ptr, rhs: StringPtr) Error!Ptr { return self.commonBinary(.Lesser, lhs, rhs); }
+    pub inline fn lesserEqual(self: *Builder, lhs: Ptr, rhs: StringPtr) Error!Ptr { return self.commonBinary(.LesserEqual, lhs, rhs); }
+    pub inline fn greater(self: *Builder, lhs: Ptr, rhs: StringPtr) Error!Ptr { return self.commonBinary(.Greater, lhs, rhs); }
+    pub inline fn greaterEqual(self: *Builder, lhs: Ptr, rhs: StringPtr) Error!Ptr { return self.commonBinary(.GreaterEqual, lhs, rhs); }
+    pub inline fn equal(self: *Builder, lhs: Ptr, rhs: StringPtr) Error!Ptr { return self.commonBinary(.Equal, lhs, rhs); }
+    pub inline fn notEqual(self: *Builder, lhs: Ptr, rhs: StringPtr) Error!Ptr { return self.commonBinary(.NotEqual, lhs, rhs); }
+    pub inline fn invert(self: *Builder, expr: Ptr) Error!Ptr { return self.commonSingle(.Invert, expr); }
+    pub inline fn xor(self: *Builder, lhs: Ptr, rhs: StringPtr) Error!Ptr { return self.commonBinary(.Xor, lhs, rhs); }
 
     inline fn commonSingle(
         self: *Builder,
         comptime nodeType: Node.Type,
         expr: Ptr,
-    ) Error!void {
-        return self.nodes.append(self.allocator, .{
+    ) Error!Ptr {
+        const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
+        self.nodes.set(res, .{
             .type = nodeType,
             .value = expr,
         });
+        return res;
     }
 
     inline fn commonBinary(
@@ -162,19 +170,27 @@ pub const Builder = struct {
         comptime nodeType: Node.Type,
         lhs: Ptr,
         rhs: Ptr
-    ) Error!void {
+    ) Error!Ptr {
         const start: u32 = @intCast(self.data.items.len);
         self.data.append(self.allocator, lhs) catch return Error.AllocatorFailure;
         self.data.append(self.allocator, rhs) catch return Error.AllocatorFailure;
-        return self.nodes.append(self.allocator, .{
+
+        const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
+        self.nodes.set(res, .{
             .type = nodeType,
             .value = start,
         });
+        return res;
     }
 };
  
 pub const Constant = union(enum) {
     pub const Ptr = defines.Offset;
+
+    const ConstantArray = struct {
+        type: TypeID,
+        data: defines.Range,
+    };
 
     Integer: union(enum) {
         i32: i32,
@@ -183,15 +199,9 @@ pub const Constant = union(enum) {
         u8: u8,
     },
     Float: f32,
-    Aggregate: struct {
-        type: TypeID,
-        data: []const Constant, // @Note we can refer with slice directly because
-                                // indices won't change unlike the JIR nodes.
-    }, 
-    Array: struct {
-        type: TypeID,
-        data: []const Constant,
-    },
+    Aggregate: ConstantArray, 
+    Array: ConstantArray,
+    Pointer: Constant.Ptr,
     Undefined: TypeID,
     Function: Function.Ptr,
 };

@@ -663,7 +663,6 @@ fn evalDecl(self: *Comptime, declPtr: defines.DeclPtr, maybeExpected: ?TypeID) E
                 else valuePtr;
         },
         .Capture => if (self.cache.get(.{
-            // TODO: Crashes
             .file = prevFile,
             .expr = decl.node,
         })) |capture| capture
