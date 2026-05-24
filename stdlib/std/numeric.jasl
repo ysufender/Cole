@@ -26,11 +26,11 @@ import std::math as M;
 import std::comptime as CT;
 
 pub let Integer = struct {
-    let Check = fn (T: type) -> bool {
+    pub let Check = fn (T: type) -> bool {
         return typeInfo(T).tag == @Integer;
     };
     
-    let Trait = fn (T: type) -> type {
+    pub let Trait = fn (T: type) -> type {
         if !Check(T) {
             compileError("Given type does not satisfy the Integer traits.", ());
         }
@@ -40,11 +40,11 @@ pub let Integer = struct {
 };
 
 pub let Numeric = struct {
-    let Check = fn (T: type) -> bool {
+    pub let Check = fn (T: type) -> bool {
         return Integer::Check(T) or T == float;
     };
 
-    let Trait = fn (T: type) -> type {
+    pub let Trait = fn (T: type) -> type {
         if !Check(T) {
             compileError("Given type does not satisfy the Numeric traits.", ());
         }
@@ -54,7 +54,7 @@ pub let Numeric = struct {
 };
 
 pub let Signed = struct {
-    let Check = fn (T: type) -> bool {
+    pub let Check = fn (T: type) -> bool {
         return switch typeInfo(T) {
             @Integer -> |i| i.signed,
             @Float -> true,
@@ -62,7 +62,7 @@ pub let Signed = struct {
         };
     }; 
 
-    let Trait = fn (T: type) -> type {
+    pub let Trait = fn (T: type) -> type {
         if !Check(T) {
             compileError("Given type does not satisfy the Signed traits.", ());
         }
@@ -72,11 +72,11 @@ pub let Signed = struct {
 };
 
 pub let Unsigned = struct {
-    let Check = fn (T: type) -> bool {
+    pub let Check = fn (T: type) -> bool {
         return !Signed::Check(T);
     }; 
 
-    let Trait = fn (T: type) -> type {
+    pub let Trait = fn (T: type) -> type {
         if !Check(T) {
             compileError("Given type does not satisfy the Unsigned traits.", ());
         }

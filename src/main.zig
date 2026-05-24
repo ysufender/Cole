@@ -139,23 +139,6 @@ fn panicHandler(msg: []const u8, stack: ?usize) noreturn {
 
     stderr.writeAll("\nRuntime invoked panic:\nInfo: ") catch {};
     stderr.writeAll(msg) catch {};
-    stderr.writeAll("\n") catch {};
-
-    if (std.debug.sys_can_stack_trace) {
-        if (stack) |addr| {
-            var addrBuf: [512]usize = undefined;
-            const trace = std.debug.captureCurrentStackTrace(.{
-                    .first_address = addr,
-                },
-                &addrBuf,
-            );
-            std.debug.dumpStackTrace(&trace);
-        }
-        else {
-            std.debug.dumpCurrentStackTrace(.{});
-        }
-    }
-
-    stderr.writeAll("\n") catch {};
+    common.debug.stackTrace(stack, &stderr);
     std.process.exit(1);
 }

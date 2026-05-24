@@ -118,5 +118,6 @@ pub const CompilerError = error {
     UnionLayoutViolation,
     PublicEntryPoint,
     UserspaceError,
+    ExistentialDilemma,
     Terminate,
 };

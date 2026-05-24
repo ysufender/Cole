@@ -167,7 +167,7 @@ pub fn registerTokens(self: *Context, tokens: Lexer.TokenList.Slice) Error!defin
     return @intCast(self.tokenMap.items.len - 1);
 }
 
-pub fn getTokens(self: *const Context, tokens: defines.TokenPtr) *const Lexer.TokenList.Slice {
+pub fn getTokens(self: *const Context, tokens: defines.TokenListPtr) *const Lexer.TokenList.Slice {
     assert(tokens < self.tokenMap.items.len);
     return &self.tokenMap.items[tokens];
 }

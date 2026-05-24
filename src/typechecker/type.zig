@@ -20,14 +20,13 @@ pub const TypeInfo = union(enum) {
     Float: bool, // mutability bool
     Void,
 
+    Array: Array,
+
     Pointer: Pointer,
     Function: Function, // is a pointer
     Noreturn,
     Any: bool, // mutability bool
     Type,
-
-    Array: Array,
-
 
     /// Like type, comptime_int, comptime_float, enum_literal
     // @CompilerOnly

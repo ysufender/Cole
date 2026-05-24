@@ -1,3 +1,5 @@
+// @Beware expects all passed parameters to be already typechecked.
+
 const std = @import("std");
 const common = @import("../core/common.zig");
 const backend = @import("../codegen/backend.zig");
@@ -37,16 +39,19 @@ pub fn declaration(self: *Lowerer, ptr: defines.DeclPtr, decl: *const Declaratio
         .Function => return common.debug.ShouldBeImpossible(@src()),
         .Type => {
             const typeDefPtr = self.typechecker.executer.expectType(decl.node)
-                c> atc>h return common.debug.ShouldBeImpossible(@src());
+                catch return common.debug.ShouldBeImpossible(@src());
             const typeDef = self.typechecker.executer.getValue(typeDefPtr).Type;
-            try self.typechecker.builder.typeDef(typeDef);
+            _ = try self.typechecker.builder.typeDef(typeDef);
         },
         else => {
-            if (self.typechecker.executer.attemptEval(decl.node, typeID)) |someVal| {
-                const constant = try self.addConstant(someVal, typeID);
-            }
-            else {
-            }
+            // @Note Top-level comptimeness is checked in the typechecker.
+            const initializer =
+                if (self.typechecker.executer.attemptEval(decl.node, typeID)) |someVal|
+                    try self.typechecker.builder.literal(try self.addConstant(someVal, typeID))
+                else
+                    try self.expression(decl.node);
+
+            try self.typechecker.builder.variableDef(typeID, initializer);
         },
     }
 }
@@ -55,7 +60,7 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.ValuePtr, ofTypePtr: TypeI
     const value = self.typechecker.executer.getValue(valuePtr);
     const ofType = self.typechecker.typeTable.get(ofTypePtr);
     return self.typechecker.builder.addConstant(switch (value) {
-        .Int => |val| switch (self.typechecker.sizeOf(ofType)) {
+        .Int => |val| switch (self.typechecker.sizeOf(ofTypePtr)) {
             32 => .{ .Integer = if (ofType.Integer.signed) .{
                 .i32 = @intCast(val),
             } else .{
@@ -68,12 +73,12 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.ValuePtr, ofTypePtr: TypeI
             }},
             else => return common.debug.ShouldBeImpossible(@src()),
         },
-        .Float => |val| return .{ .Float = val },
+        .Float => |val| .{ .Float = val },
         .Undefined => |valueType| .{ .Undefined = valueType },
         .Struct => |str| blk: {
             const start = self.typechecker.builder.constants.len;
             for (str.Fields.start..str.Fields.end) |fieldPtr| {
-                _ = try self.addConstant(fieldPtr, ofType.Struct.fields[fieldPtr - str.Fields.start].valueType);
+                _ = try self.addConstant(@intCast(fieldPtr), ofType.Struct.fields[fieldPtr - str.Fields.start].valueType);
             }
             break :blk .{ .Aggregate = .{
                 .type = str.Type,
@@ -87,7 +92,7 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.ValuePtr, ofTypePtr: TypeI
         .Union => |uni| blk: {
             const start = self.typechecker.builder.constants.len;
             _ = try self.typechecker.builder.addConstant(.{ .Integer = .{ .u32 = uni.Tag } });
-            _ = try self.addConstant(uni.Value, ofType.Union.fields[uni.Tag + 1]);
+            _ = try self.addConstant(uni.Value, ofType.Union.fields[uni.Tag + 1].valueType);
             break :blk .{ .Aggregate = .{
                 .type = uni.Type,
                 .data = .{
@@ -120,29 +125,98 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.ValuePtr, ofTypePtr: TypeI
         .Slice => |slice| blk: {
             const start = self.typechecker.builder.constants.len;
 
-            switch (ofType) {
-                .Array => |arr| {
-                    for (0..slice.Size) |index| {
-                        _ = try self.addConstant(slice.at(index), arr.child);
-                    }
-
-                    break :blk .{ .Aggregate = .{
-                    }};
-                },
+            const child = switch (ofType) {
+                .Array => |arr| arr.child,
                 .Pointer => |ptr| ptr.child,
                 else => return common.debug.ShouldBeImpossible(@src()),
+            };
+
+            for (0..slice.Size) |index| {
+                _ = try self.addConstant(slice.at(@intCast(index)), child);
             }
+
+            break :blk switch (ofType) {
+                .Array => .{ .Aggregate = .{
+                    .type = slice.Type,
+                    .data = .{
+                        .start = @intCast(start),
+                        .end = @intCast(self.typechecker.builder.constants.len),
+                    },
+                }},
+                .Pointer => |ptr| pointer: { 
+                    const implicitArray = JIR.Constant{ .Aggregate = .{
+                        .type = try self.typechecker.registerType(.{
+                            .Array = .{
+                                .mutable = true,
+                                .child = ptr.child,
+                                .len = slice.Size,
+                            },
+                        }),
+                        .data = .{
+                            .start = @intCast(start),
+                            .end = @intCast(self.typechecker.builder.constants.len),
+                        },
+                    }};
+
+                    break :pointer .{ .Pointer = try self.typechecker.builder.addConstant(implicitArray) };
+                },
+                else => return common.debug.ShouldBeImpossible(@src()),
+            };
         },
+        .Pointer => {
+            self.report("Comptime pointers can't live outside the comptime scope.", .{});
+            return Error.ExistentialDilemma;
+        },
+        .Bool => |boolValue| .{ .Integer = .{ .u8 = @intFromBool(boolValue), }, },
+        .Void => {
+            self.report(
+                "I don't even know what happened, but somehow you tried to "
+                ++ "create a constant value of type 'void'. I don't think that is "
+                ++ "really useful, since it only means that the statement should "
+                ++ "be comptime ran. Anyway, here is the place of this error message: "
+                ++ common.debug.locationString(@src())
+                ++ ". And here is also (hopefully) some stacktrace: ",
+                .{},
+            );
+
+            const _stderr = std.Io.File.stderr().writer(self.typechecker.context.io, &common.log.wbuf);
+            var stderr = _stderr.interface;
+            common.debug.stackTrace(@frameAddress(), &stderr);
+
+            return common.debug.ShouldBeImpossible(@src());
+        },
+        .Function, .Type => return common.debug.ShouldBeImpossible(@src()),
     });
 }
 
-pub fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr) Error!void {
+fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr) Error!JIR.Ptr {
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
 
     const expr = ast.expressions.get(exprPtr);
-    switch (expr.type) {
-        .EnumDefinition, .StructDefinition, .UnionDefinition => {
-        },
-        else => return common.debug.NotImplemented(@src()),
-    }
+    return switch (expr.type) {
+        .Assignment => self.assignment(expr.value),
+        .EnumDefinition, .StructDefinition, .UnionDefinition,
+        .FunctionDefinition, .FunctionType, .ArrayType,
+        .CPointerType, .MutableType, .PointerType,
+        .SliceType, .Scoping, .Mark => common.debug.ShouldBeImpossible(@src()),
+        else => common.debug.NotImplemented(@src()),
+    };
+}
+
+fn assignment(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
+    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+
+    const lhs = ast.extra[extraPtr];
+    const rhs = ast.extra[extraPtr + 1];
+
+    const lhsType = try self.typechecker.typecheckExpression(lhs, null);
+
+    _ = lhsType;
+    _ = rhs;
+    unreachable;
+}
+
+fn report(self: *Lowerer, comptime fmt: []const u8, args: anytype) void {
+    _ = self.typechecker.setFlag(.AttemptingEval, false);
+    return self.typechecker.report("LOWERER: " ++ fmt, args);
 }

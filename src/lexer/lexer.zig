@@ -101,7 +101,7 @@ pub const Token = struct {
 
             source = source[(newLine + 1)..];
             line += 1;
-        } else unreachable;
+        } else 0;
 
         return source[0..end];
     }

@@ -38,7 +38,7 @@ const LookupMap = collections.HashMap(defines.DeclPtr, TypecheckStatus);
 pub const Flags = enum(u3) {
     ConcreteValue = 1,
     LValue = 2,
-    Codegen = 3,
+    AttemptingEval = 3,
 
     pub fn flag(flagToGet: Flags) u3 {
         return @intFromEnum(flagToGet);
@@ -175,6 +175,7 @@ pub fn typecheck(self: *Typechecker, allocator: Allocator) Error!Resolution {
     }
 
     const mainType = try self.typecheckDecl(mainPtr, null);
+    self.clearFlags();
     if (mainType != Comptime.Builtin.Type("entry_point")) {
         const main = self.symbols.getDecl(mainPtr);
         self.lastToken = main.token;
@@ -547,8 +548,6 @@ fn typecheckArrayInitialization(self: *Typechecker, ast: *const Parser.AST, arr:
         return Error.InitializerCountMismatch;
     }
 
-    defer _ = self.setFlag(.ConcreteValue, true);
-
     for (0..arr.len) |index| {
         const item = try self.typecheckValue(
             try self.executer.eval(ast.extra[range.at(@intCast(index))], arr.child),
@@ -611,8 +610,6 @@ fn typecheckUnionInitialization(self: *Typechecker, ast: *const Parser.AST, uni:
 }
 
 pub fn typecheckScoping(self: *Typechecker, expr: defines.ExpressionPtr) Error!TypeID {
-    defer _ = self.setFlag(.ConcreteValue, true);
-
     if (self.symbols.resolutionMap.get(.{
         .file = self.currentFile,
         .expr = expr,
@@ -934,8 +931,6 @@ pub fn typecheckTypeForwarding(self: *Typechecker, extraPtr: defines.OpaquePtr, 
 }
 
 pub fn typecheckIndexing(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!TypeID {
-    defer _ = self.setFlag(.ConcreteValue, true);
-
     const lValue = self.getFlag(.LValue);
 
     const ast = self.context.getAST(self.currentFile);
@@ -1033,8 +1028,6 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
         };
     }
 
-    defer _ = self.setFlag(.ConcreteValue, true);
-
     const allocator = self.arena.allocator();
 
     const prevToken = self.lastToken;
@@ -1098,15 +1091,13 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
         .result = declType,
     };
     
-    try self.lowerer.declaration(&decl);
+    try self.lowerer.declaration(declPtr, &decl);
 
     return declType;
 }
 
 pub fn typecheckDot(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!TypeID {
-    // @Beware
-    // @Important
-    // TODO: This doesn't allow member function calls yet! Add them!
+    // @Important TODO: This doesn't allow member function calls yet! Add them!
 
     const ast = self.context.getAST(self.currentFile);
     const tokens = self.context.getTokens(ast.tokens);
@@ -1124,7 +1115,6 @@ pub fn typecheckDot(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!TypeI
                 self.report("Attempt to take the address of non-concrete value.", .{ });
                 return Error.AddressOfTemporaryValue;
             }
-            _ = self.setFlag(.ConcreteValue, false);
 
             // @Beware Must be kept in sync with the ConcreteValue check.
             // Hence we assume lhs is something that we can take the address of.
@@ -1137,7 +1127,6 @@ pub fn typecheckDot(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!TypeI
             });
         },
         .Star => {
-            _ = self.setFlag(.ConcreteValue, false);
             switch (self.typeTable.get(objectTypeID)) {
                 .Pointer => |ptr| switch (ptr.size) {
                     .Single, .C => return ptr.child,
@@ -1201,7 +1190,6 @@ pub fn typecheckDot(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!TypeI
 
     const member = try self.builder.internString(memberName);
     const index = try self.fieldIndex(objectTypeID, member);
-    _ = self.setFlag(.ConcreteValue, true);
 
     const fields = switch (objectType) {
         .Union => |uni| blk: { 
@@ -1783,7 +1771,7 @@ pub fn registerType(self: *Typechecker, newType: TypeInfo) Error!TypeID {
 }
 
 pub fn report(self: *Typechecker, comptime fmt: []const u8, args: anytype) void {
-    if (self.executer.getFlag(.Attempting)) {
+    if (self.getFlag(.AttemptingEval)) {
         return;
     }
 
@@ -2426,8 +2414,14 @@ pub fn setFlag(self: *Typechecker, comptime flag: Flags, bit: bool) bool {
     return self.flags.isSet(Flags.flag(flag));
 }
 
-fn getFlag(self: *Typechecker, comptime flag: Flags) bool {
+pub fn getFlag(self: *Typechecker, comptime flag: Flags) bool {
     return self.flags.isSet(Flags.flag(flag));
+}
+
+fn clearFlags(self: *Typechecker) void {
+    const complement = self.flags.complement();
+    self.flags.toggleAll();
+    self.flags = self.flags.xorWith(complement);
 }
 
 /// Assumes metadata doesn't exist for given element

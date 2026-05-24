@@ -18,43 +18,46 @@ const Error = common.CompilerError;
 
 pub const InternTable = std.array_hash_map.String(void);
 
-pub const Constants = []const Constant;
-
 pub const Ptr = defines.Offset;
 
 const Node = struct {
     pub const List = MultiArrayList(Node);
 
     pub const Type = enum {
-        TypeDef, // ok
-        FunctionDef, // ok
-        VariableDef, // ok
-        Assignment, // ok
-        Store, // ok
-        Reference, // ok
-        Dereference, // ok
-        Call, // ok
-        Literal, // ok
-        Add, // ok
-        Sub, // ok
-        Div, // ok
-        Mul, // ok
-        LeftShift, // ok
-        RightShift, // ok
-        And, // ok
-        Or, // ok
-        Label, // ok
-        Dot, // ok
-        Grouping, // ok
-        Goto, // ok
-        Lesser, // ok
-        LesserEqual, // ok
-        Greater, // ok
-        GreaterEqual, // ok
-        Equal, // ok
-        NotEqual, // ok
-        Invert, // ok
-        Xor, // ok
+        TypeDef,
+        FunctionDef,
+        VariableDef,
+
+        /// Direct assignment to a variable.
+        Assignment,
+
+        /// Assignment through pointer
+        Store,
+
+        Reference,
+        Dereference,
+        Call,
+        Literal,
+        Add,
+        Sub,
+        Div,
+        Mul,
+        LeftShift,
+        RightShift,
+        And,
+        Or,
+        Label,
+        Dot,
+        Grouping,
+        Goto,
+        Lesser,
+        LesserEqual,
+        Greater,
+        GreaterEqual,
+        Equal,
+        NotEqual,
+        Invert,
+        Xor,
     };
 
     type: Type,
@@ -101,7 +104,7 @@ pub const Builder = struct {
     pub fn addConstant(self: *Builder, constant: Constant) Error!Constant.Ptr {
         const res = self.constants.addOne(self.allocator) catch return Error.AllocatorFailure;
         self.constants.set(res, constant);
-        return res;
+        return @intCast(res);
     }
 
     pub fn internString(self: *Builder, str: []const u8) Error!defines.StringPtr {
@@ -110,21 +113,26 @@ pub const Builder = struct {
         return @intCast(res.index);
     }
 
-    pub fn variableDef(self: *Builder, typeID: TypeID, initializer: ?Ptr) Error!void {
+    pub fn variableDef(self: *Builder, typeID: TypeID, initializer: Ptr) Error!void {
         const start: u32 = @intCast(self.data.items.len);
         self.data.append(self.allocator, typeID) catch return Error.AllocatorFailure;
-        self.data.append(self.allocator, @intFromBool(initializer != null)) catch return Error.AllocatorFailure;
-        if (initializer) |i| {
-            self.data.append(self.allocator, i) catch return Error.AllocatorFailure;
+        const initializerExpression = self.nodes.get(initializer).value;
+        const isUndefined = self.constants.get(initializerExpression) == .Undefined;
+        self.data.append(self.allocator, @intFromBool(isUndefined)) catch return Error.AllocatorFailure;
+
+        if (!isUndefined) {
+            self.data.append(self.allocator, initializer) catch return Error.AllocatorFailure;
         }
+
         return self.nodes.append(self.allocator, .{
             .type = .VariableDef,
             .value = start,
         });
     }
 
+    pub inline fn typeDef(self: *Builder, typeID: TypeID) Error!void { _ = try self.commonSingle(.TypeDef, typeID); }
+
     pub inline fn getInternedString(self: *const Builder, index: defines.StringPtr)  []const u8 { return self.strings.keys()[index]; }
-    pub inline fn typeDef(self: *Builder, typeID: TypeID) Error!Ptr { return self.commonSingle(.TypeDef, typeID); }
     pub inline fn functionDef(self: *Builder, function: Function.Ptr) Error!Ptr { return self.commonSingle(.FunctionDef, function); }
     pub inline fn assignment(self: *Builder, decl: StringPtr, expr: Ptr) Error!Ptr { return self.commonBinary(.Assignment, decl, expr); }
     pub inline fn store(self: *Builder, decl: Ptr, expr: Ptr) Error!Ptr { return self.commonBinary(.Store, decl, expr); }
@@ -186,6 +194,7 @@ pub const Builder = struct {
  
 pub const Constant = union(enum) {
     pub const Ptr = defines.Offset;
+    pub const List = std.MultiArrayList(Constant).Slice;
 
     const ConstantArray = struct {
         type: TypeID,
@@ -208,6 +217,7 @@ pub const Constant = union(enum) {
 
 pub const Function = struct {
     pub const Ptr = defines.Offset;
+    pub const List = MultiArrayList(Function).Slice;
 
     signature: TypeID,
     body: []const Function.Ptr,
@@ -216,7 +226,7 @@ pub const Function = struct {
 const JIR = @This();
 
 types: Typechecker.TypeTable.Slice,
-constants: std.MultiArrayList(Constant).Slice,
-functions: MultiArrayList(Function).Slice,
+constants: Constant.List,
+functions: Function.List,
 nodes: Node.List.Slice,
 data: []const u32,

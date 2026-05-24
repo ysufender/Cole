@@ -31,7 +31,6 @@ pub const IncompleteType = 1;
 const VoidValue = 2;
 
 pub const Flags = enum(u3) {
-    Attempting = 0,
     CanCycle = 1,
     LValue = 2,
 
@@ -130,8 +129,8 @@ pub fn queryConstants(self: *const Comptime, allocator: Allocator) Error!backend
 }
 
 pub fn attemptEval(self: *Comptime, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeID) ?ValuePtr {
-    const prev = self.setFlag(.Attempting, true);
-    defer _ = self.setFlag(.Attempting, prev);
+    const prev = self.typechecker.setFlag(.AttemptingEval, true);
+    defer _ = self.typechecker.setFlag(.AttemptingEval, prev);
     return self.eval(exprPtr, maybeExpected) catch null;
 }
 
@@ -295,12 +294,12 @@ pub fn evalMark(
                         return Error.ComptimeNotPossible;
                     },
                     Builtin.Metadata("@comptime").? => {
-                        if (!self.getFlag(.Attempting)) {
+                        if (!self.typechecker.getFlag(.AttemptingEval)) {
                             self.report("Redundant @comptime mark in already comptime scope.", .{});
                             return Error.RedundantMark;
                         }
 
-                        _ = self.setFlag(.Attempting, false);
+                        _ = self.typechecker.setFlag(.AttemptingEval, false);
                     },
                     else => { },
                 }
@@ -1121,7 +1120,7 @@ pub fn evalCompileLog(self: *Comptime, extraPtr: defines.OpaquePtr) Error!ValueP
         },
     };
 
-    if (self.getFlag(.Attempting)) {
+    if (self.typechecker.getFlag(.AttemptingEval)) {
         return VoidValue;
     }
 
@@ -1742,9 +1741,7 @@ fn comptimeEq(self: *const Comptime, lhs: Value, rhs: Value) bool {
 }
 
 fn report(self: *Comptime, comptime fmt: []const u8, args: anytype) void {
-    return
-        if (self.getFlag(.Attempting)) {}
-        else self.typechecker.report("COMPTIME: " ++ fmt, args);
+    return self.typechecker.report("COMPTIME: " ++ fmt, args);
 }
 
 pub fn getValue(self: *const Comptime, address: defines.Offset) Value {
@@ -1764,7 +1761,7 @@ fn appendValue(self: *Comptime, value: Value) Error!ValuePtr {
     return @intCast(addr);
 }
 
-fn setFlag(self: *Comptime, comptime flag: Flags, bit: bool) bool {
+pub fn setFlag(self: *Comptime, comptime flag: Flags, bit: bool) bool {
     defer self.flags.setValue(Flags.flag(flag), bit);
     return self.flags.isSet(Flags.flag(flag));
 }

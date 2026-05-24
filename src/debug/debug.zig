@@ -8,25 +8,43 @@ const Error = common.CompilerError;
 pub const isDebug = @import("config").isDebug;
 
 pub fn NotImplemented(comptime src: std.builtin.SourceLocation) Error {
-    common.log.err(std.fmt.comptimePrint("Unimplemented in {s} at {d}:{d}", .{
-        src.file,
-        src.line,
-        src.column,
-    }), .{});
-
+    common.log.err("Not implemented in " ++ locationString(src) , .{});
     return Error.NotImplemented;
 }
 
 pub fn ShouldBeImpossible(comptime src: std.builtin.SourceLocation) Error {
-    common.log.err(std.fmt.comptimePrint("Reached impossible branch in {s} at {d}:{d}", .{
-        src.file,
-        src.line,
-        src.column,
-    }), .{});
-
+    common.log.err("Reached impossible branch in " ++ locationString(src) , .{});
     return Error.ShouldBeImpossible;
 }
 
 pub fn hello(num: usize) void {
     common.log.debug("Hello {d}", .{num});
+}
+
+pub fn locationString(comptime location: std.builtin.SourceLocation) []const u8 {
+    return std.fmt.comptimePrint("{s} at {d}:{d}", .{
+        location.file,
+        location.line,
+        location.column,
+    });
+}
+
+pub fn stackTrace(stack: ?usize, stderr: *std.Io.Writer) void {
+    defer stderr.flush() catch {};
+    if (std.debug.sys_can_stack_trace) {
+        stderr.writeAll("\n") catch {};
+        if (stack) |addr| {
+            var addrBuf: [512]usize = undefined;
+            const trace = std.debug.captureCurrentStackTrace(.{
+                    .first_address = addr,
+                },
+                &addrBuf,
+            );
+            std.debug.dumpStackTrace(&trace);
+        }
+        else {
+            std.debug.dumpCurrentStackTrace(.{});
+        }
+        stderr.writeAll("\n") catch {};
+    }
 }

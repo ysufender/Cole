@@ -568,6 +568,13 @@ fn expression(self: *Parser) ExpressionResult {
 fn assignment(self: *Parser) ExpressionResult {
     var expr = try self.ifExpression();
 
+    // @Note Assignment is actually a statement, rather than an expression.
+    // The reason it resides here is that it was easier to parse it like
+    // an expression rather than having to do a lookahead/lookback.
+    // The only place Parser.assignment is called is Parser.expression,
+    // so it is guaranteed to be the lowest precedence expression and
+    // therefore suitable to be a statement.
+
     if (self.match(&.{.Equal})) {
         const rhs = try self.ifExpression();
 
