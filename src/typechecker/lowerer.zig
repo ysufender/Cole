@@ -60,27 +60,51 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.ValuePtr, ofTypePtr: TypeI
     const value = self.typechecker.executer.getValue(valuePtr);
     const ofType = self.typechecker.typeTable.get(ofTypePtr);
     return self.typechecker.builder.addConstant(switch (value) {
-        .Int => |val| switch (self.typechecker.sizeOf(ofTypePtr)) {
-            32 => .{ .Integer = if (ofType.Integer.signed) .{
-                .i32 = @intCast(val),
-            } else .{
-                .u32 = @intCast(val),
-            }},
-            8 => .{ .Integer = if (ofType.Integer.signed) .{
-                .i8 = @intCast(val),
-            } else .{
-                .u8 = @intCast(val),
-            }},
-            else => return common.debug.ShouldBeImpossible(@src()),
+        .Int => |val| integer: {
+            if (ofType == .ComptimeInt) {
+                self.report(
+                    "Value of type 'comptime_int' can't leak outside the comptime scope "
+                    ++ "without a target integer type. Consider adding a type annotation "
+                    ++ "or an explicit cast.",
+                    .{}
+                );
+                return Error.ExistentialDilemma;
+            }
+
+            break :integer switch (self.typechecker.sizeOf(ofTypePtr)) {
+                32 => .{ .Integer = if (ofType.Integer.signed) .{
+                    .i32 = @intCast(val),
+                } else .{
+                    .u32 = @intCast(val),
+                }},
+                8 => .{ .Integer = if (ofType.Integer.signed) .{
+                    .i8 = @intCast(val),
+                } else .{
+                    .u8 = @intCast(val),
+                }},
+                else => return common.debug.ShouldBeImpossible(@src()),
+            };
         },
-        .Float => |val| .{ .Float = val },
+        .Float => |val| float: {
+            if (ofType == .ComptimeFloat) {
+                self.report(
+                    "Value of type 'comptime_float' can't leak outside the comptime scope "
+                    ++ "without a target floating point type. Consider adding a type annotation "
+                    ++ "or an explicit cast.",
+                    .{}
+                );
+                return Error.ExistentialDilemma;
+            }
+
+            break :float .{ .Float = val };
+        },
         .Undefined => |valueType| .{ .Undefined = valueType },
-        .Struct => |str| blk: {
+        .Struct => |str| @"struct": {
             const start = self.typechecker.builder.constants.len;
             for (str.Fields.start..str.Fields.end) |fieldPtr| {
                 _ = try self.addConstant(@intCast(fieldPtr), ofType.Struct.fields[fieldPtr - str.Fields.start].valueType);
             }
-            break :blk .{ .Aggregate = .{
+            break :@"struct" .{ .Aggregate = .{
                 .type = str.Type,
                 .data = .{
                     .start = @intCast(start),
@@ -89,11 +113,11 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.ValuePtr, ofTypePtr: TypeI
             }};
         },
         .Enum => |val| .{ .Integer = .{ .u32 = val.Value } },
-        .Union => |uni| blk: {
+        .Union => |uni| @"union": {
             const start = self.typechecker.builder.constants.len;
             _ = try self.typechecker.builder.addConstant(.{ .Integer = .{ .u32 = uni.Tag } });
             _ = try self.addConstant(uni.Value, ofType.Union.fields[uni.Tag + 1].valueType);
-            break :blk .{ .Aggregate = .{
+            break :@"union" .{ .Aggregate = .{
                 .type = uni.Type,
                 .data = .{
                     .start = @intCast(start),
@@ -101,7 +125,7 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.ValuePtr, ofTypePtr: TypeI
                 },
             }};
         },
-        .String => |string| blk: {
+        .String => |string| string: {
             // @Beware strings are slices, so they are aggregate
             // in the form [size, internedStringIndex]
             const strPtr = try self.typechecker.builder.internString(string);
@@ -114,7 +138,7 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.ValuePtr, ofTypePtr: TypeI
                 .u32 = strPtr,
             }});
 
-            break :blk .{ .Aggregate = .{
+            break :string .{ .Aggregate = .{
                 .type = Comptime.Builtin.Type("string"),
                 .data = .{
                     .start = @intCast(start),
@@ -122,7 +146,7 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.ValuePtr, ofTypePtr: TypeI
                 },
             }};
         },
-        .Slice => |slice| blk: {
+        .Slice => |slice| slice: {
             const start = self.typechecker.builder.constants.len;
 
             const child = switch (ofType) {
@@ -135,7 +159,7 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.ValuePtr, ofTypePtr: TypeI
                 _ = try self.addConstant(slice.at(@intCast(index)), child);
             }
 
-            break :blk switch (ofType) {
+            break :slice switch (ofType) {
                 .Array => .{ .Aggregate = .{
                     .type = slice.Type,
                     .data = .{
@@ -210,6 +234,13 @@ fn assignment(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     const rhs = ast.extra[extraPtr + 1];
 
     const lhsType = try self.typechecker.typecheckExpression(lhs, null);
+
+    // @Beware Must be kept in sync with ConcreteValue check in typechecker.
+    // @Note lhs can be: Scoping, Identifier, Indexing, or a dereference.
+    // Indexing and dereference should be redirected to Lowerer.store instead of
+    // handling here.
+
+    // TODO: After assignment typechecking.
 
     _ = lhsType;
     _ = rhs;

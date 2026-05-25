@@ -1,3 +1,19 @@
-let a = false;
+let Struct = struct {
+    pub let a = u32;
 
-let main = a.&;
+    pub let Inner = struct {
+        pub let a: u32 = 0;
+    };
+};
+
+let Enum = enum {
+    Base,
+    Inner,
+};
+
+let mode: Enum = @Inner;
+
+let main = (switch mode {
+    @Base -> Struct,
+    @Inner -> Struct::Inner,
+})::a;

@@ -101,6 +101,12 @@ pub const Builder = struct {
         }, allocator);
     }
 
+    pub fn addFunction(self: *Builder, function: Function) Error!Function.Ptr {
+        const res = try self.functions.addOne(self.allocator);
+        self.constants.set(res, function);
+        return res;
+    }
+
     pub fn addConstant(self: *Builder, constant: Constant) Error!Constant.Ptr {
         const res = self.constants.addOne(self.allocator) catch return Error.AllocatorFailure;
         self.constants.set(res, constant);
@@ -220,7 +226,7 @@ pub const Function = struct {
     pub const List = MultiArrayList(Function).Slice;
 
     signature: TypeID,
-    body: []const Function.Ptr,
+    body: defines.Range,
 };
 
 const JIR = @This();

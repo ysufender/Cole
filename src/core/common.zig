@@ -119,5 +119,6 @@ pub const CompilerError = error {
     PublicEntryPoint,
     UserspaceError,
     ExistentialDilemma,
+    UnexpectedRValue,
     Terminate,
 };

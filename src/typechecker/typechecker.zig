@@ -32,7 +32,7 @@ const eql = std.meta.eql;
 
 pub const TypeTable = MultiArrayList(TypeInfo);
 pub const TypeMap = collections.HashMap(TypeInfo, TypeID);
-pub const MetadataMap = collections.HashMap(Element, []const Comptime.ValuePtr);
+pub const MetadataMap = collections.HashMap(Element, []const Comptime.Value.Ptr);
 const LookupMap = collections.HashMap(defines.DeclPtr, TypecheckStatus);
 
 pub const Flags = enum(u3) {
@@ -362,7 +362,7 @@ pub fn typecheckIfExpression(self: *Typechecker, extraPtr: defines.OpaquePtr, ma
     return self.infer(thenBranch, elseBranch) catch common.debug.ShouldBeImpossible(@src());
 }
 
-pub fn typecheckValue(self: *Typechecker, val: Comptime.ValuePtr, maybeExpected: ?TypeID) Error!TypeID {
+pub fn typecheckValue(self: *Typechecker, val: Comptime.Value.Ptr, maybeExpected: ?TypeID) Error!TypeID {
     const expected =
         if (determineExpected(maybeExpected)) |expected| expected
         else Comptime.Builtin.Type("any");
@@ -936,6 +936,13 @@ pub fn typecheckIndexing(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!
     const ast = self.context.getAST(self.currentFile);
 
     const maybeIndexableId = try self.typecheckExpression(ast.extra[extraPtr], null);
+
+    // @Note if trying to form an lvalue, maybeIndexable must be a concrete value.
+    if (!self.getFlag(.ConcreteValue)) {
+        self.report("Attempt to form an lvalue by indexing a non-concrete value.", .{ });
+        return Error.UnexpectedRValue;
+    }
+
     const maybeIndexable = self.typeTable.get(maybeIndexableId);
     switch (maybeIndexable) {
         .Array => { },
@@ -1205,8 +1212,8 @@ pub fn typecheckDot(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!TypeI
         .Struct => |str| str.fields,
         else => return common.debug.ShouldBeImpossible(@src()),
     };
-    return fields[index].valueType;
 
+    return fields[index].valueType;
 }
 
 pub fn typecheckMark(
@@ -1232,7 +1239,7 @@ pub fn typecheckMark(
         .end = ast.extra[extraPtr + 1], 
     };
 
-    const metadata = self.arena.allocator().alloc(Comptime.ValuePtr, marks.len())
+    const metadata = self.arena.allocator().alloc(Comptime.Value.Ptr, marks.len())
         catch return Error.AllocatorFailure;
 
     for (0..marks.len()) |index| {
@@ -2429,7 +2436,7 @@ fn setMetadata(
     self: *Typechecker,
     kind: Element.Kind,
     element: defines.EitherPtr(defines.ExpressionPtr, defines.StatementPtr),
-    metadata: []const Comptime.ValuePtr,
+    metadata: []const Comptime.Value.Ptr,
 ) Error!void {
     return self.metadata.put(self.arena.allocator(), .{
         .kind = kind,
