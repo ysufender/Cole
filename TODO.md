@@ -1,6 +1,6 @@
 Roadmap to Version 0.1.0
 
-- [ ] Concrete value check for suitable lhs detection is not working.
+- [x] Concrete value check for suitable lhs detection is not working.
 - [ ] Member function calls via first argument being the object type (or
 a pointer to it) is not present yet.
 - [ ] Custom tagged unions.

@@ -281,15 +281,15 @@ pub fn typecheckVariable(self: *Typechecker, decl: *const Resolver.Declaration) 
 pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.ExpressionPtr, maybeExpected: ?TypeID) Error!TypeID {
     const ast = self.context.getAST(self.currentFile);
 
-    if (self.executer.attemptEval(expressionPtr, maybeExpected)) |result| {
-        return self.typecheckValue(result, maybeExpected);
-    }
-
     const expr = ast.expressions.get(expressionPtr);
     defer _ = self.setFlag(.ConcreteValue, switch (expr.type) {
         .Identifier, .Indexing, .Scoping => true,
         else => false,
     });
+
+    if (self.executer.attemptEval(expressionPtr, maybeExpected)) |result| {
+        return self.typecheckValue(result, maybeExpected);
+    }
 
     return switch (expr.type) {
         .Identifier => {
