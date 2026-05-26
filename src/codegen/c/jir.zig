@@ -28,6 +28,8 @@ const Node = struct {
         FunctionDef,
         VariableDef,
 
+        Identifier,
+
         /// Direct assignment to a variable.
         Assignment,
 
@@ -143,6 +145,7 @@ pub const Builder = struct {
     pub inline fn functionDef(self: *Builder, function: Function.Ptr) Error!void { _ = try self.commonSingle(.FunctionDef, function); }
     pub inline fn typeDef(self: *Builder, typeID: TypeID) Error!void { _ = try self.commonSingle(.TypeDef, typeID); }
 
+    pub inline fn identifier(self: *Builder, decl: StringPtr) Error!Ptr { return self.commonSingle(.Identifier, decl); }
     pub inline fn assignment(self: *Builder, decl: StringPtr, expr: Ptr) Error!Ptr { return self.commonBinary(.Assignment, decl, expr); }
     pub inline fn store(self: *Builder, decl: Ptr, expr: Ptr) Error!Ptr { return self.commonBinary(.Store, decl, expr); }
     pub inline fn reference(self: *Builder, decl: StringPtr) Error!Ptr { return self.commonSingle(.Reference, decl); }

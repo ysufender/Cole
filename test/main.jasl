@@ -1,17 +1,2 @@
-let Struct = struct {
-    pub let a = u32;
-
-    pub let Inner = struct {
-        pub let a: u32 = 0;
-    };
-};
-
-let Enum = enum {
-    Base,
-    Inner,
-};
-
-let mode: Enum = @Inner;
-
 let test: i8 = 12;
 let main: *fn void -> i32 = fn || test;

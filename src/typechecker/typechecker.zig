@@ -1,5 +1,7 @@
 // @Note Lowering to C IR is requested by the typechecker,
-// but it is done by the lowerer.zig
+// but it is done by the lowerer.zig, which makes calls to
+// JIR.Builder since JIR.Builder itself doesn't know about
+// untyped AST.
 
 const std = @import("std");
 const common = @import("../core/common.zig");

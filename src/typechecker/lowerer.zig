@@ -220,7 +220,7 @@ pub fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID
     return switch (expr.type) {
         .Literal => self.literal(exprPtr, ofType),
         .Mark => self.mark(expr.value, ofType),
-        .Identifier => self.identifier(expr.value, ofType),
+        .Identifier => self.identifier(expr.value),
 
         .EnumDefinition, .StructDefinition, .UnionDefinition,
         .FunctionType, .ArrayType,
@@ -233,6 +233,15 @@ pub fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID
             return common.debug.NotImplemented(@src());
         },
     };
+}
+
+// @Note type names are also plain identifiers.
+fn identifier(self: *Lowerer, identifierTokenPtr: defines.TokenPtr) Error!JIR.Ptr {
+    const tokens = self.typechecker.context.getTokens(self.typechecker.currentFile);
+
+    const lexeme = tokens.get(identifierTokenPtr).lexeme(self.typechecker.context, self.typechecker.currentFile);
+    const strPtr = try self.typechecker.builder.internString(lexeme);
+    return self.typechecker.builder.identifier(strPtr);
 }
 
 fn mark(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR.Ptr {

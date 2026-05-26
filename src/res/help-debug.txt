@@ -1,6 +1,7 @@
 
     Debug Options:
-        --print-ast                 : Print a pretty(!) formatted AST dump to stdout
-        --print-ast-full            : Print a pretty(!) formatted AST dump to stdout, after parsing every used module
+        --print-ast                 : Print an ugly formatted AST dump to stdout
+        --print-ast-full            : Print an ugly formatted AST dump to stdout, after parsing every used module
         --dump-memory               : Print an ugly formatted dump of comptime memory at each eval call.
         --dump-stats                : Print an ugly formatted dump of overall stats of compilation.
+        --dump-jir                  : Print an ugly formatted dump of the lowered-typed IR.
