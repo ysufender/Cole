@@ -705,6 +705,11 @@ fn resolveExpression(self: *Resolver, exprPtr: defines.ExpressionPtr) Error!void
             defer self.currentScope = previous;
             self.currentScope = lambda;
 
+            self.resolved.putNoClobber(allocator, .{
+                .file = self.dataIndex(),
+                .expr = exprPtr,
+            }, lambda) catch return Error.AllocatorFailure;
+
             for (captures.start..captures.end) |capturePtrPtr| {
                 const name = ast.extra[capturePtrPtr];
                 const lexeme = tokens.get(name).lexeme(self.context, self.dataIndex());

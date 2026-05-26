@@ -36,7 +36,7 @@ pub fn declaration(self: *Lowerer, ptr: defines.DeclPtr, decl: *const Declaratio
     const typeID = status.result;
     const typeInfo = self.typechecker.typeTable.get(typeID);
     switch (typeInfo) {
-        .Function => return common.debug.ShouldBeImpossible(@src()),
+        .Function => {},
         .Type => {
             const typeDefPtr = self.typechecker.executer.expectType(decl.node)
                 catch return common.debug.ShouldBeImpossible(@src());
@@ -49,14 +49,14 @@ pub fn declaration(self: *Lowerer, ptr: defines.DeclPtr, decl: *const Declaratio
                 if (self.typechecker.executer.attemptEval(decl.node, typeID)) |someVal|
                     try self.typechecker.builder.literal(try self.addConstant(someVal, typeID))
                 else
-                    try self.expression(decl.node);
+                    try self.expression(decl.node, typeID);
 
             try self.typechecker.builder.variableDef(typeID, initializer);
         },
     }
 }
 
-pub fn addConstant(self: *Lowerer, valuePtr: Comptime.ValuePtr, ofTypePtr: TypeID) Error!JIR.Constant.Ptr {
+pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: TypeID) Error!JIR.Constant.Ptr {
     const value = self.typechecker.executer.getValue(valuePtr);
     const ofType = self.typechecker.typeTable.get(ofTypePtr);
     return self.typechecker.builder.addConstant(switch (value) {
@@ -213,38 +213,38 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.ValuePtr, ofTypePtr: TypeI
     });
 }
 
-fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr) Error!JIR.Ptr {
+pub fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID) Error!JIR.Ptr {
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
 
     const expr = ast.expressions.get(exprPtr);
     return switch (expr.type) {
-        .Assignment => self.assignment(expr.value),
+        .Literal => self.literal(exprPtr, ofType),
+        .Mark => self.mark(expr.value, ofType),
+        .Identifier => self.identifier(expr.value, ofType),
+
         .EnumDefinition, .StructDefinition, .UnionDefinition,
-        .FunctionDefinition, .FunctionType, .ArrayType,
+        .FunctionType, .ArrayType,
         .CPointerType, .MutableType, .PointerType,
-        .SliceType, .Scoping, .Mark => common.debug.ShouldBeImpossible(@src()),
-        else => common.debug.NotImplemented(@src()),
+        .Lambda, .FunctionDefinition,
+        .SliceType, .Scoping => common.debug.ShouldBeImpossible(@src()),
+
+        else => |t| {
+            self.report("'{s}' lowering is not implemented.", .{@tagName(t)});
+            return common.debug.NotImplemented(@src());
+        },
     };
 }
 
-fn assignment(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
+fn mark(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR.Ptr {
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+    return self.expression(ast.extra[extraPtr + 2], ofType);
+}
 
-    const lhs = ast.extra[extraPtr];
-    const rhs = ast.extra[extraPtr + 1];
-
-    const lhsType = try self.typechecker.typecheckExpression(lhs, null);
-
-    // @Beware Must be kept in sync with ConcreteValue check in typechecker.
-    // @Note lhs can be: Scoping, Identifier, Indexing, or a dereference.
-    // Indexing and dereference should be redirected to Lowerer.store instead of
-    // handling here.
-
-    // TODO: After assignment typechecking.
-
-    _ = lhsType;
-    _ = rhs;
-    unreachable;
+fn literal(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID) Error!JIR.Ptr {
+    // @Note should already been evaluated before.
+    const valuePtr = try self.typechecker.executer.eval(exprPtr, null);
+    const constant = try self.addConstant(valuePtr, ofType);
+    return self.typechecker.builder.literal(constant);
 }
 
 fn report(self: *Lowerer, comptime fmt: []const u8, args: anytype) void {

@@ -13,7 +13,5 @@ let Enum = enum {
 
 let mode: Enum = @Inner;
 
-let main = (switch mode {
-    @Base -> Struct,
-    @Inner -> Struct::Inner,
-})::a;
+let test: i8 = 12;
+let main: *fn void -> i32 = fn || test;

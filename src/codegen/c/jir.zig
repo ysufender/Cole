@@ -103,7 +103,7 @@ pub const Builder = struct {
 
     pub fn addFunction(self: *Builder, function: Function) Error!Function.Ptr {
         const res = try self.functions.addOne(self.allocator);
-        self.constants.set(res, function);
+        self.functions.set(res, function);
         return res;
     }
 
@@ -117,6 +117,10 @@ pub const Builder = struct {
         const res = self.strings.getOrPutValue(self.allocator, str, {})
             catch return Error.AllocatorFailure;
         return @intCast(res.index);
+    }
+
+    pub inline fn getInternedString(self: *const Builder, index: defines.StringPtr)  []const u8 {
+        return self.strings.keys()[index];
     }
 
     pub fn variableDef(self: *Builder, typeID: TypeID, initializer: Ptr) Error!void {
@@ -136,10 +140,9 @@ pub const Builder = struct {
         });
     }
 
+    pub inline fn functionDef(self: *Builder, function: Function.Ptr) Error!void { _ = try self.commonSingle(.FunctionDef, function); }
     pub inline fn typeDef(self: *Builder, typeID: TypeID) Error!void { _ = try self.commonSingle(.TypeDef, typeID); }
 
-    pub inline fn getInternedString(self: *const Builder, index: defines.StringPtr)  []const u8 { return self.strings.keys()[index]; }
-    pub inline fn functionDef(self: *Builder, function: Function.Ptr) Error!Ptr { return self.commonSingle(.FunctionDef, function); }
     pub inline fn assignment(self: *Builder, decl: StringPtr, expr: Ptr) Error!Ptr { return self.commonBinary(.Assignment, decl, expr); }
     pub inline fn store(self: *Builder, decl: Ptr, expr: Ptr) Error!Ptr { return self.commonBinary(.Store, decl, expr); }
     pub inline fn reference(self: *Builder, decl: StringPtr) Error!Ptr { return self.commonSingle(.Reference, decl); }
@@ -236,3 +239,16 @@ constants: Constant.List,
 functions: Function.List,
 nodes: Node.List.Slice,
 data: []const u32,
+
+pub fn dump(self: *const JIR) void {
+    common.log.debug("Registered types:", .{});
+    for (0..self.types.len) |index| {
+        common.log.debug("    {d}", .{ index });
+    }
+
+    common.log.debug("Lowered IR:", .{});
+    var iterator = self.nodes.iterator();
+    while (iterator.next()) |node| {
+        common.log.debug("{s}", .{@tagName(node.type)});
+    }
+}

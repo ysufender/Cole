@@ -119,7 +119,11 @@ fn innerMain(allocator: std.mem.Allocator, init: std.process.Init) common.Compil
     }
 
     var typechecker = try Typechecker.init(allocator, &context, &modules, &resolved);
-    _ = try typechecker.typecheck(allocator);
+    const loweredIR = try typechecker.typecheck(allocator);
+
+    if (context.settings.hasFlag("--dump-jir")) {
+        loweredIR.dump();
+    }
 
     if (context.settings.hasFlag("--typecheck-only")) {
         return;

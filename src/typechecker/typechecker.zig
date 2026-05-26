@@ -39,6 +39,7 @@ pub const Flags = enum(u3) {
     ConcreteValue = 1,
     LValue = 2,
     AttemptingEval = 3,
+    CanCycle = 4,
 
     pub fn flag(flagToGet: Flags) u3 {
         return @intFromEnum(flagToGet);
@@ -141,15 +142,6 @@ pub fn init(
         .typenameMap = .empty,
         .arena = arena,
     };
-}
-
-fn debugLog(self: *Typechecker) void {
-    common.log.debug("Registered types:", .{});
-    for (0..self.typeTable.len) |index| {
-        common.log.debug("    {s}", .{
-            try self.typeName(self.arena.allocator(), @intCast(index)),
-        });
-    }
 }
 
 pub fn typecheck(self: *Typechecker, allocator: Allocator) Error!Resolution {
@@ -287,6 +279,7 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
         else => false,
     });
 
+    // @Note all literals should be handled here.
     if (self.executer.attemptEval(expressionPtr, maybeExpected)) |result| {
         return self.typecheckValue(result, maybeExpected);
     }
@@ -378,7 +371,7 @@ pub fn typecheckValue(self: *Typechecker, val: Comptime.Value.Ptr, maybeExpected
         .Struct => |str| str.Type,
         .Type => Comptime.Builtin.Type("type"),
         .Pointer => |ptr| ptr.Type,
-        .Function => |func| func,
+        .Function => |func| self.builder.functions.get(func).signature,
         .Void => Comptime.Builtin.Type("void"),
         .Undefined => |undef| undef,
         .Slice => |slice| slice.Type,
@@ -1062,7 +1055,7 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
                     return isPresent.value_ptr.result
                 else  { },
             .InProgress => {
-                if (!self.executer.getFlag(.CanCycle)) {
+                if (!self.getFlag(.CanCycle)) {
                     self.report("Dependency cycle detected. '{s}' depends on itself.", .{
                         tokens.get(decl.token).lexeme(self.context, self.currentFile),
                     });
@@ -1085,8 +1078,8 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
             self.report("Operations on namespaces are not allowed.", .{});
             return Error.NamespaceAsValue;
         },
-        .Builtin => return common.debug.ShouldBeImpossible(@src()),
-        .Capture => return common.debug.ShouldBeImpossible(@src()),
+        .Builtin, .Capture => return common.debug.ShouldBeImpossible(@src()),
+        .Parameter => return common.debug.ShouldBeImpossible(@src()),
         else => {
             self.report("{s} is not implemented.", .{@tagName(decl.kind)});
             return Error.NotImplemented;

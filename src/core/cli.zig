@@ -52,6 +52,8 @@ const flags = std.StaticStringMap(Flags).initComptime(&(.{
     .{ "--dump-memory", .Flag },
 
     .{ "--dump-stats", .Flag },
+
+    .{ "--dump-jir", .Flag },
 }));
 
 const helpText =

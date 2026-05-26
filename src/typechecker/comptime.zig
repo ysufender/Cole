@@ -29,7 +29,6 @@ pub const IncompleteType = 1;
 const VoidValue = 2;
 
 pub const Flags = enum(u3) {
-    CanCycle = 1,
     LValue = 2,
 
     pub fn flag(flagToGet: Flags) u3 {
@@ -77,7 +76,7 @@ pub const Value = union(enum) {
             return self.To + index;
         }
     },
-    Function: ,
+    Function: JIR.Function.Ptr,
     Void,
     Undefined: TypeID,
 };
@@ -139,7 +138,6 @@ pub fn eval(self: *Comptime, exprPtr: defines.ExpressionPtr, maybeExpected: ?Typ
         return cached;
     }
 
-    // TODO: Complete after proper typed AST
     const expr = ast.expressions.get(exprPtr);
 
     const addr = switch (expr.type) {
@@ -183,9 +181,10 @@ pub fn eval(self: *Comptime, exprPtr: defines.ExpressionPtr, maybeExpected: ?Typ
         .Mark => try self.evalMark(.Expression, exprPtr, expr.value, maybeExpected),
 
         .Dot => try self.evalDot(expr.value),
+        
+        .Lambda => try self.evalLambda(exprPtr, expr.value, maybeExpected),
 
-        .Assignment,
-        .Lambda, .FunctionDefinition => |t| {
+        .Assignment, .FunctionDefinition => |t| {
             self.report("Unable to resolve comptime expression. ({s})", .{
                 @tagName(t)
             });
@@ -199,20 +198,26 @@ pub fn eval(self: *Comptime, exprPtr: defines.ExpressionPtr, maybeExpected: ?Typ
     return addr;
 }
 
-fn evalLambda(self: *Comptime, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID) Error!Value.Ptr {
+fn evalLambda(self: *Comptime, exprPtr: defines.ExpressionPtr, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID) Error!Value.Ptr {
     const expected =
-        if (Typechecker.determineExpected(maybeExpected)) |expected| switch (self.typechecker.typeTable.get(expected)) {
-            .Function => |func| func,
-            else => {
-                self.report("Expected '{s}', received lambda expression.", .{
-                    self.typechecker.typeName(self.arena.allocator(), expected),
-                });
-                return Error.TypeMismatch;
+        if (maybeExpected) |expected| switch (expected) {
+            Builtin.Type("any"), Builtin.Type("mut any") => {
+                self.report("Couldn't infer the type of lambda expression.", .{});
+                return error.InferenceError;
+            },
+            else => switch (self.typechecker.typeTable.get(expected)) {
+                .Function => |func| func,
+                else => {
+                    self.report("Expected '{s}', received lambda expression.", .{
+                        try self.typechecker.typeName(self.arena.allocator(), expected),
+                    });
+                    return error.TypeMismatch;
+                },
             },
         }
         else {
             self.report("Couldn't infer the type of lambda expression.", .{});
-            return Error.InferenceError;
+            return error.InferenceError;
         };
 
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
@@ -237,7 +242,23 @@ fn evalLambda(self: *Comptime, extraPtr: defines.OpaquePtr, maybeExpected: ?Type
                 paramsRange.len(),
             }
         );
-        return Error.ArgumentCountMismatch;
+        return error.ArgumentCountMismatch;
+    }
+
+    const tokens = self.typechecker.context.getTokens(self.typechecker.currentFile);
+    const lambdaScope = self.typechecker.symbols.findDecl(.{
+        .file = self.typechecker.currentFile,
+        .expr = exprPtr,
+    });
+    for (paramsRange.start..paramsRange.end) |index| {
+        const paramName = tokens.get(ast.extra[index]).lexeme(self.typechecker.context, self.typechecker.currentFile);
+        if (self.typechecker.symbols.lookup.get(.{ .scope = lambdaScope, .name = paramName })) |param| {
+            self.typechecker.lookup.put(self.typechecker.arena.allocator(), param, .{
+                .status = .Checked,
+                .result = expected.argTypes[index - paramsRange.start],
+            }) catch return Error.AllocatorFailure;
+        }
+        else return common.debug.ShouldBeImpossible(@src());
     }
 
     const returnType = try self.typechecker.typecheckExpression(
@@ -248,18 +269,29 @@ fn evalLambda(self: *Comptime, extraPtr: defines.OpaquePtr, maybeExpected: ?Type
     if (expected.returnType != returnType) {
         self.report(
             "Mismatching return type in lambda expression. Expected '{s}', received '{s}'", .{
-                self.typechecker.typeName(self.arena.allocator(), expected.returnType),
-                self.typechecker.typeName(self.arena.allocator(), returnType),
+                try self.typechecker.typeName(self.arena.allocator(), expected.returnType),
+                try self.typechecker.typeName(self.arena.allocator(), returnType),
             }
         );
 
-        return Error.TypeMismatch;
+        return error.TypeMismatch;
     }
 
-    // TODO: Continue
+    const funcBody = try self.typechecker.lowerer.expression(ast.extra[extraPtr + 2], expected.returnType);
+    const functionDef = JIR.Function{
+        .signature = maybeExpected.?,
+        .body = .{
+            .start = funcBody,
+            .end = funcBody + 1,
+        },
+    };
+    const functionJIR = try self.typechecker.builder.addFunction(functionDef);
+    try self.typechecker.builder.functionDef(functionJIR);
 
     // @Unfinished
-    return common.debug.NotImplemented(@src());
+    return self.appendValue(.{
+        .Function = functionJIR,
+    });
 }
 
 pub fn evalDot(self: *Comptime, extraPtr: defines.OpaquePtr) Error!Value.Ptr {
@@ -842,8 +874,8 @@ fn evalPtrType(
     comptime ptrType: @FieldType(types.Pointer, "size"),
     innerType: defines.ExpressionPtr
 ) Error!Value.Ptr {
-    const prev = self.setFlag(.CanCycle, true);
-    defer _ = self.setFlag(.CanCycle, prev);
+    const prev = self.typechecker.setFlag(.CanCycle, true);
+    defer _ = self.typechecker.setFlag(.CanCycle, prev);
     const inner = self.expectType(innerType) catch |err| switch (err) {
         Error.DependencyCycle => IncompleteType,
         else => return err,
@@ -1693,7 +1725,7 @@ fn handleScopeDecls(
     return defs.items;
 }
 
-fn castValue(self: *Comptime, valuePtr: Value.Ptr, to: TypeID) Error!ValuePtr {
+fn castValue(self: *Comptime, valuePtr: Value.Ptr, to: TypeID) Error!Value.Ptr {
     const value = self.getValue(valuePtr);
     const newValue: Value = switch (value) {
         .Pointer => |ptr| .{
