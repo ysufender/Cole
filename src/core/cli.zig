@@ -43,6 +43,7 @@ const flags = std.StaticStringMap(Flags).initComptime(&(.{
     .{ "--resolve-only", .Flag },
 
     .{ "--allow-structural-coercion", .Flag },
+    .{ "--allow-recursion", .Flag },
 
 } ++ if (common.debug.isDebug) .{
 

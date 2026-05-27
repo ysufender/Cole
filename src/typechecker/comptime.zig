@@ -261,6 +261,19 @@ fn evalLambda(self: *Comptime, exprPtr: defines.ExpressionPtr, extraPtr: defines
         else return common.debug.ShouldBeImpossible(@src());
     }
 
+    const declPtr = self.typechecker.callstack.peek() orelse return common.debug.ShouldBeImpossible(@src());
+    const declStatus = self.typechecker.lookup.getPtr(declPtr) orelse return common.debug.ShouldBeImpossible(@src());
+
+    // @Beware TODO: May cause strange bugs, properly design sometime.
+    if (self.typechecker.context.settings.hasFlag("--allow-recursion")) {
+        if (declStatus.status == .InProgress) {
+            declStatus.* = .{
+                .status = .Checked,
+                .result = maybeExpected orelse return common.debug.ShouldBeImpossible(@src()),
+            };
+        }
+    }
+
     const returnType = try self.typechecker.typecheckExpression(
         ast.extra[extraPtr + 2],
         expected.returnType,
@@ -279,7 +292,7 @@ fn evalLambda(self: *Comptime, exprPtr: defines.ExpressionPtr, extraPtr: defines
 
     const funcBody = try self.typechecker.lowerer.expression(ast.extra[extraPtr + 2], expected.returnType);
     const functionDef = JIR.Function{
-        .signature = maybeExpected.?,
+        .signature = maybeExpected orelse return common.debug.ShouldBeImpossible(@src()),
         .body = .{
             .start = funcBody,
             .end = funcBody + 1,

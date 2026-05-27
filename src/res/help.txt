@@ -5,13 +5,18 @@
     Options:
         --help, -h                  : Print this help message.
         --version, -v               : Print version info
+
         --working, -w  <path>       : Set working directory
         --max-err, -m  <count>      : Set max error count before terminating the compilation. Defaults to 10
         --include, -I  <path>       : Add <path> to the searchpath of the compiler. Can be relative or absolute
+
         --parse-only                : Parse the project, do not compile
         --typecheck-only            : Typecheck the project, do not compile
         --resolve-only              : Resolve the project, do not compile
+
         --allow-structural-coercion : Allow structurally identical structs/enums/unions to implicity coerce,
                                       rather than requiring an explicit cast.
+        --allow-recursion           : Allow recursion, for some reason. Why don't you just iterate?
+
         --backend, -B <backend>     : Specify a backend for the codegen. Available options are:
                                       c.

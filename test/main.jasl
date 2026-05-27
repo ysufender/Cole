@@ -1,2 +1,2 @@
 let test: i8 = 12;
-let main: *fn void -> i32 = fn || test;
+let main: *fn void -> i32 = fn || main;
