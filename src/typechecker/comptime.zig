@@ -24,10 +24,6 @@ const FlagMap = std.bit_set.IntegerBitSet(8);
 const Cache = collections.HashMap(Resolver.ResolutionKey, Value.Ptr);
 const Memory = std.ArrayList(Value);
 
-pub const AnyType = 0;
-pub const IncompleteType = 1;
-const VoidValue = 2;
-
 pub const Flags = enum(u3) {
     LValue = 2,
 
@@ -40,6 +36,20 @@ pub const Flags = enum(u3) {
 // with possibly flattened fields for performance
 // and memory usage
 pub const Value = union(enum) {
+    pub const Implicit = enum(u8) {
+        pub const Metadata = enum(u8) {
+            NoComptime = 0,
+            Comptime = 1,
+        };
+
+        pub const Type = enum(u8) {
+            Any = 2,
+            Incomplete = 3,
+        };
+
+        Void = 4,
+    };
+
     pub const Ptr = defines.Offset;
 
     Int: i64,
@@ -102,10 +112,15 @@ pub fn init(typechecker: *Typechecker, gpa: Allocator) Error!Comptime {
     var cache = Cache.empty;
     cache.ensureTotalCapacity(allocator, typechecker.symbols.resolutionMap.count()) catch return Error.AllocatorFailure;
 
-    var memory = Memory.initCapacity(allocator, 1024) catch return Error.AllocatorFailure;
+    var memory = Memory.initCapacity(allocator, 512) catch return Error.AllocatorFailure;
+    inline for (0..@typeInfo(Value.Implicit.Metadata).@"enum".fields.len) |index| {
+        memory.appendAssumeCapacity(.{ .Enum = .{ .Type = Builtin.Type("builtin_metadata"), .Value = @intCast(index) } });
+    }
     memory.appendAssumeCapacity(.{ .Type = Builtin.Type("any") });
     memory.appendAssumeCapacity(.{ .Type = Builtin.Type("incomplete") });
     memory.appendAssumeCapacity(.{ .Void = { } });
+
+    prepBuiltinMetadata(&memory);
 
     return .{
         .typechecker = typechecker,
@@ -113,7 +128,7 @@ pub fn init(typechecker: *Typechecker, gpa: Allocator) Error!Comptime {
         .cache = cache,
         .memory = memory,
         .flags = FlagMap.initEmpty(),
-        .rng = .init(5315),
+        .rng = std.Random.DefaultPrng.init(5315),
         .arena = arena,
     };
 }
@@ -142,7 +157,7 @@ pub fn eval(self: *Comptime, exprPtr: defines.ExpressionPtr, maybeExpected: ?Typ
 
     const addr = switch (expr.type) {
         .Identifier =>
-            if (expr.value == 0) AnyType
+            if (expr.value == 0) @intFromEnum(Value.Implicit.Type.Any)
             else if (typechecker.symbols.tryGetDecl(.{ .file = file, .expr = exprPtr })) |decl|
                 try self.evalDecl(decl, maybeExpected)
             else {
@@ -165,7 +180,7 @@ pub fn eval(self: *Comptime, exprPtr: defines.ExpressionPtr, maybeExpected: ?Typ
         .CPointerType => try self.evalPtrType(.C, expr.value),
         .MutableType => try self.evalMutType(expr.value),
         .ArrayType => try self.evalArrType(expr.value),
-        .FunctionType => try self.evalFuncType(expr.value),
+        .FunctionType => try self.evalFuncType(exprPtr, expr.value),
         .EnumDefinition => try self.evalEnumType(exprPtr),
         .StructDefinition => try self.evalStructType(exprPtr),
         .UnionDefinition => try self.evalUnionType(exprPtr),
@@ -183,19 +198,92 @@ pub fn eval(self: *Comptime, exprPtr: defines.ExpressionPtr, maybeExpected: ?Typ
         .Dot => try self.evalDot(expr.value),
         
         .Lambda => try self.evalLambda(exprPtr, expr.value, maybeExpected),
+        .FunctionDefinition => try self.evalFunction(exprPtr, expr.value),
 
-        .Assignment, .FunctionDefinition => |t| {
-            self.report("Unable to resolve comptime expression. ({s})", .{
-                @tagName(t)
-            });
-            return Error.ComptimeNotPossible;
-        },
+        // @Note should be handled with the statements.
+        .Assignment => try self.typechecker.typecheckExpression(exprPtr, maybeExpected),
     };
 
     defer self.dumpMem();
     self.cache.putNoClobber(self.arena.allocator(), key, @intCast(addr))
         catch return Error.AllocatorFailure;
     return addr;
+}
+
+fn evalFunction(self: *Comptime, exprPtr: defines.ExpressionPtr, extraPtr: defines.OpaquePtr) Error!Value.Ptr {
+    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+
+    const paramsRange = defines.Range{
+        .start = ast.extra[extraPtr],
+        .end = ast.extra[extraPtr + 1],
+    };
+
+    const argTypes = self.typechecker.arena.allocator().alloc(TypeID, paramsRange.len())
+        catch return Error.AllocatorFailure;
+
+    const returnTypeExpr = ast.extra[extraPtr + 2];
+    const bodyPtr = ast.extra[extraPtr + 3];
+
+    var isComptime =
+        if (self.typechecker.getMetadata(.Expression, exprPtr)) |metadata|
+            if (std.mem.findScalar(u32, metadata, @intFromEnum(Value.Implicit.Metadata.Comptime))) |_| true else false
+        else false;
+
+    for (paramsRange.start..paramsRange.end) |paramPtrPtr| {
+        const param = ast.signatures.get(ast.extra[paramPtrPtr]);
+        const argType = self.getValue(try self.expectType(param.type)).Type;
+        argTypes[paramPtrPtr - paramsRange.start] = argType;
+
+        if (self.typechecker.typeTable.get(argType).isComptime(&self.typechecker.typeTable)) {
+            isComptime = true;
+        }
+    }
+
+    const returnType = Typechecker.determineExpected(
+        self.getValue(try self.expectType(returnTypeExpr)).Type
+    ) orelse {
+        self.report("Unknown return type in function signatures is not allowed.", .{});
+        return Error.IllegalGenericType;
+    };
+
+    const functionType = try self.typechecker.registerType(.{
+        .Function = .{
+            .mutable = false,
+            .isComptime = isComptime,
+            .argTypes = argTypes,
+            .returnType = returnType,
+        },
+    });
+
+    const prev = self.typechecker.currentScope;
+    self.typechecker.currentScope = self.typechecker.symbols.tryGetDecl(.{
+        .file = self.typechecker.currentFile,
+        .expr = exprPtr
+    }) orelse return common.debug.ShouldBeImpossible(@src());
+    defer self.typechecker.currentScope = prev;
+
+    try self.typechecker.typecheckStatement(bodyPtr, returnType);
+
+    if (!(
+        self.typechecker.typeTable.get(returnType).isZeroBit()
+        or self.typechecker.getFlag(.CoveredAllPaths)
+    )) {
+        self.typechecker.report("Function with return type '{s}' does not return a value in all code paths.", .{
+            try self.typechecker.typeName(self.arena.allocator(), returnType),
+        });
+        return Error.UncoveredCodePath;
+    }
+
+    const functionDef = JIR.Function{
+        .signature = functionType,
+        .body = try self.typechecker.lowerer.statement(bodyPtr),
+    };
+    const functionJIR = try self.typechecker.builder.addFunction(functionDef);
+    try self.typechecker.builder.functionDef(functionJIR);
+
+    return self.appendValue(.{
+        .Function = functionJIR,
+    });
 }
 
 fn evalLambda(self: *Comptime, exprPtr: defines.ExpressionPtr, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID) Error!Value.Ptr {
@@ -246,13 +334,17 @@ fn evalLambda(self: *Comptime, exprPtr: defines.ExpressionPtr, extraPtr: defines
     }
 
     const tokens = self.typechecker.context.getTokens(self.typechecker.currentFile);
-    const lambdaScope = self.typechecker.symbols.findDecl(.{
+
+    const prev = self.typechecker.currentScope;
+    self.typechecker.currentScope = self.typechecker.symbols.findDecl(.{
         .file = self.typechecker.currentFile,
         .expr = exprPtr,
     });
+    defer self.typechecker.currentScope = prev;
+
     for (paramsRange.start..paramsRange.end) |index| {
         const paramName = tokens.get(ast.extra[index]).lexeme(self.typechecker.context, self.typechecker.currentFile);
-        if (self.typechecker.symbols.lookup.get(.{ .scope = lambdaScope, .name = paramName })) |param| {
+        if (self.typechecker.symbols.lookup.get(.{ .scope = self.typechecker.currentScope, .name = paramName })) |param| {
             self.typechecker.lookup.put(self.typechecker.arena.allocator(), param, .{
                 .status = .Checked,
                 .result = expected.argTypes[index - paramsRange.start],
@@ -290,6 +382,8 @@ fn evalLambda(self: *Comptime, exprPtr: defines.ExpressionPtr, extraPtr: defines
         return error.TypeMismatch;
     }
 
+    // @Incomplete TOOD: should insert a return statement here instead of a direct
+    // expression. Finish after statement typechecking and lowering.
     const funcBody = try self.typechecker.lowerer.expression(ast.extra[extraPtr + 2], expected.returnType);
     const functionDef = JIR.Function{
         .signature = maybeExpected orelse return common.debug.ShouldBeImpossible(@src()),
@@ -301,7 +395,6 @@ fn evalLambda(self: *Comptime, exprPtr: defines.ExpressionPtr, extraPtr: defines
     const functionJIR = try self.typechecker.builder.addFunction(functionDef);
     try self.typechecker.builder.functionDef(functionJIR);
 
-    // @Unfinished
     return self.appendValue(.{
         .Function = functionJIR,
     });
@@ -393,12 +486,11 @@ pub fn evalMark(
                         return Error.ComptimeNotPossible;
                     },
                     Builtin.Metadata("@comptime").? => {
-                        if (!self.typechecker.getFlag(.AttemptingEval)) {
-                            self.report("Redundant @comptime mark in already comptime scope.", .{});
-                            return Error.RedundantMark;
-                        }
-
                         _ = self.typechecker.setFlag(.AttemptingEval, false);
+                        //if (!self.typechecker.getFlag(.AttemptingEval)) {
+                        //    self.report("Redundant @comptime mark in already comptime scope.", .{});
+                        //    return Error.RedundantMark;
+                        //}
                     },
                     else => { },
                 }
@@ -839,12 +931,7 @@ fn evalLiteral(self: *Comptime, tokenPtr: defines.TokenPtr, maybeExpected: ?Type
         .String => .{ .String = lexeme },
         .EnumLiteral =>
             if (Typechecker.determineExpected(maybeExpected)) |expected|
-                if (Builtin.Metadata(lexeme)) |metadata| .{
-                    .Enum = .{
-                        .Type = Builtin.Type("builtin_metadata"),
-                        .Value = metadata,
-                    }
-                }
+                if (Builtin.Metadata(lexeme)) |metadata| return metadata
                 else switch (self.typechecker.typeTable.get(expected)) {
                     .Enum => |enm| ret: for (enm.fields, 0..) |field, index| {
                         if (std.mem.eql(u8, field, lexeme[1..])) {
@@ -890,7 +977,7 @@ fn evalPtrType(
     const prev = self.typechecker.setFlag(.CanCycle, true);
     defer _ = self.typechecker.setFlag(.CanCycle, prev);
     const inner = self.expectType(innerType) catch |err| switch (err) {
-        Error.DependencyCycle => IncompleteType,
+        Error.DependencyCycle => @intFromEnum(Value.Implicit.Type.Incomplete),
         else => return err,
     };
 
@@ -907,7 +994,7 @@ fn evalPtrType(
     });
 }
 
-fn evalFuncType(self: *Comptime, extraPtr: defines.OpaquePtr) Error!Value.Ptr {
+fn evalFuncType(self: *Comptime, exprPtr: defines.ExpressionPtr, extraPtr: defines.OpaquePtr) Error!Value.Ptr {
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
 
     const args = self.getValue(try self.expectDefined(ast.extra[extraPtr], null));
@@ -939,15 +1026,30 @@ fn evalFuncType(self: *Comptime, extraPtr: defines.OpaquePtr) Error!Value.Ptr {
     };
 
     var argTypes = self.arena.allocator().alloc(TypeID, argSize) catch return Error.AllocatorFailure;
+    var isComptime =
+        if (self.typechecker.getMetadata(.Expression, exprPtr)) |metadata|
+            if (std.mem.findScalar(u32, metadata, @intFromEnum(Comptime.Value.Implicit.Metadata.Comptime))) |_| true else false
+        else false;
 
     switch (args) {
-        .Type => |argType| if (argSize != 0) { argTypes[0] = argType; },
+        .Type => |argType| if (argSize != 0) {
+            argTypes[0] = argType;
+
+            if (self.typechecker.typeTable.get(argType).isComptime(&self.typechecker.typeTable)) {
+                isComptime = true;
+            }
+        },
         .Slice => |slice| {
             var realIndex: u32 = 0;
             for (0..slice.Size) |index| {
                 if (self.memory.items[slice.at(@intCast(index))].Type != Builtin.Type("void")) {
-                    argTypes[realIndex] = self.memory.items[slice.at(@intCast(index))].Type;
+                    const argType = self.memory.items[slice.at(@intCast(index))].Type;
+                    argTypes[realIndex] = argType;
                     realIndex += 1;
+
+                    if (self.typechecker.typeTable.get(argType).isComptime(&self.typechecker.typeTable)) {
+                        isComptime = true;
+                    }
                 }
             }
         },
@@ -958,6 +1060,7 @@ fn evalFuncType(self: *Comptime, extraPtr: defines.OpaquePtr) Error!Value.Ptr {
     const typeID = try self.typechecker.registerType(.{
         .Function = .{
             .mutable = false,
+            .isComptime = isComptime,
             .argTypes = argTypes,
             .returnType = returnType.Type,
         },
@@ -1220,7 +1323,7 @@ pub fn evalCompileLog(self: *Comptime, extraPtr: defines.OpaquePtr) Error!Value.
     };
 
     if (self.typechecker.getFlag(.AttemptingEval)) {
-        return VoidValue;
+        return @intFromEnum(Value.Implicit.Void);
     }
 
     common.log.info("COMPILE LOG: {s}", .{message});
@@ -1233,7 +1336,7 @@ pub fn evalCompileLog(self: *Comptime, extraPtr: defines.OpaquePtr) Error!Value.
         position.column,
     });
     token.printLocation(self.arena.allocator(), self.typechecker.context, self.typechecker.currentFile, position, self.typechecker.callstack.size == 1);
-    return VoidValue;
+    return @intFromEnum(Value.Implicit.Void);
 }
 
 pub fn evalCompileError(self: *Comptime, extraPtr: defines.OpaquePtr) Error {
@@ -1327,7 +1430,7 @@ pub fn constructFromList(self: *Comptime, typeID: TypeID, _range: defines.Range)
                 _ = try self.expectDefined(ast.extra[extra], typeID);
             }
 
-            break :ret VoidValue;
+            break :ret @intFromEnum(Value.Implicit.Void);
         },
         .Enum => self.expectDefined(ast.extra[range.at(0)], typeID),
         .Struct => |str| self.constructStruct(ast, typeID, &str, range),
@@ -1886,6 +1989,17 @@ pub fn dumpMem(self: *const Comptime) void {
     }
 }
 
+fn prepBuiltinMetadata(memory: *Memory) void {
+    for (0..builtinMetadata.len) |metadata| {
+        memory.appendAssumeCapacity(.{
+            .Enum = .{
+                .Type = Builtin.Type("builtin_metadata"),
+                .Value = @intCast(metadata),
+            },
+        });
+    }
+}
+
 pub const Builtin = struct {
     pub fn isBuiltinType(typeID: TypeID) bool {
         return typeID <= Builtin.Type("any");
@@ -1975,7 +2089,7 @@ pub const builtinTypes = [_]struct {
     // incomplete
     .{ .name = "incomplete", .info = .{ .Struct = .{ .mutable = false, .name = Resolver.BuiltinIndex("any") + 3, .fields = &.{}, .definitions = &.{}, .scope = 0 } } },
     // entry_point
-    .{ .name = "entry_point", .info = .{ .Function = .{ .mutable = false, .argTypes = &.{}, .returnType = 1 } } },
+    .{ .name = "entry_point", .info = .{ .Function = .{ .mutable = false, .isComptime = false, .argTypes = &.{}, .returnType = 1 } } },
     // builtin_metadata
     .{ .name = "builtin_metadata", .info = .{ .Enum = .{ .mutable = false, .name = Resolver.BuiltinIndex("any") + 5, .fields = &.{}, .definitions = &.{}, .scope = 0 } } },
 };

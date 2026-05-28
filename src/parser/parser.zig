@@ -6,10 +6,11 @@ const Lexer = @import("../lexer/lexer.zig");
 const collections = @import("../util/collections.zig");
 const defines = @import("../core/defines.zig");
 
+const Error = common.CompilerError;
 const Allocator = std.mem.Allocator;
-const ExpressionResult = common.CompilerError!defines.ExpressionPtr;
+const ExpressionResult = Error!defines.ExpressionPtr;
 
-pub const StatementResult = common.CompilerError!defines.StatementPtr;
+pub const StatementResult = Error!defines.StatementPtr;
 
 pub const VariableSignatureMap = collections.MultiArrayList(VariableSignature);
 pub const ExpressionMap = collections.MultiArrayList(Expression);
@@ -23,31 +24,31 @@ pub const AnyType = 0;
 // performant with collections.MultiArrayList(T)
 pub const Expression = struct {
     pub const Type = enum {
-        Assignment, // ok
-        Binary, // ok
-        Literal, // ok
-        Indexing, // ok
-        Slicing, // ok
-        Identifier, // ok
-        Unary, // ok
-        StructDefinition, // ok
-        EnumDefinition, // ok
-        UnionDefinition, // ok
-        FunctionDefinition, // ok
-        Mark, // ok
-        Lambda, // ok
-        Call, // ok
-        Conditional, // ok
-        Switch, // ok
-        MutableType, // ok
-        CPointerType, // ok
-        PointerType, // ok
-        SliceType, // ok
-        ArrayType, // ok
-        FunctionType, // ok
-        Scoping, // ok
-        ExpressionList, // ok
-        Dot, // ok
+        Assignment,
+        Binary,
+        Literal,
+        Indexing,
+        Slicing,
+        Identifier,
+        Unary,
+        StructDefinition,
+        EnumDefinition,
+        UnionDefinition,
+        FunctionDefinition,
+        Mark,
+        Lambda,
+        Call,
+        Conditional,
+        Switch,
+        MutableType,
+        CPointerType,
+        PointerType,
+        SliceType,
+        ArrayType,
+        FunctionType,
+        Scoping,
+        ExpressionList,
+        Dot,
     };
 
     type: Type,
@@ -454,7 +455,10 @@ fn loopStatement(self: *Parser, loopToken: Lexer.TokenType) StatementResult {
     const result = try self.alloc(Statement);
     self.statementMap.set(result, .{
         .type = switch (loopToken) {
-            .For => .For,
+            .For => {
+                self.report("For loop is not implemented.", .{});
+                return common.debug.NotImplemented(@src());
+            },
             .While => .While,
             else => unreachable,
         },
@@ -1456,9 +1460,18 @@ fn commonSwitch(
             self.scratch.append(self.allocator(), 0) catch return error.AllocatorFailure;
         }
 
-        self.scratch.append(self.allocator(), try switch (switchType) {
-            .Statement => self.statement(),
-            .Expression => self.expression(),
+        self.scratch.append(self.allocator(), switch (switchType) {
+            .Statement => blk: {
+                const stmt = try self.statement();
+
+                if (self.statementMap.get(stmt).type == .VariableDefinition) {
+                    self.report("Variable definitions are not allowed here.", .{});
+                    return Error.IllegalSyntax;
+                }
+
+                break :blk stmt;
+            },
+            .Expression => try self.expression(),
         }) catch return error.AllocatorFailure;
 
         switch (switchType) {

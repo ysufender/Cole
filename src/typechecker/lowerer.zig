@@ -214,6 +214,10 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
 }
 
 pub fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID) Error!JIR.Ptr {
+    if (self.typechecker.executer.attemptEval(exprPtr, ofType)) |_| {
+        return self.literal(exprPtr, ofType);
+    }
+
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
 
     const expr = ast.expressions.get(exprPtr);
@@ -232,6 +236,15 @@ pub fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID
             self.report("'{s}' lowering is not implemented.", .{@tagName(t)});
             return common.debug.NotImplemented(@src());
         },
+    };
+}
+
+pub fn statement(self: *Lowerer, statementPtr: defines.StatementPtr) Error!defines.Range {
+    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+
+    const stmt = ast.statements.get(statementPtr);
+    return switch (stmt.type) {
+        else => common.debug.NotImplemented(@src()),
     };
 }
 

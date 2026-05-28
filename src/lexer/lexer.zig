@@ -76,7 +76,7 @@ pub const Token = struct {
         var source = context.getFile(file)[0..token.start];
 
         var line: defines.Offset = 1;
-        while (std.mem.indexOfScalar(u8, source, '\n')) |newline| {
+        while (std.mem.findScalar(u8, source, '\n')) |newline| {
             source = source[(newline + 1)..];
             line += 1;
         }
@@ -94,7 +94,7 @@ pub const Token = struct {
 
         var source = context.getFile(file);
         var line: defines.Offset = 1;
-        const end = while (std.mem.indexOfScalar(u8, source, '\n')) |newLine| {
+        const end = while (std.mem.findScalar(u8, source, '\n')) |newLine| {
             if (line == pos.line) {
                 break newLine;
             }
@@ -283,7 +283,7 @@ fn scanToken(self: *Lexer) common.CompilerError!void {
         '/' => 
             if (self.match('/')) {
                 const index =
-                    if (std.mem.indexOfScalarPos(u8, self.source, self.current, '\n'))
+                    if (std.mem.findScalarPos(u8, self.source, self.current, '\n'))
                         |idx| idx
                     else
                         self.end;
@@ -342,7 +342,7 @@ fn scanToken(self: *Lexer) common.CompilerError!void {
         },
         '"' => {
             const index =
-                if (std.mem.indexOfScalarPos(u8, self.source, self.current, '"'))
+                if (std.mem.findScalarPos(u8, self.source, self.current, '"'))
                     |idx| idx
                 else
                     self.end;

@@ -2,26 +2,57 @@ const std = @import("std");
 
 const resourcePath = "res/";
 
-const targets = [_]std.Target.Query{
+var targets = [_]std.Target.Query{
     .{},
-    .{ .os_tag = .windows, .cpu_arch = .x86_64 },
-    .{ .os_tag = .linux,   .cpu_arch = .x86_64 },
+    .{ .os_tag = .windows, .cpu_arch = .x86_64, .abi = .gnu },
+    .{ .os_tag = .linux,   .cpu_arch = .x86_64, .abi = .gnu },
 };
 
 const version = std.SemanticVersion{
     .major = 0,
-    .minor = 1,
-    .patch = 0,
+    .minor = 0,
+    .patch = 1,
 };
 
+var config: struct {
+    native: std.Build.ResolvedTarget = undefined,
+    tools: struct {
+        compiler_debugger: bool = false,
+    } = .{ },
+} = .{};
+
 pub fn build(b: *std.Build) void {
-    configureBuild(b);
+    _ = configureBuild(b);
+    buildCompiler(b);
+    buildTools(b);
+    addDebugTarget(b);
+}
+
+fn buildTools(b: *std.Build) void {
+    if (config.tools.compiler_debugger) {
+        const exe = b.addExecutable(.{
+            .name = "jaslcdbg",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("tools/compiler_debugger/main.zig"),
+                .optimize = .Debug,
+                .target = config.native,
+                .link_libc = config.native.result.os.tag == .windows,
+            }),
+        });
+        exe.root_module.addIncludePath(b.path("tools/compiler_debugger/"));
+        const install = b.addInstallArtifact(exe, .{
+            .dest_dir = .{ .override = .{ .custom = "tools" } }
+        });
+
+        b.getInstallStep().dependOn(&install.step);
+    }
+}
+
+fn buildCompiler(b: *std.Build) void {
     addTargets(b, .Debug);
     addTargets(b, .ReleaseFast);
     addTargets(b, .ReleaseSafe);
     addTargets(b, .ReleaseSmall);
-
-    addDebugTarget(b);
 }
 
 fn addTargets(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
@@ -94,8 +125,6 @@ fn addTargets(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
 }
 
 fn addDebugTarget(b: *std.Build) void {
-    const target   = b.standardTargetOptions(.{});
-
     const targetName = "debug";
 
     const opts = b.addOptions();
@@ -107,9 +136,9 @@ fn addDebugTarget(b: *std.Build) void {
         .version = version,
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/main.zig"),
-            .target = target,
+            .target = config.native,
             .optimize = .Debug,
-            .link_libc  = target.result.os.tag == .windows,
+            .link_libc  = config.native.result.os.tag == .windows,
             .error_tracing = true,
             .omit_frame_pointer = false,
         }),
@@ -126,5 +155,10 @@ fn addDebugTarget(b: *std.Build) void {
 }
 
 fn configureBuild(b: *std.Build) void {
-    _ = b;
+    config = .{
+        .native = b.standardTargetOptions(.{}),
+        .tools = .{
+            .compiler_debugger = b.option(bool, "compiler-debugger", "Build the compiler debugger, not to be confused with program debugger.") orelse false,
+        },
+    };
 }

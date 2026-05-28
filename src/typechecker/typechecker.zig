@@ -2,6 +2,9 @@
 // but it is done by the lowerer.zig, which makes calls to
 // JIR.Builder since JIR.Builder itself doesn't know about
 // untyped AST.
+//
+// @Note Defer statements are properly handled in codegen.
+// typechecker only typechecks.
 
 const std = @import("std");
 const common = @import("../core/common.zig");
@@ -37,13 +40,17 @@ pub const TypeMap = collections.HashMap(TypeInfo, TypeID);
 pub const MetadataMap = collections.HashMap(Element, []const Comptime.Value.Ptr);
 const LookupMap = collections.HashMap(defines.DeclPtr, TypecheckStatus);
 
-pub const Flags = enum(u3) {
+pub const Flags = enum(u8) {
     ConcreteValue = 1,
     LValue = 2,
     AttemptingEval = 3,
     CanCycle = 4,
+    NoReturn = 5,
+    MustReturn = 6,
+    CoveredAllPaths = 7,
+    InLoop = 8,
 
-    pub fn flag(flagToGet: Flags) u3 {
+    pub fn flag(flagToGet: Flags) u8 {
         return @intFromEnum(flagToGet);
     }
 };
@@ -183,6 +190,381 @@ pub fn typecheck(self: *Typechecker, allocator: Allocator) Error!Resolution {
     return self.builder.build(allocator, self.typeTable.slice());
 }
 
+pub fn typecheckStatement(self: *Typechecker, statementPtr: defines.StatementPtr, expected: TypeID) Error!void {
+    const ast = self.context.getAST(self.currentFile);
+
+    const stmt = ast.statements.get(statementPtr);
+    return switch (stmt.type) {
+        .Block => self.typecheckBlock(stmt.value, expected),
+        .Expression => self.typecheckExpressionStatement(stmt.value),
+        .Conditional => self.typecheckIfStatement(stmt.value, expected),
+        .Return => self.typecheckReturn(stmt.value, expected),
+        .Discard => self.typecheckDiscard(stmt.value),
+        .Switch => self.typecheckSwitchStatement(stmt.value, expected),
+        .While => self.typecheckWhileStatement(stmt.value, expected),
+        .Break, .Continue => self.typecheckLoopControl(stmt.value),
+        .Import => common.debug.ShouldBeImpossible(@src()),
+        // TODO: Continue with defer
+        else => |t| {
+            self.report("Typechecking of '{s}' statements is not implemented.", .{
+                @tagName(t),
+            });
+            return common.debug.NotImplemented(@src());
+        },
+    };
+}
+
+fn typecheckLoopControl(self: *Typechecker, _: defines.OpaquePtr) Error!void {
+    if (!self.getFlag(.InLoop)) {
+        self.report("Loop control statement outside loop body.", .{});
+        return Error.LoopControlOutsideLoopScope;
+    }
+}
+
+fn typecheckWhileStatement(self: *Typechecker, extraPtr: defines.OpaquePtr, expected: TypeID) Error!void {
+    const ast = self.context.getAST(self.currentFile);
+
+    defer _ = self.setFlag(.CoveredAllPaths, false);
+
+    const conditionPtr = ast.extra[extraPtr];
+    const bodyPtr = ast.extra[extraPtr + 1];
+
+    const condition = try self.typecheckExpression(conditionPtr, Comptime.Builtin.Type("bool"));
+    if (!self.suitable(Comptime.Builtin.Type("bool"), condition)) {
+        self.report("Expected a boolean for condition.", .{});
+        return Error.TypeMismatch;
+    }
+
+    const prev = self.setFlag(.InLoop, true);
+    defer _ = self.setFlag(.InLoop, prev);
+    try self.typecheckStatement(bodyPtr, expected);
+}
+
+fn typecheckSwitchStatement(self: *Typechecker, extraPtr: defines.OpaquePtr, expected: TypeID) Error!void {
+    const ast = self.context.getAST(self.currentFile);
+
+    const item = ast.extra[extraPtr];
+    const itemTypeID = try self.typecheckExpression(item, null);
+    const itemType = self.typeTable.get(itemTypeID);
+
+    switch (itemType) {
+        .Enum => { },
+        .Union => |uni| if (!uni.isTagged) {
+            self.report("Can't switch on untagged union type '{s}'", .{
+                try self.typeName(self.arena.allocator(), itemTypeID),
+            });
+            return Error.SwitchOnPlainUnion;
+        },
+        else => {
+            self.report("Can't switch on value of type '{s}'", .{
+                try self.typeName(self.arena.allocator(), itemTypeID),
+            });
+            return Error.SwitchOnNonSwitchableValue;
+        },
+    }
+
+    const range = defines.Range{
+        .start = ast.extra[extraPtr + 1],
+        .end = ast.extra[extraPtr + 2],
+    };
+
+    return switch (itemType) {
+        .Enum => |enm| self.typecheckSwitchStatementOnEnum(ast, itemTypeID, &enm, range, expected),
+        .Union => |uni| self.typecheckSwitchStatementOnUnion(ast, itemTypeID, &uni, range, expected),
+        else => return common.debug.ShouldBeImpossible(@src()),
+    };
+}
+
+fn typecheckSwitchStatementOnUnion(
+    self: *Typechecker,
+    ast: *const Parser.AST,
+    itemTypeID: TypeID,
+    uni: *const Types.Union,
+    range: defines.Range,
+    expected: TypeID,
+) Error!void {
+    // @Beware Hardcoded field size, must be kept in sync with parser.(union|struct|enum)Definition
+    var fieldBuffer: [512]u32 = undefined;
+    var bufferAllocator = std.heap.FixedBufferAllocator.init(@ptrCast(&fieldBuffer));
+
+    const tag = self.typeTable.get(uni.tag).Enum;
+
+    var fieldMap = std.DynamicBitSet.initEmpty(bufferAllocator.allocator(), tag.fields.len)
+        catch return common.debug.ShouldBeImpossible(@src());
+
+    var case = range.start;
+    while (case < range.end) : (case += 4) {
+        if (fieldMap.count() == fieldMap.capacity()) {
+            self.report("Unreachable switch case.", .{ });
+            return Error.UnreachableCodePath;
+        }
+
+        const caseLabel = ast.extra[case];
+        const fieldName = 
+            if (caseLabel == 0) blk: {
+                fieldMap.setRangeValue(.{
+                    .start = 0,
+                    .end = fieldMap.capacity(),
+                }, true);
+
+                break :blk "else";
+            }
+            else blk: {
+                const fieldPtr = try self.executer.eval(caseLabel, uni.tag);
+                const field = self.executer.getValue(fieldPtr);
+
+                const enumeration = switch (field) {
+                    .Enum => |caseEnum| caseEnum.Value,
+                    else => {
+                        self.report("Expected a comptime enum for switch case label, received '{s}' instead.", .{
+                            try self.typeName(self.arena.allocator(), try self.typecheckValue(fieldPtr, itemTypeID)),
+                        });
+                        return Error.InvalidSwitchCase;
+                    }
+                };
+
+                if (fieldMap.isSet(enumeration)) {
+                    self.report("Duplicate switch case '{s}'.", .{
+                        tag.fields[enumeration],
+                    });
+                    return Error.DuplicateSwitchCase;
+                }
+
+                fieldMap.set(enumeration);
+                break :blk tag.fields[enumeration];
+            };
+
+        const prev = self.currentScope;
+        defer self.currentScope = prev;
+
+        const captureCount = ast.extra[case + 1];
+        if (captureCount > 1) {
+            self.report("Value destruction is not supported.", .{ });
+            return Error.IllegalSyntax;
+        }
+        else if (captureCount > 0)
+        {
+            const firstCapture = ast.extra[case + 2];
+
+            const captureDecl = self.symbols.findDecl(.{
+                .file = self.currentFile,
+                .expr = firstCapture,
+            });
+
+            const field = try self.builder.internString(fieldName);
+            const captureType = uni.fields[
+                self.fieldIndex(itemTypeID, field) catch return common.debug.ShouldBeImpossible(@src())
+            ].valueType;
+
+            self.lookup.putNoClobber(self.arena.allocator(), captureDecl, .{
+                .status = .Checked,
+                .result = captureType,
+            }) catch return Error.AllocatorFailure;
+        }
+
+        try self.typecheckStatement(ast.extra[case + 3], expected);
+    }
+
+    if (fieldMap.count() != fieldMap.capacity()) {
+        common.log.err("Missing union fields:", .{});
+
+        var iterator = fieldMap.iterator(.{
+            .direction = .forward,
+            .kind = .unset,
+        });
+        while (iterator.next()) |field| {
+            const fieldName = tag.fields[field];
+            common.log.err(("." ** 4) ++ " {s}", .{
+                fieldName,
+            });
+        }
+
+        self.report("In switch expression.", .{});
+        return Error.UnhandledSwitchCases;
+    }
+}
+
+fn typecheckSwitchStatementOnEnum(
+    self: *Typechecker,
+    ast: *const Parser.AST,
+    itemTypeID: TypeID,
+    enm: *const Types.Enum,
+    range: defines.Range,
+    expected: TypeID,
+) Error!void {
+    // @Beware Hardcoded field size, must be kept in sync with parser.(union|struct|enum)Definition
+    var fieldBuffer: [512]u32 = undefined;
+    var bufferAllocator = std.heap.FixedBufferAllocator.init(@ptrCast(&fieldBuffer));
+
+    var fieldMap = std.DynamicBitSet.initEmpty(bufferAllocator.allocator(), enm.fields.len)
+        catch return common.debug.ShouldBeImpossible(@src());
+
+    var case = range.start;
+    while (case < range.end) : (case += 4) {
+        if (fieldMap.count() == fieldMap.capacity()) {
+            self.report("Unreachable switch case.", .{ });
+            return Error.UnreachableCodePath;
+        }
+
+        const caseLabel = ast.extra[case];
+        if (caseLabel == 0) {
+            fieldMap.setRangeValue(.{
+                .start = 0,
+                .end = fieldMap.capacity(),
+            }, true);
+        }
+        else {
+            const fieldPtr = try self.executer.eval(caseLabel, itemTypeID);
+            const field = self.executer.getValue(fieldPtr);
+
+            const enumeration = switch (field) {
+                .Enum => |caseEnum| caseEnum.Value,
+                else => {
+                    self.report("Expected a comptime enum for switch case label, received '{s}' instead.", .{
+                        try self.typeName(self.arena.allocator(), try self.typecheckValue(fieldPtr, itemTypeID)),
+                    });
+                    return Error.InvalidSwitchCase;
+                }
+            };
+
+            if (fieldMap.isSet(enumeration)) {
+                self.report("Duplicate switch case '{s}'.", .{
+                    enm.fields[enumeration],
+                });
+                return Error.DuplicateSwitchCase;
+            }
+
+            fieldMap.set(enumeration);
+        }
+
+        const captureCount = ast.extra[case + 1];
+        if (captureCount > 1) {
+            self.report("Too many captures for context.", .{ });
+            return Error.IllegalSyntax;
+        }
+        else if (captureCount > 0) {
+            const firstCapture = ast.extra[case + 2];
+
+            const captureDecl = self.symbols.findDecl(.{
+                .file = self.currentFile,
+                .expr = firstCapture,
+            });
+
+            self.lookup.putNoClobber(self.arena.allocator(), captureDecl, .{
+                .status = .Checked,
+                .result = itemTypeID,
+            }) catch return Error.AllocatorFailure;
+        }
+
+        try self.typecheckStatement(ast.extra[case + 3], expected);
+    }
+
+    if (fieldMap.count() != fieldMap.capacity()) {
+        common.log.err("Missing enum fields:", .{});
+
+        var iterator = fieldMap.iterator(.{
+            .direction = .forward,
+            .kind = .unset,
+        });
+        while (iterator.next()) |field| {
+            const fieldName = enm.fields[field];
+            common.log.err(("." ** 4) ++ " {s}", .{
+                fieldName,
+            });
+        }
+
+        self.report("In switch expression.", .{});
+        return Error.UnhandledSwitchCases;
+    }
+}
+
+fn typecheckDiscard(self: *Typechecker, exprPtr: defines.ExpressionPtr) Error!void {
+    _ = try self.typecheckExpression(exprPtr, null);
+}
+
+fn typecheckReturn(self: *Typechecker, exprPtr: defines.ExpressionPtr, expected: TypeID) Error!void {
+    const returnType = try self.typecheckExpression(exprPtr, expected);
+
+    if (!self.suitable(expected, returnType)) {
+        self.report("Unsuitable return type, expected '{s}', received '{s}'", .{
+            try self.typeName(self.arena.allocator(), expected),
+            try self.typeName(self.arena.allocator(), returnType),
+        });
+        return Error.ReturnTypeMismatch;
+    }
+
+    _ = self.setFlag(.CoveredAllPaths, true);
+}
+
+fn typecheckIfStatement(self: *Typechecker, extraPtr: defines.OpaquePtr, expected: TypeID) Error!void {
+    const ast = self.context.getAST(self.currentFile);
+
+    const conditionExpr = ast.extra[extraPtr];
+    const body = ast.extra[extraPtr + 1];
+    const maybeOtherwise =
+        if (ast.extra[extraPtr + 2] == 1) ast.extra[extraPtr + 3]
+        else null;
+
+    const conditionType = try self.typecheckExpression(conditionExpr, Comptime.Builtin.Type("bool"));
+    if (!self.suitable(conditionType, Comptime.Builtin.Type("bool"))) {
+        self.report("Expected a boolean for condition.", .{});
+        return Error.TypeMismatch;
+    }
+
+    try self.typecheckStatement(body, expected);
+    const coveredIf = self.getFlag(.CoveredAllPaths);
+
+    _ = self.setFlag(.CoveredAllPaths, false);
+    const coveredElse =
+        if (maybeOtherwise) |otherwise| blk: {
+            try self.typecheckStatement(otherwise, expected);
+            break :blk self.getFlag(.CoveredAllPaths);
+        }
+        else false;
+
+    _ = self.setFlag(.CoveredAllPaths, coveredIf and coveredElse);
+}
+
+fn typecheckAssignment(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!void {
+    _ = extraPtr;
+    self.report("Assignment is not supported yet. You have to do a static single assignment.", .{});
+    return common.debug.NotImplemented(@src());
+}
+
+fn typecheckExpressionStatement(self: *Typechecker, exprPtr: defines.OpaquePtr) Error!void {
+    const ast = self.context.getAST(self.currentFile);
+
+    const expression = ast.expressions.get(exprPtr);
+
+    if (expression.type == .Assignment) return self.typecheckAssignment(expression.value);
+
+    const resultType = try self.typecheckExpression(exprPtr, null);
+
+    if (!self.typeTable.get(resultType).isZeroBit()) {
+        self.report("Unhandled return value of type '{s}', consider using an explicit discard '_' instead.", .{
+            try self.typeName(self.arena.allocator(), resultType),
+        });
+    }
+}
+
+fn typecheckBlock(self: *Typechecker, extraPtr: defines.OpaquePtr, expected: TypeID) Error!void {
+    const ast = self.context.getAST(self.currentFile);
+
+    const innerRange = defines.Range{
+        .start = ast.extra[extraPtr],
+        .end = ast.extra[extraPtr + 1],
+    };
+
+    for (innerRange.start..innerRange.end) |index| {
+        if (self.getFlag(.CoveredAllPaths)) {
+            self.report("Unreachable code", .{});
+            return Error.UnreachableCodePath;
+        }
+
+        try self.typecheckStatement(ast.extra[index], expected);
+    }
+}
+
 pub fn typecheckVariable(self: *Typechecker, decl: *const Resolver.Declaration) Error!TypeID {
     const expected = try self.expectType(decl.type);
 
@@ -316,12 +698,14 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
 
         .Mark => self.typecheckMark(.Expression, expressionPtr, expr.value, maybeExpected),
 
-        .Dot => return self.typecheckDot(expr.value),
+        .Dot => self.typecheckDot(expr.value),
 
         .Assignment => |t| {
-            self.report("Unable to typecheck expression '{s}'.", .{@tagName(t)});
-            return Error.TypecheckingFailure;
-        }
+            self.report("Expected an expression, received '{s}' instead.", .{
+                @tagName(t),
+            });
+            return Error.IllegalSyntax;
+        },
     };
 }
 
@@ -2177,6 +2561,7 @@ pub fn makeMutable(_: *const Typechecker, info: TypeInfo) TypeInfo {
         .Function => |func| .{
             .Function = .{
                 .mutable = true,
+                .isComptime = func.isComptime,
                 .argTypes = func.argTypes,
                 .returnType = func.returnType,
             },
@@ -2427,7 +2812,7 @@ fn clearFlags(self: *Typechecker) void {
 }
 
 /// Assumes metadata doesn't exist for given element
-fn setMetadata(
+pub fn setMetadata(
     self: *Typechecker,
     kind: Element.Kind,
     element: defines.EitherPtr(defines.ExpressionPtr, defines.StatementPtr),

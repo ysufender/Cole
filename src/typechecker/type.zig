@@ -23,7 +23,7 @@ pub const TypeInfo = union(enum) {
     Array: Array,
 
     Pointer: Pointer,
-    Function: Function, // is a pointer
+    Function: Function,
     Noreturn,
     Any: bool, // mutability bool
     Type,
@@ -139,6 +139,7 @@ pub const Array = struct {
 
 pub const Function = struct {
     mutable: bool,
+    isComptime: bool, 
     argTypes: []const TypeID,
     returnType: TypeID,
 };

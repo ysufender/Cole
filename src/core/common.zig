@@ -120,5 +120,9 @@ pub const CompilerError = error {
     UserspaceError,
     ExistentialDilemma,
     UnexpectedRValue,
+    IllegalGenericType,
+    UncoveredCodePath,
+    ReturnTypeMismatch,
+    LoopControlOutsideLoopScope,
     Terminate,
 };

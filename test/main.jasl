@@ -1,2 +1,11 @@
-let test: i8 = 12;
-let main: *fn void -> i32 = fn || main;
+let enm = enum {
+    Test,
+    Test2,
+};
+
+let main = fn () -> i32 {
+    switch enm::Test {
+        @Test -> return 0;
+        else -> return 1;
+    }
+};
