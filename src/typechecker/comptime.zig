@@ -1802,7 +1802,7 @@ pub fn constructUndefined(self: *Comptime, valueType: TypeID) Error!Value.Ptr {
     };
 }
 
-fn generateRandomName(self: *Comptime, comptime mode: @TypeOf(.EnumLiteral)) Error!u32 {
+pub fn generateRandomName(self: *Comptime, comptime mode: @TypeOf(.EnumLiteral)) Error!u32 {
     const randint = self.rng.next();
 
     const res = std.fmt.allocPrint(self.arena.allocator(), "$$anon_"++@tagName(mode)++"_{d}", .{

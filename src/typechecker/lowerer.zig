@@ -5,12 +5,13 @@ const common = @import("../core/common.zig");
 const backend = @import("../codegen/backend.zig");
 const defines = @import("../core/defines.zig");
 
-const Error = common.CompilerError;
+const Parser = @import("../parser/parser.zig");
 const Typechecker = @import("typechecker.zig");
 const TypeID = @import("type.zig").TypeID;
 const Comptime = @import("comptime.zig");
 const Declaration = @import("resolver.zig").Declaration;
 const JIR = backend.C.JIR;
+const Error = common.CompilerError;
 
 const assert = std.debug.assert;
 
@@ -213,6 +214,132 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
     });
 }
 
+pub fn statement(self: *Lowerer, statementPtr: defines.StatementPtr) Error!defines.Range {
+    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+
+    const stmt = ast.statements.get(statementPtr);
+    return switch (stmt.type) {
+        .Block => self.block(stmt.value),
+        .Expression =>
+            if (ast.expressions.items(.type)[stmt.value] == .Assignment) common.debug.NotImplemented(@src())
+            else self.expressionStmt(stmt.value),
+        .Return => self.@"return"(),
+        .Conditional => self.conditional(stmt.value, &ast),
+        .While => |t| self.loop(t, stmt.value, &ast),
+        else => |t| {
+            self.report("Statement '{s}' is not implemented.", .{
+                @tagName(t),
+            });
+            return common.debug.NotImplemented(@src());
+        },
+    };
+}
+
+fn loop(
+    self: *Lowerer,
+    loopType: enum {
+        While,
+        For,
+    },
+    extraPtr: defines.OpaquePtr,
+    ast: *const Parser.AST,
+) Error!defines.Range {
+    if (loopType == .For) return common.debug.ShouldBeImpossible(@src());
+
+    const condition = ast.tokens[extraPtr];
+    const body = ast.tokens[extraPtr + 1];
+}
+
+fn conditional(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.AST) Error!defines.Range {
+    const conditionExpr = ast.extra[extraPtr];
+
+    if (self.typechecker.executer.attemptEval(conditionExpr, null)) |comptimeConditionPtr| {
+        const comptimeCondition = self.typechecker.executer.getValue(comptimeConditionPtr).Bool;
+
+        if (comptimeCondition) {
+            return self.statement(ast.extra[extraPtr + 1]);
+        }
+
+        if (ast.extra[extraPtr + 2] == 1) {
+            return self.statement(ast.extra[extraPtr + 3]);
+        }
+
+        const start = self.typechecker.builder.nodes.len;
+        return .{
+            .start = start,
+            .end = start + 1,
+        };
+    }
+
+    // @Note the compiler sets up a virtual logic register which holds the
+    // intermediary logic results. Conditional jumps read from the said
+    // register directly.
+
+    const start = try self.expression(conditionExpr, Comptime.Builtin.Type("bool"));
+    const end = blk: {
+        const body = ast.extra[extraPtr + 1];
+        const maybeEnd = (try self.statement(body)).end;
+
+        const maybeElse =
+            if (ast.extra[extraPtr + 2] == 1) ast.extra[extraPtr + 3]
+            else null;
+
+        if (maybeElse) |elseBranch| {
+            break :blk (try self.statement(elseBranch)).end;
+        }
+        else {
+            break :blk maybeEnd;
+        }
+    };
+
+    return .{
+        .start = start,
+        .end = end,
+    };
+}
+
+fn expressionStmt(self: *Lowerer, expr: defines.ExpressionPtr) Error!defines.Range {
+    const exprType = self.typechecker.typecheckExpression(expr, null)
+        catch return common.debug.ShouldBeImpossible(@src());
+    const res = try self.expression(expr, exprType);
+    return .{
+        .start = res,
+        .end = res + 1,
+    };
+}
+
+fn @"return"(self: *Lowerer, expr: defines.ExpressionPtr) Error!defines.Range {
+    const start = self.typechecker.builder.@"return"(expr);
+    return .{
+        .start = start,
+        .end = start + 1,
+    };
+}
+
+fn block(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!defines.Range {
+    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+
+    const statements = defines.Range{
+        .start = ast.extra[extraPtr],
+        .end = ast.extra[extraPtr + 1],
+    };
+
+    if (statements.len() <= 0) {
+        return;
+    }
+
+    const start = try self.typechecker.builder.scope(self.typechecker.executer.generateRandomName(.While));
+    for (statements.start..statements.end) |stmt| {
+        try self.statement(stmt);
+    }
+    const end = try self.typechecker.builder.exit();
+
+    return .{
+        .start = start,
+        .end = end,
+    };
+}
+
 pub fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID) Error!JIR.Ptr {
     if (self.typechecker.executer.attemptEval(exprPtr, ofType)) |_| {
         return self.literal(exprPtr, ofType);
@@ -232,19 +359,22 @@ pub fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID
         .Lambda, .FunctionDefinition,
         .SliceType, .Scoping => common.debug.ShouldBeImpossible(@src()),
 
+        .Assignment => {
+            self.report(
+                "Hello, whomever changed the codebase to such a state that "
+                ++ "the typechecker is now all screwed up. Due to your ingenius, "
+                ++ "the lowerer now treats assignments as expressions, rather than "
+                ++ "statements. I won't give you any further information about the "
+                ++ "matter. I won't even give a stacktrace for you to debug.",
+                .{}
+            );
+            return common.debug.ShouldBeImpossible(@src());
+        },
+
         else => |t| {
             self.report("'{s}' lowering is not implemented.", .{@tagName(t)});
             return common.debug.NotImplemented(@src());
         },
-    };
-}
-
-pub fn statement(self: *Lowerer, statementPtr: defines.StatementPtr) Error!defines.Range {
-    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
-
-    const stmt = ast.statements.get(statementPtr);
-    return switch (stmt.type) {
-        else => common.debug.NotImplemented(@src()),
     };
 }
 

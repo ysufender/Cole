@@ -36,6 +36,11 @@ const Node = struct {
         /// Assignment through pointer
         Store,
 
+        Return,
+
+        Scope,
+        Exit,
+
         Reference,
         Dereference,
         Call,
@@ -51,7 +56,8 @@ const Node = struct {
         Label,
         Dot,
         Grouping,
-        Goto,
+        Jump,
+        JumpIf,
         Lesser,
         LesserEqual,
         Greater,
@@ -145,6 +151,11 @@ pub const Builder = struct {
     pub inline fn functionDef(self: *Builder, function: Function.Ptr) Error!void { _ = try self.commonSingle(.FunctionDef, function); }
     pub inline fn typeDef(self: *Builder, typeID: TypeID) Error!void { _ = try self.commonSingle(.TypeDef, typeID); }
 
+    pub inline fn jump(self: *Builder, lbl: StringPtr) Error!Ptr { return self.commonSingle(.Jump, lbl); }
+    pub inline fn cjump(self: *Builder, lbl: StringPtr) Error!Ptr { return self.commonSingle(.JumpIf, lbl); }
+    pub inline fn exit(self: *Builder) Error!Ptr { return self.commonSingle(.Scope, 0); }
+    pub inline fn scope(self: *Builder, name: StringPtr) Error!Ptr { return self.commonSingle(.Scope, name); }
+    pub inline fn @"return"(self: *Builder, expr: Ptr) Error!Ptr { return self.commonSingle(.Return, expr); }
     pub inline fn identifier(self: *Builder, decl: StringPtr) Error!Ptr { return self.commonSingle(.Identifier, decl); }
     pub inline fn assignment(self: *Builder, decl: StringPtr, expr: Ptr) Error!Ptr { return self.commonBinary(.Assignment, decl, expr); }
     pub inline fn store(self: *Builder, decl: Ptr, expr: Ptr) Error!Ptr { return self.commonBinary(.Store, decl, expr); }
