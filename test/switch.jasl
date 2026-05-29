@@ -1,6 +1,0 @@
-let main = fn () -> void {
-    switch test {
-        false -> |capture| something();
-        true -> other();
-    }
-};

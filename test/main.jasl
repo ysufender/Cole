@@ -1,11 +1,5 @@
-let enm = enum {
-    Test,
-    Test2,
-};
+import switch_test;
 
 let main = fn () -> i32 {
-    switch enm::Test {
-        @Test -> return 0;
-        else -> return 1;
-    }
+    return 0;
 };

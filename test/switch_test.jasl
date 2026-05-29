@@ -1,0 +1,6 @@
+pub let main = fn (test: bool) -> void {
+    switch test {
+        false -> |capture| return typeOf(capture);
+        true -> { }
+    }
+};

@@ -487,10 +487,16 @@ pub fn evalMark(
                     },
                     Builtin.Metadata("@comptime").? => {
                         _ = self.typechecker.setFlag(.AttemptingEval, false);
-                        //if (!self.typechecker.getFlag(.AttemptingEval)) {
-                        //    self.report("Redundant @comptime mark in already comptime scope.", .{});
-                        //    return Error.RedundantMark;
-                        //}
+
+                        const exprType = try self.typechecker.typecheckExpression(ast.extra[extraPtr + 2], maybeExpected);
+
+                        if (!(
+                            self.typechecker.getFlag(.AttemptingEval)
+                            or self.typechecker.typeTable.get(exprType) == .Function
+                        )) {
+                            self.report("Redundant @comptime mark in already comptime scope.", .{});
+                            return Error.RedundantMark;
+                        }
                     },
                     else => { },
                 }

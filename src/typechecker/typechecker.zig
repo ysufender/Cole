@@ -204,7 +204,9 @@ pub fn typecheckStatement(self: *Typechecker, statementPtr: defines.StatementPtr
         .While => self.typecheckWhileStatement(stmt.value, expected),
         .Break, .Continue => self.typecheckLoopControl(stmt.value),
         .Import => common.debug.ShouldBeImpossible(@src()),
-        // TODO: Continue with defer
+        .Defer => self.typecheckDefer(stmt.value),
+        .VariableDefinition => try self.typecheckVarDefStatement(stmt.value),
+        .Mark => try self.typecheckStatementMark(statementPtr, stmt.value),
         else => |t| {
             self.report("Typechecking of '{s}' statements is not implemented.", .{
                 @tagName(t),
@@ -212,6 +214,121 @@ pub fn typecheckStatement(self: *Typechecker, statementPtr: defines.StatementPtr
             return common.debug.NotImplemented(@src());
         },
     };
+}
+
+fn typecheckStatementMark(
+    self: *Typechecker,
+    stmtPtr: defines.StatementPtr,
+    extraPtr: defines.OpaquePtr,
+) Error!void {
+    _ = try self.typecheckMark(.Statement, stmtPtr, extraPtr, null);
+    
+    // TODO: Special marks, extern and such.
+}
+
+fn typecheckVariableDef(self: *Typechecker, token: defines.TokenPtr, expected: TypeID, topLevel: bool, node: defines.ExpressionPtr) Error!TypeID {
+    const initializer =
+        if (topLevel or expected == Comptime.Builtin.Type("type"))
+            try self.typecheckValue(try self.executer.eval(node, expected), expected)
+        else
+            try self.typecheckExpression(node, expected);
+
+    const res =
+        if (self.suitable(expected, initializer))
+            try self.infer(expected, initializer)
+        else  {
+            self.report(
+                "Mismatching initializer type in variable definition."
+                ++ " Expected '{s}', received '{s}'.", .{
+                try self.typeName(self.arena.allocator(), expected),
+                try self.typeName(self.arena.allocator(), initializer),
+            });
+            return Error.TypeMismatch;
+        };
+
+    blk: switch (self.typeTable.get(initializer)) {
+        .Type => {
+            const newType = self.executer.getValue(try self.executer.eval(node, expected)).Type;
+            const name = self.builder.getInternedString(switch (self.typeTable.get(newType)) {
+                .Union => |uni| uni.name,
+                .Struct => |str| str.name,
+                .Enum => |enm| enm.name,
+                else => break :blk,
+            });
+
+            if (name[0] != '$') {
+                break :blk;
+            }
+
+            const ast = self.context.getAST(self.currentFile);
+            const tokens = self.context.getTokens(ast.tokens);
+
+            const symName = tokens.get(token).lexeme(self.context, self.currentFile);
+            const namespace = self.modules.modules.get(self.modules.modules.len - self.currentFile - 1).name;
+            const newName = std.fmt.allocPrint(self.arena.allocator(), "{s}::{s}", .{
+                namespace,
+                symName,
+            }) catch return Error.AllocatorFailure;
+            const new = try self.builder.internString(newName);
+
+            self.typeTable.set(newType, switch (self.typeTable.get(newType)) {
+                .Struct => |str| .{
+                    .Struct = .{
+                        .mutable = str.mutable,
+                        .name = new,
+                        .fields = str.fields,
+                        .definitions = str.definitions,
+                        .scope = str.scope,
+                    },
+                },
+
+                .Enum => |enm| .{
+                    .Enum = .{
+                        .mutable = enm.mutable,
+                        .name = new,
+                        .definitions = enm.definitions,
+                        .fields = enm.fields,
+                        .scope = enm.scope,
+                    },
+                },
+
+                .Union => |uni| TypeInfo{
+                    .Union = .{
+                        .name = new,
+                        .isTagged = uni.isTagged,
+                        .tag = uni.tag,
+                        .mutable = uni.mutable,
+                        .definitions = uni.definitions,
+                        .fields = uni.fields,
+                        .scope = uni.scope,
+                    },
+                },
+
+                else => unreachable,
+            });
+        },
+        else => { },
+    }
+
+    return res;
+}
+
+fn typecheckVarDefStatement(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!void {
+    const ast = self.context.getAST(self.currentFile);
+
+    const signature = ast.signatures.get(ast.extra[extraPtr]);
+    const expected = try self.expectType(signature.type);
+    _ = try self.typecheckVariableDef(signature.name, expected, false, ast.extra[extraPtr + 1]);
+
+    // @Incomplete TODO: Set the decl's resolved type, to do that we need to get the decl
+    // and to do that we need to know the scope, or somehow store some metadata for per
+    // variable definition.
+}
+
+fn typecheckDefer(self: *Typechecker, stmtPtr: defines.StatementPtr) Error!void {
+    const prev = self.setFlag(.NoReturn, true);
+    defer _ = self.setFlag(.NoReturn, prev);
+    try self.typecheckStatement(stmtPtr, Comptime.Builtin.Type("void"));
 }
 
 fn typecheckLoopControl(self: *Typechecker, _: defines.OpaquePtr) Error!void {
@@ -565,93 +682,9 @@ fn typecheckBlock(self: *Typechecker, extraPtr: defines.OpaquePtr, expected: Typ
     }
 }
 
-pub fn typecheckVariable(self: *Typechecker, decl: *const Resolver.Declaration) Error!TypeID {
+pub fn typecheckVariableDeclaration(self: *Typechecker, decl: *const Resolver.Declaration) Error!TypeID {
     const expected = try self.expectType(decl.type);
-
-    const initializer =
-        if (decl.topLevel or expected == Comptime.Builtin.Type("type"))
-            try self.typecheckValue(try self.executer.eval(decl.node, expected), expected)
-        else
-            try self.typecheckExpression(decl.node, expected);
-
-    const res =
-        if (self.suitable(expected, initializer))
-            try self.infer(expected, initializer)
-        else  {
-            self.report(
-                "Mismatching initializer type in variable definition."
-                ++ " Expected '{s}', received '{s}'.", .{
-                try self.typeName(self.arena.allocator(), expected),
-                try self.typeName(self.arena.allocator(), initializer),
-            });
-            return Error.TypeMismatch;
-        };
-
-    blk: switch (self.typeTable.get(initializer)) {
-        .Type => {
-            const newType = self.executer.getValue(try self.executer.eval(decl.node, expected)).Type;
-            const name = self.builder.getInternedString(switch (self.typeTable.get(newType)) {
-                .Union => |uni| uni.name,
-                .Struct => |str| str.name,
-                .Enum => |enm| enm.name,
-                else => break :blk,
-            });
-
-            if (name[0] != '$') {
-                break :blk;
-            }
-
-            const ast = self.context.getAST(self.currentFile);
-            const tokens = self.context.getTokens(ast.tokens);
-
-            const symName = tokens.get(decl.token).lexeme(self.context, self.currentFile);
-            const namespace = self.modules.modules.get(self.modules.modules.len - self.currentFile - 1).name;
-            const newName = std.fmt.allocPrint(self.arena.allocator(), "{s}::{s}", .{
-                namespace,
-                symName,
-            }) catch return Error.AllocatorFailure;
-            const new = try self.builder.internString(newName);
-
-            self.typeTable.set(newType, switch (self.typeTable.get(newType)) {
-                .Struct => |str| .{
-                    .Struct = .{
-                        .mutable = str.mutable,
-                        .name = new,
-                        .fields = str.fields,
-                        .definitions = str.definitions,
-                        .scope = str.scope,
-                    },
-                },
-
-                .Enum => |enm| .{
-                    .Enum = .{
-                        .mutable = enm.mutable,
-                        .name = new,
-                        .definitions = enm.definitions,
-                        .fields = enm.fields,
-                        .scope = enm.scope,
-                    },
-                },
-
-                .Union => |uni| TypeInfo{
-                    .Union = .{
-                        .name = new,
-                        .isTagged = uni.isTagged,
-                        .tag = uni.tag,
-                        .mutable = uni.mutable,
-                        .definitions = uni.definitions,
-                        .fields = uni.fields,
-                        .scope = uni.scope,
-                    },
-                },
-
-                else => unreachable,
-            });
-        },
-        else => { },
-    }
-
-    return res;
+    return self.typecheckVariableDef(decl.token, expected, decl.topLevel, decl.node);
 }
 
 pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.ExpressionPtr, maybeExpected: ?TypeID) Error!TypeID {
@@ -1459,7 +1492,7 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
     errdefer isPresent.value_ptr.status = .NotChecked;
 
     const declType = try switch (decl.kind) {
-        .Variable => self.typecheckVariable(&decl),
+        .Variable => self.typecheckVariableDeclaration(&decl),
         .Namespace => {
             self.report("Operations on namespaces are not allowed.", .{});
             return Error.NamespaceAsValue;
@@ -1636,9 +1669,18 @@ pub fn typecheckMark(
 
     try self.setMetadata(kind, marked, metadata);
 
-    return
-        if (kind == .Statement) common.debug.NotImplemented(@src())
-        else self.typecheckExpression(marked, maybeExpected);
+    if (kind == .Statement) {
+        try self.typecheckStatement(marked, 0);
+
+        const markedStmt = ast.statements.get(marked);
+        if (markedStmt.type == .VariableDefinition) {
+            return self.typecheckExpression(ast.extra[markedStmt.value + 1], maybeExpected);
+        }
+        else return 0;
+    }
+    else {
+        return self.typecheckExpression(marked, maybeExpected);
+    }
 }
 
 pub fn typecheckSlicing(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!TypeID {
