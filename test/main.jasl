@@ -1,5 +1,12 @@
 import switch_test;
 
 let main = fn () -> i32 {
-    ();
+    let this: bool = false;
+
+    if this {
+        return 1;
+    }
+    else {
+        return 0;
+    }
 };

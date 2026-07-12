@@ -936,7 +936,7 @@ fn resolveSignature(self: *Resolver, signaturePtr: defines.SignaturePtr, comptim
                     };
             }
         },
-        else => unreachable,
+        else => common.debug.ShouldBeImpossible(@src()),
     }
 }
 

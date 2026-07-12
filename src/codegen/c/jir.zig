@@ -27,20 +27,12 @@ const Node = struct {
         TypeDef,
         FunctionDef,
         VariableDef,
-
         Identifier,
-
-        /// Direct assignment to a variable.
-        Assignment,
-
-        /// Assignment through pointer
-        Store,
-
+        Assignment, // Direct assignment to a variable.
+        Store, // Assignment through pointer
         Return,
-
         Scope,
         Exit,
-
         Reference,
         Dereference,
         Call,
@@ -66,6 +58,10 @@ const Node = struct {
         NotEqual,
         Invert,
         Xor,
+        BitwiseOr,
+        BitwiseAnd,
+        Not,
+        Negation,
     };
 
     type: Type,
@@ -174,14 +170,18 @@ pub const Builder = struct {
     pub inline fn label(self: *Builder, name: StringPtr) Error!Ptr { return self.commonSingle(.Label, name); }
     pub inline fn dot(self: *Builder, object: Ptr, field: StringPtr) Error!Ptr { return self.commonBinary(.Dot, object, field); }
     pub inline fn grouping(self: *Builder, expr: Ptr) Error!Ptr { return self.commonSingle(.Grouping, expr); }
-    pub inline fn lesser(self: *Builder, lhs: Ptr, rhs: StringPtr) Error!Ptr { return self.commonBinary(.Lesser, lhs, rhs); }
-    pub inline fn lesserEqual(self: *Builder, lhs: Ptr, rhs: StringPtr) Error!Ptr { return self.commonBinary(.LesserEqual, lhs, rhs); }
-    pub inline fn greater(self: *Builder, lhs: Ptr, rhs: StringPtr) Error!Ptr { return self.commonBinary(.Greater, lhs, rhs); }
-    pub inline fn greaterEqual(self: *Builder, lhs: Ptr, rhs: StringPtr) Error!Ptr { return self.commonBinary(.GreaterEqual, lhs, rhs); }
-    pub inline fn equal(self: *Builder, lhs: Ptr, rhs: StringPtr) Error!Ptr { return self.commonBinary(.Equal, lhs, rhs); }
-    pub inline fn notEqual(self: *Builder, lhs: Ptr, rhs: StringPtr) Error!Ptr { return self.commonBinary(.NotEqual, lhs, rhs); }
+    pub inline fn lesser(self: *Builder, lhs: Ptr, rhs: Ptr) Error!Ptr { return self.commonBinary(.Lesser, lhs, rhs); }
+    pub inline fn lesserEqual(self: *Builder, lhs: Ptr, rhs: Ptr) Error!Ptr { return self.commonBinary(.LesserEqual, lhs, rhs); }
+    pub inline fn greater(self: *Builder, lhs: Ptr, rhs: Ptr) Error!Ptr { return self.commonBinary(.Greater, lhs, rhs); }
+    pub inline fn greaterEqual(self: *Builder, lhs: Ptr, rhs: Ptr) Error!Ptr { return self.commonBinary(.GreaterEqual, lhs, rhs); }
+    pub inline fn equal(self: *Builder, lhs: Ptr, rhs: Ptr) Error!Ptr { return self.commonBinary(.Equal, lhs, rhs); }
+    pub inline fn notEqual(self: *Builder, lhs: Ptr, rhs: Ptr) Error!Ptr { return self.commonBinary(.NotEqual, lhs, rhs); }
     pub inline fn invert(self: *Builder, expr: Ptr) Error!Ptr { return self.commonSingle(.Invert, expr); }
-    pub inline fn xor(self: *Builder, lhs: Ptr, rhs: StringPtr) Error!Ptr { return self.commonBinary(.Xor, lhs, rhs); }
+    pub inline fn xor(self: *Builder, lhs: Ptr, rhs: Ptr) Error!Ptr { return self.commonBinary(.Xor, lhs, rhs); }
+    pub inline fn bitwiseOr(self: *Builder, lhs: Ptr, rhs: Ptr) Error!Ptr { return self.commonBinary(.BitwiseOr, lhs, rhs); }
+    pub inline fn bitwiseAnd(self: *Builder, lhs: Ptr, rhs: Ptr) Error!Ptr { return self.commonBinary(.BitwiseAnd, lhs, rhs); }
+    pub inline fn not(self: *Builder, rhs: Ptr) Error!Ptr { return self.commonSingle(.Not, rhs); }
+    pub inline fn negate(self: *Builder, rhs: Ptr) Error!Ptr { return self.commonSingle(.Negation, rhs); }
 
     inline fn commonSingle(
         self: *Builder,

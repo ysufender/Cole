@@ -687,6 +687,10 @@ pub fn typecheckVariableDeclaration(self: *Typechecker, decl: *const Resolver.De
     return self.typecheckVariableDef(decl.token, expected, decl.topLevel, decl.node);
 }
 
+pub fn typecheckParameter(self: *Typechecker, decl: *const Resolver.Declaration) Error!TypeID {
+    return self.typecheckExpression(decl.type, null);
+}
+
 pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.ExpressionPtr, maybeExpected: ?TypeID) Error!TypeID {
     const ast = self.context.getAST(self.currentFile);
 
@@ -1498,7 +1502,7 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
             return Error.NamespaceAsValue;
         },
         .Builtin, .Capture => return common.debug.ShouldBeImpossible(@src()),
-        .Parameter => return common.debug.ShouldBeImpossible(@src()),
+        .Parameter => self.typecheckParameter(&decl),
         else => {
             self.report("{s} is not implemented.", .{@tagName(decl.kind)});
             return Error.NotImplemented;

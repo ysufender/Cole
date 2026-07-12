@@ -1803,13 +1803,17 @@ pub fn constructUndefined(self: *Comptime, valueType: TypeID) Error!Value.Ptr {
 }
 
 pub fn generateRandomName(self: *Comptime, comptime mode: @TypeOf(.EnumLiteral)) Error!u32 {
+    return self.typechecker.builder.internString(
+        try self.generateRandomNameString(mode)
+    );
+}
+
+pub fn generateRandomNameString(self: *Comptime, comptime mode: @TypeOf(.EnumLiteral)) Error![]const u8 {
     const randint = self.rng.next();
 
-    const res = std.fmt.allocPrint(self.arena.allocator(), "$$anon_"++@tagName(mode)++"_{d}", .{
+    return std.fmt.allocPrint(self.arena.allocator(), "$$anon_"++@tagName(mode)++"_{d}", .{
         randint
-    }) catch return Error.AllocatorFailure;
-
-    return self.typechecker.builder.internString(res);
+    }) catch Error.AllocatorFailure;
 }
 
 // @Beware, scope declarations must be comptime since they are technically

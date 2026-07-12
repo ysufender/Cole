@@ -5,6 +5,7 @@ const common = @import("../core/common.zig");
 const backend = @import("../codegen/backend.zig");
 const defines = @import("../core/defines.zig");
 
+const Lexer = @import("../lexer/lexer.zig");
 const Parser = @import("../parser/parser.zig");
 const Typechecker = @import("typechecker.zig");
 const TypeID = @import("type.zig").TypeID;
@@ -18,6 +19,7 @@ const assert = std.debug.assert;
 const Lowerer = @This();
 
 typechecker: *Typechecker,
+lastLoop: []const u8 = "",
 
 pub fn init(typechecker: *Typechecker) Lowerer {
     return .{
@@ -214,6 +216,10 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
     });
 }
 
+//
+// Statement
+//
+
 pub fn statement(self: *Lowerer, statementPtr: defines.StatementPtr) Error!defines.Range {
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
 
@@ -223,15 +229,67 @@ pub fn statement(self: *Lowerer, statementPtr: defines.StatementPtr) Error!defin
         .Expression =>
             if (ast.expressions.items(.type)[stmt.value] == .Assignment) common.debug.NotImplemented(@src())
             else self.expressionStmt(stmt.value),
-        .Return => self.@"return"(),
-        .Conditional => self.conditional(stmt.value, &ast),
-        .While => |t| self.loop(t, stmt.value, &ast),
-        else => |t| {
+        .Return => self.@"return"(stmt.value),
+        .Conditional => self.conditional(stmt.value, ast),
+        .While => self.loop(.While, stmt.value, ast),
+        .Break => self.@"break"(),
+        .Continue => self.@"continue"(),
+        .Discard => blk: {
+            const start = try self.expression(stmt.value, try self.typechecker.typecheckExpression(stmt.value, null));
+
+            break :blk .{
+                .start = start,
+                .end = start + 1,
+            };
+        },
+        .VariableDefinition => .{
+            .start = 0,
+            .end = 0,
+        },
+        .Import, .Mark => common.debug.ShouldBeImpossible(@src()),
+        .Defer, .For,
+        .InlineAssembly, .Switch => |t| {
             self.report("Statement '{s}' is not implemented.", .{
                 @tagName(t),
             });
             return common.debug.NotImplemented(@src());
         },
+    };
+}
+
+fn @"continue"(self: *Lowerer) Error!defines.Range {
+    const startLabel = std.fmt.allocPrint(
+        self.typechecker.arena.allocator(),
+        "{s}_Start", .{
+            self.lastLoop,
+        },
+    ) catch return Error.AllocatorFailure;
+
+    const start = try self.typechecker.builder.jump(
+        try self.typechecker.builder.internString(startLabel),
+    );
+
+    return .{
+        .start = start,
+        .end = start + 1,
+    };
+}
+
+fn @"break"(self: *Lowerer) Error!defines.Range {
+    const endLabel = std.fmt.allocPrint(
+        self.typechecker.arena.allocator(),
+        "{s}_End", .{
+            self.lastLoop,
+        },
+    ) catch return Error.AllocatorFailure;
+
+    const start = try self.typechecker.builder.jump(
+        try self.typechecker.builder.internString(endLabel),
+    );
+
+    return .{
+        .start = start,
+        .end = start + 1,
     };
 }
 
@@ -246,8 +304,44 @@ fn loop(
 ) Error!defines.Range {
     if (loopType == .For) return common.debug.ShouldBeImpossible(@src());
 
-    const condition = ast.tokens[extraPtr];
-    const body = ast.tokens[extraPtr + 1];
+    const loopLabel = try self.typechecker.executer.generateRandomNameString(.Loop);
+    self.lastLoop = loopLabel;
+
+    const startLabel = try self.typechecker.builder.internString(
+        std.fmt.allocPrint(
+            self.typechecker.arena.allocator(),
+            "{s}_Start", .{
+                loopLabel,
+            }
+        ) catch return Error.AllocatorFailure
+    );
+
+    const endLabel = try self.typechecker.builder.internString(
+        std.fmt.allocPrint(
+            self.typechecker.arena.allocator(),
+            "{s}_End", .{
+                loopLabel,
+            }
+        ) catch return Error.AllocatorFailure
+    );
+
+    const start = try self.typechecker.builder.label(startLabel);
+
+    const conditionPtr = ast.extra[extraPtr];
+    _  = try self.expression(conditionPtr, Comptime.Builtin.Type("bool"));
+
+    _ = try self.typechecker.builder.cjump(endLabel);
+
+    const bodyPtr = ast.extra[extraPtr + 1];
+    _ = try self.statement(bodyPtr);
+    _ = try self.typechecker.builder.jump(startLabel);
+
+    const end = try self.typechecker.builder.label(endLabel);
+
+    return .{
+        .start = start,
+        .end = end,
+    };
 }
 
 fn conditional(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.AST) Error!defines.Range {
@@ -274,22 +368,32 @@ fn conditional(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.A
     // @Note the compiler sets up a virtual logic register which holds the
     // intermediary logic results. Conditional jumps read from the said
     // register directly.
+    //
+    // @Important @Beware Conditional jump is made only when register
+    // stores false.
 
     const start = try self.expression(conditionExpr, Comptime.Builtin.Type("bool"));
     const end = blk: {
+        const elseLabel = try self.typechecker.executer.generateRandomName(.Else);
+        const finallyLabel = try self.typechecker.executer.generateRandomName(.Finally);
+
+        _ = try self.typechecker.builder.cjump(elseLabel);
+
         const body = ast.extra[extraPtr + 1];
-        const maybeEnd = (try self.statement(body)).end;
+        _ = try self.statement(body);
+
+        _ = try self.typechecker.builder.jump(finallyLabel);
 
         const maybeElse =
             if (ast.extra[extraPtr + 2] == 1) ast.extra[extraPtr + 3]
             else null;
 
         if (maybeElse) |elseBranch| {
-            break :blk (try self.statement(elseBranch)).end;
+            _ = try self.typechecker.builder.label(elseLabel);
+            _ = try self.statement(elseBranch);
         }
-        else {
-            break :blk maybeEnd;
-        }
+
+        break :blk try self.typechecker.builder.label(finallyLabel);
     };
 
     return .{
@@ -309,7 +413,7 @@ fn expressionStmt(self: *Lowerer, expr: defines.ExpressionPtr) Error!defines.Ran
 }
 
 fn @"return"(self: *Lowerer, expr: defines.ExpressionPtr) Error!defines.Range {
-    const start = self.typechecker.builder.@"return"(expr);
+    const start = try self.typechecker.builder.@"return"(expr);
     return .{
         .start = start,
         .end = start + 1,
@@ -325,12 +429,14 @@ fn block(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!defines.Range {
     };
 
     if (statements.len() <= 0) {
-        return;
+        return statements;
     }
 
-    const start = try self.typechecker.builder.scope(self.typechecker.executer.generateRandomName(.While));
+    const start = try self.typechecker.builder.scope(
+        try self.typechecker.executer.generateRandomName(.Block)
+    );
     for (statements.start..statements.end) |stmt| {
-        try self.statement(stmt);
+        _ = try self.statement(ast.extra[@intCast(stmt)]);
     }
     const end = try self.typechecker.builder.exit();
 
@@ -339,6 +445,11 @@ fn block(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!defines.Range {
         .end = end,
     };
 }
+
+
+//
+// Expression
+//
 
 pub fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID) Error!JIR.Ptr {
     if (self.typechecker.executer.attemptEval(exprPtr, ofType)) |_| {
@@ -371,10 +482,56 @@ pub fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID
             return common.debug.ShouldBeImpossible(@src());
         },
 
-        else => |t| {
+        .Binary => self.binary(expr.value, ofType),
+        .Unary => self.unary(expr.value, ofType),
+
+        // TODO: Continue
+        .Switch, .Conditional, .ExpressionList,
+        .Call, .Dot, .Indexing, .Slicing => |t| {
             self.report("'{s}' lowering is not implemented.", .{@tagName(t)});
             return common.debug.NotImplemented(@src());
         },
+    };
+}
+
+fn unary(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR.Ptr {
+    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+
+    const rhs = try self.expression(ast.extra[extraPtr + 1], ofType);
+
+    return switch (@as(Lexer.TokenType, @enumFromInt(ast.extra[extraPtr]))) {
+        .Bang => self.typechecker.builder.not(rhs),
+        .Minus => self.typechecker.builder.negate(rhs),
+        .Tilde => self.typechecker.builder.invert(rhs),
+        else => common.debug.ShouldBeImpossible(@src()),
+    };
+}
+
+fn binary(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR.Ptr {
+    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+
+    const lhs = try self.expression(ast.extra[extraPtr], ofType);
+    const rhs = try self.expression(ast.extra[extraPtr + 2], ofType);
+
+    return switch (@as(Lexer.TokenType, @enumFromInt(ast.extra[extraPtr + 1]))) {
+        .Xor => self.typechecker.builder.xor(lhs, rhs),
+        .Minus => self.typechecker.builder.sub(lhs, rhs),
+        .Plus => self.typechecker.builder.add(lhs, rhs),
+        .Slash => self.typechecker.builder.div(lhs, rhs),
+        .Star => self.typechecker.builder.mul(lhs, rhs),
+        .BangEqual => self.typechecker.builder.notEqual(lhs, rhs),
+        .EqualEqual => self.typechecker.builder.equal(lhs, rhs),
+        .GreaterEqual => self.typechecker.builder.greaterEqual(lhs, rhs),
+        .LesserEqual => self.typechecker.builder.lesserEqual(lhs, rhs),
+        .Lesser => self.typechecker.builder.lesser(lhs, rhs),
+        .Greater => self.typechecker.builder.greater(lhs, rhs),
+        .LeftShift => self.typechecker.builder.lshift(lhs, rhs),
+        .RightShift => self.typechecker.builder.rshift(lhs, rhs),
+        .And => self.typechecker.builder.@"and"(lhs, rhs),
+        .Or => self.typechecker.builder.@"or"(lhs, rhs),
+        .Pipe => self.typechecker.builder.bitwiseOr(lhs, rhs),
+        .Ampersand => self.typechecker.builder.bitwiseAnd(lhs, rhs),
+        else => common.debug.ShouldBeImpossible(@src()),
     };
 }
 
