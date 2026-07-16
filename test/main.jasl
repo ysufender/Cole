@@ -1,12 +1,10 @@
-import switch_test;
+let Some = union {
+    field1: bool,
+    field2: bool,
+};
 
 let main = fn () -> i32 {
-    let this: bool = false;
-
-    if this {
-        return 1;
-    }
-    else {
-        return 0;
-    }
+    let that = Some(@field1, false);
+    let other = that.field2;
+    return 0;
 };

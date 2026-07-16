@@ -224,16 +224,16 @@ pub fn statement(self: *Lowerer, statementPtr: defines.StatementPtr) Error!defin
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
 
     const stmt = ast.statements.get(statementPtr);
-    return switch (stmt.type) {
-        .Block => self.block(stmt.value),
+    const node: defines.Range = switch (stmt.type) {
+        .Block => try self.block(stmt.value),
         .Expression =>
-            if (ast.expressions.items(.type)[stmt.value] == .Assignment) common.debug.NotImplemented(@src())
-            else self.expressionStmt(stmt.value),
-        .Return => self.@"return"(stmt.value),
-        .Conditional => self.conditional(stmt.value, ast),
-        .While => self.loop(.While, stmt.value, ast),
-        .Break => self.@"break"(),
-        .Continue => self.@"continue"(),
+            if (ast.expressions.items(.type)[stmt.value] == .Assignment) return common.debug.NotImplemented(@src())
+            else try self.expressionStmt(stmt.value),
+        .Return => try self.@"return"(stmt.value),
+        .Conditional => try self.conditional(stmt.value, ast),
+        .While => try self.loop(.While, stmt.value, ast),
+        .Break => try self.@"break"(),
+        .Continue => try self.@"continue"(),
         .Discard => blk: {
             const start = try self.expression(stmt.value, try self.typechecker.typecheckExpression(stmt.value, null));
 
@@ -246,7 +246,8 @@ pub fn statement(self: *Lowerer, statementPtr: defines.StatementPtr) Error!defin
             .start = 0,
             .end = 0,
         },
-        .Import, .Mark => common.debug.ShouldBeImpossible(@src()),
+        .Import, .Mark => return common.debug.ShouldBeImpossible(@src()),
+
         .Defer, .For,
         .InlineAssembly, .Switch => |t| {
             self.report("Statement '{s}' is not implemented.", .{
@@ -255,6 +256,9 @@ pub fn statement(self: *Lowerer, statementPtr: defines.StatementPtr) Error!defin
             return common.debug.NotImplemented(@src());
         },
     };
+
+    try self.typechecker.builder.addKeyNode(node.start);
+    return node;
 }
 
 fn @"continue"(self: *Lowerer) Error!defines.Range {
@@ -485,13 +489,74 @@ pub fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID
         .Binary => self.binary(expr.value, ofType),
         .Unary => self.unary(expr.value, ofType),
 
-        // TODO: Continue
-        .Switch, .Conditional, .ExpressionList,
-        .Call, .Dot, .Indexing, .Slicing => |t| {
+        .Conditional => self.conditionalExpr(expr.value, ofType),
+
+        .Dot => self.dot(expr.value),
+
+        .Indexing => self.indexing(expr.value),
+
+        .Switch, .ExpressionList, .Call, .Slicing => |t| {
             self.report("'{s}' lowering is not implemented.", .{@tagName(t)});
             return common.debug.NotImplemented(@src());
         },
     };
+}
+
+fn indexing(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
+    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+
+    const exprPtr = ast.extra[extraPtr];
+    const typeID = try self.typechecker.typecheckExpression(exprPtr, null);
+
+    const indexable = switch (self.typechecker.typeTable.get(typeID)) {
+        .Array => try self.expression(exprPtr, typeID),
+        .Pointer => |ptr| switch (ptr.size) {
+            .Slice => blk: {
+                const slice = try self.expression(exprPtr, typeID);
+                break :blk try self.typechecker.builder.dot(slice, try self.typechecker.builder.internString("ptr"));
+            },
+            else => try self.expression(exprPtr, typeID),
+        },
+        else => return common.debug.ShouldBeImpossible(@src()),
+    };
+
+    const indexPtr = ast.extra[extraPtr + 1];
+    const indexType = try self.typechecker.typecheckExpression(indexPtr, null);
+
+    const index = try self.expression(indexPtr, indexType);
+
+    return self.typechecker.builder.dereference(
+        try self.typechecker.builder.add(indexable, index)
+    );
+}
+
+fn dot(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
+    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+    const tokens = self.typechecker.context.getTokens(ast.tokens);
+
+    const exprPtr = ast.extra[extraPtr];
+    const exprType = try self.typechecker.typecheckExpression(exprPtr, null);
+
+    const obj = try self.expression(exprPtr, exprType);
+    const member = tokens
+                    .get(ast.extra[extraPtr + 1])
+                    .lexeme(self.typechecker.context, self.typechecker.currentFile);
+
+    return self.typechecker.builder.dot(obj, try self.typechecker.builder.internString(member));
+}
+
+fn conditionalExpr(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR.Ptr {
+    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+
+    const cndPtr = ast.extra[extraPtr];
+    const thenPtr = ast.extra[extraPtr + 1];
+    const otherPtr = ast.extra[extraPtr + 2];
+
+    const cnd = try self.expression(cndPtr, Comptime.Builtin.Type("bool"));
+    const then = try self.expression(thenPtr, ofType);
+    const otherwise = try self.expression(otherPtr, ofType);
+
+    return self.typechecker.builder.ternary(cnd, then, otherwise);
 }
 
 fn unary(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR.Ptr {

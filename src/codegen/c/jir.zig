@@ -56,6 +56,7 @@ const Node = struct {
         GreaterEqual,
         Equal,
         NotEqual,
+        Ternary,
         Invert,
         Xor,
         BitwiseOr,
@@ -76,6 +77,7 @@ pub const Builder = struct {
     nodes: Node.List,
     data: std.ArrayList(u32),
     allocator: Allocator,
+    keyNodes: std.ArrayList(Ptr),
     strings: InternTable,
 
     pub fn init(allocator: Allocator, counts: common.CompilerContext.Counts) Error!Builder {
@@ -85,6 +87,8 @@ pub const Builder = struct {
 
         return .{
             .nodes = try Node.List.init(allocator, counts.statements + counts.expressions),
+            .keyNodes = std.ArrayList(Ptr).initCapacity(allocator, counts.statements + counts.expressions)
+                catch return Error.AllocatorFailure,
             .data = std.ArrayList(u32).initCapacity(allocator, (counts.statements + counts.expressions) / 2)
                 catch return Error.AllocatorFailure,
             .constants = std.MultiArrayList(Constant).initCapacity(allocator, counts.bool + counts.float + counts.integer + counts.string)
@@ -101,6 +105,7 @@ pub const Builder = struct {
             .constants = self.constants.slice(),
             .functions = self.functions.slice(),
             .nodes = self.nodes.slice(),
+            .keyNodes = self.keyNodes.items,
             .data = self.data.items,
         }, allocator);
     }
@@ -125,6 +130,10 @@ pub const Builder = struct {
 
     pub inline fn getInternedString(self: *const Builder, index: defines.StringPtr)  []const u8 {
         return self.strings.keys()[index];
+    }
+
+    pub fn addKeyNode(self: *Builder, node: Ptr) Error!void {
+        return self.keyNodes.append(self.allocator, node);
     }
 
     pub fn variableDef(self: *Builder, typeID: TypeID, initializer: Ptr) Error!void {
@@ -182,6 +191,20 @@ pub const Builder = struct {
     pub inline fn bitwiseAnd(self: *Builder, lhs: Ptr, rhs: Ptr) Error!Ptr { return self.commonBinary(.BitwiseAnd, lhs, rhs); }
     pub inline fn not(self: *Builder, rhs: Ptr) Error!Ptr { return self.commonSingle(.Not, rhs); }
     pub inline fn negate(self: *Builder, rhs: Ptr) Error!Ptr { return self.commonSingle(.Negation, rhs); }
+
+    pub inline fn ternary(self: *Builder, cnd: Ptr, then: Ptr, otherwise: Ptr) Error!Ptr {
+        const start: u32 = @intCast(self.data.items.len);
+        self.data.append(self.allocator, cnd) catch return Error.AllocatorFailure;
+        self.data.append(self.allocator, then) catch return Error.AllocatorFailure;
+        self.data.append(self.allocator, otherwise) catch return Error.AllocatorFailure;
+
+        const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
+        self.nodes.set(res, .{
+            .type = .Ternary,
+            .value = start,
+        });
+        return res;
+    }
 
     inline fn commonSingle(
         self: *Builder,
@@ -252,6 +275,7 @@ types: Typechecker.TypeTable.Slice,
 constants: Constant.List,
 functions: Function.List,
 nodes: Node.List.Slice,
+keyNodes: []const Ptr,
 data: []const u32,
 
 pub fn dump(self: *const JIR) void {
