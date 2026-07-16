@@ -451,8 +451,10 @@ fn resolveStatement(self: *Resolver, stmt: defines.StatementPtr, topLevel: bool)
             isPresent.value_ptr.* = decl;
         },
 
+        .Defer => try self.resolveStatement(statement.value, false),
+
         // Single expr statements
-        .Defer, .Return, .Discard, .Expression => try self.resolveExpression(statement.value),
+        .Return, .Discard, .Expression => try self.resolveExpression(statement.value),
 
         else => {},
     }
@@ -474,7 +476,7 @@ fn resolveExpression(self: *Resolver, exprPtr: defines.ExpressionPtr) Error!void
 
             const decl = try self.look(identifier);
 
-            const status = self.resolved.getOrPut(allocator, .{ .file = ast.tokens, .expr = exprPtr })
+            const status = self.resolved.getOrPut(allocator, .{ .file = self.dataIndex(), .expr = exprPtr })
                 catch return Error.AllocatorFailure;
 
             if (status.found_existing) {

@@ -26,7 +26,7 @@ fn InnerStaticStack(comptime T: type, comptime Size: usize) type {
             }
 
             defer stack.items = stack.values[0..stack.index];
-            defer stack.index -= 1;
+            stack.index -= 1;
             return stack.values[stack.index];
         }
 
@@ -88,6 +88,64 @@ pub fn StaticRingStack(comptime T: type, comptime Size: usize) type {
 
         pub fn empty(stack: *const Self) bool {
             return stack.size <= 0;
+        }
+    };
+}
+
+pub fn Stack(comptime T: type) type {
+    return struct {
+        const Self = @This();
+
+        allocator: std.mem.Allocator,
+        items: []T = &.{},
+        index: u32 = 0,
+
+        pub fn init(allocator: std.mem.Allocator, capacity: u32) Error!Self {
+            var self = Self{
+                .allocator = allocator,
+            };
+
+            try self.ensureTotalCapacity(capacity);
+            return self;
+        }
+
+        pub fn ensureTotalCapacity(self: *Self, cap: u32) Error!void {
+            if (self.items.len >= cap) {
+                return;
+            }
+
+            const new = self.allocator.alloc(T, cap)
+                catch return Error.AllocatorFailure;
+            @memcpy(new[0..self.index], self.items[0..self.index]);
+            self.allocator.free(self.items);
+            self.items = new;
+        }
+
+        pub fn push(self: *Self, value: T) Error!void {
+            if (self.index >= self.items.len) {
+                try self.ensureTotalCapacity(if (self.items.len == 0) 8 else @intCast(self.items.len * 2));
+            }
+
+            defer self.index += 1;
+            self.items[self.index] = value;
+        }
+
+        pub fn pop(self: *Self) ?T {
+            if (self.index == 0) {
+                return null;
+            }
+
+            self.index -= 1;
+            return self.items[self.index];
+        }
+
+        pub fn empty(self: *const Self) bool {
+            return self.index == 0;
+        }
+
+        pub fn peek(self: *const Self) *T {
+            std.debug.assert(self.index > 0);
+            return &self.items[self.index - 1];
         }
     };
 }

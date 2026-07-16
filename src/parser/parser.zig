@@ -304,17 +304,6 @@ fn statement(self: *Parser) StatementResult {
 /// Defer only allows function calls and assignments, for now.
 fn deferStatement(self: *Parser) StatementResult {
     const deferred = try self.statement();
-
-    //switch (self.expressionMap.items(.type)[deferred]) {
-    //    .Call, .Assignment => { },
-    //    else => {
-    //        self.report("Only function calls and variable assignments are allowed in defer statements.", .{});
-    //        return error.IllegalSyntax;
-    //    }
-    //}
-
-    _ = try self.consume(.Semicolon, error.MissingSemicolon, "Expected semicolon after statement.");
-
     const result = try self.alloc(Statement);
     self.statementMap.set(result, .{
         .type = .Defer,

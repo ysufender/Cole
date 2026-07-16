@@ -119,7 +119,7 @@ fn innerMain(allocator: std.mem.Allocator, init: std.process.Init) common.Compil
     }
 
     var typechecker = try Typechecker.init(allocator, &context, &modules, &resolved);
-    const loweredIR = try typechecker.typecheck(allocator);
+    var loweredIR = try typechecker.typecheck(allocator);
 
     if (context.settings.hasFlag("--dump-jir")) {
         loweredIR.dump();
@@ -132,11 +132,12 @@ fn innerMain(allocator: std.mem.Allocator, init: std.process.Init) common.Compil
     // @Note codegen shouldn't depend on anything but the typechecker
     // output from now on. Also it shouldn't error too. Validation
     // has ended.
-    context.deinit();
+    _ = context.arena.reset(.retain_capacity);
+
+    try loweredIR.codegen(&context);
 }
 
-pub var MainProcInit: std.process.Init = undefined;
-pub const panic = std.debug.FullPanic(panicHandler);
+var MainProcInit: std.process.Init = undefined;
 fn panicHandler(msg: []const u8, stack: ?usize) noreturn {
     const _stderr = std.Io.File.stderr().writer(MainProcInit.io, &common.log.wbuf);
     var stderr = _stderr.interface;

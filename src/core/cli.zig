@@ -15,11 +15,15 @@ const Flags = enum {
     Include,
     Backend,
     Flag,
+    Output,
 };
 
 const flags = std.StaticStringMap(Flags).initComptime(&(.{
     .{ "--help", .Help },
     .{ "-h", .Help },
+
+    .{ "--output", .Output },
+    .{ "-o", .Output },
 
     .{ "--version", .Version },
     .{ "-v", .Version },
@@ -69,6 +73,7 @@ pub fn parseCLI(allocator: std.mem.Allocator, _args: std.process.Args, io: std.I
     _ = args.skip();
 
     var maybeFile: ?[]const u8 = null;
+    var maybeOut: ?[]const u8 = null;
     var workingDir: []const u8 = undefined;
     var includeDirs = NMap.empty;
     var maxErr: u32 = 5;
@@ -128,6 +133,14 @@ pub fn parseCLI(allocator: std.mem.Allocator, _args: std.process.Args, io: std.I
                     common.log.err("Expected a path after include flag.", .{});
                 }
             },
+            .Output =>
+                if (maybeOut) |_| {
+                    common.log.err("Multiple output file overrides.", .{});
+                    return Error.MultipleCLIOptions;
+                }
+                else {
+                    maybeOut = flag;
+                },
 
             .Flag => cliFlags.put(allocator, flag, {}) catch return Error.AllocatorFailure,
 
@@ -157,6 +170,7 @@ pub fn parseCLI(allocator: std.mem.Allocator, _args: std.process.Args, io: std.I
     return blk: {
         if (maybeFile) |file| break :blk common.CompilerSettings{
             .inputFile = file,
+            .outputFile = maybeOut,
             .workingDir = workingDir,
             .includeDirs = try collect(
                 includeDirs.count(),

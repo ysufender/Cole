@@ -37,18 +37,19 @@ const eql = std.meta.eql;
 
 pub const TypeTable = MultiArrayList(TypeInfo);
 pub const TypeMap = collections.HashMap(TypeInfo, TypeID);
+pub const TypeNameMap = std.AutoHashMapUnmanaged(TypeID, defines.StringPtr);
 pub const MetadataMap = collections.HashMap(Element, []const Comptime.Value.Ptr);
 const LookupMap = collections.HashMap(defines.DeclPtr, TypecheckStatus);
 
 pub const Flags = enum(u8) {
-    ConcreteValue = 1,
-    LValue = 2,
-    AttemptingEval = 3,
-    CanCycle = 4,
-    NoReturn = 5,
-    MustReturn = 6,
-    CoveredAllPaths = 7,
-    InLoop = 8,
+    ConcreteValue = 0,
+    LValue = 1,
+    AttemptingEval = 2,
+    CanCycle = 3,
+    MustReturn = 4,
+    CoveredAllPaths = 5,
+    InLoop = 6,
+    InDefer = 7,
 
     pub fn flag(flagToGet: Flags) u8 {
         return @intFromEnum(flagToGet);
@@ -99,7 +100,7 @@ flags: FlagMap,
 
 builder: backend.C.JIR.Builder,
 lowerer: Lowerer,
-typenameMap: std.AutoHashMapUnmanaged(TypeID, defines.StringPtr),
+typenameMap: TypeNameMap,
 
 pub fn init(
     gpa: Allocator,
@@ -124,14 +125,6 @@ pub fn init(
     lookup.ensureTotalCapacity(allocator, symbolTable.declarations.len) catch return Error.AllocatorFailure;
     metadata.ensureTotalCapacity(allocator, counts.meta * 3) catch return Error.AllocatorFailure;
 
-    var builder = try backend.C.JIR.Builder.init(allocator, counts);
-
-    inline for (Comptime.builtinTypes, 0..) |builtin, id| {
-        typeTable.appendAssumeCapacity(builtin.info);
-        typeMap.putAssumeCapacityNoClobber(builtin.info, @intCast(id));
-        _ = try builder.internString(builtin.name);
-    }
-
     return .{
         .context = context,
         .modules = modules,
@@ -141,7 +134,7 @@ pub fn init(
         .lookup = lookup,
         .flags = FlagMap.initEmpty(),
         .executer = undefined,
-        .builder = builder,
+        .builder = try backend.C.JIR.Builder.init(allocator, counts),
         .lowerer = undefined,
         .symbols = symbolTable,
         .currentFile = 0,
@@ -159,9 +152,17 @@ pub fn typecheck(self: *Typechecker, allocator: Allocator) Error!Resolution {
         return Error.MissingDefinition;
     }
 
+    inline for (Comptime.builtinTypes, 0..) |builtin, id| {
+        self.typeTable.appendAssumeCapacity(builtin.info);
+        self.typeMap.putAssumeCapacityNoClobber(builtin.info, @intCast(id));
+        const str = try self.builder.internString(builtin.name);
+        self.typenameMap.putNoClobber(self.arena.allocator(), id, str)
+            catch return Error.AllocatorFailure;
+    }
+
     self.builder.allocator = self.arena.allocator();
     self.executer = try Comptime.init(self, allocator);
-    self.lowerer = Lowerer.init(self);
+    self.lowerer = try Lowerer.init(self);
 
     defer self.arena.deinit();
     defer self.executer.deinit();
@@ -187,7 +188,7 @@ pub fn typecheck(self: *Typechecker, allocator: Allocator) Error!Resolution {
         return Error.TypeMismatch;
     }
 
-    return self.builder.build(allocator, self.typeTable.slice());
+    return self.builder.build(allocator, self);
 }
 
 pub fn typecheckStatement(self: *Typechecker, statementPtr: defines.StatementPtr, expected: TypeID) Error!void {
@@ -222,7 +223,6 @@ fn typecheckStatementMark(
     extraPtr: defines.OpaquePtr,
 ) Error!void {
     _ = try self.typecheckMark(.Statement, stmtPtr, extraPtr, null);
-    
     // TODO: Special marks, extern and such.
 }
 
@@ -307,6 +307,20 @@ fn typecheckVariableDef(self: *Typechecker, token: defines.TokenPtr, expected: T
                 else => unreachable,
             });
         },
+        .Function => {
+            const ast = self.context.getAST(self.currentFile);
+            const tokens = self.context.getTokens(ast.tokens);
+
+            const symName = tokens.get(token).lexeme(self.context, self.currentFile);
+            const namespace = self.modules.modules.get(self.modules.modules.len - self.currentFile - 1).name;
+            const newName = std.fmt.allocPrint(self.arena.allocator(), "{s}::{s}", .{
+                namespace,
+                symName,
+            }) catch return Error.AllocatorFailure;
+            const new = try self.builder.internString(newName);
+
+            try self.builder.functionDef(new, self.executer.getValue(try self.executer.eval(node, expected)).Function);
+        },
         else => { },
     }
 
@@ -326,8 +340,13 @@ fn typecheckVarDefStatement(self: *Typechecker, extraPtr: defines.OpaquePtr) Err
 }
 
 fn typecheckDefer(self: *Typechecker, stmtPtr: defines.StatementPtr) Error!void {
-    const prev = self.setFlag(.NoReturn, true);
-    defer _ = self.setFlag(.NoReturn, prev);
+    if (self.getFlag(.InDefer)) {
+        self.report("Defer statements can't have defer statements inside them.", .{});
+        return Error.DeferOutsideDeferrableScope;
+    }
+
+    _ = self.setFlag(.InDefer, true);
+    defer _ = self.setFlag(.InDefer, false);
     try self.typecheckStatement(stmtPtr, Comptime.Builtin.Type("void"));
 }
 
@@ -335,6 +354,10 @@ fn typecheckLoopControl(self: *Typechecker, _: defines.OpaquePtr) Error!void {
     if (!self.getFlag(.InLoop)) {
         self.report("Loop control statement outside loop body.", .{});
         return Error.LoopControlOutsideLoopScope;
+    }
+    else if (self.getFlag(.InDefer)) {
+        self.report("Defer statements can't have loop control statements.", .{});
+        return Error.DeferOutsideDeferrableScope;
     }
 }
 
@@ -600,6 +623,11 @@ fn typecheckDiscard(self: *Typechecker, exprPtr: defines.ExpressionPtr) Error!vo
 }
 
 fn typecheckReturn(self: *Typechecker, exprPtr: defines.ExpressionPtr, expected: TypeID) Error!void {
+    if (self.getFlag(.InDefer)) {
+        self.report("Return statements in defer statements are not allowed.", .{});
+        return Error.DeferOutsideDeferrableScope;
+    }
+
     const returnType = try self.typecheckExpression(exprPtr, expected);
 
     if (!self.suitable(expected, returnType)) {
@@ -2199,6 +2227,7 @@ pub fn registerType(self: *Typechecker, newType: TypeInfo) Error!TypeID {
         self.typeTable.set(typeID, newType);
     }
 
+    _ = try self.typeName(self.arena.allocator(), isPresent.value_ptr.*); // force intern type name
     return isPresent.value_ptr.*;
 }
 

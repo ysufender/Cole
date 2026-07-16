@@ -279,7 +279,6 @@ fn evalFunction(self: *Comptime, exprPtr: defines.ExpressionPtr, extraPtr: defin
         .body = try self.typechecker.lowerer.statement(bodyPtr),
     };
     const functionJIR = try self.typechecker.builder.addFunction(functionDef);
-    try self.typechecker.builder.functionDef(functionJIR);
 
     return self.appendValue(.{
         .Function = functionJIR,
@@ -393,7 +392,6 @@ fn evalLambda(self: *Comptime, exprPtr: defines.ExpressionPtr, extraPtr: defines
         },
     };
     const functionJIR = try self.typechecker.builder.addFunction(functionDef);
-    try self.typechecker.builder.functionDef(functionJIR);
 
     return self.appendValue(.{
         .Function = functionJIR,

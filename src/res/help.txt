@@ -6,6 +6,8 @@
         --help, -h                  : Print this help message.
         --version, -v               : Print version info
 
+        --output, -o   <path>       : Output file name.
+
         --working, -w  <path>       : Set working directory
         --max-err, -m  <count>      : Set max error count before terminating the compilation. Defaults to 10
         --include, -I  <path>       : Add <path> to the searchpath of the compiler. Can be relative or absolute

@@ -124,5 +124,7 @@ pub const CompilerError = error {
     UncoveredCodePath,
     ReturnTypeMismatch,
     LoopControlOutsideLoopScope,
+    DeferOutsideDeferrableScope,
+    MultipleCLIOptions,
     Terminate,
 };

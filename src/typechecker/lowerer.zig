@@ -11,19 +11,27 @@ const Typechecker = @import("typechecker.zig");
 const TypeID = @import("type.zig").TypeID;
 const Comptime = @import("comptime.zig");
 const Declaration = @import("resolver.zig").Declaration;
+const Stack = @import("../util/stack.zig").Stack;
 const JIR = backend.C.JIR;
 const Error = common.CompilerError;
 
 const assert = std.debug.assert;
 
+const Scope = u32; // defer count
+
 const Lowerer = @This();
 
 typechecker: *Typechecker,
 lastLoop: []const u8 = "",
+lastLoopDepth: u32 = 0,
+scopes: Stack(Scope),
+defers: Stack(defines.StatementPtr),
 
-pub fn init(typechecker: *Typechecker) Lowerer {
+pub fn init(typechecker: *Typechecker) Error!Lowerer {
     return .{
         .typechecker = typechecker,
+        .scopes = try Stack(Scope).init(typechecker.arena.allocator(), typechecker.symbols.scopes.len),
+        .defers = try Stack(defines.StatementPtr).init(typechecker.arena.allocator(), typechecker.symbols.scopes.len * 8),
     };
 }
 
@@ -216,6 +224,33 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
     });
 }
 
+fn unwindDefers(self: *Lowerer, upTo: u32) Error!?defines.Range {
+    var tmpDefers = self.defers;
+    var tmpScopes = self.scopes;
+
+    var range: ?defines.Range = null;
+
+    for (0..upTo) |_| {
+        const deferCount = tmpScopes.pop() orelse 0;
+        for (0..deferCount) |_| {
+            const stmtPtr = tmpDefers.pop() orelse return common.debug.ShouldBeImpossible(@src());
+            const stmtRange = try self.statement(stmtPtr);
+
+            range =
+                if(range) |r| .{
+                    .start = r.start,
+                    .end = stmtRange.end,
+                }
+                else .{
+                    .start = stmtRange.start,
+                    .end = stmtRange.end,
+                };
+        }
+    }
+
+    return range;
+}
+
 //
 // Statement
 //
@@ -229,9 +264,9 @@ pub fn statement(self: *Lowerer, statementPtr: defines.StatementPtr) Error!defin
         .Expression =>
             if (ast.expressions.items(.type)[stmt.value] == .Assignment) return common.debug.NotImplemented(@src())
             else try self.expressionStmt(stmt.value),
-        .Return => try self.@"return"(stmt.value),
         .Conditional => try self.conditional(stmt.value, ast),
         .While => try self.loop(.While, stmt.value, ast),
+        .Return => try self.@"return"(stmt.value),
         .Break => try self.@"break"(),
         .Continue => try self.@"continue"(),
         .Discard => blk: {
@@ -248,7 +283,10 @@ pub fn statement(self: *Lowerer, statementPtr: defines.StatementPtr) Error!defin
         },
         .Import, .Mark => return common.debug.ShouldBeImpossible(@src()),
 
-        .Defer, .For,
+        .Defer => try self.@"defer"(stmt.value),
+
+        .For => return common.debug.ShouldBeImpossible(@src()),
+
         .InlineAssembly, .Switch => |t| {
             self.report("Statement '{s}' is not implemented.", .{
                 @tagName(t),
@@ -261,6 +299,19 @@ pub fn statement(self: *Lowerer, statementPtr: defines.StatementPtr) Error!defin
     return node;
 }
 
+fn @"defer"(self: *Lowerer, stmtPtr: defines.StatementPtr) Error!defines.Range {
+    const deferCount = self.scopes.pop() orelse {
+        self.report("Defer statement outisde deferrable scope.", .{});
+        return Error.DeferOutsideDeferrableScope;
+    };
+    try self.scopes.push(deferCount + 1);
+    try self.defers.push(stmtPtr);
+    return .{
+        .start = 0,
+        .end = 0,
+    };
+}
+
 fn @"continue"(self: *Lowerer) Error!defines.Range {
     const startLabel = std.fmt.allocPrint(
         self.typechecker.arena.allocator(),
@@ -269,14 +320,21 @@ fn @"continue"(self: *Lowerer) Error!defines.Range {
         },
     ) catch return Error.AllocatorFailure;
 
-    const start = try self.typechecker.builder.jump(
+    const start = try self.unwindDefers(self.scopes.index - self.lastLoopDepth);
+
+    const end = try self.typechecker.builder.jump(
         try self.typechecker.builder.internString(startLabel),
     );
 
-    return .{
-        .start = start,
-        .end = start + 1,
-    };
+    return
+        if (start) |sr| .{
+            .start = sr.start,
+            .end = end,
+        }
+        else .{
+            .start = end,
+            .end = end + 1,
+        };
 }
 
 fn @"break"(self: *Lowerer) Error!defines.Range {
@@ -287,14 +345,21 @@ fn @"break"(self: *Lowerer) Error!defines.Range {
         },
     ) catch return Error.AllocatorFailure;
 
-    const start = try self.typechecker.builder.jump(
+    const start = try self.unwindDefers(self.scopes.index - self.lastLoopDepth);
+
+    const end = try self.typechecker.builder.jump(
         try self.typechecker.builder.internString(endLabel),
     );
 
-    return .{
-        .start = start,
-        .end = start + 1,
-    };
+    return
+        if (start) |sr| .{
+            .start = sr.start,
+            .end = end,
+        }
+        else .{
+            .start = end,
+            .end = end + 1,
+        };
 }
 
 fn loop(
@@ -337,6 +402,7 @@ fn loop(
     _ = try self.typechecker.builder.cjump(endLabel);
 
     const bodyPtr = ast.extra[extraPtr + 1];
+    self.lastLoopDepth = self.scopes.index;
     _ = try self.statement(bodyPtr);
     _ = try self.typechecker.builder.jump(startLabel);
 
@@ -418,9 +484,10 @@ fn expressionStmt(self: *Lowerer, expr: defines.ExpressionPtr) Error!defines.Ran
 
 fn @"return"(self: *Lowerer, expr: defines.ExpressionPtr) Error!defines.Range {
     const start = try self.typechecker.builder.@"return"(expr);
+    const end = try self.unwindDefers(self.scopes.index);
     return .{
         .start = start,
-        .end = start + 1,
+        .end = if (end) |er| er.end else start + 1,
     };
 }
 
@@ -436,12 +503,36 @@ fn block(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!defines.Range {
         return statements;
     }
 
+    try self.scopes.push(0);
+
     const start = try self.typechecker.builder.scope(
         try self.typechecker.executer.generateRandomName(.Block)
     );
+
+    var alreadyDeferred = false;
     for (statements.start..statements.end) |stmt| {
         _ = try self.statement(ast.extra[@intCast(stmt)]);
+
+        if (stmt != statements.end - 1) {
+            continue;
+        }
+
+        alreadyDeferred = switch (ast.statements.items(.type)[ast.extra[stmt]]) {
+            .Return, .Continue, .Break => true,
+            else => false,
+        };
     }
+
+    const deferCount = self.scopes.pop() orelse 0;
+    for (0..deferCount) |_| {
+        const stmtPtr = self.defers.pop()
+            orelse return common.debug.ShouldBeImpossible(@src());
+
+        if (!alreadyDeferred) {
+            _ = try self.statement(stmtPtr);
+        }
+    }
+
     const end = try self.typechecker.builder.exit();
 
     return .{
@@ -495,11 +586,41 @@ pub fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID
 
         .Indexing => self.indexing(expr.value),
 
-        .Switch, .ExpressionList, .Call, .Slicing => |t| {
+        .ExpressionList => self.expressionList(expr.value),
+
+        .Switch, .Call, .Slicing => |t| {
             self.report("'{s}' lowering is not implemented.", .{@tagName(t)});
             return common.debug.NotImplemented(@src());
         },
     };
+}
+
+fn expressionList(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
+    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+
+    const exprs = defines.Range{
+        .start = ast.extra[extraPtr],
+        .end = ast.extra[extraPtr + 1],
+    };
+
+    var res: ?defines.Range = null;
+
+    for (exprs.start..exprs.end) |exprPtr| {
+        const expr = try self.expression(@intCast(exprPtr), try self.typechecker.typecheckExpression(@intCast(exprPtr), null));
+
+        res =
+            if (res) |rr| .{
+                .start = rr.start,
+                .end = expr,
+            }
+            else .{
+                .start = expr,
+                .end = expr + 1,
+            };
+    }
+
+    const rres = res orelse defines.Range{ .start = 0, .end = 0 };
+    return self.typechecker.builder.grouping(rres.start, rres.end);
 }
 
 fn indexing(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {

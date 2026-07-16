@@ -1,10 +1,24 @@
-let Some = union {
-    field1: bool,
-    field2: bool,
-};
-
 let main = fn () -> i32 {
-    let that = Some(@field1, false);
-    let other = that.field2;
     return 0;
 };
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

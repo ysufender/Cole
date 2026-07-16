@@ -11,16 +11,24 @@ const collections = @import("../../util/collections.zig");
 const Types = @import("../../typechecker/type.zig");
 
 const Typechecker = @import("../../typechecker/typechecker.zig");
+const Comptime = @import("../../typechecker/comptime.zig");
 const MultiArrayList = @import("../../util/collections.zig").MultiArrayList;
 const TypeID = Types.TypeID;
 const Allocator = std.mem.Allocator;
 const Error = common.CompilerError;
+const CompilerSettings = common.CompilerSettings;
+const Arena = std.heap.ArenaAllocator;
+const Context = common.CompilerContext;
+const CreateDirError = std.Io.Dir.CreateDirError;
+const TypeNameMap = @import("../../typechecker/typechecker.zig").TypeNameMap;
 
 pub const InternTable = std.array_hash_map.String(void);
 
 pub const Ptr = defines.Offset;
 
-const Node = struct {
+pub const Builder = @import("jir/builder.zig");
+
+pub const Node = struct {
     pub const List = MultiArrayList(Node);
 
     pub const Type = enum {
@@ -69,175 +77,6 @@ const Node = struct {
     value: defines.EitherPtr(Ptr, u32),
 };
 
-pub const Builder = struct {
-    pub const StringPtr = defines.Offset;
-
-    constants: std.MultiArrayList(Constant),
-    functions: MultiArrayList(Function),
-    nodes: Node.List,
-    data: std.ArrayList(u32),
-    allocator: Allocator,
-    keyNodes: std.ArrayList(Ptr),
-    strings: InternTable,
-
-    pub fn init(allocator: Allocator, counts: common.CompilerContext.Counts) Error!Builder {
-        var strings = InternTable.empty;
-        strings.ensureTotalCapacity(allocator, counts.string + counts.types * 4 + counts.functions)
-            catch return Error.AllocatorFailure;
-
-        return .{
-            .nodes = try Node.List.init(allocator, counts.statements + counts.expressions),
-            .keyNodes = std.ArrayList(Ptr).initCapacity(allocator, counts.statements + counts.expressions)
-                catch return Error.AllocatorFailure,
-            .data = std.ArrayList(u32).initCapacity(allocator, (counts.statements + counts.expressions) / 2)
-                catch return Error.AllocatorFailure,
-            .constants = std.MultiArrayList(Constant).initCapacity(allocator, counts.bool + counts.float + counts.integer + counts.string)
-                catch return Error.AllocatorFailure,
-            .functions = try MultiArrayList(Function).init(allocator, counts.functions),
-            .strings = strings,
-            .allocator = allocator,
-        };
-    }
-
-    pub fn build(self: *const Builder, allocator: Allocator, types: Typechecker.TypeTable.Slice) Error!JIR {
-        return collections.deepCopy(JIR{
-            .types = types,
-            .constants = self.constants.slice(),
-            .functions = self.functions.slice(),
-            .nodes = self.nodes.slice(),
-            .keyNodes = self.keyNodes.items,
-            .data = self.data.items,
-        }, allocator);
-    }
-
-    pub fn addFunction(self: *Builder, function: Function) Error!Function.Ptr {
-        const res = try self.functions.addOne(self.allocator);
-        self.functions.set(res, function);
-        return res;
-    }
-
-    pub fn addConstant(self: *Builder, constant: Constant) Error!Constant.Ptr {
-        const res = self.constants.addOne(self.allocator) catch return Error.AllocatorFailure;
-        self.constants.set(res, constant);
-        return @intCast(res);
-    }
-
-    pub fn internString(self: *Builder, str: []const u8) Error!defines.StringPtr {
-        const res = self.strings.getOrPutValue(self.allocator, str, {})
-            catch return Error.AllocatorFailure;
-        return @intCast(res.index);
-    }
-
-    pub inline fn getInternedString(self: *const Builder, index: defines.StringPtr)  []const u8 {
-        return self.strings.keys()[index];
-    }
-
-    pub fn addKeyNode(self: *Builder, node: Ptr) Error!void {
-        return self.keyNodes.append(self.allocator, node);
-    }
-
-    pub fn variableDef(self: *Builder, typeID: TypeID, initializer: Ptr) Error!void {
-        const start: u32 = @intCast(self.data.items.len);
-        self.data.append(self.allocator, typeID) catch return Error.AllocatorFailure;
-        const initializerExpression = self.nodes.get(initializer).value;
-        const isUndefined = self.constants.get(initializerExpression) == .Undefined;
-        self.data.append(self.allocator, @intFromBool(isUndefined)) catch return Error.AllocatorFailure;
-
-        if (!isUndefined) {
-            self.data.append(self.allocator, initializer) catch return Error.AllocatorFailure;
-        }
-
-        return self.nodes.append(self.allocator, .{
-            .type = .VariableDef,
-            .value = start,
-        });
-    }
-
-    pub inline fn functionDef(self: *Builder, function: Function.Ptr) Error!void { _ = try self.commonSingle(.FunctionDef, function); }
-    pub inline fn typeDef(self: *Builder, typeID: TypeID) Error!void { _ = try self.commonSingle(.TypeDef, typeID); }
-
-    pub inline fn jump(self: *Builder, lbl: StringPtr) Error!Ptr { return self.commonSingle(.Jump, lbl); }
-    pub inline fn cjump(self: *Builder, lbl: StringPtr) Error!Ptr { return self.commonSingle(.JumpIf, lbl); }
-    pub inline fn exit(self: *Builder) Error!Ptr { return self.commonSingle(.Scope, 0); }
-    pub inline fn scope(self: *Builder, name: StringPtr) Error!Ptr { return self.commonSingle(.Scope, name); }
-    pub inline fn @"return"(self: *Builder, expr: Ptr) Error!Ptr { return self.commonSingle(.Return, expr); }
-    pub inline fn identifier(self: *Builder, decl: StringPtr) Error!Ptr { return self.commonSingle(.Identifier, decl); }
-    pub inline fn assignment(self: *Builder, decl: StringPtr, expr: Ptr) Error!Ptr { return self.commonBinary(.Assignment, decl, expr); }
-    pub inline fn store(self: *Builder, decl: Ptr, expr: Ptr) Error!Ptr { return self.commonBinary(.Store, decl, expr); }
-    pub inline fn reference(self: *Builder, decl: StringPtr) Error!Ptr { return self.commonSingle(.Reference, decl); }
-    pub inline fn dereference(self: *Builder, expr: Ptr) Error!Ptr { return self.commonSingle(.Dereference, expr); }
-    pub inline fn call(self: *Builder, expr: Ptr, args: []const Ptr) Error!Ptr { return self.commonBinary(.Call, expr, args); }
-    pub inline fn literal(self: *Builder, constant: Constant.Ptr) Error!Ptr { return self.commonSingle(.Literal, constant); }
-    pub inline fn add(self: *Builder, lhs: Ptr, rhs: Ptr) Error!Ptr { return self.commonBinary(.Add, lhs, rhs); }
-    pub inline fn sub(self: *Builder, lhs: Ptr, rhs: Ptr) Error!Ptr { return self.commonBinary(.Sub, lhs, rhs); }
-    pub inline fn div(self: *Builder, lhs: Ptr, rhs: Ptr) Error!Ptr { return self.commonBinary(.Div, lhs, rhs); }
-    pub inline fn mul(self: *Builder, lhs: Ptr, rhs: Ptr) Error!Ptr { return self.commonBinary(.Mul, lhs, rhs); }
-    pub inline fn lshift(self: *Builder, lhs: Ptr, rhs: Ptr) Error!Ptr { return self.commonBinary(.LeftShift, lhs, rhs); }
-    pub inline fn rshift(self: *Builder, lhs: Ptr, rhs: Ptr) Error!Ptr { return self.commonBinary(.RightShift, lhs, rhs); }
-    pub inline fn @"and"(self: *Builder, lhs: Ptr, rhs: Ptr) Error!Ptr { return self.commonBinary(.And, lhs, rhs); }
-    pub inline fn @"or"(self: *Builder, lhs: Ptr, rhs: Ptr) Error!Ptr { return self.commonBinary(.Or, lhs, rhs); }
-    pub inline fn label(self: *Builder, name: StringPtr) Error!Ptr { return self.commonSingle(.Label, name); }
-    pub inline fn dot(self: *Builder, object: Ptr, field: StringPtr) Error!Ptr { return self.commonBinary(.Dot, object, field); }
-    pub inline fn grouping(self: *Builder, expr: Ptr) Error!Ptr { return self.commonSingle(.Grouping, expr); }
-    pub inline fn lesser(self: *Builder, lhs: Ptr, rhs: Ptr) Error!Ptr { return self.commonBinary(.Lesser, lhs, rhs); }
-    pub inline fn lesserEqual(self: *Builder, lhs: Ptr, rhs: Ptr) Error!Ptr { return self.commonBinary(.LesserEqual, lhs, rhs); }
-    pub inline fn greater(self: *Builder, lhs: Ptr, rhs: Ptr) Error!Ptr { return self.commonBinary(.Greater, lhs, rhs); }
-    pub inline fn greaterEqual(self: *Builder, lhs: Ptr, rhs: Ptr) Error!Ptr { return self.commonBinary(.GreaterEqual, lhs, rhs); }
-    pub inline fn equal(self: *Builder, lhs: Ptr, rhs: Ptr) Error!Ptr { return self.commonBinary(.Equal, lhs, rhs); }
-    pub inline fn notEqual(self: *Builder, lhs: Ptr, rhs: Ptr) Error!Ptr { return self.commonBinary(.NotEqual, lhs, rhs); }
-    pub inline fn invert(self: *Builder, expr: Ptr) Error!Ptr { return self.commonSingle(.Invert, expr); }
-    pub inline fn xor(self: *Builder, lhs: Ptr, rhs: Ptr) Error!Ptr { return self.commonBinary(.Xor, lhs, rhs); }
-    pub inline fn bitwiseOr(self: *Builder, lhs: Ptr, rhs: Ptr) Error!Ptr { return self.commonBinary(.BitwiseOr, lhs, rhs); }
-    pub inline fn bitwiseAnd(self: *Builder, lhs: Ptr, rhs: Ptr) Error!Ptr { return self.commonBinary(.BitwiseAnd, lhs, rhs); }
-    pub inline fn not(self: *Builder, rhs: Ptr) Error!Ptr { return self.commonSingle(.Not, rhs); }
-    pub inline fn negate(self: *Builder, rhs: Ptr) Error!Ptr { return self.commonSingle(.Negation, rhs); }
-
-    pub inline fn ternary(self: *Builder, cnd: Ptr, then: Ptr, otherwise: Ptr) Error!Ptr {
-        const start: u32 = @intCast(self.data.items.len);
-        self.data.append(self.allocator, cnd) catch return Error.AllocatorFailure;
-        self.data.append(self.allocator, then) catch return Error.AllocatorFailure;
-        self.data.append(self.allocator, otherwise) catch return Error.AllocatorFailure;
-
-        const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
-        self.nodes.set(res, .{
-            .type = .Ternary,
-            .value = start,
-        });
-        return res;
-    }
-
-    inline fn commonSingle(
-        self: *Builder,
-        comptime nodeType: Node.Type,
-        expr: Ptr,
-    ) Error!Ptr {
-        const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
-        self.nodes.set(res, .{
-            .type = nodeType,
-            .value = expr,
-        });
-        return res;
-    }
-
-    inline fn commonBinary(
-        self: *Builder,
-        comptime nodeType: Node.Type,
-        lhs: Ptr,
-        rhs: Ptr
-    ) Error!Ptr {
-        const start: u32 = @intCast(self.data.items.len);
-        self.data.append(self.allocator, lhs) catch return Error.AllocatorFailure;
-        self.data.append(self.allocator, rhs) catch return Error.AllocatorFailure;
-
-        const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
-        self.nodes.set(res, .{
-            .type = nodeType,
-            .value = start,
-        });
-        return res;
-    }
-};
- 
 pub const Constant = union(enum) {
     pub const Ptr = defines.Offset;
     pub const List = std.MultiArrayList(Constant).Slice;
@@ -271,12 +110,15 @@ pub const Function = struct {
 
 const JIR = @This();
 
+strings: [][]const u8,
 types: Typechecker.TypeTable.Slice,
+typeNames: TypeNameMap,
 constants: Constant.List,
 functions: Function.List,
 nodes: Node.List.Slice,
 keyNodes: []const Ptr,
 data: []const u32,
+allocator: Allocator = undefined,
 
 pub fn dump(self: *const JIR) void {
     common.log.debug("Registered types:", .{});
@@ -290,3 +132,155 @@ pub fn dump(self: *const JIR) void {
         common.log.debug("{s}", .{@tagName(node.type)});
     }
 }
+
+pub fn codegen(self: *JIR, context: *Context) Error!void {
+    self.allocator = context.arena.allocator();
+
+    std.Io.Dir.cwd().createDir(context.io, "build", .default_dir) catch |err| switch (err) {
+        CreateDirError.PathAlreadyExists => { },
+        else => {
+            common.log.err("Failed to create output directory.", .{});
+            return Error.IOError;
+        },
+    };
+
+    const buildDir = std.Io.Dir.cwd().openDir(context.io, "build", .{})
+        catch return Error.IOError;
+
+    while (true) {
+        buildDir.createDir(context.io, "c/", .default_dir) catch |err| switch (err) {
+            CreateDirError.PathAlreadyExists => {
+                buildDir.deleteTree(context.io, "c")
+                    catch return Error.IOError;
+                continue;
+            },
+            else => {
+                common.log.err("Failed to create output directory.", .{});
+                return Error.IOError;
+            },
+        };
+        break;
+    }
+
+    const cOut = buildDir.openDir(context.io, "c", .{})
+        catch return Error.IOError;
+
+    var wbuf: [256]u8 = undefined;
+
+    var forwardDeclFile = cOut.createFile(context.io, "forward_decl.h", .{ })
+        catch return Error.IOError;
+    defer forwardDeclFile.close(context.io);
+    var forwardDeclWriter = forwardDeclFile.writer(context.io, &wbuf);
+    try self.forwardDecls(&forwardDeclWriter.interface);
+
+    var sourceFile = cOut.createFile(context.io, "source.c", .{ })
+        catch return Error.IOError;
+    defer sourceFile.close(context.io);
+    var sourceWriter = sourceFile.writer(context.io, &wbuf);
+    try self.sourceGen(&sourceWriter.interface);
+}
+
+fn forwardDecls(self: *JIR, out: *std.Io.Writer) Error!void {
+    out.print(
+    \\/*
+    \\ * This file has been automatically generated
+    \\ * by the JASL compiler.
+    \\ */
+    \\
+    \\#ifndef JASL_CODEGEN_C_FORWARD_DECLS_H
+    \\#define JASL_CODEGEN_C_FORWARD_DECLS_H
+    \\
+    \\#include <stdint.h>
+    \\
+    \\typedef uint8_t bool;
+    \\
+    \\
+    , .{}) catch return Error.IOError;
+    defer { 
+        out.print("\n#endif /* JASL_CODEGEN_C_FORWARD_DECLS_H */\n" , .{}) catch common.log.err("Failed to end header.", .{});
+        out.flush() catch common.log.err("Failed to flush forward declarations.", .{});
+    }
+
+    for (0..self.keyNodes.len) |i| {
+        try self.discoverFunctionsAndTypes(out, self.keyNodes[self.keyNodes.len - i - 1]);
+    }
+}
+
+fn discoverFunctionsAndTypes(self: *JIR, out: *std.Io.Writer, nodePtr: Ptr) Error!void {
+    const node = self.nodes.get(nodePtr);
+    switch (node.type) {
+        .FunctionDef => {
+            const typeID = self.functions.get(self.data[node.value + 1]).signature;
+            const typeInfo = self.types.get(typeID).Function;
+
+            var args: []const u8 = "";
+            for (0.., typeInfo.argTypes) |i, typePtr| {
+                args = std.fmt.allocPrint(self.allocator, "{s}{s}{s}{s}", .{
+                    args,
+                    self.getCName(typePtr),
+                    if (i == typeInfo.argTypes.len - 1) "" else ",",
+                    if (i == typeInfo.argTypes.len - 1) "" else " ",
+                }) catch return Error.AllocatorFailure;
+            }
+
+            // @Beware terribly unsafe, but I can guarantee the strings
+            // live in heap, so no worries.
+            _ = std.mem.replace(u8, self.strings[self.data[node.value]], "::", "__", @constCast(self.strings[self.data[node.value]].ptr)[0..self.strings[self.data[node.value]].len]);
+            out.print("{s} {s}({s});\n", .{
+                self.getCName(typeInfo.returnType),
+                self.strings[self.data[node.value]],
+                args
+            }) catch return Error.IOError;
+        },
+        .TypeDef => {
+        },
+        .Scope => { },
+        else => { },
+    }
+}
+
+fn sourceGen(_: *JIR, out: *std.Io.Writer) Error!void {
+    out.print(
+    \\/*
+    \\ * This file has been automatically generated
+    \\ * by the JASL compiler.
+    \\ */
+    \\
+    \\#include "forward_decl.h"
+    , .{}) catch return Error.IOError;
+    defer out.flush() catch {
+        common.log.err("Failed to flush source file.", .{});
+    };
+}
+
+fn typeName(self: *JIR, typeID: TypeID) []const u8 {
+    return self.strings[self.typeNames.get(typeID) orelse return "<UNKNOWN>"];
+}
+
+fn getCName(self: *JIR, typeID: TypeID) []const u8 {
+    inline for (builtins) |builtin| {
+        if (builtin.name == typeID) {
+            return builtin.cname;
+        }
+    }
+
+    _ = self;
+    unreachable;
+}
+
+pub const builtins = [_]struct {
+    name: TypeID,
+    cname: []const u8,
+}{
+    .{ .name = Comptime.Builtin.Type("u32"), .cname = "uint32_t" },
+    .{ .name = Comptime.Builtin.Type("i32"), .cname = "int32_t" },
+    .{ .name = Comptime.Builtin.Type("u8"), .cname = "uint8_t" },
+    .{ .name = Comptime.Builtin.Type("i8"), .cname = "int8_t" },
+    .{ .name = Comptime.Builtin.Type("bool"), .cname = "bool" },
+    .{ .name = Comptime.Builtin.Type("float"), .cname = "float" },
+    .{ .name = Comptime.Builtin.Type("void"), .cname = "void" },
+    .{ .name = Comptime.Builtin.Type("comptime_int"), .cname = "uint32_t" },
+    .{ .name = Comptime.Builtin.Type("comptime_float"), .cname = "float" },
+    .{ .name = Comptime.Builtin.Type("noreturn"), .cname = "void" },
+};
+
