@@ -1,24 +1,6 @@
+import std::math;
+
 let main = fn () -> i32 {
+    let a: float = std::math::Epsilon;
     return 0;
 };
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

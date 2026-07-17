@@ -53,6 +53,7 @@ pub fn build(self: *const Builder, allocator: Allocator, typechecker: *const Typ
         .nodes = try collections.deepCopy(self.nodes.slice(), allocator),
         .keyNodes = try collections.deepCopy(self.keyNodes.items, allocator),
         .data = try collections.deepCopy(self.data.items, allocator),
+        .context = typechecker.context,
     };
 }
 
@@ -82,37 +83,70 @@ pub fn addKeyNode(self: *Builder, node: JIR.Ptr) Error!void {
     return self.keyNodes.append(self.allocator, node);
 }
 
-pub fn variableDef(self: *Builder, typeID: TypeID, initializer: JIR.Ptr) Error!void {
-    const start: u32 = @intCast(self.data.items.len);
-    self.data.append(self.allocator, typeID) catch return Error.AllocatorFailure;
+pub fn variableDef(
+    self: *Builder,
+    topLevel: bool,
+    typeID: TypeID,
+    module: defines.ModulePtr,
+    initializer: JIR.Ptr
+) Error!JIR.Ptr {
     const initializerExpression = self.nodes.get(initializer).value;
     const isUndefined = self.constants.get(initializerExpression) == .Undefined;
-    self.data.append(self.allocator, @intFromBool(isUndefined)) catch return Error.AllocatorFailure;
 
+    const start: u32 = @intCast(self.data.items.len);
+    self.data.append(self.allocator, @intFromBool(topLevel)) catch return Error.AllocatorFailure;
+    self.data.append(self.allocator, typeID) catch return Error.AllocatorFailure;
+    self.data.append(self.allocator, module) catch return Error.AllocatorFailure;
+    self.data.append(self.allocator, @intFromBool(isUndefined)) catch return Error.AllocatorFailure;
     if (!isUndefined) {
         self.data.append(self.allocator, initializer) catch return Error.AllocatorFailure;
     }
 
-    return self.nodes.append(self.allocator, .{
+    const res = try self.nodes.addOne(self.allocator);
+    self.nodes.set(res, .{
         .type = .VariableDef,
         .value = start,
     });
+    try self.addKeyNode(res);
+    return res;
 }
 
 pub inline fn functionDef(self: *Builder, name: defines.StringPtr, function: JIR.Function.Ptr) Error!void {
     const node = try self.commonBinary(.FunctionDef, name, function);
     return self.addKeyNode(node);
 }
-pub inline fn typeDef(self: *Builder, typeID: TypeID) Error!void { _ = try self.commonSingle(.TypeDef, typeID); }
+
+pub inline fn typeDef(self: *Builder, typeID: TypeID) Error!JIR.Ptr {
+    const res = try self.commonSingle(.TypeDef, typeID);
+    try self.addKeyNode(res);
+    return res;
+}
+
+pub inline fn @"return"(self: *Builder, expr: JIR.Ptr) Error!JIR.Ptr {
+    const res = try self.commonSingle(.Return, expr);
+    try self.addKeyNode(res);
+    return res;
+}
+
+pub inline fn assignment(self: *Builder, decl: StringPtr, expr: JIR.Ptr) Error!JIR.Ptr {
+    const res = try self.commonBinary(.Assignment, decl, expr);
+    try self.addKeyNode(res);
+    return res;
+}
+
+pub inline fn store(self: *Builder, decl: JIR.Ptr, expr: JIR.Ptr) Error!JIR.Ptr {
+    const res = try self.commonBinary(.Store, decl, expr);
+    try self.addKeyNode(res);
+    return res;
+}
 
 pub inline fn jump(self: *Builder, lbl: StringPtr) Error!JIR.Ptr { return self.commonSingle(.Jump, lbl); }
 pub inline fn cjump(self: *Builder, lbl: StringPtr) Error!JIR.Ptr { return self.commonSingle(.JumpIf, lbl); }
 pub inline fn exit(self: *Builder) Error!JIR.Ptr { return self.commonSingle(.Scope, 0); }
 pub inline fn scope(self: *Builder, name: StringPtr) Error!JIR.Ptr { return self.commonSingle(.Scope, name); }
-pub inline fn @"return"(self: *Builder, expr: JIR.Ptr) Error!JIR.Ptr { return self.commonSingle(.Return, expr); }
+
 pub inline fn identifier(self: *Builder, decl: StringPtr) Error!JIR.Ptr { return self.commonSingle(.Identifier, decl); }
-pub inline fn assignment(self: *Builder, decl: StringPtr, expr: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.Assignment, decl, expr); }
-pub inline fn store(self: *Builder, decl: JIR.Ptr, expr: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.Store, decl, expr); }
+
 pub inline fn reference(self: *Builder, decl: StringPtr) Error!JIR.Ptr { return self.commonSingle(.Reference, decl); }
 pub inline fn dereference(self: *Builder, expr: JIR.Ptr) Error!JIR.Ptr { return self.commonSingle(.Dereference, expr); }
 pub inline fn call(self: *Builder, expr: JIR.Ptr, args: []const JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.Call, expr, args); }

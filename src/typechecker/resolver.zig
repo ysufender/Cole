@@ -46,6 +46,7 @@ pub const Declaration = struct {
     };
 
     scope: defines.ScopePtr,
+    name: defines.ModulePtr,
     token: defines.TokenPtr,
     node: defines.StatementPtr,
     type: defines.ExpressionPtr,
@@ -91,7 +92,7 @@ pub fn LookupContext(comptime T: type) type {
 
 pub const Resolution = struct {
     resolutionMap: ResolutionMap,
-    declarations: DeclarationList.Slice,
+    declarations: DeclarationList,
     lookup: LookupMap,
     scopes: ScopeList.Slice,
 
@@ -165,6 +166,7 @@ pub fn init(gpa: Allocator, context: *Context, modules: *const ModuleList) Error
     for (builtins, 0..) |b, i| {
         const decl = try decls.addOne(allocator);
         decls.set(decl, .{
+            .name = 0,
             .kind = .Builtin,
             .scope = builtin,
             .public = true,
@@ -196,6 +198,7 @@ pub fn init(gpa: Allocator, context: *Context, modules: *const ModuleList) Error
 
             const decl = try decls.addOne(allocator);
             decls.set(decl, .{
+                .name = 0,
                 .scope = scope,
                 .kind = .Variable,
                 .public = symbol.public,
@@ -254,7 +257,7 @@ pub fn resolve(self: *Resolver, allocator: Allocator) Error!Resolution {
 
     return collections.deepCopy(Resolution{
         .resolutionMap = self.resolved,
-        .declarations = self.decls.slice(),
+        .declarations = self.decls.mutableSlice(),
         .scopes = self.scopes.slice(),
         .lookup = self.lookup,
     }, allocator);
@@ -372,6 +375,7 @@ fn resolveStatement(self: *Resolver, stmt: defines.StatementPtr, topLevel: bool)
                 else try self.decls.addOne(allocator);
 
             self.decls.set(decl, .{
+                .name = self.dataIndex(),
                 .kind = .Variable,
                 .scope = self.currentScope,
                 .public = signature.public,
@@ -415,6 +419,7 @@ fn resolveStatement(self: *Resolver, stmt: defines.StatementPtr, topLevel: bool)
 
             const decl = try self.decls.addOne(allocator);
             self.decls.set(decl, .{
+                .name = self.dataIndex(),
                 .kind = .Namespace,
                 .scope = self.currentScope,
                 .public = false,
@@ -718,6 +723,7 @@ fn resolveExpression(self: *Resolver, exprPtr: defines.ExpressionPtr) Error!void
 
                 const decl = try self.decls.addOne(allocator);
                 self.decls.set(decl, .{
+                    .name = self.dataIndex(),
                     .kind = .Parameter,
                     .scope = self.currentScope,
                     .public = false,
@@ -918,6 +924,7 @@ fn resolveSignature(self: *Resolver, signaturePtr: defines.SignaturePtr, comptim
 
                 const decl = try self.decls.addOne(allocator);
                 self.decls.set(decl, .{
+                    .name = self.dataIndex(),
                     .kind = t,
                     .scope = self.currentScope,
                     .public = field.public,
@@ -990,6 +997,7 @@ fn resolveSwitch(
 
             const decl = try self.decls.addOne(allocator);
             self.decls.set(decl, .{
+                .name = self.dataIndex(),
                 .scope = self.currentScope,
                 .kind = .Capture,
                 .public = false,
@@ -1035,6 +1043,7 @@ fn prepassScope(self: *Resolver, declarations: defines.Range) Error!void {
 
         const decl = try self.decls.addOne(allocator);
         self.decls.set(decl, .{
+            .name = self.dataIndex(),
             .kind = .Variable,
             .scope = self.currentScope,
             .public = false,
@@ -1083,6 +1092,7 @@ fn handleScopeDefs(self: *Resolver, declarations: defines.Range) Error!void {
 
         const decl = try self.look(field.name);
         self.decls.set(decl, .{
+            .name = self.dataIndex(),
             .kind = .Variable,
             .scope = self.currentScope,
             .public = field.public,

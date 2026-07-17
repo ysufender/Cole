@@ -83,7 +83,7 @@ const Typechecker = @This();
 arena: Arena,
 context: *Context,
 modules: *const ModuleList,
-symbols: *const Resolver.Resolution,
+symbols: *Resolver.Resolution,
 
 typeTable: TypeTable,
 typeMap: TypeMap,
@@ -106,7 +106,7 @@ pub fn init(
     gpa: Allocator,
     context: *Context,
     modules: *const ModuleList,
-    symbolTable: *const Resolver.Resolution
+    symbolTable: *Resolver.Resolution
 ) Error!Typechecker {
     var arena = Arena.init(gpa);
     const allocator = arena.allocator();
@@ -333,10 +333,6 @@ fn typecheckVarDefStatement(self: *Typechecker, extraPtr: defines.OpaquePtr) Err
     const signature = ast.signatures.get(ast.extra[extraPtr]);
     const expected = try self.expectType(signature.type);
     _ = try self.typecheckVariableDef(signature.name, expected, false, ast.extra[extraPtr + 1]);
-
-    // @Incomplete TODO: Set the decl's resolved type, to do that we need to get the decl
-    // and to do that we need to know the scope, or somehow store some metadata for per
-    // variable definition.
 }
 
 fn typecheckDefer(self: *Typechecker, stmtPtr: defines.StatementPtr) Error!void {
@@ -1460,7 +1456,7 @@ pub fn typecheckIndexing(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!
 }
 
 pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected: ?TypeID) Error!TypeID {
-    const decl = self.symbols.declarations.get(declPtr);
+    var decl = self.symbols.declarations.get(declPtr);
 
     if (decl.kind == .Builtin) {
         return if (Comptime.Builtin.isBuiltinType(decl.type)) Comptime.Builtin.Type("type")
@@ -1499,6 +1495,23 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
     self.callstack.push(declPtr);
     defer _ = self.callstack.pop();
 
+    self.symbols.declarations.set(declPtr, .{
+        .type = decl.type,
+        .scope = decl.scope,
+        .node = decl.node,
+        .kind = decl.kind,
+        .token = decl.token,
+        .topLevel = decl.topLevel,
+        .public = decl.public,
+        .name = try self.builder.internString(std.fmt.allocPrint(
+            self.arena.allocator(),
+            "{s}::{s}", .{
+            self.context.moduleNameMap.items[decl.name],
+            tokens.get(decl.token).lexeme(self.context, self.currentFile)
+        }) catch return Error.AllocatorFailure),
+    });
+    decl = self.symbols.declarations.get(declPtr);
+
     if (isPresent.found_existing) {
         switch (isPresent.value_ptr.status) {
             .Checked =>
@@ -1508,7 +1521,7 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
             .InProgress => {
                 if (!self.getFlag(.CanCycle)) {
                     self.report("Dependency cycle detected. '{s}' depends on itself.", .{
-                        tokens.get(decl.token).lexeme(self.context, self.currentFile),
+                        self.builder.getInternedString(decl.name),
                     });
                 }
                 return Error.DependencyCycle;
@@ -1542,8 +1555,7 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
         .result = declType,
     };
     
-    try self.lowerer.declaration(declPtr, &decl);
-
+    _ = try self.lowerer.declaration(declPtr, &decl);
     return declType;
 }
 
@@ -2663,7 +2675,7 @@ pub fn sizeOf(self: *const Typechecker, of: TypeID) u32 {
         .Bool => @sizeOf(bool),
         .Void, .Noreturn, .EnumLiteral, .Type, .Any => 0,
         .Array => |arr| arr.len * self.sizeOf(arr.child),
-        .ComptimeInt => @sizeOf(i64),
+        .ComptimeInt => @sizeOf(i32),
         .Struct => |str| {
             var size: u32 = 0;
             for (str.fields) |field| {

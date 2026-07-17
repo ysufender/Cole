@@ -47,22 +47,26 @@ pub fn declaration(self: *Lowerer, ptr: defines.DeclPtr, decl: *const Declaratio
     const typeID = status.result;
     const typeInfo = self.typechecker.typeTable.get(typeID);
     switch (typeInfo) {
-        .Function => {},
+        .Function => { },
         .Type => {
             const typeDefPtr = self.typechecker.executer.expectType(decl.node)
                 catch return common.debug.ShouldBeImpossible(@src());
             const typeDef = self.typechecker.executer.getValue(typeDefPtr).Type;
+            const info = self.typechecker.typeTable.get(typeDef);
+            if (info == .Union and info.Union.isTagged) {
+                _ = try self.typechecker.builder.typeDef(info.Union.tag);
+            }
             _ = try self.typechecker.builder.typeDef(typeDef);
         },
         else => {
             // @Note Top-level comptimeness is checked in the typechecker.
-            const initializer =
+            const node =
                 if (self.typechecker.executer.attemptEval(decl.node, typeID)) |someVal|
                     try self.typechecker.builder.literal(try self.addConstant(someVal, typeID))
                 else
                     try self.expression(decl.node, typeID);
 
-            try self.typechecker.builder.variableDef(typeID, initializer);
+            _ = try self.typechecker.builder.variableDef(decl.topLevel, typeID, decl.name, node);
         },
     }
 }
@@ -72,15 +76,15 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
     const ofType = self.typechecker.typeTable.get(ofTypePtr);
     return self.typechecker.builder.addConstant(switch (value) {
         .Int => |val| integer: {
-            if (ofType == .ComptimeInt) {
-                self.report(
-                    "Value of type 'comptime_int' can't leak outside the comptime scope "
-                    ++ "without a target integer type. Consider adding a type annotation "
-                    ++ "or an explicit cast.",
-                    .{}
-                );
-                return Error.ExistentialDilemma;
-            }
+            //if (ofType == .ComptimeInt) {
+            //    self.report(
+            //        "Value of type 'comptime_int' can't leak outside the comptime scope "
+            //        ++ "without a target integer type. Consider adding a type annotation "
+            //        ++ "or an explicit cast.",
+            //        .{}
+            //    );
+            //    return Error.ExistentialDilemma;
+            //}
 
             break :integer switch (self.typechecker.sizeOf(ofTypePtr)) {
                 32 => .{ .Integer = if (ofType.Integer.signed) .{
@@ -97,15 +101,15 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
             };
         },
         .Float => |val| float: {
-            if (ofType == .ComptimeFloat) {
-                self.report(
-                    "Value of type 'comptime_float' can't leak outside the comptime scope "
-                    ++ "without a target floating point type. Consider adding a type annotation "
-                    ++ "or an explicit cast.",
-                    .{}
-                );
-                return Error.ExistentialDilemma;
-            }
+            //if (ofType == .ComptimeFloat) {
+            //    self.report(
+            //        "Value of type 'comptime_float' can't leak outside the comptime scope "
+            //        ++ "without a target floating point type. Consider adding a type annotation "
+            //        ++ "or an explicit cast.",
+            //        .{}
+            //    );
+            //    return Error.ExistentialDilemma;
+            //}
 
             break :float .{ .Float = val };
         },
@@ -295,7 +299,6 @@ pub fn statement(self: *Lowerer, statementPtr: defines.StatementPtr) Error!defin
         },
     };
 
-    try self.typechecker.builder.addKeyNode(node.start);
     return node;
 }
 

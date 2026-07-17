@@ -86,7 +86,7 @@ fn innerMain(allocator: std.mem.Allocator, init: std.process.Init) common.Compil
     }
 
     var resolver = try Resolver.init(allocator, &context, &modules);
-    const resolved = try resolver.resolve(allocator);
+    var resolved = try resolver.resolve(allocator);
 
     defer if (common.debug.isDebug and context.settings.hasFlag("--dump-stats")) {
         context.stats();

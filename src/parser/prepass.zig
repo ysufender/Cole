@@ -222,7 +222,7 @@ fn prepassImpl(self: *Prepass, ast: *const Parser.AST, name: []const u8) Error!v
         self.modules.ids.rehash(std.hash_map.StringContext{});
     }
 
-    self.context.registerModule(&file);
+    return self.context.registerModule(&file);
 }
 
 fn prepassImport(

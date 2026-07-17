@@ -8,8 +8,11 @@
 
 #include <stdint.h>
 
-typedef uint8_t bool;
+typedef uint8_t jasl_bool;
 
-int32_t root__main();
+extern float const std__math__Epsilon;
+
+int32_t const root__main();
+
 
 #endif /* JASL_CODEGEN_C_FORWARD_DECLS_H */

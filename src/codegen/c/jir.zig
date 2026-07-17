@@ -110,6 +110,7 @@ pub const Function = struct {
 
 const JIR = @This();
 
+cstrings: std.AutoHashMapUnmanaged(TypeID, []const u8) = undefined,
 strings: [][]const u8,
 types: Typechecker.TypeTable.Slice,
 typeNames: TypeNameMap,
@@ -119,6 +120,7 @@ nodes: Node.List.Slice,
 keyNodes: []const Ptr,
 data: []const u32,
 allocator: Allocator = undefined,
+context: *const Context,
 
 pub fn dump(self: *const JIR) void {
     common.log.debug("Registered types:", .{});
@@ -165,8 +167,9 @@ pub fn codegen(self: *JIR, context: *Context) Error!void {
     const cOut = buildDir.openDir(context.io, "c", .{})
         catch return Error.IOError;
 
-    var wbuf: [256]u8 = undefined;
+    self.cstrings = .empty;
 
+    var wbuf: [256]u8 = undefined;
     var forwardDeclFile = cOut.createFile(context.io, "forward_decl.h", .{ })
         catch return Error.IOError;
     defer forwardDeclFile.close(context.io);
@@ -192,7 +195,7 @@ fn forwardDecls(self: *JIR, out: *std.Io.Writer) Error!void {
     \\
     \\#include <stdint.h>
     \\
-    \\typedef uint8_t bool;
+    \\typedef uint8_t jasl_bool;
     \\
     \\
     , .{}) catch return Error.IOError;
@@ -201,14 +204,23 @@ fn forwardDecls(self: *JIR, out: *std.Io.Writer) Error!void {
         out.flush() catch common.log.err("Failed to flush forward declarations.", .{});
     }
 
-    for (0..self.keyNodes.len) |i| {
-        try self.discoverFunctionsAndTypes(out, self.keyNodes[self.keyNodes.len - i - 1]);
+    for (self.keyNodes) |node| {
+        try self.discoverFunctionsAndTypes(out, node);
     }
 }
 
 fn discoverFunctionsAndTypes(self: *JIR, out: *std.Io.Writer, nodePtr: Ptr) Error!void {
     const node = self.nodes.get(nodePtr);
     switch (node.type) {
+        .VariableDef => if (self.data[node.value] == 1) {
+            const typeID = self.data[node.value + 1];
+            _ = std.mem.replace(u8, self.strings[self.data[node.value + 2]], "::", "__", @constCast(self.strings[self.data[node.value + 2]]));
+            _ = std.mem.replace(u8, self.strings[self.data[node.value + 2]], "$", "_", @constCast(self.strings[self.data[node.value + 2]]));
+            out.print("extern {s} {s};\n\n", .{
+                try self.getCName(typeID),
+                self.strings[self.data[node.value + 2]],
+            }) catch return Error.IOError;
+        },
         .FunctionDef => {
             const typeID = self.functions.get(self.data[node.value + 1]).signature;
             const typeInfo = self.types.get(typeID).Function;
@@ -217,24 +229,93 @@ fn discoverFunctionsAndTypes(self: *JIR, out: *std.Io.Writer, nodePtr: Ptr) Erro
             for (0.., typeInfo.argTypes) |i, typePtr| {
                 args = std.fmt.allocPrint(self.allocator, "{s}{s}{s}{s}", .{
                     args,
-                    self.getCName(typePtr),
+                    try self.getCName(typePtr),
                     if (i == typeInfo.argTypes.len - 1) "" else ",",
                     if (i == typeInfo.argTypes.len - 1) "" else " ",
                 }) catch return Error.AllocatorFailure;
             }
 
-            // @Beware terribly unsafe, but I can guarantee the strings
-            // live in heap, so no worries.
-            _ = std.mem.replace(u8, self.strings[self.data[node.value]], "::", "__", @constCast(self.strings[self.data[node.value]].ptr)[0..self.strings[self.data[node.value]].len]);
-            out.print("{s} {s}({s});\n", .{
-                self.getCName(typeInfo.returnType),
+            _ = std.mem.replace(u8, self.strings[self.data[node.value]], "::", "__", @constCast(self.strings[self.data[node.value]]));
+            _ = std.mem.replace(u8, self.strings[self.data[node.value]], "$", "_", @constCast(self.strings[self.data[node.value]]));
+            out.print("{s} {s}({s});\n\n", .{
+                try self.getCName(typeInfo.returnType),
                 self.strings[self.data[node.value]],
                 args
             }) catch return Error.IOError;
         },
         .TypeDef => {
+            const typeID = node.value;
+            const typeInfo = self.types.get(typeID);
+
+            switch (typeInfo) {
+                .Struct => |str| {
+                    out.print("typedef struct {{\n", .{}) catch return Error.IOError;
+                    for (str.fields) |field| {
+                        out.print("\t{s} {s}_{s};\n", .{
+                            try self.getCName(field.valueType),
+                            if (field.public) "pub" else "priv",
+                            self.strings[field.name],
+                        }) catch return Error.IOError;
+                    }
+                    const name = self.strings[str.name];
+                    _ = std.mem.replace(u8, name, ":", "_", @constCast(name));
+                    _ = std.mem.replace(u8, name, "$", "_", @constCast(name));
+                    out.print("}} {s};\n\n", .{name}) catch return Error.IOError;
+                },
+
+                .Union => |uni|{
+                    if (uni.isTagged) {
+                        out.print("typedef struct {{\n", .{}) catch return Error.IOError;
+                        out.print("\t{s} {s}_{s};\n", .{
+                            try self.getCName(uni.fields[0].valueType),
+                            if (uni.fields[0].public) "pub" else "priv",
+                            self.strings[uni.fields[0].name],
+                        }) catch return Error.IOError;
+                        out.print("\tunion {{\n", .{}) catch return Error.IOError;
+                        for (uni.fields[1..]) |field| {
+                            out.print("\t\t{s} {s};\n", .{
+                                try self.getCName(field.valueType),
+                                self.strings[field.name],
+                            }) catch return Error.IOError;
+                        }
+                        out.print("\t}};\n", .{}) catch return Error.IOError;
+                        const name = self.strings[uni.name];
+                        _ = std.mem.replace(u8, name, ":", "_", @constCast(name));
+                        _ = std.mem.replace(u8, name, "$", "_", @constCast(name));
+                        out.print("}} {s};\n\n", .{name}) catch return Error.IOError;
+                    }
+                    else {
+                        out.print("typedef union {{\n", .{}) catch return Error.IOError;
+                        for (uni.fields) |field| {
+                            out.print("\t{s} {s};\n", .{
+                                try self.getCName(field.valueType),
+                                self.strings[field.name],
+                            }) catch return Error.IOError;
+                        }
+                        const name = self.strings[uni.name];
+                        _ = std.mem.replace(u8, name, ":", "_", @constCast(name));
+                        _ = std.mem.replace(u8, name, "$", "_", @constCast(name));
+                        out.print("}} {s};\n\n", .{name}) catch return Error.IOError;
+                    }
+                },
+
+                .Enum => |enm| {
+                    const name = self.strings[enm.name];
+                    _ = std.mem.replace(u8, name, ":", "_", @constCast(name));
+                    _ = std.mem.replace(u8, name, "$", "_", @constCast(name));
+                    out.print("typedef enum {{\n", .{}) catch return Error.IOError;
+                    for (enm.fields) |field| {
+                        out.print("\t{s}_{s},\n", .{
+                            name,
+                            field,
+                        }) catch return Error.IOError;
+                    }
+                    out.print("}} {s};\n\n", .{name}) catch return Error.IOError;
+                },
+
+                else => return common.debug.ShouldBeImpossible(@src()),
+            }
         },
-        .Scope => { },
         else => { },
     }
 }
@@ -253,34 +334,93 @@ fn sourceGen(_: *JIR, out: *std.Io.Writer) Error!void {
     };
 }
 
-fn typeName(self: *JIR, typeID: TypeID) []const u8 {
-    return self.strings[self.typeNames.get(typeID) orelse return "<UNKNOWN>"];
-}
-
-fn getCName(self: *JIR, typeID: TypeID) []const u8 {
-    inline for (builtins) |builtin| {
-        if (builtin.name == typeID) {
-            return builtin.cname;
-        }
+fn getCName(self: *JIR, typeID: TypeID) Error![]const u8 {
+    if (self.cstrings.get(typeID)) |name| {
+        return name;
     }
 
-    _ = self;
-    unreachable;
+    const typeInfo = self.types.get(typeID);
+    var name: []const u8 = "";
+    switch (typeInfo) {
+        .Type, .Any, .EnumLiteral,
+        .Noreturn, .Void => return common.debug.ShouldBeImpossible(@src()),
+
+        .Bool => |v| name = std.fmt.allocPrint(self.allocator, "jasl_bool{s}", .{
+            if (v) "" else " const"
+        }) catch return Error.AllocatorFailure,
+        .Float => |v| name = std.fmt.allocPrint(self.allocator, "float{s}", .{
+            if (v) "" else " const"
+        }) catch return Error.AllocatorFailure,
+        .ComptimeFloat => name = "float const" ,
+        .ComptimeInt => name = "int32_t const" ,
+        .Integer => |i| name = std.fmt.allocPrint(self.allocator, "{s}int{d}_t const", .{
+            if (i.signed) "" else "u",
+            i.size,
+        }) catch return Error.AllocatorFailure,
+
+        .Union, .Struct, .Enum => {
+            name = self.strings[
+                if (typeInfo == .Struct) typeInfo.Struct.name
+                else if (typeInfo == .Union) typeInfo.Union.name
+                else typeInfo.Enum.name
+            ];
+
+            _ = std.mem.replace(u8, name, ":", "_", @constCast(name));
+            _ = std.mem.replace(u8, name, "$", "_", @constCast(name));
+
+            const mut =
+                if (typeInfo == .Struct) typeInfo.Struct.mutable
+                else if (typeInfo == .Union) typeInfo.Union.mutable
+                else typeInfo.Enum.mutable;
+
+            name = std.fmt.allocPrint(self.allocator, "{s}{s}", .{
+                name,
+                if (mut) "" else " const",
+            }) catch return Error.AllocatorFailure;
+        },
+
+        .Function => |func| {
+            var args: []const u8 = "";
+            for (0.., func.argTypes) |i, typePtr| {
+                args = std.fmt.allocPrint(self.allocator, "{s}{s}{s}{s}", .{
+                    args,
+                    try self.getCName(typePtr),
+                    if (i == func.argTypes.len - 1) "" else ",",
+                    if (i == func.argTypes.len - 1) "" else " ",
+                }) catch return Error.AllocatorFailure;
+            }
+
+            name = std.fmt.allocPrint(self.allocator, "{s}(*)({s})", .{
+                try self.getCName(func.returnType),
+                args
+            }) catch return Error.IOError;
+        },
+
+        .Array => |arr| {
+            name = std.fmt.allocPrint(self.allocator, "Array_{s}_{d}{s}", .{
+                try self.getCName(arr.child),
+                arr.len,
+                if (arr.mutable) "" else " const",
+            }) catch return Error.AllocatorFailure;
+        },
+
+        .Pointer => |ptr| switch (ptr.size) {
+            .Slice => {
+                name = std.fmt.allocPrint(self.allocator, "Slice_{s}{s}", .{
+                    try self.getCName(ptr.child),
+                    if (ptr.mutable) "" else " const",
+                }) catch return Error.AllocatorFailure;
+            },
+            .Single, .C => {
+                name = std.fmt.allocPrint(self.allocator, "{s}*{s}", .{
+                    try self.getCName(ptr.child),
+                    if (ptr.mutable) "" else " const",
+                }) catch return Error.AllocatorFailure;
+            },
+        },
+    }
+
+    self.cstrings.putNoClobber(self.allocator, typeID, name)
+        catch return Error.AllocatorFailure;
+    return name;
 }
-
-pub const builtins = [_]struct {
-    name: TypeID,
-    cname: []const u8,
-}{
-    .{ .name = Comptime.Builtin.Type("u32"), .cname = "uint32_t" },
-    .{ .name = Comptime.Builtin.Type("i32"), .cname = "int32_t" },
-    .{ .name = Comptime.Builtin.Type("u8"), .cname = "uint8_t" },
-    .{ .name = Comptime.Builtin.Type("i8"), .cname = "int8_t" },
-    .{ .name = Comptime.Builtin.Type("bool"), .cname = "bool" },
-    .{ .name = Comptime.Builtin.Type("float"), .cname = "float" },
-    .{ .name = Comptime.Builtin.Type("void"), .cname = "void" },
-    .{ .name = Comptime.Builtin.Type("comptime_int"), .cname = "uint32_t" },
-    .{ .name = Comptime.Builtin.Type("comptime_float"), .cname = "float" },
-    .{ .name = Comptime.Builtin.Type("noreturn"), .cname = "void" },
-};
-
