@@ -1100,10 +1100,11 @@ fn evalEnumType(self: *Comptime, expr: defines.ExpressionPtr) Error!Value.Ptr {
         fields[index] = lexeme;
     }
 
+    const name = try self.generateRandomName(.Enum);
     const newType = TypeInfo{
         .Enum = .{
             .mutable = false,
-            .name = try self.generateRandomName(.Enum),
+            .name = name,
             .fields = fields,
             .definitions = try self.handleScopeDecls(ast, tokens, defRange),
             .scope = self.typechecker.symbols.findDecl(.{
@@ -1153,10 +1154,11 @@ fn evalStructType(self: *Comptime, expr: defines.ExpressionPtr) Error!Value.Ptr 
         };
     }
 
+    const name = try self.generateRandomName(.Struct);
     const newType = TypeInfo{
         .Struct = .{
             .mutable = false,
-            .name = try self.generateRandomName(.Struct),
+            .name = name,
             .fields = fields,
             .definitions = try self.handleScopeDecls(ast, tokens, defRange),
             .scope = self.typechecker.symbols.findDecl(.{
@@ -1259,16 +1261,15 @@ fn evalUnionType(self: *Comptime, expr: defines.ExpressionPtr) Error!Value.Ptr {
         };
     }
 
-    const defs = try self.handleScopeDecls(ast, tokens, defRange);
-
+    const name = try self.generateRandomName(.Union);
     const newType = TypeInfo{
         .Union = .{
             .isTagged = tagged,
             .tag = tag,
             .mutable = false,
-            .name = try self.generateRandomName(.Union),
+            .name = name,
             .fields = fields,
-            .definitions = defs,
+            .definitions = try self.handleScopeDecls(ast, tokens, defRange),
             .scope = self.typechecker.symbols.findDecl(.{
                 .file = self.typechecker.currentFile,
                 .expr = expr,
@@ -1548,9 +1549,11 @@ fn evalScoping(self: *Comptime, expr: defines.ExpressionPtr) Error!Value.Ptr {
     _ = try self.typechecker.typecheckScoping(expr);
     const res = self.getValue(try self.expectType(ast.extra[extraPtr])).Type;
 
-    const member = tokens
-        .get(ast.extra[extraPtr + 1])
-        .lexeme(self.typechecker.context, ast.tokens);
+    const member = std.fmt.allocPrint(self.arena.allocator(),
+        "{s}::{s}", .{
+        try self.typechecker.typeName(self.arena.allocator(), res),
+        tokens.get(ast.extra[extraPtr + 1]).lexeme(self.typechecker.context, ast.tokens),
+    }) catch return Error.AllocatorFailure;
 
     const scope = switch (self.typechecker.typeTable.get(res)) {
         .Enum => |enm| ret: {
@@ -1578,7 +1581,7 @@ fn evalScoping(self: *Comptime, expr: defines.ExpressionPtr) Error!Value.Ptr {
     return self.evalDecl(self.typechecker.symbols.lookup.get(.{
         .scope = scope,
         .name = member,
-    }).?, null);
+    }) orelse return common.debug.ShouldBeImpossible(@src()), null);
 }
 
 fn evalCall(self: *Comptime, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID) Error!Value.Ptr {

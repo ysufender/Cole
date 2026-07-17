@@ -66,7 +66,7 @@ pub fn declaration(self: *Lowerer, ptr: defines.DeclPtr, decl: *const Declaratio
                 else
                     try self.expression(decl.node, typeID);
 
-            _ = try self.typechecker.builder.variableDef(decl.topLevel, typeID, decl.name, node);
+            _ = try self.typechecker.builder.variableDef(decl.topLevel, typeID, decl, node);
         },
     }
 }

@@ -226,7 +226,14 @@ fn typecheckStatementMark(
     // TODO: Special marks, extern and such.
 }
 
-fn typecheckVariableDef(self: *Typechecker, token: defines.TokenPtr, expected: TypeID, topLevel: bool, node: defines.ExpressionPtr) Error!TypeID {
+fn typecheckVariableDef(
+    self: *Typechecker,
+    token: defines.TokenPtr,
+    expected: TypeID,
+    topLevel: bool,
+    parent: ?defines.DeclPtr,
+    node: defines.ExpressionPtr
+) Error!TypeID {
     const initializer =
         if (topLevel or expected == Comptime.Builtin.Type("type"))
             try self.typecheckValue(try self.executer.eval(node, expected), expected)
@@ -264,7 +271,22 @@ fn typecheckVariableDef(self: *Typechecker, token: defines.TokenPtr, expected: T
             const tokens = self.context.getTokens(ast.tokens);
 
             const symName = tokens.get(token).lexeme(self.context, self.currentFile);
-            const namespace = self.modules.modules.get(self.modules.modules.len - self.currentFile - 1).name;
+
+            const namespace =
+                if (parent != null and self.typeTable.get(try self.typecheckDecl(parent.?, null)) == .Type) hasParent: {
+                    const rtypePtr = try self.executer.eval(self.symbols.getDecl(parent.?).node, null);
+                    const rtype = self.executer.getValue(rtypePtr).Type;
+
+                    break :hasParent self.builder.getInternedString(switch (self.typeTable.get(rtype)) {
+                        .Struct => |str| str.name,
+                        .Enum => |enm| enm.name,
+                        .Union => |uni| uni.name,
+                        else => return common.debug.ShouldBeImpossible(@src()),
+                    });
+                }
+                else if (topLevel) self.modules.modules.get(self.modules.modules.len - self.currentFile - 1).name
+                else try self.executer.generateRandomNameString(.Namespace);
+
             const newName = std.fmt.allocPrint(self.arena.allocator(), "{s}::{s}", .{
                 namespace,
                 symName,
@@ -306,6 +328,53 @@ fn typecheckVariableDef(self: *Typechecker, token: defines.TokenPtr, expected: T
 
                 else => unreachable,
             });
+
+            self.typenameMap.put(self.arena.allocator(), newType, new)
+                catch return Error.AllocatorFailure;
+
+            const defs: []Types.FieldInfo = @constCast(switch (self.typeTable.get(newType)) {
+                .Struct => |str| str.definitions,
+                .Enum => |enm| enm.definitions,
+                .Union => |uni| uni.definitions,
+                else => return common.debug.ShouldBeImpossible(@src()),
+            });
+
+            var idx: u32 = 0;
+            while (idx < defs.len) : (idx += 1) {
+                const def = defs[idx];
+
+                const nname = std.fmt.allocPrint(self.arena.allocator(),
+                    "{s}::{s}", .{
+                        newName,
+                        self.builder.getInternedString(def.name),
+                }) catch return Error.AllocatorFailure;
+                defs[idx] = Types.FieldInfo{
+                    .name = try self.builder.internString(nname),
+                    .valueType = def.valueType,
+                    .public = def.public,
+                    .isComptime = def.isComptime,
+                };
+
+                const scope = self.symbols.resolutionMap.get(.{
+                    .file = self.currentFile,
+                    .expr = node,
+                }) orelse return common.debug.ShouldBeImpossible(@src());
+
+                const rres = self.symbols.lookup.fetchRemove(.{
+                    .scope = scope,
+                    .name = self.builder.getInternedString(def.name),
+                }) orelse return common.debug.ShouldBeImpossible(@src());
+
+                self.symbols.lookup.putAssumeCapacityNoClobber(.{
+                    .scope = scope,
+                    .name = nname,
+                }, rres.value);
+
+                assert(self.symbols.lookup.getOrPutAssumeCapacity(.{
+                    .scope = scope,
+                    .name = nname
+                }).found_existing);
+            }
         },
         .Function => {
             const ast = self.context.getAST(self.currentFile);
@@ -332,7 +401,7 @@ fn typecheckVarDefStatement(self: *Typechecker, extraPtr: defines.OpaquePtr) Err
 
     const signature = ast.signatures.get(ast.extra[extraPtr]);
     const expected = try self.expectType(signature.type);
-    _ = try self.typecheckVariableDef(signature.name, expected, false, ast.extra[extraPtr + 1]);
+    _ = try self.typecheckVariableDef(signature.name, expected, false, null, ast.extra[extraPtr + 1]);
 }
 
 fn typecheckDefer(self: *Typechecker, stmtPtr: defines.StatementPtr) Error!void {
@@ -706,9 +775,28 @@ fn typecheckBlock(self: *Typechecker, extraPtr: defines.OpaquePtr, expected: Typ
     }
 }
 
-pub fn typecheckVariableDeclaration(self: *Typechecker, decl: *const Resolver.Declaration) Error!TypeID {
+pub fn typecheckVariableDeclaration(self: *Typechecker, decl: *Resolver.Declaration, ptr: defines.DeclPtr) Error!TypeID {
     const expected = try self.expectType(decl.type);
-    return self.typecheckVariableDef(decl.token, expected, decl.topLevel, decl.node);
+    const res = try self.typecheckVariableDef(decl.token, expected, decl.topLevel, decl.parent, decl.node);
+
+    if (self.typeTable.get(res) == .Type) {
+        const newType = self.executer.getValue(try self.executer.eval(decl.node, expected)).Type;
+        self.symbols.declarations.set(ptr, .{
+            .name = self.typenameMap.get(newType) orelse return common.debug.ShouldBeImpossible(@src()),
+            .parent = decl.parent,
+            .node = decl.node,
+            .type = decl.type,
+            .topLevel = decl.topLevel,
+            .scope = decl.scope,
+            .public = decl.public,
+            .kind = decl.kind,
+            .token = decl.token,
+        });
+
+        decl.* = self.symbols.getDecl(ptr);
+    }
+
+    return res;
 }
 
 pub fn typecheckParameter(self: *Typechecker, decl: *const Resolver.Declaration) Error!TypeID {
@@ -1062,10 +1150,20 @@ pub fn typecheckScoping(self: *Typechecker, expr: defines.ExpressionPtr) Error!T
 
     const extraPtr: defines.OpaquePtr = ast.expressions.items(.value)[expr];
 
-    const lhsTypePtr = try self.expectType(ast.extra[extraPtr]);
-    const lhsType = self.typeTable.get(lhsTypePtr);
+    const lhsTypeID = try self.expectType(ast.extra[extraPtr]);
+    const lhsType = self.typeTable.get(lhsTypeID);
 
-    const member = tokens.get(ast.extra[extraPtr + 1]).lexeme(self.context, self.currentFile);
+    var member = tokens.get(ast.extra[extraPtr + 1]).lexeme(self.context, self.currentFile);
+    member = std.fmt.allocPrint(self.arena.allocator(),
+        "{s}::{s}", .{
+            self.builder.getInternedString(switch (lhsType) {
+                .Struct => |str| str.name,
+                .Union => |str| str.name,
+                .Enum => |str| str.name,
+                else => return common.debug.NotImplemented(@src()),
+            }),
+            member
+    }) catch return Error.AllocatorFailure;
 
     var defs: []const Types.FieldInfo = undefined;
     var scope: defines.ScopePtr = undefined;
@@ -1073,7 +1171,7 @@ pub fn typecheckScoping(self: *Typechecker, expr: defines.ExpressionPtr) Error!T
         .Enum => |enm| {
             for (enm.fields) |field| {
                 if (std.mem.eql(u8, field, member)) {
-                    return lhsTypePtr;
+                    return lhsTypeID;
                 }
             }
 
@@ -1094,11 +1192,10 @@ pub fn typecheckScoping(self: *Typechecker, expr: defines.ExpressionPtr) Error!T
     for (defs) |def| {
         if (def.name == try self.builder.internString(member)) {
             if (def.public or self.symbols.canAccess(self.currentScope, scope)) {
-                return self.discoverScopeDef(lhsTypePtr, &def, scope);
+                return self.discoverScopeDef(lhsTypeID, &def, scope);
             }
 
-            self.report("'{s}::{s}' is inaccessible due to its visibility level.", .{
-                try self.typeName(self.arena.allocator(), lhsTypePtr),
+            self.report("'{s}' is inaccessible due to its visibility level.", .{
                 member,
             });
             return Error.AccessSpecifierMismatch;
@@ -1107,7 +1204,7 @@ pub fn typecheckScoping(self: *Typechecker, expr: defines.ExpressionPtr) Error!T
 
     self.report("Couldn't find definition '{s}' in type '{s}'.", .{
         member,
-        try self.typeName(self.arena.allocator(), lhsTypePtr),
+        try self.typeName(self.arena.allocator(), lhsTypeID),
     });
 
     return Error.MissingDefinition;
@@ -1121,7 +1218,7 @@ pub fn discoverScopeDef(self: *Typechecker, from: TypeID, member: *const Types.F
     const decl = self.symbols.lookup.get(.{
         .scope = scope,
         .name = self.builder.getInternedString(member.name),
-    }).?;
+    }) orelse return common.debug.ShouldBeImpossible(@src());
 
     const discoveredType = try self.typecheckDecl(decl, null);
     const memberIndex = try self.definitionIndex(from, member.name);
@@ -1495,23 +1592,6 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
     self.callstack.push(declPtr);
     defer _ = self.callstack.pop();
 
-    self.symbols.declarations.set(declPtr, .{
-        .type = decl.type,
-        .scope = decl.scope,
-        .node = decl.node,
-        .kind = decl.kind,
-        .token = decl.token,
-        .topLevel = decl.topLevel,
-        .public = decl.public,
-        .name = try self.builder.internString(std.fmt.allocPrint(
-            self.arena.allocator(),
-            "{s}::{s}", .{
-            self.context.moduleNameMap.items[decl.name],
-            tokens.get(decl.token).lexeme(self.context, self.currentFile)
-        }) catch return Error.AllocatorFailure),
-    });
-    decl = self.symbols.declarations.get(declPtr);
-
     if (isPresent.found_existing) {
         switch (isPresent.value_ptr.status) {
             .Checked =>
@@ -1530,6 +1610,39 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
         }
     }
 
+    self.symbols.declarations.set(declPtr, .{
+        .type = decl.type,
+        .scope = decl.scope,
+        .node = decl.node,
+        .kind = decl.kind,
+        .token = decl.token,
+        .topLevel = decl.topLevel,
+        .public = decl.public,
+        .parent = decl.parent,
+        .name =
+            try self.builder.internString(
+                if (decl.topLevel)
+                    std.fmt.allocPrint(
+                        self.arena.allocator(),
+                        "{s}::{s}", .{
+                        if (decl.parent != null and self.typeTable.get(try self.typecheckDecl(decl.parent.?, null)) == .Type) hasParent: {
+                            const rtypePtr = try self.executer.eval(self.symbols.getDecl(decl.parent.?).node, null);
+                            const rtype = self.executer.getValue(rtypePtr).Type;
+
+                            break :hasParent self.builder.getInternedString(switch (self.typeTable.get(rtype)) {
+                                .Struct => |str| str.name,
+                                .Enum => |enm| enm.name,
+                                .Union => |uni| uni.name,
+                                else => return common.debug.ShouldBeImpossible(@src()),
+                            });
+                        }
+                        else self.context.moduleNameMap.items[decl.name],
+                        tokens.get(decl.token).lexeme(self.context, self.currentFile)
+                    }) catch return Error.AllocatorFailure
+                else tokens.get(decl.token).lexeme(self.context, self.currentFile)
+            )});
+    decl = self.symbols.declarations.get(declPtr);
+
     isPresent.value_ptr.* = .{
         .status = .InProgress,
         .result = 0,
@@ -1537,7 +1650,7 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
     errdefer isPresent.value_ptr.status = .NotChecked;
 
     const declType = try switch (decl.kind) {
-        .Variable => self.typecheckVariableDeclaration(&decl),
+        .Variable => self.typecheckVariableDeclaration(&decl, declPtr),
         .Namespace => {
             self.report("Operations on namespaces are not allowed.", .{});
             return Error.NamespaceAsValue;

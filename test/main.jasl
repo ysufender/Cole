@@ -1,6 +1,14 @@
 import std::math;
 
+let Some = struct {
+    pub let Other = struct {
+        pub let Mother = struct {
+            pub let def: u32 = 0;
+        };
+    };
+};
+
 let main = fn () -> i32 {
-    let a: float = std::math::Epsilon;
+    let b = Some::Other::Mother::def;
     return 0;
 };

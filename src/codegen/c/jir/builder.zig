@@ -11,6 +11,7 @@ const Allocator = std.mem.Allocator;
 pub const InternTable = std.array_hash_map.String(void);
 const Error = common.CompilerError;
 const TypeID = Types.TypeID;
+const Declaration = @import("../../../typechecker/resolver.zig").Declaration;
 
 pub const StringPtr = defines.Offset;
 
@@ -87,8 +88,8 @@ pub fn variableDef(
     self: *Builder,
     topLevel: bool,
     typeID: TypeID,
-    module: defines.ModulePtr,
-    initializer: JIR.Ptr
+    decl: *const Declaration,
+    initializer: JIR.Ptr,
 ) Error!JIR.Ptr {
     const initializerExpression = self.nodes.get(initializer).value;
     const isUndefined = self.constants.get(initializerExpression) == .Undefined;
@@ -96,7 +97,7 @@ pub fn variableDef(
     const start: u32 = @intCast(self.data.items.len);
     self.data.append(self.allocator, @intFromBool(topLevel)) catch return Error.AllocatorFailure;
     self.data.append(self.allocator, typeID) catch return Error.AllocatorFailure;
-    self.data.append(self.allocator, module) catch return Error.AllocatorFailure;
+    self.data.append(self.allocator, decl.name) catch return Error.AllocatorFailure;
     self.data.append(self.allocator, @intFromBool(isUndefined)) catch return Error.AllocatorFailure;
     if (!isUndefined) {
         self.data.append(self.allocator, initializer) catch return Error.AllocatorFailure;

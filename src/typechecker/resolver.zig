@@ -51,6 +51,7 @@ pub const Declaration = struct {
     node: defines.StatementPtr,
     type: defines.ExpressionPtr,
     topLevel: bool,
+    parent: ?defines.DeclPtr = null,
     kind: Kind,
     public: bool,
 };
@@ -139,6 +140,7 @@ resolved: ResolutionMap,
 currentScope: defines.ScopePtr,
 modules: *const ModuleList,
 lastToken: defines.TokenPtr,
+lastDecl: ?defines.DeclPtr = null,
 
 pub fn init(gpa: Allocator, context: *Context, modules: *const ModuleList) Error!Resolver {
     var arena = Arena.init(gpa);
@@ -300,6 +302,9 @@ fn resolveModule(self: *Resolver) Error!void {
 }
 
 fn resolveStatement(self: *Resolver, stmt: defines.StatementPtr, topLevel: bool) Error!void {
+    const last = self.lastDecl;
+    defer self.lastDecl = last;
+
     const allocator = self.arena.allocator();
     const ast = self.context.getAST(self.dataIndex());
     const tokens = self.context.getTokens(ast.tokens);
@@ -384,6 +389,8 @@ fn resolveStatement(self: *Resolver, stmt: defines.StatementPtr, topLevel: bool)
                 .type = signature.type,
                 .topLevel = topLevel,
             });
+
+            self.lastDecl = decl;
 
             if (topLevel) {
                 return self.resolveExpression(initializer);
@@ -1086,6 +1093,8 @@ fn handleScopeDefs(self: *Resolver, declarations: defines.Range) Error!void {
         const field = ast.signatures.get(signature);
         self.lastToken = field.name;
 
+        const prev = self.lastDecl;
+
         if (field.type != 0) {
             try self.resolveExpression(field.type);
         }
@@ -1100,8 +1109,11 @@ fn handleScopeDefs(self: *Resolver, declarations: defines.Range) Error!void {
             .node = initializer,
             .type = field.type,
             .topLevel = true,
+            .parent = self.lastDecl,
         });
-        
+
+        self.lastDecl = decl;
+        defer self.lastDecl = prev;
 
         try self.resolveExpression(initializer);
     }
