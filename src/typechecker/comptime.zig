@@ -25,6 +25,7 @@ const Cache = collections.HashMap(Resolver.ResolutionKey, Value.Ptr);
 const Memory = std.ArrayList(Value);
 
 pub const Flags = enum(u3) {
+    ComptimeAllowed = 1,
     LValue = 2,
 
     pub fn flag(flagToGet: Flags) u3 {
@@ -134,6 +135,10 @@ pub fn init(typechecker: *Typechecker, gpa: Allocator) Error!Comptime {
 }
 
 pub fn attemptEval(self: *Comptime, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeID) ?Value.Ptr {
+    if (!self.getFlag(.ComptimeAllowed)) {
+        return null;
+    }
+
     const prev = self.typechecker.setFlag(.AttemptingEval, true);
     defer _ = self.typechecker.setFlag(.AttemptingEval, prev);
     return self.eval(exprPtr, maybeExpected) catch null;

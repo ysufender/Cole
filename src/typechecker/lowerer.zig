@@ -89,6 +89,9 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
             } else .{
                 .u8 = @intCast(val),
             }},
+            1 => .{ .Integer = .{
+                .u8 = @intFromBool(ofType.Bool),
+            } },
             else => |t| {
                 common.log.err("Integer with size: {d}", .{t});
                 return common.debug.ShouldBeImpossible(@src());
@@ -264,7 +267,7 @@ pub fn statement(self: *Lowerer, statementPtr: defines.StatementPtr) Error!defin
     const node: defines.Range = switch (stmt.type) {
         .Block => try self.block(stmt.value),
         .Expression =>
-            if (ast.expressions.items(.type)[stmt.value] == .Assignment) return common.debug.NotImplemented(@src())
+            if (ast.expressions.items(.type)[stmt.value] == .Assignment) try self.assignment(ast.expressions.items(.value)[stmt.value])
             else try self.expressionStmt(stmt.value),
         .Conditional => try self.conditional(stmt.value, ast),
         .While => try self.loop(.While, stmt.value, ast),
@@ -295,6 +298,25 @@ pub fn statement(self: *Lowerer, statementPtr: defines.StatementPtr) Error!defin
     };
 
     return node;
+}
+
+fn assignment(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!defines.Range {
+    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+
+    const vexpr = ast.extra[extraPtr];
+    const rexpr = ast.extra[extraPtr + 1];
+    const vt = try self.typechecker.typecheckExpression(ast.extra[extraPtr], null);
+
+    const prev = self.typechecker.executer.setFlag(.ComptimeAllowed, false);
+    const expr = try self.expression(vexpr, vt);
+    _ = self.typechecker.executer.setFlag(.ComptimeAllowed, prev);
+    const rhs = try self.expression(rexpr, vt);
+
+    const res = try self.typechecker.builder.assignment(expr, rhs);
+    return .{
+        .start = res,
+        .end = res + 1,
+    };
 }
 
 fn variableDef(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!defines.Range {
@@ -464,17 +486,21 @@ fn conditional(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.A
     const finallyLabel = try self.typechecker.executer.generateRandomName(.Finally);
 
     const cnd = try self.expression(conditionExpr, Comptime.Builtin.Type("bool"));
-    const start = try self.typechecker.builder.cjump(elseLabel, cnd);
-    const end = blk: {
 
+    const maybeElse =
+        if (ast.extra[extraPtr + 2] == 1) ast.extra[extraPtr + 3]
+        else null;
+
+    const start = try self.typechecker.builder.cjump(
+        if (maybeElse) |_| elseLabel else finallyLabel,
+        cnd
+    );
+
+    const end = blk: {
         const body = ast.extra[extraPtr + 1];
         _ = try self.statement(body);
 
         _ = try self.typechecker.builder.jump(finallyLabel);
-
-        const maybeElse =
-            if (ast.extra[extraPtr + 2] == 1) ast.extra[extraPtr + 3]
-            else null;
 
         if (maybeElse) |elseBranch| {
             _ = try self.typechecker.builder.label(elseLabel);
@@ -501,8 +527,8 @@ fn expressionStmt(self: *Lowerer, expr: defines.ExpressionPtr) Error!defines.Ran
 }
 
 fn @"return"(self: *Lowerer, expr: JIR.Ptr) Error!defines.Range {
-    const start = try self.typechecker.builder.@"return"(expr);
     const end = try self.unwindDefers(self.scopes.index);
+    const start = try self.typechecker.builder.@"return"(expr);
     return .{
         .start = start,
         .end = if (end) |er| er.end else start + 1,
@@ -523,18 +549,8 @@ fn block(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!defines.Range {
         try self.typechecker.executer.generateRandomName(.Block),
     );
 
-    var alreadyDeferred = false;
     for (statements.start..statements.end) |stmt| {
         _ = try self.statement(ast.extra[@intCast(stmt)]);
-
-        if (stmt != statements.end - 1) {
-            continue;
-        }
-
-        alreadyDeferred = switch (ast.statements.items(.type)[ast.extra[stmt]]) {
-            .Return, .Continue, .Break => true,
-            else => false,
-        };
     }
 
     const deferCount = self.scopes.pop() orelse 0;
@@ -542,7 +558,7 @@ fn block(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!defines.Range {
         const stmtPtr = self.defers.pop()
             orelse return common.debug.ShouldBeImpossible(@src());
 
-        if (!alreadyDeferred) {
+        if (!self.typechecker.getFlag(.CoveredAllPaths)) {
             _ = try self.statement(stmtPtr);
         }
     }
@@ -593,13 +609,9 @@ pub fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID
 
         .Binary => self.binary(expr.value, ofType),
         .Unary => self.unary(expr.value, ofType),
-
         .Conditional => self.conditionalExpr(expr.value, ofType),
-
         .Dot => self.dot(expr.value),
-
         .Indexing => self.indexing(expr.value),
-
         .ExpressionList => self.expressionList(expr.value),
 
         .Switch, .Call, .Slicing => |t| {
@@ -620,12 +632,12 @@ fn expressionList(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     var res: ?defines.Range = null;
 
     for (exprs.start..exprs.end) |exprPtr| {
-        const expr = try self.expression(@intCast(exprPtr), try self.typechecker.typecheckExpression(@intCast(exprPtr), null));
+        const expr = try self.expression(ast.extra[@intCast(exprPtr)], try self.typechecker.typecheckExpression(ast.extra[@intCast(exprPtr)], null));
 
         res =
             if (res) |rr| .{
                 .start = rr.start,
-                .end = expr,
+                .end = expr + 1,
             }
             else .{
                 .start = expr,

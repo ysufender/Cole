@@ -131,13 +131,8 @@ pub inline fn @"return"(self: *Builder, expr: JIR.Ptr) Error!JIR.Ptr {
     return res;
 }
 
-pub inline fn assignment(self: *Builder, decl: StringPtr, expr: JIR.Ptr) Error!JIR.Ptr {
+pub inline fn assignment(self: *Builder, decl: JIR.Ptr, expr: JIR.Ptr) Error!JIR.Ptr {
     const res = try self.commonBinary(.Assignment, decl, expr);
-    return res;
-}
-
-pub inline fn store(self: *Builder, decl: JIR.Ptr, expr: JIR.Ptr) Error!JIR.Ptr {
-    const res = try self.commonBinary(.Store, decl, expr);
     return res;
 }
 
@@ -150,7 +145,6 @@ pub inline fn identifier(self: *Builder, decl: defines.StringPtr) Error!JIR.Ptr 
 
 pub inline fn reference(self: *Builder, decl: StringPtr) Error!JIR.Ptr { return self.commonSingle(.Reference, decl); }
 pub inline fn dereference(self: *Builder, expr: JIR.Ptr) Error!JIR.Ptr { return self.commonSingle(.Dereference, expr); }
-pub inline fn call(self: *Builder, expr: JIR.Ptr, args: []const JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.Call, expr, args); }
 pub inline fn literal(self: *Builder, constant: JIR.Constant.Ptr) Error!JIR.Ptr { return self.commonSingle(.Literal, constant); }
 pub inline fn add(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.Add, lhs, rhs); }
 pub inline fn sub(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.Sub, lhs, rhs); }
@@ -176,15 +170,24 @@ pub inline fn not(self: *Builder, rhs: JIR.Ptr) Error!JIR.Ptr { return self.comm
 pub inline fn negate(self: *Builder, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonSingle(.Negation, rhs); }
 pub inline fn grouping(self: *Builder, exprStart: JIR.Ptr, exprEnd: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.Grouping, exprStart, exprEnd); }
 
-pub inline fn ternary(self: *Builder, cnd: JIR.Ptr, then: JIR.Ptr, otherwise: JIR.Ptr) Error!JIR.Ptr {
+pub inline fn ternary(self: *Builder, cnd: JIR.Ptr, then: JIR.Ptr, otherwise: JIR.Ptr) Error!JIR.Ptr { return self.commonTernary(.Ternary, cnd, then, otherwise); }
+pub inline fn call(self: *Builder, expr: JIR.Ptr, args: defines.Range) Error!JIR.Ptr { return self.commonTernary(.Call, expr, args.start, args.end); }
+
+inline fn commonTernary(
+    self: *Builder,
+    comptime nodeType: JIR.Node.Type,
+    first: JIR.Ptr,
+    second: JIR.Ptr,
+    third: JIR.Ptr,
+) Error!JIR.Ptr {
     const start: u32 = @intCast(self.data.items.len);
-    self.data.append(self.allocator, cnd) catch return Error.AllocatorFailure;
-    self.data.append(self.allocator, then) catch return Error.AllocatorFailure;
-    self.data.append(self.allocator, otherwise) catch return Error.AllocatorFailure;
+    self.data.append(self.allocator, first) catch return Error.AllocatorFailure;
+    self.data.append(self.allocator, second) catch return Error.AllocatorFailure;
+    self.data.append(self.allocator, third) catch return Error.AllocatorFailure;
 
     const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
     self.nodes.set(res, .{
-        .type = .Ternary,
+        .type = nodeType,
         .value = start,
     });
     return res;

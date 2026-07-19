@@ -38,8 +38,7 @@ pub const Node = struct {
         FunctionDef,
         VariableDef,
         Identifier,
-        Assignment, // Direct assignment to a variable.
-        Store, // Assignment through pointer
+        Assignment,
         Return,
         Scope,
         Exit,
@@ -326,9 +325,8 @@ fn discoverFunctionsAndTypes(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void 
                 .Struct => |str| {
                     try self.write(out, "typedef struct {{\n", .{});
                     for (str.fields) |field| {
-                        try self.write(out, "\t{s} {s}_{s};\n", .{
+                        try self.write(out, "\t{s} {s};\n", .{
                             try self.getCName(field.valueType, null, false),
-                            if (field.public) "pub" else "priv",
                             self.strings[field.name],
                         });
                     }
@@ -341,9 +339,8 @@ fn discoverFunctionsAndTypes(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void 
                 .Union => |uni|{
                     if (uni.isTagged) {
                         try self.write(out, "typedef struct {{\n", .{});
-                        try self.write(out, "\t{s} {s}_{s};\n", .{
+                        try self.write(out, "\t{s} {s};\n", .{
                             try self.getCName(uni.fields[0].valueType, null, false),
-                            if (uni.fields[0].public) "pub" else "priv",
                             self.strings[uni.fields[0].name],
                         });
                         try self.write(out, "\tunion {{\n", .{});
@@ -483,7 +480,7 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
                 try self.write(out, ";\n", .{ });
             }
         },
-        .Identifier => try self.write(out, " {s} ", .{self.strings[node.value]}),
+        .Identifier => try self.write(out, "{s}", .{self.strings[node.value]}),
         .Literal => self.literal(out, node.value),
         .Scope => {
             try self.writeln(out, "{{\n{s}: (void)(0);\n", .{
@@ -515,7 +512,7 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
         .BitwiseAnd => try self.commonBinary(out, node.value, "&"),
         .BitwiseOr => try self.commonBinary(out, node.value, "|"),
 
-        .Label => try self.writeln(out, "{s}:\n", .{self.strings[node.value]}),
+        .Label => try self.writeln(out, "{s}: (void)(0);\n", .{self.strings[node.value]}),
         .Jump => try self.writeln(out, "goto {s};\n", .{self.strings[node.value]}),
         .JumpIf => {
             try self.writeln(out, "if (", .{});
@@ -540,7 +537,48 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
         .Invert => try self.commonSingle(out, node.value, "~"),
         .Not => try self.commonSingle(out, node.value, "!"),
         .Negation => try self.commonSingle(out, node.value, "-"),
-        else => { },
+        .Assignment => {
+            try self.writeln(out, "", .{});
+            try self.operation(out, self.data[node.value]);
+            try self.write(out, " = ", .{});
+            try self.operation(out, self.data[node.value + 1]);
+            try self.write(out, ";\n", .{});
+        },
+        .Dot => {
+            try self.operation(out, self.data[node.value]);
+            try self.write(out, ".{s}", .{
+                self.strings[self.data[node.value + 1]],
+            });
+        },
+        .Grouping => {
+            try self.write(out, "{{", .{});
+            for (self.data[node.value]..self.data[node.value + 1]) |idx| {
+                try self.operation(out, @intCast(idx));
+                if (idx == self.data[node.value + 1] - 1) {
+                    continue;
+                }
+                try self.write(out, ", ", .{});
+            }
+            try self.write(out, "}}", .{});
+        },
+        .Call => {
+            const func = self.data[node.value];
+            const range = defines.Range{
+                .start = self.data[node.value + 1],
+                .end = self.data[node.value + 2],
+            };
+
+            try self.operation(out, func);
+            try self.write(out, "(", .{});
+            for (range.start..range.end) |idx| {
+                try self.operation(out, func);
+                if (idx == self.data[node.value + 1] - 1) {
+                    continue;
+                }
+                try self.write(out, ", ", .{});
+            }
+            try self.write(out, ")", .{});
+        },
     };
 }
 
@@ -619,7 +657,7 @@ fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool
         .Integer => |i| name = std.fmt.allocPrint(self.allocator, "{s}int{d}_t{s}", .{
             if (i.signed) "" else "u",
             i.size,
-            if (mutable) "" else " const",
+            if (mutable or i.mutable) "" else " const",
         }) catch return Error.AllocatorFailure,
 
         .Union, .Struct, .Enum => {
@@ -697,7 +735,7 @@ fn isStmt(nt: Node.Type) bool {
     return switch (nt) {
         .FunctionDef, .Return, .JumpIf,
         .Jump, .Label, .Exit, .Scope,
-        .Assignment, .Store, .VariableDef => true,
+        .Assignment, .VariableDef => true,
 
         else => false,
     };

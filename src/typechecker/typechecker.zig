@@ -46,9 +46,10 @@ pub const Flags = enum(u8) {
     LValue = 1,
     AttemptingEval = 2,
     CanCycle = 3,
-    CoveredAllPaths = 5,
-    InLoop = 6,
-    InDefer = 7,
+    CoveredAllPaths = 4,
+    InLoop = 5,
+    InDefer = 6,
+    Mutable = 7,
 
     pub fn flag(flagToGet: Flags) u8 {
         return @intFromEnum(flagToGet);
@@ -193,7 +194,7 @@ pub fn typecheck(self: *Typechecker, allocator: Allocator) Error!Resolution {
 pub fn typecheckStatement(self: *Typechecker, statementPtr: defines.StatementPtr, expected: TypeID) Error!void {
     const ast = self.context.getAST(self.currentFile);
 
-    _ = try self.lowerer.statement(statementPtr);
+    // _ = try self.lowerer.statement(statementPtr);
 
     const stmt = ast.statements.get(statementPtr);
     return switch (stmt.type) {
@@ -766,9 +767,32 @@ fn typecheckIfStatement(self: *Typechecker, extraPtr: defines.OpaquePtr, expecte
 }
 
 fn typecheckAssignment(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!void {
-    _ = extraPtr;
-    self.report("Assignment is not supported yet. You have to do a static single assignment.", .{});
-    return common.debug.NotImplemented(@src());
+    const ast = self.context.getAST(self.currentFile);
+
+    const expr = ast.extra[extraPtr];
+    const rhs = ast.extra[extraPtr + 1];
+
+    const vtype = try self.typecheckExpression(expr, null);
+
+    if (!self.getFlag(.ConcreteValue)) {
+        self.report("Expected a concrete value for assignment.", .{});
+        return Error.AssignationOfNonConcreteValue;
+    }
+
+    const rtype = try self.typecheckExpression(rhs, null);
+
+    if (!self.getFlag(.Mutable)) {
+        self.report("Attempt to modify non-mutable value.", .{ });
+        return Error.MutabilityViolation;
+    }
+
+    if (!self.suitable(vtype, rtype)) {
+        self.report("Can't assign value of type '{s}' to value of type '{s}'.", .{
+            try self.typeName(self.arena.allocator(), vtype),
+            try self.typeName(self.arena.allocator(), rtype),
+        });
+        return Error.TypeMismatch;
+    }
 }
 
 fn typecheckExpressionStatement(self: *Typechecker, exprPtr: defines.OpaquePtr) Error!void {
@@ -820,7 +844,7 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
 
     const expr = ast.expressions.get(expressionPtr);
     defer _ = self.setFlag(.ConcreteValue, switch (expr.type) {
-        .Identifier, .Indexing, .Scoping => true,
+        .Identifier, .Indexing, .Scoping, .Dot => true,
         else => false,
     });
 
@@ -833,7 +857,13 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
         .Identifier => {
             self.lastToken = expr.value;
             const decl = self.symbols.findDecl(.{ .file = self.currentFile, .expr = expressionPtr });
-            return self.typecheckDecl(decl, maybeExpected);
+            const discoveredType = try self.typecheckDecl(decl, maybeExpected);
+
+            if (self.mutable(discoveredType)) {
+                _ = self.setFlag(.Mutable, true);
+            }
+
+            return discoveredType;
         },
         .Indexing => return self.typecheckIndexing(expr.value),
         .Call => self.typecheckCall(expr.value, maybeExpected),
@@ -1204,7 +1234,7 @@ pub fn typecheckScoping(self: *Typechecker, expr: defines.ExpressionPtr) Error!T
     for (defs) |def| {
         if (def.name == try self.builder.internString(member)) {
             if (def.public or self.symbols.canAccess(self.currentScope, scope)) {
-                return self.discoverScopeDef(lhsTypeID, &def, scope);
+                return self.discoverScopeDef(lhsTypeID, &def, scope, expr);
             }
 
             self.report("'{s}' is inaccessible due to its visibility level.", .{
@@ -1222,7 +1252,13 @@ pub fn typecheckScoping(self: *Typechecker, expr: defines.ExpressionPtr) Error!T
     return Error.MissingDefinition;
 }
 
-pub fn discoverScopeDef(self: *Typechecker, from: TypeID, member: *const Types.FieldInfo, scope: defines.ScopePtr) Error!TypeID {
+pub fn discoverScopeDef(
+    self: *Typechecker,
+    from: TypeID,
+    member: *const Types.FieldInfo,
+    scope: defines.ScopePtr,
+    expr: defines.ExpressionPtr
+) Error!TypeID {
     if (member.valueType != Comptime.Builtin.Type("incomplete")) {
         return member.valueType;
     }
@@ -1232,8 +1268,17 @@ pub fn discoverScopeDef(self: *Typechecker, from: TypeID, member: *const Types.F
         .name = self.builder.getInternedString(member.name),
     }) orelse return common.debug.ShouldBeImpossible(@src());
 
+    self.symbols.resolutionMap.put(self.arena.allocator(), .{
+        .file = self.currentFile,
+        .expr = expr,
+    }, decl) catch return Error.AllocatorFailure;
+
     const discoveredType = try self.typecheckDecl(decl, null);
     const memberIndex = try self.definitionIndex(from, member.name);
+
+    if (self.mutable(discoveredType)) {
+        _ = self.setFlag(.Mutable, true);
+    }
 
     switch (self.typeTable.get(from)) {
         .Enum => |enm| {
@@ -1493,10 +1538,10 @@ pub fn typecheckIndexing(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!
     }
 
     const maybeIndexable = self.typeTable.get(maybeIndexableId);
-    switch (maybeIndexable) {
-        .Array => { },
+    const inner = switch (maybeIndexable) {
+        .Array => |arr| arr.child,
         .Pointer => |ptr| switch (ptr.size) {
-            .Slice, .C => { },
+            .Slice, .C => ptr.child,
             else => {
                 self.report("Attempt to index a singular pointer '{s}'.", .{
                     try self.typeName(self.arena.allocator(), maybeIndexableId),
@@ -1510,6 +1555,13 @@ pub fn typecheckIndexing(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!
             });
             return Error.IndexingOfNonIndexableValue;
         },
+    };
+
+    if (
+        self.mutable(maybeIndexableId)
+        and self.mutable(inner)
+    ) {
+        _ = self.setFlag(.Mutable, true);
     }
 
     const maybeIndexPtr = try self.typecheckExpression(ast.extra[extraPtr + 1], null);
@@ -2611,6 +2663,8 @@ pub fn assertComparable(self: *const Typechecker, this: TypeID, that: TypeID) Er
     try switch (thisType) {
         .ComptimeInt => functional.throwIf(!self.isInt(that), Error.ComparisonOnIncompatibleTypes),
         .ComptimeFloat => functional.throwIf(!self.isFloat(that), Error.ComparisonOnIncompatibleTypes),
+        .Integer => functional.throwIf(!self.isInt(that), Error.ComparisonOnIncompatibleTypes),
+        .Float => functional.throwIf(!self.isFloat(that), Error.ComparisonOnIncompatibleTypes),
         .Array => |thisArr| switch (thatType) {
             .Array => |thatArr| self.assertComparable(thisArr.child, thatArr.child),
             else => Error.ComparisonOnIncompatibleTypes,

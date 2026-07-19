@@ -129,5 +129,6 @@ pub const CompilerError = error {
     IllegalNonTopLevelOp,
     ComptimePointer,
     BackendError,
+    AssignationOfNonConcreteValue,
     Terminate,
 };
