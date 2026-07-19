@@ -68,7 +68,6 @@ pub const Statement = struct {
         For,
         Break,
         Continue,
-        Mark,
         VariableDefinition,
         Discard,
         Import,
@@ -296,7 +295,6 @@ fn statement(self: *Parser) StatementResult {
             return error.InvalidToken;
         },
         .Defer => self.deferStatement(),
-        .Mark => self.mark(true),
         else => self.expressionStmt(),
     };
 }
@@ -317,10 +315,19 @@ fn expressionStmt(self: *Parser) StatementResult {
     assert(self.current > 0);
     self.current -= 1;
 
-    const expr = try self.expression();
+    const exprPtr = try self.expression();
+    const expr = self.expressionMap.get(exprPtr);
 
-    switch (self.expressionMap.items(.type)[expr]) {
+    switch (expr.type) {
         .Assignment, .Call => { },
+        .Mark =>
+            switch (self.expressionMap.get(self.extra.items[expr.value + 2]).type) {
+                .Assignment, .Call => { },
+                else => |t| {
+                    self.report("Only assignment and function calls are allowed as expression statements. Received '{s}'", .{@tagName(t)});
+                    return error.IllegalSyntax;
+                },
+            },
         else => |t| {
             self.report("Only assignment and function calls are allowed as expression statements. Received '{s}'", .{@tagName(t)});
             return error.IllegalSyntax;
@@ -332,7 +339,7 @@ fn expressionStmt(self: *Parser) StatementResult {
     const result = try self.alloc(Statement);
     self.statementMap.set(result, .{
         .type = .Expression,
-        .value = expr,
+        .value = exprPtr,
     });
 
     return result;
@@ -888,7 +895,6 @@ fn primary(self: *Parser) ExpressionResult {
             });
             return expr;
         },
-        .Mark => return self.mark(false),
         .Identifier => {
             const expr = try self.alloc(Expression);
             self.expressionMap.set(expr, .{
@@ -897,41 +903,17 @@ fn primary(self: *Parser) ExpressionResult {
             });
             return expr;
         },
+        .Mark => return self.mark(),
         else => {
-            self.current -= 1;
-            self.report("Expected a primary expression, got '{s}' instead.", .{self.tokens.get(self.advance()).lexeme(self.context, self.file)});
+            self.report("Expected a primary expression, got '{s}' instead.", .{self.tokens.get(self.current).lexeme(self.context, self.file)});
             return error.InvalidToken;
         },
     }
 }
 
-fn mark(self: *Parser, comptime stmt: bool) if (stmt) StatementResult else ExpressionResult {
-    assert(if (stmt) self.current > 0 else true);
-    self.current -= if (stmt) 1 else 0;
-
+fn mark(self: *Parser) ExpressionResult {
     const marks = try self.compilerHint();
-    const marked =
-        if (stmt) try self.statement()
-        else try self.ifExpression();
-
-    if (stmt) switch (self.statementMap.items(.type)[marked]) {
-        .For, .While, .VariableDefinition => {},
-        else  => |t| {
-            self.report("Statement metadata can only be attached to loops and definitions. Received '{s}'", .{@tagName(t)});
-            return error.IllegalSyntax;
-        },
-    };
-
-    // @Beware maybe maybe maybe
-    if (false) {
-        if (!stmt) switch (self.expressionMap.items(.type)[marked]) {
-            .StructDefinition, .EnumDefinition, .UnionDefinition, .FunctionDefinition, => {},
-            else  => |t| {
-                self.report("Expression metadata can only be attached to type definitions and functions. Received '{s}'", .{@tagName(t)});
-                return error.IllegalSyntax;
-            },
-        };
-    }
+    const marked = try self.ifExpression();
 
     if (marks.len() == 0) {
         return marked;
@@ -944,8 +926,8 @@ fn mark(self: *Parser, comptime stmt: bool) if (stmt) StatementResult else Expre
     self.extra.append(self.allocator(), marks.end) catch return error.AllocatorFailure;
     self.extra.append(self.allocator(), marked) catch return error.AllocatorFailure;
 
-    const ptr = try self.alloc(if (stmt) Statement else Expression);
-    (if (stmt) self.statementMap else self.expressionMap).set(ptr, .{
+    const ptr = try self.alloc(Expression);
+    self.expressionMap.set(ptr, .{
         .type = .Mark,
         .value = start,
     });
@@ -1533,8 +1515,7 @@ fn synchronize(self: *Parser) void {
             .Fn, .Let, .Pub,
             .While, .If, .Asm,
             .Continue, .Return, .Import,
-            .Defer, .Mark,
-            .Discard, .Break => return,
+            .Defer, .Discard, .Break => return,
             else => {},
         }
 

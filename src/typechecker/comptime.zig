@@ -38,17 +38,12 @@ pub const Flags = enum(u3) {
 // and memory usage
 pub const Value = union(enum) {
     pub const Implicit = enum(u8) {
-        pub const Metadata = enum(u8) {
-            NoComptime = 0,
-            Comptime = 1,
-        };
-
         pub const Type = enum(u8) {
-            Any = 2,
-            Incomplete = 3,
+            Any = 0,
+            Incomplete = 1,
         };
 
-        Void = 4,
+        Void = 2,
     };
 
     pub const Ptr = defines.Offset;
@@ -114,14 +109,9 @@ pub fn init(typechecker: *Typechecker, gpa: Allocator) Error!Comptime {
     cache.ensureTotalCapacity(allocator, typechecker.symbols.resolutionMap.count()) catch return Error.AllocatorFailure;
 
     var memory = Memory.initCapacity(allocator, 512) catch return Error.AllocatorFailure;
-    inline for (0..@typeInfo(Value.Implicit.Metadata).@"enum".fields.len) |index| {
-        memory.appendAssumeCapacity(.{ .Enum = .{ .Type = Builtin.Type("builtin_metadata"), .Value = @intCast(index) } });
-    }
     memory.appendAssumeCapacity(.{ .Type = Builtin.Type("any") });
     memory.appendAssumeCapacity(.{ .Type = Builtin.Type("incomplete") });
     memory.appendAssumeCapacity(.{ .Void = { } });
-
-    prepBuiltinMetadata(&memory);
 
     return .{
         .typechecker = typechecker,
@@ -198,7 +188,7 @@ pub fn eval(self: *Comptime, exprPtr: defines.ExpressionPtr, maybeExpected: ?Typ
 
         .Slicing => try self.evalSlicing(expr.value),
 
-        .Mark => try self.evalMark(.Expression, exprPtr, expr.value, maybeExpected),
+        .Mark => try self.evalMark(exprPtr, expr.value, maybeExpected),
 
         .Dot => try self.evalDot(expr.value),
         
@@ -229,10 +219,7 @@ fn evalFunction(self: *Comptime, exprPtr: defines.ExpressionPtr, extraPtr: defin
     const returnTypeExpr = ast.extra[extraPtr + 2];
     const bodyPtr = ast.extra[extraPtr + 3];
 
-    var isComptime =
-        if (self.typechecker.getMetadata(.Expression, exprPtr)) |metadata|
-            if (std.mem.findScalar(u32, metadata, @intFromEnum(Value.Implicit.Metadata.Comptime))) |_| true else false
-        else false;
+    var isComptime = self.typechecker.hasMetadata(exprPtr, "@comptime");
 
     for (paramsRange.start..paramsRange.end) |paramPtrPtr| {
         const param = ast.signatures.get(ast.extra[paramPtrPtr]);
@@ -462,57 +449,37 @@ pub fn evalDot(self: *Comptime, extraPtr: defines.OpaquePtr) Error!Value.Ptr {
 
 pub fn evalMark(
     self: *Comptime,
-    kind: Typechecker.Element.Kind,
     ptr: defines.EitherPtr(defines.ExpressionPtr, defines.StatementPtr),
     extraPtr: defines.OpaquePtr,
     maybeExpected: ?TypeID,
 ) Error!Value.Ptr {
-    _ = try self.typechecker.typecheckMark(kind, ptr, extraPtr, maybeExpected);
+    _ = try self.typechecker.typecheckMark(ptr, extraPtr, maybeExpected);
 
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
 
-    const metadata = self.typechecker.getMetadata(kind, ast.extra[extraPtr + 2])
-        orelse return common.debug.ShouldBeImpossible(@src()); 
+    if (self.typechecker.hasMetadata(ast.extra[extraPtr + 2], "@comptime")) {
+        const exprType = try self.typechecker.typecheckExpression(ast.extra[extraPtr + 2], maybeExpected);
 
-    for (metadata) |dataPtr| {
-        const data = self.getValue(dataPtr);
-        switch (data) {
-            .Enum => |enm| {
-                if (enm.Type != Builtin.Type("builtin_metadata")) {
-                    continue;
-                }
+        // @Note force comptime eval when calling said function.
+        if (self.typechecker.typeTable.get(exprType) != .Function) {
+            self.report("Redundant @comptime mark in already comptime scope.", .{});
+            return Error.RedundantMark;
+        }
+    }
+    else if (
+        self.typechecker.hasMetadata(ast.extra[extraPtr + 2], "@noComptime")
+        and !self.typechecker.getFlag(.AttemptingEval)
+    ) {
+        const exprType = try self.typechecker.typecheckExpression(ast.extra[extraPtr + 2], maybeExpected);
 
-                switch (enm.Value) {
-                    Builtin.Metadata("@noComptime").? => {
-                        self.report("Comptime evaluation of {s} is not possible due to '@noComptime' mark.", .{
-                            if (kind == .Statement) "statement" else "expression",
-                        });
-                        return Error.ComptimeNotPossible;
-                    },
-                    Builtin.Metadata("@comptime").? => {
-                        _ = self.typechecker.setFlag(.AttemptingEval, false);
-
-                        const exprType = try self.typechecker.typecheckExpression(ast.extra[extraPtr + 2], maybeExpected);
-
-                        if (!(
-                            self.typechecker.getFlag(.AttemptingEval)
-                            or self.typechecker.typeTable.get(exprType) == .Function
-                        )) {
-                            self.report("Redundant @comptime mark in already comptime scope.", .{});
-                            return Error.RedundantMark;
-                        }
-                    },
-                    else => { },
-                }
-            },
-            else => { },
+        // @Note force comptime eval when calling said function.
+        if (self.typechecker.typeTable.get(exprType) != .Function) {
+            self.report("Comptime evaluation of expression is not possible due to '@noComptime' mark.", .{ });
+            return Error.ComptimeNotPossible;
         }
     }
 
-    return switch (kind) {
-        .Statement => common.debug.NotImplemented(@src()),
-        .Expression => self.eval(ast.extra[extraPtr + 2], maybeExpected),
-    };
+    return self.eval(ast.extra[extraPtr + 2], maybeExpected);
 }
 
 pub fn evalSlicing(self: *Comptime, extraPtr: defines.OpaquePtr) Error!Value.Ptr {
@@ -941,7 +908,12 @@ fn evalLiteral(self: *Comptime, tokenPtr: defines.TokenPtr, maybeExpected: ?Type
         .String => .{ .String = lexeme },
         .EnumLiteral =>
             if (Typechecker.determineExpected(maybeExpected)) |expected|
-                if (Builtin.Metadata(lexeme)) |metadata| return metadata
+                if (Builtin.Metadata(lexeme)) |metadata| .{
+                    .Enum = .{
+                        .Type = expected,
+                        .Value = metadata,
+                    },
+                }
                 else switch (self.typechecker.typeTable.get(expected)) {
                     .Enum => |enm| ret: for (enm.fields, 0..) |field, index| {
                         if (std.mem.eql(u8, field, lexeme[1..])) {
@@ -1036,10 +1008,7 @@ fn evalFuncType(self: *Comptime, exprPtr: defines.ExpressionPtr, extraPtr: defin
     };
 
     var argTypes = self.arena.allocator().alloc(TypeID, argSize) catch return Error.AllocatorFailure;
-    var isComptime =
-        if (self.typechecker.getMetadata(.Expression, exprPtr)) |metadata|
-            if (std.mem.findScalar(u32, metadata, @intFromEnum(Comptime.Value.Implicit.Metadata.Comptime))) |_| true else false
-        else false;
+    var isComptime = self.typechecker.hasMetadata(exprPtr, "@comptime");
 
     switch (args) {
         .Type => |argType| if (argSize != 0) {
@@ -2006,17 +1975,6 @@ pub fn dumpMem(self: *const Comptime) void {
     }
 }
 
-fn prepBuiltinMetadata(memory: *Memory) void {
-    for (0..builtinMetadata.len) |metadata| {
-        memory.appendAssumeCapacity(.{
-            .Enum = .{
-                .Type = Builtin.Type("builtin_metadata"),
-                .Value = @intCast(metadata),
-            },
-        });
-    }
-}
-
 pub const Builtin = struct {
     pub fn isBuiltinType(typeID: TypeID) bool {
         return typeID <= Builtin.Type("any");
@@ -2048,7 +2006,7 @@ pub const Builtin = struct {
     }
 
     pub fn Metadata(metadata: []const u8) ?defines.Offset {
-        if (@typeInfo(@TypeOf(.{metadata})).@"struct".fields[0].is_comptime) comptime {
+        comptime if (@typeInfo(@TypeOf(.{metadata})).@"struct".fields[0].is_comptime) {
             for (builtinMetadata, 0..) |item, index| {
                 if (std.mem.eql(u8, item, metadata)) {
                     return index;
@@ -2114,4 +2072,5 @@ pub const builtinTypes = [_]struct {
 pub const builtinMetadata = [_][]const u8 {
     "@noComptime",
     "@comptime",
+    "@export",
 };

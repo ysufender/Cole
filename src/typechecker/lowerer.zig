@@ -283,7 +283,7 @@ pub fn statement(self: *Lowerer, statementPtr: defines.StatementPtr) Error!defin
             };
         },
         .VariableDefinition => try self.variableDef(stmt.value),
-        .Import, .Mark => return common.debug.ShouldBeImpossible(@src()),
+        .Import => return common.debug.ShouldBeImpossible(@src()),
 
         .Defer => try self.@"defer"(stmt.value),
 
@@ -326,6 +326,18 @@ fn variableDef(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!defines.Range 
     const decl = self.typechecker.symbols.getDecl(declPtr);
 
     const typeID = try self.typechecker.typecheckDecl(declPtr, null);
+
+    if (typeID == Comptime.Builtin.Type("type")) {
+        const vdef = try self.typechecker.builder.typeDef(
+            self.typechecker.executer.getValue(
+                try self.typechecker.executer.eval(decl.node, null),
+            ).Type,
+        );
+        return .{
+            .start = vdef,
+            .end = vdef + 1,
+        };
+    }
 
     const node =
         if (self.typechecker.executer.attemptEval(decl.node, typeID)) |someVal|
@@ -614,11 +626,49 @@ pub fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID
         .Indexing => self.indexing(expr.value),
         .ExpressionList => self.expressionList(expr.value),
 
-        .Switch, .Call, .Slicing => |t| {
+        .Call => self.call(expr.value),
+
+        .Switch, .Slicing => |t| {
             self.report("'{s}' lowering is not implemented.", .{@tagName(t)});
             return common.debug.NotImplemented(@src());
         },
     };
+}
+
+fn call(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
+    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+
+    const func = ast.extra[extraPtr];
+    const argsListPtr = ast.extra[extraPtr + 1];
+    const argsList = ast.expressions.get(argsListPtr);
+    const argsRange = defines.Range{
+        .start = ast.extra[argsList.value],
+        .end = ast.extra[argsList.value + 1],
+    };
+
+    var res: ?defines.Range = null;
+
+    for (argsRange.start..argsRange.end) |exprPtr| {
+        const expr = try self.expression(ast.extra[@intCast(exprPtr)], try self.typechecker.typecheckExpression(ast.extra[@intCast(exprPtr)], null));
+
+        res =
+            if (res) |rr| .{
+                .start = rr.start,
+                .end = expr + 1,
+            }
+            else .{
+                .start = expr,
+                .end = expr + 1,
+            };
+    }
+
+    const rres = res orelse defines.Range{ .start = 0, .end = 0 };
+
+    return
+        if (try self.typechecker.typecheckExpression(func, null) == Comptime.Builtin.Type("type"))
+            self.typechecker.builder.grouping(rres.start, rres.end)
+        else
+            self.typechecker.builder.call(func, rres);
 }
 
 fn expressionList(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {

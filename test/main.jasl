@@ -1,11 +1,13 @@
-let S = struct {
-    a: mut i32,
+let test = #(@export) fn () -> void {
 };
 
 let main = fn () -> i32 {
-    let c: mut S = S(0);
+    let S = struct {
+        a: mut i32,
+    };
 
-    defer c.a = 1;
+    let c = S(5);
+    test();
 
     return 1;
 };

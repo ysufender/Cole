@@ -354,19 +354,6 @@ fn resolveStatement(self: *Resolver, stmt: defines.StatementPtr, topLevel: bool)
             const body = ast.extra[statement.value + 1];
             try self.resolveStatement(body, false);
         },
-        .Mark => {
-            const marks = defines.Range{
-                .start = ast.extra[statement.value],
-                .end = ast.extra[statement.value + 1],
-            };
-
-            for (marks.start..marks.end) |mark| {
-                try self.resolveExpression(ast.extra[mark]);
-            }
-
-            const marked = ast.extra[statement.value + 2];
-            try self.resolveStatement(marked, topLevel);
-        },
         .VariableDefinition => {
             const signature = ast.signatures.get(ast.extra[statement.value]);
             const initializer = ast.extra[statement.value + 1];

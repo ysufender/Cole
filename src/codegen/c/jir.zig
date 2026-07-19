@@ -236,14 +236,6 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
         out.flush() catch common.log.err("Failed to flush forward declarations.", .{});
     }
 
-    for (self.keyNodes) |node| {
-        try self.discoverFunctionsAndTypes(out, node);
-    }
-}
-
-fn discoverFunctionsAndTypes(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
-    const node = self.nodes.get(nodePtr);
-
     for (0..self.types.len) |typeID| {
         const typeInfo = self.types.get(@intCast(typeID));
 
@@ -274,6 +266,14 @@ fn discoverFunctionsAndTypes(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void 
             else => {},
         }
     }
+
+    for (0..self.nodes.len) |node| {
+        try self.discoverFunctionsAndTypes(out, @intCast(node));
+    }
+}
+
+fn discoverFunctionsAndTypes(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
+    const node = self.nodes.get(nodePtr);
 
     switch (node.type) {
         .VariableDef => if (self.data[node.value] == 1) {
@@ -637,8 +637,8 @@ fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool
             return common.debug.ShouldBeImpossible(@src());
         },
 
-        .Void => return "void const",
-        .Noreturn => return "void const",
+        .Void => return "void",
+        .Noreturn => return "void",
 
         .Bool => |v| name = std.fmt.allocPrint(self.allocator, "jasl_bool{s}", .{
             if (v) "" else " const"

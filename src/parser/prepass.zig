@@ -184,10 +184,6 @@ fn prepassImpl(self: *Prepass, ast: *const Parser.AST, name: []const u8) Error!v
                 errc += 1;
                 break :case;
             },
-            .Mark => {
-                statement = ast.statements.get(ast.extra[statement.value + 2]); 
-                continue :statementLoop;
-            },
             else => {
                 self.report(
                     "Only definitions are allowed at top-level. Received: {s}",

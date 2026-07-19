@@ -38,7 +38,7 @@ const eql = std.meta.eql;
 pub const TypeTable = MultiArrayList(TypeInfo);
 pub const TypeMap = collections.HashMap(TypeInfo, TypeID);
 pub const TypeNameMap = std.AutoHashMapUnmanaged(TypeID, defines.StringPtr);
-pub const MetadataMap = collections.HashMap(Element, []const Comptime.Value.Ptr);
+pub const MetadataMap = collections.HashMap(defines.ExpressionPtr, []const Comptime.Value.Ptr);
 const LookupMap = collections.HashMap(defines.DeclPtr, TypecheckStatus);
 
 pub const Flags = enum(u8) {
@@ -64,16 +64,6 @@ const TypecheckStatus = struct {
     },
 
     result: TypeID,
-};
-
-pub const Element = struct {
-    pub const Kind = enum {
-        Statement,
-        Expression,
-    };
-
-    kind: Kind,
-    value: defines.OpaquePtr,
 };
 
 pub const Resolution = backend.C.JIR;
@@ -156,8 +146,10 @@ pub fn typecheck(self: *Typechecker, allocator: Allocator) Error!Resolution {
         self.typeTable.appendAssumeCapacity(builtin.info);
         self.typeMap.putAssumeCapacityNoClobber(builtin.info, @intCast(id));
         const str = try self.builder.internString(builtin.name);
-        self.typenameMap.putNoClobber(self.arena.allocator(), id, str)
-            catch return Error.AllocatorFailure;
+        if (!std.mem.eql(u8, builtin.name, "entry_point")) {
+            self.typenameMap.putNoClobber(self.arena.allocator(), id, str)
+                catch return Error.AllocatorFailure;
+        }
     }
 
     self.builder.allocator = self.arena.allocator();
@@ -209,7 +201,6 @@ pub fn typecheckStatement(self: *Typechecker, statementPtr: defines.StatementPtr
         .Import => common.debug.ShouldBeImpossible(@src()),
         .Defer => self.typecheckDefer(stmt.value),
         .VariableDefinition => try self.typecheckVarDefStatement(stmt.value),
-        .Mark => try self.typecheckStatementMark(statementPtr, stmt.value),
         else => |t| {
             self.report("Typechecking of '{s}' statements is not implemented.", .{
                 @tagName(t),
@@ -217,15 +208,6 @@ pub fn typecheckStatement(self: *Typechecker, statementPtr: defines.StatementPtr
             return common.debug.NotImplemented(@src());
         },
     };
-}
-
-fn typecheckStatementMark(
-    self: *Typechecker,
-    stmtPtr: defines.StatementPtr,
-    extraPtr: defines.OpaquePtr,
-) Error!void {
-    _ = try self.typecheckMark(.Statement, stmtPtr, extraPtr, null);
-    // TODO: Special marks, extern and such.
 }
 
 fn typecheckVariableDef(
@@ -257,12 +239,6 @@ fn typecheckVariableDef(
 
     blk: switch (self.typeTable.get(initializer)) {
         .Type => {
-            // @Maybe @Beware remove this. But currently local types cause problems.
-            if (!topLevel) {
-                self.report("Type definitions can only be done in top-level contexts.", .{});
-                return Error.IllegalNonTopLevelOp;
-            }
-
             const newType = self.executer.getValue(try self.executer.eval(node, expected)).Type;
             const name = self.builder.getInternedString(switch (self.typeTable.get(newType)) {
                 .Union => |uni| uni.name,
@@ -385,13 +361,8 @@ fn typecheckVariableDef(
             }
         },
         .Function => {
-            // @Maybe @Beware remove this. But currently local types cause problems.
-            if (!topLevel) {
-                self.report("Function definitions can only be done in top-level contexts.", .{});
-                return Error.IllegalNonTopLevelOp;
-            }
-
             const fnc = self.executer.getValue(try self.executer.eval(node, expected)).Function;
+
             if (self.builder.getInternedString(fnc.name)[0] != '$') {
                 break :blk;
             }
@@ -401,10 +372,20 @@ fn typecheckVariableDef(
 
             const symName = tokens.get(token).lexeme(self.context, self.currentFile);
             const namespace = self.modules.modules.get(self.modules.modules.len - self.currentFile - 1).name;
-            const newName = std.fmt.allocPrint(self.arena.allocator(), "{s}::{s}", .{
-                namespace,
-                symName,
-            }) catch return Error.AllocatorFailure;
+            const newName = 
+                if (self.hasMetadata(node, "@export"))
+                    symName
+                else
+                    std.fmt.allocPrint(self.arena.allocator(), "{s}::{s}", .{
+                        namespace,
+                        symName,
+                    }) catch return Error.AllocatorFailure;
+
+            if (std.mem.eql(u8, namespace, "root") and std.mem.eql(u8, newName, "main")) {
+                self.report("Main function can't be exported.", .{});
+                return Error.ExportOfMainFunction;
+            }
+
             const new = try self.builder.internString(newName);
 
             const val = try self.executer.eval(node, expected);
@@ -848,6 +829,11 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
         else => false,
     });
 
+    if (self.hasMetadata(expressionPtr, "@comptime")) {
+        const val = try self.executer.eval(expressionPtr, maybeExpected);
+        return self.typecheckValue(val, maybeExpected);
+    }
+
     // @Note all literals should be handled here.
     if (self.executer.attemptEval(expressionPtr, maybeExpected)) |result| {
         return self.typecheckValue(result, maybeExpected);
@@ -887,7 +873,7 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
 
         .Slicing => self.typecheckSlicing(expr.value),
 
-        .Mark => self.typecheckMark(.Expression, expressionPtr, expr.value, maybeExpected),
+        .Mark => self.typecheckMark(expressionPtr, expr.value, maybeExpected),
 
         .Dot => self.typecheckDot(expr.value),
 
@@ -1854,17 +1840,14 @@ pub fn typecheckDot(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!TypeI
 
 pub fn typecheckMark(
     self: *Typechecker,
-    kind: Element.Kind,
     ptr: defines.EitherPtr(defines.StatementPtr, defines.ExpressionPtr),
     extraPtr: defines.OpaquePtr,
     maybeExpected: ?TypeID
 ) Error!TypeID {
-    // In case of the mark of a mark, ptr is the marked this, which is the
+    // @Note In case of the mark of a mark, ptr is the marked this, which is the
     // current mark.
-    if (self.getMetadata(kind, ptr)) |_| {
-        self.report("Redundant marking of already marked {s}.", .{
-            if (kind == .Statement) "statement" else "expression",
-        });
+    if (self.getMetadata(ptr)) |_| {
+        self.report("Redundant marking of already marked expression.", .{ });
         return Error.RedundantMark;
     }
 
@@ -1886,25 +1869,8 @@ pub fn typecheckMark(
     }
 
     const marked = ast.extra[extraPtr + 2];
-    if (kind == .Statement and ast.statements.items(.type)[marked] == .VariableDefinition) {
-        const varDef = ast.statements.get(marked);
-        try self.setMetadata(kind, ast.extra[varDef.value + 1], metadata);
-    }
-
-    try self.setMetadata(kind, marked, metadata);
-
-    if (kind == .Statement) {
-        try self.typecheckStatement(marked, 0);
-
-        const markedStmt = ast.statements.get(marked);
-        if (markedStmt.type == .VariableDefinition) {
-            return self.typecheckExpression(ast.extra[markedStmt.value + 1], maybeExpected);
-        }
-        else return 0;
-    }
-    else {
-        return self.typecheckExpression(marked, maybeExpected);
-    }
+    try self.setMetadata(marked, metadata);
+    return self.typecheckExpression(marked, maybeExpected);
 }
 
 pub fn typecheckSlicing(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!TypeID {
@@ -2979,79 +2945,77 @@ pub fn typeName(self: *Typechecker, allocator: Allocator, typeID: TypeID) Error!
     if (self.typenameMap.get(typeID)) |namePtr| {
         return self.builder.getInternedString(namePtr);
     }
-    else return
-        if (Comptime.Builtin.isBuiltinType(typeID)) Comptime.Builtin.TypeName(typeID)
-        else ret: switch (self.typeTable.get(typeID)) {
-            .Pointer => {
-                const ptr: Types.Pointer = self.typeTable.get(typeID).Pointer;
-                const child = try self.typeName(allocator, ptr.child);
+    else return ret: switch (self.typeTable.get(typeID)) {
+        .Pointer => {
+            const ptr: Types.Pointer = self.typeTable.get(typeID).Pointer;
+            const child = try self.typeName(allocator, ptr.child);
 
-                const mut = if (ptr.mutable) "mut " else "";
-                const prefix = switch (ptr.size) {
-                    .Slice => "[]",
-                    .Single => "*",
-                    .C => "[@c]",
-                };
+            const mut = if (ptr.mutable) "mut " else "";
+            const prefix = switch (ptr.size) {
+                .Slice => "[]",
+                .Single => "*",
+                .C => "[@c]",
+            };
 
-                var res = allocator.alloc(u8, child.len + prefix.len + mut.len) catch return Error.AllocatorFailure;
-                res = std.fmt.bufPrint(res, "{s}{s}{s}", .{mut, prefix, child}) catch unreachable;
-                self.typenameMap.putNoClobber(allocator, typeID, try self.builder.internString(res)) catch unreachable;
-                break :ret res;
-            },
-            .Array => {
-                const arr: Types.Array = self.typeTable.get(typeID).Array;
-                const child = try self.typeName(allocator, arr.child);
+            var res = allocator.alloc(u8, child.len + prefix.len + mut.len) catch return Error.AllocatorFailure;
+            res = std.fmt.bufPrint(res, "{s}{s}{s}", .{mut, prefix, child}) catch unreachable;
+            self.typenameMap.putNoClobber(allocator, typeID, try self.builder.internString(res)) catch unreachable;
+            break :ret res;
+        },
+        .Array => {
+            const arr: Types.Array = self.typeTable.get(typeID).Array;
+            const child = try self.typeName(allocator, arr.child);
 
-                const prefix = if (arr.mutable) "mut " else "";
-                const size = std.fmt.allocPrint(allocator, "[{d}]", .{arr.len})
-                    catch return Error.AllocatorFailure;
+            const prefix = if (arr.mutable) "mut " else "";
+            const size = std.fmt.allocPrint(allocator, "[{d}]", .{arr.len})
+                catch return Error.AllocatorFailure;
 
-                var res = allocator.alloc(u8, child.len + prefix.len + size.len) catch return Error.AllocatorFailure;
-                res = std.fmt.bufPrint(res, "{s}{s}{s}", .{prefix, size, child}) catch unreachable;
-                self.typenameMap.putNoClobber(allocator, typeID, try self.builder.internString(res)) catch unreachable;
-                break :ret res;
-            },
-            .Struct, .Union, .Enum => typename(self, allocator, typeID),
-            .Function => |func| {
-                var res: []const u8 = if (func.mutable) "mut *fn (" else "*fn (";
+            var res = allocator.alloc(u8, child.len + prefix.len + size.len) catch return Error.AllocatorFailure;
+            res = std.fmt.bufPrint(res, "{s}{s}{s}", .{prefix, size, child}) catch unreachable;
+            self.typenameMap.putNoClobber(allocator, typeID, try self.builder.internString(res)) catch unreachable;
+            break :ret res;
+        },
+        .Struct, .Union, .Enum => typename(self, allocator, typeID),
+        .Function => |func| {
+            var res: []const u8 = if (func.mutable) "mut *fn (" else "*fn (";
 
-                for (0..func.argTypes.len) |index| {
-                    res = std.fmt.allocPrint(allocator, "{s}{s}{s}", .{
-                        res,
-                        try self.typeName(allocator, func.argTypes[index]),
-                        if (index == func.argTypes.len - 1) "" else ", ",
-                    }) catch return Error.AllocatorFailure;
-                }
+            for (0..func.argTypes.len) |index| {
+                res = std.fmt.allocPrint(allocator, "{s}{s}{s}", .{
+                    res,
+                    try self.typeName(allocator, func.argTypes[index]),
+                    if (index == func.argTypes.len - 1) "" else ", ",
+                }) catch return Error.AllocatorFailure;
+            }
 
 
-                res = std.fmt.allocPrint(allocator, "{s}) -> {s}", .{res, try self.typeName(allocator, func.returnType)}) catch return Error.AllocatorFailure;
-                self.typenameMap.putNoClobber(allocator, typeID, try self.builder.internString(res)) catch unreachable;
-                break :ret res;
-            },
-            .EnumLiteral => "enum_literal",
-            .ComptimeFloat => "comptime_float",
-            .ComptimeInt => "comptime_int",
-            .Type => "type",
-            .Any => "any",
-            .Bool => "bool",
-            .Float => "float",
-            .Noreturn => "noreturn",
-            .Void => "void",
-            .Integer => |int| {
-                const mut = if (int.mutable) "mut " else "";
-                const sign = if (int.signed) "i" else "u"; 
-                const size = std.fmt.allocPrint(
-                    allocator,
-                    "{d}",
-                    .{int.size},
-                ) catch return Error.AllocatorFailure;
+            res = std.fmt.allocPrint(allocator, "{s}) -> {s}", .{res, try self.typeName(allocator, func.returnType)}) catch return Error.AllocatorFailure;
+            self.typenameMap.putNoClobber(allocator, typeID, try self.builder.internString(res)) catch unreachable;
+            break :ret res;
+        },
+        .EnumLiteral => "enum_literal",
+        .ComptimeFloat => "comptime_float",
+        .ComptimeInt => "comptime_int",
+        .Type => "type",
+        .Any => "any",
+        .Bool => "bool",
+        .Float => "float",
+        .Noreturn => "noreturn",
+        .Void => "void",
+        .Integer => |int| {
+            const mut = if (int.mutable) "mut " else "";
+            const sign = if (int.signed) "i" else "u"; 
+            const size = std.fmt.allocPrint(
+                allocator,
+                "{d}",
+                .{int.size},
+            ) catch return Error.AllocatorFailure;
 
-                var res = allocator.alloc(u8, sign.len + size.len + mut.len) catch return Error.AllocatorFailure;
-                res = std.fmt.bufPrint(res, "{s}{s}{s}", .{mut, sign, size}) catch unreachable;
-                self.typenameMap.putNoClobber(allocator, typeID, try self.builder.internString(res)) catch unreachable;
-                break :ret res;
-            },
-        };
+            var res = allocator.alloc(u8, sign.len + size.len + mut.len) catch return Error.AllocatorFailure;
+            res = std.fmt.bufPrint(res, "{s}{s}{s}", .{mut, sign, size}) catch unreachable;
+            self.typenameMap.putNoClobber(allocator, typeID, try self.builder.internString(res)) catch unreachable;
+            break :ret res;
+        },
+    };
 }
 
 pub fn determineExpected(maybeExpected: ?TypeID) ?TypeID {
@@ -3083,23 +3047,51 @@ fn clearFlags(self: *Typechecker) void {
 /// Assumes metadata doesn't exist for given element
 pub fn setMetadata(
     self: *Typechecker,
-    kind: Element.Kind,
-    element: defines.EitherPtr(defines.ExpressionPtr, defines.StatementPtr),
+    element: defines.ExpressionPtr,
     metadata: []const Comptime.Value.Ptr,
 ) Error!void {
-    return self.metadata.put(self.arena.allocator(), .{
-        .kind = kind,
-        .value = element,
-    }, metadata) catch Error.AllocatorFailure;
+    return self.metadata.put(self.arena.allocator(), element, metadata) catch Error.AllocatorFailure;
 }
 
 pub fn getMetadata(
     self: *const Typechecker,
-    elementType: Element.Kind,
     value: defines.EitherPtr(defines.ExpressionPtr, defines.StatementPtr)
 ) ?[]const defines.ExpressionPtr {
-    return self.metadata.get(.{
-        .kind = elementType,
-        .value = value,
-    });
+    return self.metadata.get(value);
+}
+
+pub fn hasMetadata(
+    self: *const Typechecker,
+    _value: defines.ExpressionPtr,
+    _meta: []const u8,
+) bool {
+    const ast = self.context.getAST(self.currentFile);
+
+    const value = blk: {
+        const expr = ast.expressions.get(_value);
+
+        break :blk
+            if (expr.type == .Mark) ast.extra[expr.value + 2]
+            else _value;
+    };
+
+    return
+        if (self.getMetadata(value)) |metadata| blk: {
+            for (metadata) |meta| {
+                const meval = self.executer.getValue(meta);
+
+                switch (meval) {
+                    .Enum => |enm|
+                        if (
+                            enm.Type == Comptime.Builtin.Type("builtin_metadata")
+                            and enm.Value == Comptime.Builtin.Metadata(_meta)
+                        ) break :blk true,
+
+                    else => { },
+                }
+            }
+
+            break :blk false;
+        }
+        else false;
 }

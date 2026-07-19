@@ -130,5 +130,6 @@ pub const CompilerError = error {
     ComptimePointer,
     BackendError,
     AssignationOfNonConcreteValue,
+    ExportOfMainFunction,
     Terminate,
 };

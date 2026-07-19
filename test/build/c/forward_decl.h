@@ -12,13 +12,11 @@ typedef uint8_t jasl_bool;
 
 typedef uint8_t* Slice_uint8_t;
 
+void test();
+
 typedef struct {
 	int32_t a;
-} root__S;
-
-typedef uint8_t* Slice_uint8_t;
-
-typedef uint8_t* Slice_uint8_t;
+} __anon_Namespace_16049278749992822981__S;
 
 int32_t const root__main();
 
