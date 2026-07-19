@@ -1,14 +1,10 @@
-import std::math;
-
-let Some = struct {
-    pub let Other = struct {
-        pub let Mother = struct {
-            pub let def: u32 = 0;
-        };
-    };
-};
-
 let main = fn () -> i32 {
-    let b = Some::Other::Mother::def;
-    return 0;
+    let c: bool = true;
+    let d: u32 = if (c) 5 else 4;
+
+    if c {
+        return 1;
+    } else {
+        return 0;
+    }
 };

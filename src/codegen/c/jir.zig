@@ -22,6 +22,8 @@ const Context = common.CompilerContext;
 const CreateDirError = std.Io.Dir.CreateDirError;
 const TypeNameMap = @import("../../typechecker/typechecker.zig").TypeNameMap;
 
+const Writer = std.Io.Writer;
+
 pub const InternTable = std.array_hash_map.String(void);
 
 pub const Ptr = defines.Offset;
@@ -95,15 +97,15 @@ pub const Constant = union(enum) {
     Float: f32,
     Aggregate: ConstantArray, 
     Array: ConstantArray,
-    Pointer: Constant.Ptr,
     Undefined: TypeID,
-    Function: Function.Ptr,
+    Function: defines.StringPtr,
 };
 
 pub const Function = struct {
     pub const Ptr = defines.Offset;
     pub const List = MultiArrayList(Function).Slice;
 
+    name: defines.StringPtr,
     signature: TypeID,
     body: defines.Range,
 };
@@ -121,6 +123,7 @@ keyNodes: []const Ptr,
 data: []const u32,
 allocator: Allocator = undefined,
 context: *const Context,
+indent: u32 = 0,
 
 pub fn dump(self: *const JIR) void {
     common.log.debug("Registered types:", .{});
@@ -135,7 +138,35 @@ pub fn dump(self: *const JIR) void {
     }
 }
 
-pub fn codegen(self: *JIR, context: *Context) Error!void {
+pub fn compile(self: *JIR, dir: std.Io.Dir) Error!void {
+    var proc = std.process.spawn(self.context.io, .{
+        .create_no_window = true,
+        .cwd = .{ .dir = dir },
+        .argv = &.{
+            "gcc",
+            "source.c",
+            "-o",
+            self.context.settings.outputFile orelse "out",
+        },
+    }) catch {
+        common.log.err("Failed to invoke 'gcc'.", .{});
+        return Error.BackendError;
+    };
+
+    const term = proc.wait(self.context.io) catch {
+        common.log.err("Failed to invoke 'gcc'.", .{});
+        return Error.BackendError;
+    };
+
+    return switch (term) {
+        .exited => |ex|
+            if (ex == 0) { }
+            else Error.BackendError,
+        else => Error.BackendError,
+    };
+}
+
+pub fn codegen(self: *JIR, context: *Context) Error!std.Io.Dir {
     self.allocator = context.arena.allocator();
 
     std.Io.Dir.cwd().createDir(context.io, "build", .default_dir) catch |err| switch (err) {
@@ -181,10 +212,12 @@ pub fn codegen(self: *JIR, context: *Context) Error!void {
     defer sourceFile.close(context.io);
     var sourceWriter = sourceFile.writer(context.io, &wbuf);
     try self.sourceGen(&sourceWriter.interface);
+
+    return cOut;
 }
 
-fn forwardDecls(self: *JIR, out: *std.Io.Writer) Error!void {
-    out.print(
+fn forwardDecls(self: *JIR, out: *Writer) Error!void {
+    try self.write(out, 
     \\/*
     \\ * This file has been automatically generated
     \\ * by the JASL compiler.
@@ -198,9 +231,9 @@ fn forwardDecls(self: *JIR, out: *std.Io.Writer) Error!void {
     \\typedef uint8_t jasl_bool;
     \\
     \\
-    , .{}) catch return Error.IOError;
+    , .{});
     defer { 
-        out.print("\n#endif /* JASL_CODEGEN_C_FORWARD_DECLS_H */\n" , .{}) catch common.log.err("Failed to end header.", .{});
+        self.write(out, "\n#endif /* JASL_CODEGEN_C_FORWARD_DECLS_H */\n" , .{}) catch common.log.err("Failed to end header.", .{});
         out.flush() catch common.log.err("Failed to flush forward declarations.", .{});
     }
 
@@ -209,27 +242,69 @@ fn forwardDecls(self: *JIR, out: *std.Io.Writer) Error!void {
     }
 }
 
-fn discoverFunctionsAndTypes(self: *JIR, out: *std.Io.Writer, nodePtr: Ptr) Error!void {
+fn discoverFunctionsAndTypes(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
     const node = self.nodes.get(nodePtr);
+
+    for (0..self.types.len) |typeID| {
+        const typeInfo = self.types.get(@intCast(typeID));
+
+        switch (typeInfo) {
+            .Array => |arr| {
+                const name = std.fmt.allocPrint(self.allocator, "Array_{s}_{d}_t[{d}]", .{
+                    try self.getCName(arr.child, null, true),
+                    arr.len,
+                    arr.len,
+                }) catch return Error.AllocatorFailure;
+
+                try self.write(out, "typedef {s} {s};\n\n", .{
+                    try self.getCName(arr.child, null, false), name
+                });
+            },
+            .Pointer => |ptr| switch (ptr.size) {
+                .Slice => {
+                    const name = std.fmt.allocPrint(self.allocator, "Slice_{s}", .{
+                        try self.getCName(ptr.child, null, true),
+                    }) catch return Error.AllocatorFailure;
+
+                    try self.write(out, "typedef {s}* {s};\n\n", .{
+                        try self.getCName(ptr.child, null, false), name
+                    });
+                },
+                else => { },
+            },
+            else => {},
+        }
+    }
+
     switch (node.type) {
         .VariableDef => if (self.data[node.value] == 1) {
             const typeID = self.data[node.value + 1];
-            _ = std.mem.replace(u8, self.strings[self.data[node.value + 2]], "::", "__", @constCast(self.strings[self.data[node.value + 2]]));
-            _ = std.mem.replace(u8, self.strings[self.data[node.value + 2]], "$", "_", @constCast(self.strings[self.data[node.value + 2]]));
-            out.print("extern {s} {s};\n\n", .{
-                try self.getCName(typeID),
-                self.strings[self.data[node.value + 2]],
-            }) catch return Error.IOError;
+            const info = self.types.get(typeID);
+            if (info == .Pointer and self.types.get(info.Pointer.child) == .Function) {
+                _ = std.mem.replace(u8, self.strings[self.data[node.value + 2]], "::", "__", @constCast(self.strings[self.data[node.value + 2]]));
+                _ = std.mem.replace(u8, self.strings[self.data[node.value + 2]], "$", "_", @constCast(self.strings[self.data[node.value + 2]]));
+                try self.write(out, "extern {s};\n\n", .{
+                    try self.getCName(info.Pointer.child, self.data[node.value + 2], false),
+                });
+            }
+            else {
+                _ = std.mem.replace(u8, self.strings[self.data[node.value + 2]], "::", "__", @constCast(self.strings[self.data[node.value + 2]]));
+                _ = std.mem.replace(u8, self.strings[self.data[node.value + 2]], "$", "_", @constCast(self.strings[self.data[node.value + 2]]));
+                try self.write(out, "extern {s} {s};\n\n", .{
+                    try self.getCName(typeID, null, false),
+                    self.strings[self.data[node.value + 2]],
+                });
+            }
         },
         .FunctionDef => {
-            const typeID = self.functions.get(self.data[node.value + 1]).signature;
-            const typeInfo = self.types.get(typeID).Function;
+            const func = self.functions.get(self.data[node.value + 1]);
+            const typeInfo = self.types.get(func.signature).Function;
 
             var args: []const u8 = "";
             for (0.., typeInfo.argTypes) |i, typePtr| {
                 args = std.fmt.allocPrint(self.allocator, "{s}{s}{s}{s}", .{
                     args,
-                    try self.getCName(typePtr),
+                    try self.getCName(typePtr, null, false),
                     if (i == typeInfo.argTypes.len - 1) "" else ",",
                     if (i == typeInfo.argTypes.len - 1) "" else " ",
                 }) catch return Error.AllocatorFailure;
@@ -237,11 +312,11 @@ fn discoverFunctionsAndTypes(self: *JIR, out: *std.Io.Writer, nodePtr: Ptr) Erro
 
             _ = std.mem.replace(u8, self.strings[self.data[node.value]], "::", "__", @constCast(self.strings[self.data[node.value]]));
             _ = std.mem.replace(u8, self.strings[self.data[node.value]], "$", "_", @constCast(self.strings[self.data[node.value]]));
-            out.print("{s} {s}({s});\n\n", .{
-                try self.getCName(typeInfo.returnType),
-                self.strings[self.data[node.value]],
+            try self.write(out, "{s} {s}({s});\n\n", .{
+                try self.getCName(typeInfo.returnType, null, false),
+                self.strings[func.name],
                 args
-            }) catch return Error.IOError;
+            });
         },
         .TypeDef => {
             const typeID = node.value;
@@ -249,53 +324,53 @@ fn discoverFunctionsAndTypes(self: *JIR, out: *std.Io.Writer, nodePtr: Ptr) Erro
 
             switch (typeInfo) {
                 .Struct => |str| {
-                    out.print("typedef struct {{\n", .{}) catch return Error.IOError;
+                    try self.write(out, "typedef struct {{\n", .{});
                     for (str.fields) |field| {
-                        out.print("\t{s} {s}_{s};\n", .{
-                            try self.getCName(field.valueType),
+                        try self.write(out, "\t{s} {s}_{s};\n", .{
+                            try self.getCName(field.valueType, null, false),
                             if (field.public) "pub" else "priv",
                             self.strings[field.name],
-                        }) catch return Error.IOError;
+                        });
                     }
                     const name = self.strings[str.name];
                     _ = std.mem.replace(u8, name, ":", "_", @constCast(name));
                     _ = std.mem.replace(u8, name, "$", "_", @constCast(name));
-                    out.print("}} {s};\n\n", .{name}) catch return Error.IOError;
+                    try self.write(out, "}} {s};\n\n", .{name});
                 },
 
                 .Union => |uni|{
                     if (uni.isTagged) {
-                        out.print("typedef struct {{\n", .{}) catch return Error.IOError;
-                        out.print("\t{s} {s}_{s};\n", .{
-                            try self.getCName(uni.fields[0].valueType),
+                        try self.write(out, "typedef struct {{\n", .{});
+                        try self.write(out, "\t{s} {s}_{s};\n", .{
+                            try self.getCName(uni.fields[0].valueType, null, false),
                             if (uni.fields[0].public) "pub" else "priv",
                             self.strings[uni.fields[0].name],
-                        }) catch return Error.IOError;
-                        out.print("\tunion {{\n", .{}) catch return Error.IOError;
+                        });
+                        try self.write(out, "\tunion {{\n", .{});
                         for (uni.fields[1..]) |field| {
-                            out.print("\t\t{s} {s};\n", .{
-                                try self.getCName(field.valueType),
+                            try self.write(out, "\t\t{s} {s};\n", .{
+                                try self.getCName(field.valueType, null, false),
                                 self.strings[field.name],
-                            }) catch return Error.IOError;
+                            });
                         }
-                        out.print("\t}};\n", .{}) catch return Error.IOError;
+                        try self.write(out, "\t}};\n", .{});
                         const name = self.strings[uni.name];
                         _ = std.mem.replace(u8, name, ":", "_", @constCast(name));
                         _ = std.mem.replace(u8, name, "$", "_", @constCast(name));
-                        out.print("}} {s};\n\n", .{name}) catch return Error.IOError;
+                        try self.write(out, "}} {s};\n\n", .{name});
                     }
                     else {
-                        out.print("typedef union {{\n", .{}) catch return Error.IOError;
+                        try self.write(out, "typedef union {{\n", .{});
                         for (uni.fields) |field| {
-                            out.print("\t{s} {s};\n", .{
-                                try self.getCName(field.valueType),
+                            try self.write(out, "\t{s} {s};\n", .{
+                                try self.getCName(field.valueType, null, false),
                                 self.strings[field.name],
-                            }) catch return Error.IOError;
+                            });
                         }
                         const name = self.strings[uni.name];
                         _ = std.mem.replace(u8, name, ":", "_", @constCast(name));
                         _ = std.mem.replace(u8, name, "$", "_", @constCast(name));
-                        out.print("}} {s};\n\n", .{name}) catch return Error.IOError;
+                        try self.write(out, "}} {s};\n\n", .{name});
                     }
                 },
 
@@ -303,14 +378,14 @@ fn discoverFunctionsAndTypes(self: *JIR, out: *std.Io.Writer, nodePtr: Ptr) Erro
                     const name = self.strings[enm.name];
                     _ = std.mem.replace(u8, name, ":", "_", @constCast(name));
                     _ = std.mem.replace(u8, name, "$", "_", @constCast(name));
-                    out.print("typedef enum {{\n", .{}) catch return Error.IOError;
+                    try self.write(out, "typedef enum {{\n", .{});
                     for (enm.fields) |field| {
-                        out.print("\t{s}_{s},\n", .{
+                        try self.write(out, "\t{s}_{s},\n", .{
                             name,
                             field,
-                        }) catch return Error.IOError;
+                        });
                     }
-                    out.print("}} {s};\n\n", .{name}) catch return Error.IOError;
+                    try self.write(out, "}} {s};\n\n", .{name});
                 },
 
                 else => return common.debug.ShouldBeImpossible(@src()),
@@ -320,30 +395,212 @@ fn discoverFunctionsAndTypes(self: *JIR, out: *std.Io.Writer, nodePtr: Ptr) Erro
     }
 }
 
-fn sourceGen(_: *JIR, out: *std.Io.Writer) Error!void {
-    out.print(
+fn sourceGen(self: *JIR, out: *Writer) Error!void {
+    try self.write(out, 
     \\/*
     \\ * This file has been automatically generated
     \\ * by the JASL compiler.
     \\ */
     \\
     \\#include "forward_decl.h"
-    , .{}) catch return Error.IOError;
+    \\
+    \\int main() {{
+    \\    return root__main();
+    \\}}
+    \\
+    \\
+    , .{});
     defer out.flush() catch {
         common.log.err("Failed to flush source file.", .{});
     };
+
+    for (self.keyNodes) |keyNode| {
+        const node = self.nodes.get(@intCast(keyNode));
+        switch (node.type) {
+            .VariableDef => if (self.data[node.value] == 1) {
+                try self.operation(out, keyNode);
+            },
+            .FunctionDef => try self.operation(out, keyNode),
+            else => { },
+        }
+    }
 }
 
-fn getCName(self: *JIR, typeID: TypeID) Error![]const u8 {
+fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
+    const node = self.nodes.get(nodePtr);
+
+    try switch (node.type) {
+        .TypeDef => { },
+        .FunctionDef => {
+            const name = self.strings[self.data[node.value]];
+            const func = self.functions.get(self.data[node.value + 1]);
+            const typeInfo = self.types.get(func.signature).Function;
+
+            var args: []const u8 = "";
+            for (0.., typeInfo.argTypes) |i, typePtr| {
+                // @Important TODO: Function parameter names WHY AREN'T THEY HERE???
+                args = std.fmt.allocPrint(self.allocator, "{s}{s}{s}{s}", .{
+                    args,
+                    try self.getCName(typePtr, null, false),
+                    if (i == typeInfo.argTypes.len - 1) "" else ",",
+                    if (i == typeInfo.argTypes.len - 1) "" else " ",
+                }) catch return Error.AllocatorFailure;
+            }
+
+            try self.writeln(out, "{s} {s}({s})\n", .{
+                try self.getCName(typeInfo.returnType, null, false),
+                name,
+                args
+            });
+            
+            for (func.body.start..func.body.end) |ptr| {
+                if (isStmt(self.nodes.items(.type)[ptr])) {
+                    try self.operation(out, @intCast(ptr));
+                }
+            }
+        },
+        .VariableDef => {
+            const typeID = self.data[node.value + 1];
+            const info = self.types.get(typeID);
+            if (info == .Pointer and self.types.get(info.Pointer.child) == .Function) {
+                _ = std.mem.replace(u8, self.strings[self.data[node.value + 2]], "::", "__", @constCast(self.strings[self.data[node.value + 2]]));
+                _ = std.mem.replace(u8, self.strings[self.data[node.value + 2]], "$", "_", @constCast(self.strings[self.data[node.value + 2]]));
+                try self.write(out, "{s}{s}", .{
+                    try self.getCName(info.Pointer.child, self.data[node.value + 2], false),
+                    if (self.data[node.value + 3] == 1) ";" else " = ",
+                });
+            }
+            else {
+                try self.writeln(out, "{s} {s}{s}", .{
+                    try self.getCName(typeID, null, false),
+                    self.strings[self.data[node.value + 2]],
+                    if (self.data[node.value + 3] == 1) ";\n" else " = ",
+                });
+            }
+
+            if (self.data[node.value + 3] == 0) {
+                try self.operation(out, self.data[node.value + 4]);
+                try self.write(out, ";\n", .{ });
+            }
+        },
+        .Identifier => try self.write(out, " {s} ", .{self.strings[node.value]}),
+        .Literal => self.literal(out, node.value),
+        .Scope => {
+            try self.writeln(out, "{{\n{s}: (void)(0);\n", .{
+                self.strings[node.value],
+            });
+            self.indent += 1;
+        },
+
+        .Exit => {
+            self.indent -= 1;
+            try self.writeln(out, "}}\n", .{});
+        },
+
+        .Add => try self.commonBinary(out, node.value, "+"),
+        .Sub => try self.commonBinary(out, node.value, "-"),
+        .And => try self.commonBinary(out, node.value, "&&"),
+        .Div => try self.commonBinary(out, node.value, "/"),
+        .Mul => try self.commonBinary(out, node.value, "*"),
+        .Or => try self.commonBinary(out, node.value, "||"),
+        .Xor => try self.commonBinary(out, node.value, "^"),
+        .LeftShift => try self.commonBinary(out, node.value, "<<"),
+        .RightShift => try self.commonBinary(out, node.value, ">>"),
+        .Lesser => try self.commonBinary(out, node.value, "<"),
+        .LesserEqual => try self.commonBinary(out, node.value, "<="),
+        .Greater => try self.commonBinary(out, node.value, ">"),
+        .GreaterEqual => try self.commonBinary(out, node.value, ">="),
+        .Equal => try self.commonBinary(out, node.value, "=="),
+        .NotEqual => try self.commonBinary(out, node.value, "!="),
+        .BitwiseAnd => try self.commonBinary(out, node.value, "&"),
+        .BitwiseOr => try self.commonBinary(out, node.value, "|"),
+
+        .Label => try self.writeln(out, "{s}:\n", .{self.strings[node.value]}),
+        .Jump => try self.writeln(out, "goto {s};\n", .{self.strings[node.value]}),
+        .JumpIf => {
+            try self.writeln(out, "if (", .{});
+            try self.operation(out, self.data[node.value + 1]);
+            try self.write(out, ") goto {s};\n", .{self.strings[self.data[node.value]]});
+        },
+        .Return => {
+            try self.writeln(out, "return ", .{});
+            try self.operation(out, node.value);
+            try self.write(out, ";\n", .{});
+        },
+        .Ternary => {
+            try self.operation(out, self.data[node.value]);
+            try self.write(out, " ? ", .{});
+            try self.operation(out, self.data[node.value + 1]);
+            try self.write(out, " : ", .{});
+            try self.operation(out, self.data[node.value + 2]);
+        },
+
+        .Reference => try self.commonSingle(out, node.value, "&"),
+        .Dereference => try self.commonSingle(out, node.value, "*"),
+        .Invert => try self.commonSingle(out, node.value, "~"),
+        .Not => try self.commonSingle(out, node.value, "!"),
+        .Negation => try self.commonSingle(out, node.value, "-"),
+        else => { },
+    };
+}
+
+fn commonSingle(self: *JIR, out: *Writer, ptr: Ptr, comptime op: []const u8) Error!void {
+    try self.write(out, op++"(", .{});
+    try self.operation(out, ptr);
+    try self.write(out, ")", .{});
+}
+
+fn commonBinary(self: *JIR, out: *Writer, ptr: Ptr, comptime op: []const u8) Error!void {
+    try self.write(out, "(", .{});
+    try self.operation(out, self.data[ptr]);
+    try self.write(out, " "++op++" ", .{});
+    try self.operation(out, self.data[ptr + 1]);
+    try self.write(out, ")", .{});
+}
+
+fn literal(self: *JIR, out: *Writer, ptr: Constant.Ptr) Error!void {
+    const cst = self.constants.get(ptr);
+
+    try switch (cst) {
+        .Undefined => self.write(out, "{{ }}", .{}),
+        .Integer => |int| switch (int) {
+            .i32 => |t| self.write(out, "{d}", .{t}),
+            .u32 => |t| self.write(out, "{d}", .{t}),
+            .i8 => |t| self.write(out, "{d}", .{t}),
+            .u8 => |t| self.write(out, "{d}", .{t}),
+        },
+        .Float => |fl| self.write(out, "{}", .{fl}),
+        .Function => |func| self.write(out, "{s}", .{self.strings[func]}),
+        .Array, .Aggregate => |arr| {
+            try self.write(out, "{{ ", .{});
+            for (arr.data.start..arr.data.end) |idx| {
+                try self.literal(out, @intCast(idx));
+                if (idx != arr.data.end - 1) {
+                    try self.write(out, ", ", .{});
+                }
+            }
+            try self.write(out, " }}", .{});
+        },
+    };
+}
+
+fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool) Error![]const u8 {
     if (self.cstrings.get(typeID)) |name| {
-        return name;
+        return
+            if (mutable and std.mem.endsWith(u8, name, "const")) name[0..name.len - 6]
+            else name;
     }
 
     const typeInfo = self.types.get(typeID);
     var name: []const u8 = "";
     switch (typeInfo) {
-        .Type, .Any, .EnumLiteral,
-        .Noreturn, .Void => return common.debug.ShouldBeImpossible(@src()),
+        .Type, .Any, .EnumLiteral => {
+            common.log.err("Unsupported {s}", .{@tagName(typeInfo)});
+            return common.debug.ShouldBeImpossible(@src());
+        },
+
+        .Void => return "void const",
+        .Noreturn => return "void const",
 
         .Bool => |v| name = std.fmt.allocPrint(self.allocator, "jasl_bool{s}", .{
             if (v) "" else " const"
@@ -351,11 +608,18 @@ fn getCName(self: *JIR, typeID: TypeID) Error![]const u8 {
         .Float => |v| name = std.fmt.allocPrint(self.allocator, "float{s}", .{
             if (v) "" else " const"
         }) catch return Error.AllocatorFailure,
-        .ComptimeFloat => name = "float const" ,
-        .ComptimeInt => name = "int32_t const" ,
-        .Integer => |i| name = std.fmt.allocPrint(self.allocator, "{s}int{d}_t const", .{
+        .ComptimeFloat => name = std.fmt.allocPrint(self.allocator,
+            "float{s}", .{
+            if (mutable) "" else " const"
+        }) catch return Error.AllocatorFailure,
+        .ComptimeInt => name = std.fmt.allocPrint(self.allocator,
+            "int32_t{s}", .{
+            if (mutable) "" else " const"
+        }) catch return Error.AllocatorFailure,
+        .Integer => |i| name = std.fmt.allocPrint(self.allocator, "{s}int{d}_t{s}", .{
             if (i.signed) "" else "u",
             i.size,
+            if (mutable) "" else " const",
         }) catch return Error.AllocatorFailure,
 
         .Union, .Struct, .Enum => {
@@ -384,21 +648,22 @@ fn getCName(self: *JIR, typeID: TypeID) Error![]const u8 {
             for (0.., func.argTypes) |i, typePtr| {
                 args = std.fmt.allocPrint(self.allocator, "{s}{s}{s}{s}", .{
                     args,
-                    try self.getCName(typePtr),
+                    try self.getCName(typePtr, _name, false),
                     if (i == func.argTypes.len - 1) "" else ",",
                     if (i == func.argTypes.len - 1) "" else " ",
                 }) catch return Error.AllocatorFailure;
             }
 
-            name = std.fmt.allocPrint(self.allocator, "{s}(*)({s})", .{
-                try self.getCName(func.returnType),
+            name = std.fmt.allocPrint(self.allocator, "{s} (*{s})({s})", .{
+                try self.getCName(func.returnType, _name, true),
+                if (_name) |n| self.strings[n] else "",
                 args
-            }) catch return Error.IOError;
+            }) catch return Error.AllocatorFailure;
         },
 
         .Array => |arr| {
-            name = std.fmt.allocPrint(self.allocator, "Array_{s}_{d}{s}", .{
-                try self.getCName(arr.child),
+            name = std.fmt.allocPrint(self.allocator, "Array_{s}_{d}_t{s}", .{
+                try self.getCName(arr.child, _name, true),
                 arr.len,
                 if (arr.mutable) "" else " const",
             }) catch return Error.AllocatorFailure;
@@ -407,13 +672,13 @@ fn getCName(self: *JIR, typeID: TypeID) Error![]const u8 {
         .Pointer => |ptr| switch (ptr.size) {
             .Slice => {
                 name = std.fmt.allocPrint(self.allocator, "Slice_{s}{s}", .{
-                    try self.getCName(ptr.child),
+                    try self.getCName(ptr.child, _name, true),
                     if (ptr.mutable) "" else " const",
                 }) catch return Error.AllocatorFailure;
             },
             .Single, .C => {
                 name = std.fmt.allocPrint(self.allocator, "{s}*{s}", .{
-                    try self.getCName(ptr.child),
+                    try self.getCName(ptr.child, _name, true),
                     if (ptr.mutable) "" else " const",
                 }) catch return Error.AllocatorFailure;
             },
@@ -422,5 +687,29 @@ fn getCName(self: *JIR, typeID: TypeID) Error![]const u8 {
 
     self.cstrings.putNoClobber(self.allocator, typeID, name)
         catch return Error.AllocatorFailure;
-    return name;
+
+    return
+        if (mutable and std.mem.endsWith(u8, name, "const")) name[0..name.len - 6]
+        else name;
+}
+
+fn isStmt(nt: Node.Type) bool {
+    return switch (nt) {
+        .FunctionDef, .Return, .JumpIf,
+        .Jump, .Label, .Exit, .Scope,
+        .Assignment, .Store, .VariableDef => true,
+
+        else => false,
+    };
+}
+
+fn write(_: *JIR, out: *Writer, comptime msg: []const u8, args: anytype) Error!void {
+    return out.print(msg, args) catch Error.IOError;
+}
+
+fn writeln(self: *JIR, out: *Writer, comptime msg: []const u8, args: anytype) Error!void {
+    for (0..self.indent) |_| {
+        out.print("    ", .{}) catch return Error.IOError;
+    }
+    return out.print(msg, args) catch Error.IOError;
 }

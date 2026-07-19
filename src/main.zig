@@ -134,7 +134,8 @@ fn innerMain(allocator: std.mem.Allocator, init: std.process.Init) common.Compil
     // has ended.
     _ = context.arena.reset(.retain_capacity);
 
-    try loweredIR.codegen(&context);
+    const outDir = try loweredIR.codegen(&context);
+    try loweredIR.compile(outDir);
 }
 
 var MainProcInit: std.process.Init = undefined;

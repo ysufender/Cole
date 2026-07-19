@@ -126,5 +126,8 @@ pub const CompilerError = error {
     LoopControlOutsideLoopScope,
     DeferOutsideDeferrableScope,
     MultipleCLIOptions,
+    IllegalNonTopLevelOp,
+    ComptimePointer,
+    BackendError,
     Terminate,
 };

@@ -56,7 +56,7 @@ pub fn declaration(self: *Lowerer, ptr: defines.DeclPtr, decl: *const Declaratio
             if (info == .Union and info.Union.isTagged) {
                 _ = try self.typechecker.builder.typeDef(info.Union.tag);
             }
-            _ = try self.typechecker.builder.typeDef(typeDef);
+           _ = try self.typechecker.builder.typeDef(typeDef);
         },
         else => {
             // @Note Top-level comptimeness is checked in the typechecker.
@@ -66,7 +66,7 @@ pub fn declaration(self: *Lowerer, ptr: defines.DeclPtr, decl: *const Declaratio
                 else
                     try self.expression(decl.node, typeID);
 
-            _ = try self.typechecker.builder.variableDef(decl.topLevel, typeID, decl, node);
+            _ = try self.typechecker.builder.variableDef(decl.topLevel, typeID, decl, node, self.typechecker);
         },
     }
 }
@@ -75,44 +75,26 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
     const value = self.typechecker.executer.getValue(valuePtr);
     const ofType = self.typechecker.typeTable.get(ofTypePtr);
     return self.typechecker.builder.addConstant(switch (value) {
-        .Int => |val| integer: {
-            //if (ofType == .ComptimeInt) {
-            //    self.report(
-            //        "Value of type 'comptime_int' can't leak outside the comptime scope "
-            //        ++ "without a target integer type. Consider adding a type annotation "
-            //        ++ "or an explicit cast.",
-            //        .{}
-            //    );
-            //    return Error.ExistentialDilemma;
-            //}
-
-            break :integer switch (self.typechecker.sizeOf(ofTypePtr)) {
-                32 => .{ .Integer = if (ofType.Integer.signed) .{
-                    .i32 = @intCast(val),
-                } else .{
-                    .u32 = @intCast(val),
-                }},
-                8 => .{ .Integer = if (ofType.Integer.signed) .{
-                    .i8 = @intCast(val),
-                } else .{
-                    .u8 = @intCast(val),
-                }},
-                else => return common.debug.ShouldBeImpossible(@src()),
-            };
+        .Int => |val| switch (self.typechecker.sizeOf(ofTypePtr)) {
+            64 => .{ .Integer = .{
+                .i32 = @intCast(val),
+            }},
+            32 => .{ .Integer = if (ofType.Integer.signed) .{
+                .i32 = @intCast(val),
+            } else .{
+                .u32 = @intCast(val),
+            }},
+            8 => .{ .Integer = if (ofType.Integer.signed) .{
+                .i8 = @intCast(val),
+            } else .{
+                .u8 = @intCast(val),
+            }},
+            else => |t| {
+                common.log.err("Integer with size: {d}", .{t});
+                return common.debug.ShouldBeImpossible(@src());
+            },
         },
-        .Float => |val| float: {
-            //if (ofType == .ComptimeFloat) {
-            //    self.report(
-            //        "Value of type 'comptime_float' can't leak outside the comptime scope "
-            //        ++ "without a target floating point type. Consider adding a type annotation "
-            //        ++ "or an explicit cast.",
-            //        .{}
-            //    );
-            //    return Error.ExistentialDilemma;
-            //}
-
-            break :float .{ .Float = val };
-        },
+        .Float => |val| .{ .Float = val },
         .Undefined => |valueType| .{ .Undefined = valueType },
         .Struct => |str| @"struct": {
             const start = self.typechecker.builder.constants.len;
@@ -182,29 +164,42 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
                         .end = @intCast(self.typechecker.builder.constants.len),
                     },
                 }},
-                .Pointer => |ptr| pointer: { 
-                    const implicitArray = JIR.Constant{ .Aggregate = .{
-                        .type = try self.typechecker.registerType(.{
-                            .Array = .{
-                                .mutable = true,
-                                .child = ptr.child,
-                                .len = slice.Size,
+                .Pointer => |ptr|
+                    if (true) {
+                        self.report("Pointer types can't be comptime constants.", .{});
+                        return Error.ComptimePointer;
+                    }
+                    else pointer: { 
+                        const implicitArray = JIR.Constant{ .Aggregate = .{
+                            .type = try self.typechecker.registerType(.{
+                                .Array = .{
+                                    .mutable = true,
+                                    .child = ptr.child,
+                                    .len = slice.Size,
+                                },
+                            }),
+                            .data = .{
+                                .start = @intCast(start),
+                                .end = @intCast(self.typechecker.builder.constants.len),
                             },
-                        }),
-                        .data = .{
-                            .start = @intCast(start),
-                            .end = @intCast(self.typechecker.builder.constants.len),
-                        },
-                    }};
+                        }};
 
-                    break :pointer .{ .Pointer = try self.typechecker.builder.addConstant(implicitArray) };
-                },
-                else => return common.debug.ShouldBeImpossible(@src()),
+                        break :pointer .{ .Pointer = try self.typechecker.builder.addConstant(implicitArray) };
+                    },
+                    else => return common.debug.ShouldBeImpossible(@src()),
             };
         },
-        .Pointer => {
-            self.report("Comptime pointers can't live outside the comptime scope.", .{});
-            return Error.ExistentialDilemma;
+        .Pointer => |ptr| blk: {
+            const val = self.typechecker.executer.getValue(ptr.To);
+            switch (val) {
+                .Function => |func| break :blk JIR.Constant{
+                    .Function = func.name,
+                },
+                else => {
+                    self.report("Comptime pointers can't live outside the comptime scope.", .{});
+                    return Error.ExistentialDilemma;
+                }
+            }
         },
         .Bool => |boolValue| .{ .Integer = .{ .u8 = @intFromBool(boolValue), }, },
         .Void => {
@@ -224,7 +219,10 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
 
             return common.debug.ShouldBeImpossible(@src());
         },
-        .Function, .Type => return common.debug.ShouldBeImpossible(@src()),
+        .Function => |func| .{
+            .Function = func.name,
+        },
+        .Type => return common.debug.ShouldBeImpossible(@src()),
     });
 }
 
@@ -243,11 +241,11 @@ fn unwindDefers(self: *Lowerer, upTo: u32) Error!?defines.Range {
             range =
                 if(range) |r| .{
                     .start = r.start,
-                    .end = stmtRange.end,
+                    .end = stmtRange.end + 1,
                 }
                 else .{
                     .start = stmtRange.start,
-                    .end = stmtRange.end,
+                    .end = stmtRange.end + 1,
                 };
         }
     }
@@ -270,7 +268,7 @@ pub fn statement(self: *Lowerer, statementPtr: defines.StatementPtr) Error!defin
             else try self.expressionStmt(stmt.value),
         .Conditional => try self.conditional(stmt.value, ast),
         .While => try self.loop(.While, stmt.value, ast),
-        .Return => try self.@"return"(stmt.value),
+        .Return => try self.@"return"(try self.expression(stmt.value, try self.typechecker.typecheckExpression(stmt.value, null))),
         .Break => try self.@"break"(),
         .Continue => try self.@"continue"(),
         .Discard => blk: {
@@ -281,10 +279,7 @@ pub fn statement(self: *Lowerer, statementPtr: defines.StatementPtr) Error!defin
                 .end = start + 1,
             };
         },
-        .VariableDefinition => .{
-            .start = 0,
-            .end = 0,
-        },
+        .VariableDefinition => try self.variableDef(stmt.value),
         .Import, .Mark => return common.debug.ShouldBeImpossible(@src()),
 
         .Defer => try self.@"defer"(stmt.value),
@@ -300,6 +295,33 @@ pub fn statement(self: *Lowerer, statementPtr: defines.StatementPtr) Error!defin
     };
 
     return node;
+}
+
+fn variableDef(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!defines.Range {
+    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+
+    const declPtr = ast.extra[extraPtr + 2];
+    const decl = self.typechecker.symbols.getDecl(declPtr);
+
+    const typeID = try self.typechecker.typecheckDecl(declPtr, null);
+
+    const node =
+        if (self.typechecker.executer.attemptEval(decl.node, typeID)) |someVal|
+            try self.typechecker.builder.literal(try self.addConstant(someVal, typeID))
+        else
+            try self.expression(decl.node, typeID);
+
+    const def = try self.typechecker.builder.variableDef(
+        decl.topLevel,
+        typeID,
+        &decl,
+        node,
+        self.typechecker,
+    );
+    return .{
+        .start = def,
+        .end = def + 1,
+    };
 }
 
 fn @"defer"(self: *Lowerer, stmtPtr: defines.StatementPtr) Error!defines.Range {
@@ -400,9 +422,9 @@ fn loop(
     const start = try self.typechecker.builder.label(startLabel);
 
     const conditionPtr = ast.extra[extraPtr];
-    _  = try self.expression(conditionPtr, Comptime.Builtin.Type("bool"));
+    const cnd = try self.expression(conditionPtr, Comptime.Builtin.Type("bool"));
 
-    _ = try self.typechecker.builder.cjump(endLabel);
+    _ = try self.typechecker.builder.cjump(endLabel, cnd);
 
     const bodyPtr = ast.extra[extraPtr + 1];
     self.lastLoopDepth = self.scopes.index;
@@ -413,7 +435,7 @@ fn loop(
 
     return .{
         .start = start,
-        .end = end,
+        .end = end + 1,
     };
 }
 
@@ -438,19 +460,12 @@ fn conditional(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.A
         };
     }
 
-    // @Note the compiler sets up a virtual logic register which holds the
-    // intermediary logic results. Conditional jumps read from the said
-    // register directly.
-    //
-    // @Important @Beware Conditional jump is made only when register
-    // stores false.
+    const elseLabel = try self.typechecker.executer.generateRandomName(.Else);
+    const finallyLabel = try self.typechecker.executer.generateRandomName(.Finally);
 
-    const start = try self.expression(conditionExpr, Comptime.Builtin.Type("bool"));
+    const cnd = try self.expression(conditionExpr, Comptime.Builtin.Type("bool"));
+    const start = try self.typechecker.builder.cjump(elseLabel, cnd);
     const end = blk: {
-        const elseLabel = try self.typechecker.executer.generateRandomName(.Else);
-        const finallyLabel = try self.typechecker.executer.generateRandomName(.Finally);
-
-        _ = try self.typechecker.builder.cjump(elseLabel);
 
         const body = ast.extra[extraPtr + 1];
         _ = try self.statement(body);
@@ -471,7 +486,7 @@ fn conditional(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.A
 
     return .{
         .start = start,
-        .end = end,
+        .end = end + 1,
     };
 }
 
@@ -485,7 +500,7 @@ fn expressionStmt(self: *Lowerer, expr: defines.ExpressionPtr) Error!defines.Ran
     };
 }
 
-fn @"return"(self: *Lowerer, expr: defines.ExpressionPtr) Error!defines.Range {
+fn @"return"(self: *Lowerer, expr: JIR.Ptr) Error!defines.Range {
     const start = try self.typechecker.builder.@"return"(expr);
     const end = try self.unwindDefers(self.scopes.index);
     return .{
@@ -502,14 +517,10 @@ fn block(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!defines.Range {
         .end = ast.extra[extraPtr + 1],
     };
 
-    if (statements.len() <= 0) {
-        return statements;
-    }
-
     try self.scopes.push(0);
 
     const start = try self.typechecker.builder.scope(
-        try self.typechecker.executer.generateRandomName(.Block)
+        try self.typechecker.executer.generateRandomName(.Block),
     );
 
     var alreadyDeferred = false;
@@ -540,7 +551,7 @@ fn block(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!defines.Range {
 
     return .{
         .start = start,
-        .end = end,
+        .end = end + 1,
     };
 }
 
@@ -560,7 +571,7 @@ pub fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID
     return switch (expr.type) {
         .Literal => self.literal(exprPtr, ofType),
         .Mark => self.mark(expr.value, ofType),
-        .Identifier => self.identifier(expr.value),
+        .Identifier => self.identifier(exprPtr),
 
         .EnumDefinition, .StructDefinition, .UnionDefinition,
         .FunctionType, .ArrayType,
@@ -725,12 +736,12 @@ fn binary(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR
 }
 
 // @Note type names are also plain identifiers.
-fn identifier(self: *Lowerer, identifierTokenPtr: defines.TokenPtr) Error!JIR.Ptr {
-    const tokens = self.typechecker.context.getTokens(self.typechecker.currentFile);
-
-    const lexeme = tokens.get(identifierTokenPtr).lexeme(self.typechecker.context, self.typechecker.currentFile);
-    const strPtr = try self.typechecker.builder.internString(lexeme);
-    return self.typechecker.builder.identifier(strPtr);
+fn identifier(self: *Lowerer, id: defines.ExpressionPtr) Error!JIR.Ptr {
+    const decl = self.typechecker.symbols.findGetDecl(.{
+        .file = self.typechecker.currentFile,
+        .expr = id,
+    });
+    return self.typechecker.builder.identifier(decl.name);
 }
 
 fn mark(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR.Ptr {

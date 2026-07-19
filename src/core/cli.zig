@@ -139,7 +139,7 @@ pub fn parseCLI(allocator: std.mem.Allocator, _args: std.process.Args, io: std.I
                     return Error.MultipleCLIOptions;
                 }
                 else {
-                    maybeOut = flag;
+                    maybeOut = args.next();
                 },
 
             .Flag => cliFlags.put(allocator, flag, {}) catch return Error.AllocatorFailure,
@@ -170,7 +170,7 @@ pub fn parseCLI(allocator: std.mem.Allocator, _args: std.process.Args, io: std.I
     return blk: {
         if (maybeFile) |file| break :blk common.CompilerSettings{
             .inputFile = file,
-            .outputFile = maybeOut,
+            .outputFile = maybeOut orelse "out",
             .workingDir = workingDir,
             .includeDirs = try collect(
                 includeDirs.count(),

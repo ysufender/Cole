@@ -46,7 +46,6 @@ pub const Flags = enum(u8) {
     LValue = 1,
     AttemptingEval = 2,
     CanCycle = 3,
-    MustReturn = 4,
     CoveredAllPaths = 5,
     InLoop = 6,
     InDefer = 7,
@@ -194,6 +193,8 @@ pub fn typecheck(self: *Typechecker, allocator: Allocator) Error!Resolution {
 pub fn typecheckStatement(self: *Typechecker, statementPtr: defines.StatementPtr, expected: TypeID) Error!void {
     const ast = self.context.getAST(self.currentFile);
 
+    _ = try self.lowerer.statement(statementPtr);
+
     const stmt = ast.statements.get(statementPtr);
     return switch (stmt.type) {
         .Block => self.typecheckBlock(stmt.value, expected),
@@ -255,6 +256,12 @@ fn typecheckVariableDef(
 
     blk: switch (self.typeTable.get(initializer)) {
         .Type => {
+            // @Maybe @Beware remove this. But currently local types cause problems.
+            if (!topLevel) {
+                self.report("Type definitions can only be done in top-level contexts.", .{});
+                return Error.IllegalNonTopLevelOp;
+            }
+
             const newType = self.executer.getValue(try self.executer.eval(node, expected)).Type;
             const name = self.builder.getInternedString(switch (self.typeTable.get(newType)) {
                 .Union => |uni| uni.name,
@@ -377,6 +384,17 @@ fn typecheckVariableDef(
             }
         },
         .Function => {
+            // @Maybe @Beware remove this. But currently local types cause problems.
+            if (!topLevel) {
+                self.report("Function definitions can only be done in top-level contexts.", .{});
+                return Error.IllegalNonTopLevelOp;
+            }
+
+            const fnc = self.executer.getValue(try self.executer.eval(node, expected)).Function;
+            if (self.builder.getInternedString(fnc.name)[0] != '$') {
+                break :blk;
+            }
+
             const ast = self.context.getAST(self.currentFile);
             const tokens = self.context.getTokens(ast.tokens);
 
@@ -388,7 +406,19 @@ fn typecheckVariableDef(
             }) catch return Error.AllocatorFailure;
             const new = try self.builder.internString(newName);
 
-            try self.builder.functionDef(new, self.executer.getValue(try self.executer.eval(node, expected)).Function);
+            const val = try self.executer.eval(node, expected);
+            var func = self.executer.getValue(val).Function;
+            func.name = new;
+
+            self.executer.memory.items[val] = .{
+                .Function = .{
+                    .name = func.name,
+                    .signature = func.signature,
+                    .body = func.body,
+                },
+            };
+
+            try self.builder.functionDef(new, try self.builder.addFunction(func));
         },
         else => { },
     }
@@ -775,27 +805,9 @@ fn typecheckBlock(self: *Typechecker, extraPtr: defines.OpaquePtr, expected: Typ
     }
 }
 
-pub fn typecheckVariableDeclaration(self: *Typechecker, decl: *Resolver.Declaration, ptr: defines.DeclPtr) Error!TypeID {
+pub fn typecheckVariableDeclaration(self: *Typechecker, decl: *Resolver.Declaration, _: defines.DeclPtr) Error!TypeID {
     const expected = try self.expectType(decl.type);
     const res = try self.typecheckVariableDef(decl.token, expected, decl.topLevel, decl.parent, decl.node);
-
-    if (self.typeTable.get(res) == .Type) {
-        const newType = self.executer.getValue(try self.executer.eval(decl.node, expected)).Type;
-        self.symbols.declarations.set(ptr, .{
-            .name = self.typenameMap.get(newType) orelse return common.debug.ShouldBeImpossible(@src()),
-            .parent = decl.parent,
-            .node = decl.node,
-            .type = decl.type,
-            .topLevel = decl.topLevel,
-            .scope = decl.scope,
-            .public = decl.public,
-            .kind = decl.kind,
-            .token = decl.token,
-        });
-
-        decl.* = self.symbols.getDecl(ptr);
-    }
-
     return res;
 }
 
@@ -906,7 +918,7 @@ pub fn typecheckValue(self: *Typechecker, val: Comptime.Value.Ptr, maybeExpected
         .Struct => |str| str.Type,
         .Type => Comptime.Builtin.Type("type"),
         .Pointer => |ptr| ptr.Type,
-        .Function => |func| self.builder.functions.get(func).signature,
+        .Function => |func| func.signature,
         .Void => Comptime.Builtin.Type("void"),
         .Undefined => |undef| undef,
         .Slice => |slice| slice.Type,
@@ -1667,8 +1679,11 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
         .status = .Checked,
         .result = declType,
     };
-    
-    _ = try self.lowerer.declaration(declPtr, &decl);
+
+    if (decl.topLevel) {
+        try self.lowerer.declaration(isPresent.key_ptr.*, &decl);
+    }
+
     return declType;
 }
 
@@ -2780,15 +2795,15 @@ pub fn makeMutable(_: *const Typechecker, info: TypeInfo) TypeInfo {
 /// In bytes
 pub fn sizeOf(self: *const Typechecker, of: TypeID) u32 {
     return ret: switch (self.typeTable.get(of)) {
-        .Pointer => @sizeOf(*void),
-        .Function => @sizeOf(@TypeOf(&sizeOf)),
-        .Enum => @sizeOf(u32),
-        .Float, .ComptimeFloat => @sizeOf(f32),
+        .Pointer => @bitSizeOf(*void),
+        .Function => @bitSizeOf(@TypeOf(&sizeOf)),
+        .Enum => @bitSizeOf(u32),
+        .Float, .ComptimeFloat => @bitSizeOf(f32),
         .Integer => |int| int.size,
-        .Bool => @sizeOf(bool),
+        .Bool => @bitSizeOf(bool),
         .Void, .Noreturn, .EnumLiteral, .Type, .Any => 0,
         .Array => |arr| arr.len * self.sizeOf(arr.child),
-        .ComptimeInt => @sizeOf(i32),
+        .ComptimeInt => @bitSizeOf(i64),
         .Struct => |str| {
             var size: u32 = 0;
             for (str.fields) |field| {
@@ -2805,7 +2820,7 @@ pub fn sizeOf(self: *const Typechecker, of: TypeID) u32 {
                 size = @max(size, self.sizeOf(field.valueType));
             }
 
-            break :ret size + @as(u32, if (uni.isTagged) @sizeOf(u32) else 0);
+            break :ret size + @as(u32, if (uni.isTagged) @bitSizeOf(u32) else 0);
         },
     };
 }

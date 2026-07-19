@@ -10,16 +10,19 @@
 
 typedef uint8_t jasl_bool;
 
-typedef struct {
-} root__Some;
+typedef uint8_t* Slice_uint8_t;
 
-typedef struct {
-} root__Some__Other;
+typedef uint8_t* Slice_uint8_t;
 
-typedef struct {
-} root__Some__Other__Mother;
+typedef uint8_t* Slice_uint8_t;
 
-extern uint32_t const root__Some__Other__Mother__def;
+typedef uint8_t* Slice_uint8_t;
+
+typedef uint8_t* Slice_uint8_t;
+
+typedef uint8_t* Slice_uint8_t;
+
+typedef uint8_t* Slice_uint8_t;
 
 int32_t const root__main();
 

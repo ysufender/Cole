@@ -379,6 +379,8 @@ fn resolveStatement(self: *Resolver, stmt: defines.StatementPtr, topLevel: bool)
                 if (topLevel) try self.look(signature.name)
                 else try self.decls.addOne(allocator);
 
+            ast.extra[statement.value + 2] = decl;
+
             self.decls.set(decl, .{
                 .name = self.dataIndex(),
                 .kind = .Variable,

@@ -487,6 +487,7 @@ fn variable(self: *Parser, public: bool) StatementResult {
     const start: defines.OpaquePtr = @intCast(self.extra.items.len);
     self.extra.append(self.allocator(), signature) catch return error.AllocatorFailure;
     self.extra.append(self.allocator(), expr) catch return error.AllocatorFailure;
+    self.extra.append(self.allocator(), 0) catch return error.AllocatorFailure;
 
     const result = try self.alloc(Statement);
     self.statementMap.set(result, .{

@@ -86,7 +86,7 @@ pub const Value = union(enum) {
             return self.To + index;
         }
     },
-    Function: JIR.Function.Ptr,
+    Function: JIR.Function,
     Void,
     Undefined: TypeID,
 };
@@ -277,11 +277,11 @@ fn evalFunction(self: *Comptime, exprPtr: defines.ExpressionPtr, extraPtr: defin
     const functionDef = JIR.Function{
         .signature = functionType,
         .body = try self.typechecker.lowerer.statement(bodyPtr),
+        .name = try self.generateRandomName(.Function),
     };
-    const functionJIR = try self.typechecker.builder.addFunction(functionDef);
 
     return self.appendValue(.{
-        .Function = functionJIR,
+        .Function = functionDef,
     });
 }
 
@@ -383,18 +383,19 @@ fn evalLambda(self: *Comptime, exprPtr: defines.ExpressionPtr, extraPtr: defines
 
     // @Incomplete TOOD: should insert a return statement here instead of a direct
     // expression. Finish after statement typechecking and lowering.
-    const funcBody = try self.typechecker.lowerer.expression(ast.extra[extraPtr + 2], expected.returnType);
+    const retExpr = try self.typechecker.lowerer.expression(ast.extra[extraPtr + 2], expected.returnType);
+    const retStmt = try self.typechecker.builder.@"return"(retExpr);
     const functionDef = JIR.Function{
         .signature = maybeExpected orelse return common.debug.ShouldBeImpossible(@src()),
         .body = .{
-            .start = funcBody,
-            .end = funcBody + 1,
+            .start = retStmt,
+            .end = retStmt + 1,
         },
+        .name = try self.generateRandomName(.Function),
     };
-    const functionJIR = try self.typechecker.builder.addFunction(functionDef);
 
     return self.appendValue(.{
-        .Function = functionJIR,
+        .Function = functionDef,
     });
 }
 
