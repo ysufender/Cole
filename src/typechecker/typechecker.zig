@@ -49,7 +49,6 @@ pub const Flags = enum(u8) {
     CoveredAllPaths = 4,
     InLoop = 5,
     InDefer = 6,
-    Mutable = 7,
 
     pub fn flag(flagToGet: Flags) u8 {
         return @intFromEnum(flagToGet);
@@ -212,17 +211,14 @@ pub fn typecheckStatement(self: *Typechecker, statementPtr: defines.StatementPtr
 
 fn typecheckVariableDef(
     self: *Typechecker,
-    token: defines.TokenPtr,
+    decl: *const Resolver.Declaration,
     expected: TypeID,
-    topLevel: bool,
-    parent: ?defines.DeclPtr,
-    node: defines.ExpressionPtr
 ) Error!TypeID {
     const initializer =
-        if (topLevel or expected == Comptime.Builtin.Type("type"))
-            try self.typecheckValue(try self.executer.eval(node, expected), expected)
+        if (decl.topLevel or expected == Comptime.Builtin.Type("type"))
+            try self.typecheckValue(try self.executer.eval(decl.node, expected), expected)
         else
-            try self.typecheckExpression(node, expected);
+            try self.typecheckExpression(decl.node, expected);
 
     const res =
         if (self.suitable(expected, initializer))
@@ -239,7 +235,7 @@ fn typecheckVariableDef(
 
     blk: switch (self.typeTable.get(initializer)) {
         .Type => {
-            const newType = self.executer.getValue(try self.executer.eval(node, expected)).Type;
+            const newType = self.executer.getValue(try self.executer.eval(decl.node, expected)).Type;
             const name = self.builder.getInternedString(switch (self.typeTable.get(newType)) {
                 .Union => |uni| uni.name,
                 .Struct => |str| str.name,
@@ -254,11 +250,11 @@ fn typecheckVariableDef(
             const ast = self.context.getAST(self.currentFile);
             const tokens = self.context.getTokens(ast.tokens);
 
-            const symName = tokens.get(token).lexeme(self.context, self.currentFile);
+            const symName = tokens.get(decl.token).lexeme(self.context, self.currentFile);
 
             const namespace =
-                if (parent != null and self.typeTable.get(try self.typecheckDecl(parent.?, null)) == .Type) hasParent: {
-                    const rtypePtr = try self.executer.eval(self.symbols.getDecl(parent.?).node, null);
+                if (decl.parent != null and self.typeTable.get(try self.typecheckDecl(decl.parent.?, null)) == .Type) hasParent: {
+                    const rtypePtr = try self.executer.eval(self.symbols.getDecl(decl.parent.?).node, null);
                     const rtype = self.executer.getValue(rtypePtr).Type;
 
                     break :hasParent self.builder.getInternedString(switch (self.typeTable.get(rtype)) {
@@ -268,8 +264,8 @@ fn typecheckVariableDef(
                         else => return common.debug.ShouldBeImpossible(@src()),
                     });
                 }
-                else if (topLevel) self.modules.modules.get(self.modules.modules.len - self.currentFile - 1).name
-                else try self.executer.generateRandomNameString(.Namespace);
+                else if (decl.topLevel) self.modules.modules.get(self.modules.modules.len - self.currentFile - 1).name
+                else try self.executer.generateRandomNameString(.Type);
 
             const newName = std.fmt.allocPrint(self.arena.allocator(), "{s}::{s}", .{
                 namespace,
@@ -341,7 +337,7 @@ fn typecheckVariableDef(
 
                 const scope = self.symbols.resolutionMap.get(.{
                     .file = self.currentFile,
-                    .expr = node,
+                    .expr = decl.node,
                 }) orelse return common.debug.ShouldBeImpossible(@src());
 
                 const rres = self.symbols.lookup.fetchRemove(.{
@@ -361,7 +357,7 @@ fn typecheckVariableDef(
             }
         },
         .Function => {
-            const fnc = self.executer.getValue(try self.executer.eval(node, expected)).Function;
+            const fnc = self.executer.getValue(try self.executer.eval(decl.node, expected)).Function;
 
             if (self.builder.getInternedString(fnc.name)[0] != '$') {
                 break :blk;
@@ -370,10 +366,10 @@ fn typecheckVariableDef(
             const ast = self.context.getAST(self.currentFile);
             const tokens = self.context.getTokens(ast.tokens);
 
-            const symName = tokens.get(token).lexeme(self.context, self.currentFile);
+            const symName = tokens.get(decl.token).lexeme(self.context, self.currentFile);
             const namespace = self.modules.modules.get(self.modules.modules.len - self.currentFile - 1).name;
             const newName = 
-                if (self.hasMetadata(node, "@export"))
+                if (self.hasMetadata(decl.node, "@export"))
                     symName
                 else
                     std.fmt.allocPrint(self.arena.allocator(), "{s}::{s}", .{
@@ -388,7 +384,7 @@ fn typecheckVariableDef(
 
             const new = try self.builder.internString(newName);
 
-            const val = try self.executer.eval(node, expected);
+            const val = try self.executer.eval(decl.node, expected);
             var func = self.executer.getValue(val).Function;
             func.name = new;
 
@@ -412,8 +408,9 @@ fn typecheckVarDefStatement(self: *Typechecker, extraPtr: defines.OpaquePtr) Err
     const ast = self.context.getAST(self.currentFile);
 
     const signature = ast.signatures.get(ast.extra[extraPtr]);
-    const expected = try self.expectType(signature.type);
-    _ = try self.typecheckVariableDef(signature.name, expected, false, null, ast.extra[extraPtr + 1]);
+
+    const decl = ast.extra[extraPtr + 2];
+    _ = try self.typecheckDecl(decl, try self.expectType(signature.type));
 }
 
 fn typecheckDefer(self: *Typechecker, stmtPtr: defines.StatementPtr) Error!void {
@@ -755,6 +752,7 @@ fn typecheckAssignment(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!vo
 
     const vtype = try self.typecheckExpression(expr, null);
 
+    common.log.debug("assign LHS expr type = {s}", .{self.builder.getInternedString(self.typenameMap.get(vtype).?)});
     if (!self.getFlag(.ConcreteValue)) {
         self.report("Expected a concrete value for assignment.", .{});
         return Error.AssignationOfNonConcreteValue;
@@ -762,7 +760,7 @@ fn typecheckAssignment(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!vo
 
     const rtype = try self.typecheckExpression(rhs, null);
 
-    if (!self.getFlag(.Mutable)) {
+    if (!self.mutable(vtype)) {
         self.report("Attempt to modify non-mutable value.", .{ });
         return Error.MutabilityViolation;
     }
@@ -810,12 +808,6 @@ fn typecheckBlock(self: *Typechecker, extraPtr: defines.OpaquePtr, expected: Typ
     }
 }
 
-pub fn typecheckVariableDeclaration(self: *Typechecker, decl: *Resolver.Declaration, _: defines.DeclPtr) Error!TypeID {
-    const expected = try self.expectType(decl.type);
-    const res = try self.typecheckVariableDef(decl.token, expected, decl.topLevel, decl.parent, decl.node);
-    return res;
-}
-
 pub fn typecheckParameter(self: *Typechecker, decl: *const Resolver.Declaration) Error!TypeID {
     return self.typecheckExpression(decl.type, null);
 }
@@ -844,6 +836,12 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
             self.lastToken = expr.value;
             const decl = self.symbols.findDecl(.{ .file = self.currentFile, .expr = expressionPtr });
             const discoveredType = try self.typecheckDecl(decl, maybeExpected);
+            const tokens = self.context.getTokens(ast.tokens);
+            common.log.debug("ident {s}: type={d} mutable={}", .{
+                tokens.get(expr.value).lexeme(self.context, self.currentFile),
+                discoveredType,
+                self.mutable(discoveredType),
+            }); 
             return discoveredType;
         },
         .Indexing => return self.typecheckIndexing(expr.value),
@@ -1334,7 +1332,9 @@ pub fn typecheckCall(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpec
     const maybeFunction = self.typeTable.get(lhsType);
     const func = switch (maybeFunction) {
         .Type => {
-            const typeToInit = self.executer.getValue(try self.executer.eval(ast.extra[extraPtr], null)).Type;
+            const typeToInit =
+                if (maybeExpected) |exp| exp
+                else self.executer.getValue(try self.executer.eval(ast.extra[extraPtr], null)).Type;
 
             return self.typecheckExpressionList(
                 ast.expressions.items(.value)[ast.extra[extraPtr + 1]],
@@ -1515,7 +1515,7 @@ pub fn typecheckIndexing(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!
     }
 
     const maybeIndexable = self.typeTable.get(maybeIndexableId);
-    const inner = switch (maybeIndexable) {
+    _ = switch (maybeIndexable) {
         .Array => |arr| arr.child,
         .Pointer => |ptr| switch (ptr.size) {
             .Slice, .C => ptr.child,
@@ -1533,8 +1533,6 @@ pub fn typecheckIndexing(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!
             return Error.IndexingOfNonIndexableValue;
         },
     };
-
-    _ = self.setFlag(.Mutable, self.mutable(maybeIndexableId) and self.mutable(inner));
 
     const maybeIndexPtr = try self.typecheckExpression(ast.extra[extraPtr + 1], null);
     const maybeIndex = self.typeTable.get(maybeIndexPtr);
@@ -1631,9 +1629,8 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
     if (isPresent.found_existing) {
         switch (isPresent.value_ptr.status) {
             .Checked => if (isPresent.value_ptr.result != Comptime.Builtin.Type("incomplete")) {
-                _ = self.setFlag(.Mutable, self.mutable(isPresent.value_ptr.result));
                 return isPresent.value_ptr.result;
-            },
+            } else {},
             .InProgress => {
                 if (!self.getFlag(.CanCycle)) {
                     self.report("Dependency cycle detected. '{s}' depends on itself.", .{
@@ -1686,7 +1683,7 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
     errdefer isPresent.value_ptr.status = .NotChecked;
 
     const declType = try switch (decl.kind) {
-        .Variable => self.typecheckVariableDeclaration(&decl, declPtr),
+        .Variable => self.typecheckVariableDef(&decl, maybeExpected orelse try self.expectType(decl.type)),
         .Namespace => {
             self.report("Operations on namespaces are not allowed.", .{});
             return Error.NamespaceAsValue;
@@ -1705,10 +1702,10 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
     };
 
     if (decl.topLevel) {
-        try self.lowerer.declaration(isPresent.key_ptr.*, &decl);
+        try self.lowerer.topLevelDeclaration(isPresent.key_ptr.*, &decl);
     }
 
-    return self.typecheckDecl(declPtr, maybeExpected);
+    return declType;
 }
 
 pub fn typecheckDot(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!TypeID {
@@ -1820,8 +1817,6 @@ pub fn typecheckDot(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!TypeI
         .Struct => |str| str.fields,
         else => return common.debug.ShouldBeImpossible(@src()),
     };
-
-    _ = self.setFlag(.Mutable, self.mutable(objectTypeID) and self.mutable(fields[index].valueType));
 
     return fields[index].valueType;
 }

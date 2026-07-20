@@ -125,7 +125,10 @@ pub fn init(typechecker: *Typechecker, gpa: Allocator) Error!Comptime {
 }
 
 pub fn attemptEval(self: *Comptime, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeID) ?Value.Ptr {
-    if (self.getFlag(.ComptimeBanned)) {
+    if (
+        self.getFlag(.ComptimeBanned)
+        or self.typechecker.hasMetadata(exprPtr, "@noComptime")
+    ) {
         return null;
     }
 
@@ -2057,8 +2060,6 @@ pub const builtinTypes = [_]struct {
     // any
     .{ .name = "any", .info = .{ .Any = false } },
 
-    // string ([]u8)
-    .{ .name = "string", .info = .{ .Pointer = .{ .mutable = false, .child = 2, .size = .Slice, }, } },
     // mut any
     .{ .name = "mut any", .info = .{ .Any = true } },
     // incomplete

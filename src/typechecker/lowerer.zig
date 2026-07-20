@@ -35,7 +35,7 @@ pub fn init(typechecker: *Typechecker) Error!Lowerer {
     };
 }
 
-pub fn declaration(self: *Lowerer, ptr: defines.DeclPtr, decl: *const Declaration) Error!void {
+pub fn topLevelDeclaration(self: *Lowerer, ptr: defines.DeclPtr, decl: *const Declaration) Error!void {
     // @Beware Function definitions are registered by the Comptime to
     // prevent ODR violations.
 

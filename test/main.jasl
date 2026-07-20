@@ -2,12 +2,12 @@ let test = #(@export) fn () -> void {
 };
 
 let main = fn () -> i32 {
-    let c: mut u32 = (if (false) 4 else 3);
+    let Some = struct {
+        test: mut i32
+    };
 
-    if true {
-        return c;
-    }
-    else {
-        return c + 1;
-    }
+    let c: mut Some = Some(0);
+    defer c = Some(1);
+
+    return c.test;
 };
