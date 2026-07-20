@@ -307,9 +307,10 @@ fn assignment(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!defines.Range {
     const rexpr = ast.extra[extraPtr + 1];
     const vt = try self.typechecker.typecheckExpression(ast.extra[extraPtr], null);
 
-    const prev = self.typechecker.executer.setFlag(.ComptimeAllowed, false);
+    const prev = self.typechecker.executer.setFlag(.ComptimeBanned, true);
     const expr = try self.expression(vexpr, vt);
-    _ = self.typechecker.executer.setFlag(.ComptimeAllowed, prev);
+    _ = self.typechecker.executer.setFlag(.ComptimeBanned, prev);
+
     const rhs = try self.expression(rexpr, vt);
 
     const res = try self.typechecker.builder.assignment(expr, rhs);
@@ -323,9 +324,11 @@ fn variableDef(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!defines.Range 
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
 
     const declPtr = ast.extra[extraPtr + 2];
-    const decl = self.typechecker.symbols.getDecl(declPtr);
 
+    // @Beware typecheckDecl must be before getDecl because names are
+    // overwritten in typecheckDecl.
     const typeID = try self.typechecker.typecheckDecl(declPtr, null);
+    const decl = self.typechecker.symbols.getDecl(declPtr);
 
     if (typeID == Comptime.Builtin.Type("type")) {
         const vdef = try self.typechecker.builder.typeDef(
@@ -682,7 +685,8 @@ fn expressionList(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     var res: ?defines.Range = null;
 
     for (exprs.start..exprs.end) |exprPtr| {
-        const expr = try self.expression(ast.extra[@intCast(exprPtr)], try self.typechecker.typecheckExpression(ast.extra[@intCast(exprPtr)], null));
+        const t = try self.typechecker.typecheckExpression(ast.extra[@intCast(exprPtr)], null);
+        const expr = try self.expression(ast.extra[@intCast(exprPtr)], t);
 
         res =
             if (res) |rr| .{

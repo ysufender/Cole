@@ -1,0 +1,1530 @@
+diff --git a/TODO.md b/TODO.md
+index de2a393..eaa2799 100644
+--- a/TODO.md
++++ b/TODO.md
+@@ -2,7 +2,7 @@ Roadmap to Version 0.1.0
+ 
+ - [x] Concrete value check for suitable lhs detection is not working.
+ - [x] Recursion, both mutual and self.
+-- [ ] Generics and comptime marked functions.
++- [x] Generics and comptime marked functions.
+ - [ ] Member function calls via first argument being the object type (or
+ a pointer to it) is not present yet.
+ - [ ] Comptime function calls, requires a proper callstack.
+@@ -11,4 +11,5 @@ a pointer to it) is not present yet.
+ - [ ] Proper metadata attachment on expressions.
+ - [ ] Destructuring on switch captures.
+ - [ ] Extern symbols through metadata attachments.
+-- [ ] Codegen to readable C.
++- [x] Codegen to readable C.
++- [ ] Definitions inside anon types.
+diff --git a/debug.cfg b/debug.cfg
+index 1a6db3a..123edc9 100644
+--- a/debug.cfg
++++ b/debug.cfg
+@@ -5,5 +5,6 @@ set verbose off
+ file zig-out/bin/jaslc-debug
+ set args --working test main.jasl --include ../stdlib
+ 
++b lowerer.zig:301
++
+ r
+-q
+diff --git a/src/codegen/c/jir.zig b/src/codegen/c/jir.zig
+index 7a72e92..eabbf97 100644
+--- a/src/codegen/c/jir.zig
++++ b/src/codegen/c/jir.zig
+@@ -38,8 +38,7 @@ pub const Node = struct {
+         FunctionDef,
+         VariableDef,
+         Identifier,
+-        Assignment, // Direct assignment to a variable.
+-        Store, // Assignment through pointer
++        Assignment,
+         Return,
+         Scope,
+         Exit,
+@@ -237,14 +236,6 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
+         out.flush() catch common.log.err("Failed to flush forward declarations.", .{});
+     }
+ 
+-    for (self.keyNodes) |node| {
+-        try self.discoverFunctionsAndTypes(out, node);
+-    }
+-}
+-
+-fn discoverFunctionsAndTypes(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
+-    const node = self.nodes.get(nodePtr);
+-
+     for (0..self.types.len) |typeID| {
+         const typeInfo = self.types.get(@intCast(typeID));
+ 
+@@ -276,6 +267,14 @@ fn discoverFunctionsAndTypes(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void
+         }
+     }
+ 
++    for (0..self.nodes.len) |node| {
++        try self.discoverFunctionsAndTypes(out, @intCast(node));
++    }
++}
++
++fn discoverFunctionsAndTypes(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
++    const node = self.nodes.get(nodePtr);
++
+     switch (node.type) {
+         .VariableDef => if (self.data[node.value] == 1) {
+             const typeID = self.data[node.value + 1];
+@@ -326,9 +325,8 @@ fn discoverFunctionsAndTypes(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void
+                 .Struct => |str| {
+                     try self.write(out, "typedef struct {{\n", .{});
+                     for (str.fields) |field| {
+-                        try self.write(out, "\t{s} {s}_{s};\n", .{
++                        try self.write(out, "\t{s} {s};\n", .{
+                             try self.getCName(field.valueType, null, false),
+-                            if (field.public) "pub" else "priv",
+                             self.strings[field.name],
+                         });
+                     }
+@@ -341,9 +339,8 @@ fn discoverFunctionsAndTypes(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void
+                 .Union => |uni|{
+                     if (uni.isTagged) {
+                         try self.write(out, "typedef struct {{\n", .{});
+-                        try self.write(out, "\t{s} {s}_{s};\n", .{
++                        try self.write(out, "\t{s} {s};\n", .{
+                             try self.getCName(uni.fields[0].valueType, null, false),
+-                            if (uni.fields[0].public) "pub" else "priv",
+                             self.strings[uni.fields[0].name],
+                         });
+                         try self.write(out, "\tunion {{\n", .{});
+@@ -483,7 +480,7 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
+                 try self.write(out, ";\n", .{ });
+             }
+         },
+-        .Identifier => try self.write(out, " {s} ", .{self.strings[node.value]}),
++        .Identifier => try self.write(out, "{s}", .{self.strings[node.value]}),
+         .Literal => self.literal(out, node.value),
+         .Scope => {
+             try self.writeln(out, "{{\n{s}: (void)(0);\n", .{
+@@ -515,7 +512,7 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
+         .BitwiseAnd => try self.commonBinary(out, node.value, "&"),
+         .BitwiseOr => try self.commonBinary(out, node.value, "|"),
+ 
+-        .Label => try self.writeln(out, "{s}:\n", .{self.strings[node.value]}),
++        .Label => try self.writeln(out, "{s}: (void)(0);\n", .{self.strings[node.value]}),
+         .Jump => try self.writeln(out, "goto {s};\n", .{self.strings[node.value]}),
+         .JumpIf => {
+             try self.writeln(out, "if (", .{});
+@@ -540,7 +537,48 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
+         .Invert => try self.commonSingle(out, node.value, "~"),
+         .Not => try self.commonSingle(out, node.value, "!"),
+         .Negation => try self.commonSingle(out, node.value, "-"),
+-        else => { },
++        .Assignment => {
++            try self.writeln(out, "", .{});
++            try self.operation(out, self.data[node.value]);
++            try self.write(out, " = ", .{});
++            try self.operation(out, self.data[node.value + 1]);
++            try self.write(out, ";\n", .{});
++        },
++        .Dot => {
++            try self.operation(out, self.data[node.value]);
++            try self.write(out, ".{s}", .{
++                self.strings[self.data[node.value + 1]],
++            });
++        },
++        .Grouping => {
++            try self.write(out, "{{", .{});
++            for (self.data[node.value]..self.data[node.value + 1]) |idx| {
++                try self.operation(out, @intCast(idx));
++                if (idx == self.data[node.value + 1] - 1) {
++                    continue;
++                }
++                try self.write(out, ", ", .{});
++            }
++            try self.write(out, "}}", .{});
++        },
++        .Call => {
++            const func = self.data[node.value];
++            const range = defines.Range{
++                .start = self.data[node.value + 1],
++                .end = self.data[node.value + 2],
++            };
++
++            try self.operation(out, func);
++            try self.write(out, "(", .{});
++            for (range.start..range.end) |idx| {
++                try self.operation(out, func);
++                if (idx == self.data[node.value + 1] - 1) {
++                    continue;
++                }
++                try self.write(out, ", ", .{});
++            }
++            try self.write(out, ")", .{});
++        },
+     };
+ }
+ 
+@@ -599,8 +637,8 @@ fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool
+             return common.debug.ShouldBeImpossible(@src());
+         },
+ 
+-        .Void => return "void const",
+-        .Noreturn => return "void const",
++        .Void => return "void",
++        .Noreturn => return "void",
+ 
+         .Bool => |v| name = std.fmt.allocPrint(self.allocator, "jasl_bool{s}", .{
+             if (v) "" else " const"
+@@ -619,7 +657,7 @@ fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool
+         .Integer => |i| name = std.fmt.allocPrint(self.allocator, "{s}int{d}_t{s}", .{
+             if (i.signed) "" else "u",
+             i.size,
+-            if (mutable) "" else " const",
++            if (mutable or i.mutable) "" else " const",
+         }) catch return Error.AllocatorFailure,
+ 
+         .Union, .Struct, .Enum => {
+@@ -697,7 +735,7 @@ fn isStmt(nt: Node.Type) bool {
+     return switch (nt) {
+         .FunctionDef, .Return, .JumpIf,
+         .Jump, .Label, .Exit, .Scope,
+-        .Assignment, .Store, .VariableDef => true,
++        .Assignment, .VariableDef => true,
+ 
+         else => false,
+     };
+diff --git a/src/codegen/c/jir/builder.zig b/src/codegen/c/jir/builder.zig
+index fc8eb70..9d0d168 100644
+--- a/src/codegen/c/jir/builder.zig
++++ b/src/codegen/c/jir/builder.zig
+@@ -131,16 +131,11 @@ pub inline fn @"return"(self: *Builder, expr: JIR.Ptr) Error!JIR.Ptr {
+     return res;
+ }
+ 
+-pub inline fn assignment(self: *Builder, decl: StringPtr, expr: JIR.Ptr) Error!JIR.Ptr {
++pub inline fn assignment(self: *Builder, decl: JIR.Ptr, expr: JIR.Ptr) Error!JIR.Ptr {
+     const res = try self.commonBinary(.Assignment, decl, expr);
+     return res;
+ }
+ 
+-pub inline fn store(self: *Builder, decl: JIR.Ptr, expr: JIR.Ptr) Error!JIR.Ptr {
+-    const res = try self.commonBinary(.Store, decl, expr);
+-    return res;
+-}
+-
+ pub inline fn jump(self: *Builder, lbl: StringPtr) Error!JIR.Ptr { return self.commonSingle(.Jump, lbl); }
+ pub inline fn cjump(self: *Builder, lbl: StringPtr, cnd: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.JumpIf, lbl, cnd); }
+ pub inline fn exit(self: *Builder) Error!JIR.Ptr { return self.commonSingle(.Exit, 0); }
+@@ -150,7 +145,6 @@ pub inline fn identifier(self: *Builder, decl: defines.StringPtr) Error!JIR.Ptr
+ 
+ pub inline fn reference(self: *Builder, decl: StringPtr) Error!JIR.Ptr { return self.commonSingle(.Reference, decl); }
+ pub inline fn dereference(self: *Builder, expr: JIR.Ptr) Error!JIR.Ptr { return self.commonSingle(.Dereference, expr); }
+-pub inline fn call(self: *Builder, expr: JIR.Ptr, args: []const JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.Call, expr, args); }
+ pub inline fn literal(self: *Builder, constant: JIR.Constant.Ptr) Error!JIR.Ptr { return self.commonSingle(.Literal, constant); }
+ pub inline fn add(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.Add, lhs, rhs); }
+ pub inline fn sub(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.Sub, lhs, rhs); }
+@@ -176,15 +170,24 @@ pub inline fn not(self: *Builder, rhs: JIR.Ptr) Error!JIR.Ptr { return self.comm
+ pub inline fn negate(self: *Builder, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonSingle(.Negation, rhs); }
+ pub inline fn grouping(self: *Builder, exprStart: JIR.Ptr, exprEnd: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.Grouping, exprStart, exprEnd); }
+ 
+-pub inline fn ternary(self: *Builder, cnd: JIR.Ptr, then: JIR.Ptr, otherwise: JIR.Ptr) Error!JIR.Ptr {
++pub inline fn ternary(self: *Builder, cnd: JIR.Ptr, then: JIR.Ptr, otherwise: JIR.Ptr) Error!JIR.Ptr { return self.commonTernary(.Ternary, cnd, then, otherwise); }
++pub inline fn call(self: *Builder, expr: JIR.Ptr, args: defines.Range) Error!JIR.Ptr { return self.commonTernary(.Call, expr, args.start, args.end); }
++
++inline fn commonTernary(
++    self: *Builder,
++    comptime nodeType: JIR.Node.Type,
++    first: JIR.Ptr,
++    second: JIR.Ptr,
++    third: JIR.Ptr,
++) Error!JIR.Ptr {
+     const start: u32 = @intCast(self.data.items.len);
+-    self.data.append(self.allocator, cnd) catch return Error.AllocatorFailure;
+-    self.data.append(self.allocator, then) catch return Error.AllocatorFailure;
+-    self.data.append(self.allocator, otherwise) catch return Error.AllocatorFailure;
++    self.data.append(self.allocator, first) catch return Error.AllocatorFailure;
++    self.data.append(self.allocator, second) catch return Error.AllocatorFailure;
++    self.data.append(self.allocator, third) catch return Error.AllocatorFailure;
+ 
+     const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
+     self.nodes.set(res, .{
+-        .type = .Ternary,
++        .type = nodeType,
+         .value = start,
+     });
+     return res;
+diff --git a/src/core/common.zig b/src/core/common.zig
+index 280ca6e..88366d1 100644
+--- a/src/core/common.zig
++++ b/src/core/common.zig
+@@ -129,5 +129,7 @@ pub const CompilerError = error {
+     IllegalNonTopLevelOp,
+     ComptimePointer,
+     BackendError,
++    AssignationOfNonConcreteValue,
++    ExportOfMainFunction,
+     Terminate,
+ };
+diff --git a/src/debug/ast_printer.zig b/src/debug/ast_printer.zig
+index afbccd8..41c3819 100644
+--- a/src/debug/ast_printer.zig
++++ b/src/debug/ast_printer.zig
+@@ -168,16 +168,6 @@ pub const PrintContext = struct {
+                 printer.print("Asm {s} ", .{printer.tokenLexeme(val)});
+                 printer.write(";");
+             },
+-
+-            .Mark => {
+-                printer.write("Mark(");
+-                for (ex[ex[val]..ex[val + 1]]) |hint| {
+-                    printer.printExpr(@intCast(hint), depth + 1);
+-                }
+-                printer.indent(depth);
+-                printer.write(")");
+-                printer.printStmt(@intCast(ex[val + 2]), depth);
+-            },
+         }
+     }
+ 
+diff --git a/src/parser/parser.zig b/src/parser/parser.zig
+index 901fef8..fcdb524 100644
+--- a/src/parser/parser.zig
++++ b/src/parser/parser.zig
+@@ -68,7 +68,6 @@ pub const Statement = struct {
+         For,
+         Break,
+         Continue,
+-        Mark,
+         VariableDefinition,
+         Discard,
+         Import,
+@@ -296,7 +295,6 @@ fn statement(self: *Parser) StatementResult {
+             return error.InvalidToken;
+         },
+         .Defer => self.deferStatement(),
+-        .Mark => self.mark(true),
+         else => self.expressionStmt(),
+     };
+ }
+@@ -317,10 +315,19 @@ fn expressionStmt(self: *Parser) StatementResult {
+     assert(self.current > 0);
+     self.current -= 1;
+ 
+-    const expr = try self.expression();
++    const exprPtr = try self.expression();
++    const expr = self.expressionMap.get(exprPtr);
+ 
+-    switch (self.expressionMap.items(.type)[expr]) {
++    switch (expr.type) {
+         .Assignment, .Call => { },
++        .Mark =>
++            switch (self.expressionMap.get(self.extra.items[expr.value + 2]).type) {
++                .Assignment, .Call => { },
++                else => |t| {
++                    self.report("Only assignment and function calls are allowed as expression statements. Received '{s}'", .{@tagName(t)});
++                    return error.IllegalSyntax;
++                },
++            },
+         else => |t| {
+             self.report("Only assignment and function calls are allowed as expression statements. Received '{s}'", .{@tagName(t)});
+             return error.IllegalSyntax;
+@@ -332,7 +339,7 @@ fn expressionStmt(self: *Parser) StatementResult {
+     const result = try self.alloc(Statement);
+     self.statementMap.set(result, .{
+         .type = .Expression,
+-        .value = expr,
++        .value = exprPtr,
+     });
+ 
+     return result;
+@@ -888,7 +895,6 @@ fn primary(self: *Parser) ExpressionResult {
+             });
+             return expr;
+         },
+-        .Mark => return self.mark(false),
+         .Identifier => {
+             const expr = try self.alloc(Expression);
+             self.expressionMap.set(expr, .{
+@@ -897,41 +903,17 @@ fn primary(self: *Parser) ExpressionResult {
+             });
+             return expr;
+         },
++        .Mark => return self.mark(),
+         else => {
+-            self.current -= 1;
+-            self.report("Expected a primary expression, got '{s}' instead.", .{self.tokens.get(self.advance()).lexeme(self.context, self.file)});
++            self.report("Expected a primary expression, got '{s}' instead.", .{self.tokens.get(self.current).lexeme(self.context, self.file)});
+             return error.InvalidToken;
+         },
+     }
+ }
+ 
+-fn mark(self: *Parser, comptime stmt: bool) if (stmt) StatementResult else ExpressionResult {
+-    assert(if (stmt) self.current > 0 else true);
+-    self.current -= if (stmt) 1 else 0;
+-
++fn mark(self: *Parser) ExpressionResult {
+     const marks = try self.compilerHint();
+-    const marked =
+-        if (stmt) try self.statement()
+-        else try self.ifExpression();
+-
+-    if (stmt) switch (self.statementMap.items(.type)[marked]) {
+-        .For, .While, .VariableDefinition => {},
+-        else  => |t| {
+-            self.report("Statement metadata can only be attached to loops and definitions. Received '{s}'", .{@tagName(t)});
+-            return error.IllegalSyntax;
+-        },
+-    };
+-
+-    // @Beware maybe maybe maybe
+-    if (false) {
+-        if (!stmt) switch (self.expressionMap.items(.type)[marked]) {
+-            .StructDefinition, .EnumDefinition, .UnionDefinition, .FunctionDefinition, => {},
+-            else  => |t| {
+-                self.report("Expression metadata can only be attached to type definitions and functions. Received '{s}'", .{@tagName(t)});
+-                return error.IllegalSyntax;
+-            },
+-        };
+-    }
++    const marked = try self.ifExpression();
+ 
+     if (marks.len() == 0) {
+         return marked;
+@@ -944,8 +926,8 @@ fn mark(self: *Parser, comptime stmt: bool) if (stmt) StatementResult else Expre
+     self.extra.append(self.allocator(), marks.end) catch return error.AllocatorFailure;
+     self.extra.append(self.allocator(), marked) catch return error.AllocatorFailure;
+ 
+-    const ptr = try self.alloc(if (stmt) Statement else Expression);
+-    (if (stmt) self.statementMap else self.expressionMap).set(ptr, .{
++    const ptr = try self.alloc(Expression);
++    self.expressionMap.set(ptr, .{
+         .type = .Mark,
+         .value = start,
+     });
+@@ -1533,8 +1515,7 @@ fn synchronize(self: *Parser) void {
+             .Fn, .Let, .Pub,
+             .While, .If, .Asm,
+             .Continue, .Return, .Import,
+-            .Defer, .Mark,
+-            .Discard, .Break => return,
++            .Defer, .Discard, .Break => return,
+             else => {},
+         }
+ 
+diff --git a/src/parser/prepass.zig b/src/parser/prepass.zig
+index 049ca65..b5a5a49 100644
+--- a/src/parser/prepass.zig
++++ b/src/parser/prepass.zig
+@@ -184,10 +184,6 @@ fn prepassImpl(self: *Prepass, ast: *const Parser.AST, name: []const u8) Error!v
+                 errc += 1;
+                 break :case;
+             },
+-            .Mark => {
+-                statement = ast.statements.get(ast.extra[statement.value + 2]); 
+-                continue :statementLoop;
+-            },
+             else => {
+                 self.report(
+                     "Only definitions are allowed at top-level. Received: {s}",
+diff --git a/src/typechecker/comptime.zig b/src/typechecker/comptime.zig
+index f948ebf..4a09112 100644
+--- a/src/typechecker/comptime.zig
++++ b/src/typechecker/comptime.zig
+@@ -25,6 +25,7 @@ const Cache = collections.HashMap(Resolver.ResolutionKey, Value.Ptr);
+ const Memory = std.ArrayList(Value);
+ 
+ pub const Flags = enum(u3) {
++    ComptimeAllowed = 1,
+     LValue = 2,
+ 
+     pub fn flag(flagToGet: Flags) u3 {
+@@ -37,17 +38,12 @@ pub const Flags = enum(u3) {
+ // and memory usage
+ pub const Value = union(enum) {
+     pub const Implicit = enum(u8) {
+-        pub const Metadata = enum(u8) {
+-            NoComptime = 0,
+-            Comptime = 1,
+-        };
+-
+         pub const Type = enum(u8) {
+-            Any = 2,
+-            Incomplete = 3,
++            Any = 0,
++            Incomplete = 1,
+         };
+ 
+-        Void = 4,
++        Void = 2,
+     };
+ 
+     pub const Ptr = defines.Offset;
+@@ -113,15 +109,10 @@ pub fn init(typechecker: *Typechecker, gpa: Allocator) Error!Comptime {
+     cache.ensureTotalCapacity(allocator, typechecker.symbols.resolutionMap.count()) catch return Error.AllocatorFailure;
+ 
+     var memory = Memory.initCapacity(allocator, 512) catch return Error.AllocatorFailure;
+-    inline for (0..@typeInfo(Value.Implicit.Metadata).@"enum".fields.len) |index| {
+-        memory.appendAssumeCapacity(.{ .Enum = .{ .Type = Builtin.Type("builtin_metadata"), .Value = @intCast(index) } });
+-    }
+     memory.appendAssumeCapacity(.{ .Type = Builtin.Type("any") });
+     memory.appendAssumeCapacity(.{ .Type = Builtin.Type("incomplete") });
+     memory.appendAssumeCapacity(.{ .Void = { } });
+ 
+-    prepBuiltinMetadata(&memory);
+-
+     return .{
+         .typechecker = typechecker,
+         .gpa = gpa,
+@@ -134,6 +125,10 @@ pub fn init(typechecker: *Typechecker, gpa: Allocator) Error!Comptime {
+ }
+ 
+ pub fn attemptEval(self: *Comptime, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeID) ?Value.Ptr {
++    if (!self.getFlag(.ComptimeAllowed)) {
++        return null;
++    }
++
+     const prev = self.typechecker.setFlag(.AttemptingEval, true);
+     defer _ = self.typechecker.setFlag(.AttemptingEval, prev);
+     return self.eval(exprPtr, maybeExpected) catch null;
+@@ -193,7 +188,7 @@ pub fn eval(self: *Comptime, exprPtr: defines.ExpressionPtr, maybeExpected: ?Typ
+ 
+         .Slicing => try self.evalSlicing(expr.value),
+ 
+-        .Mark => try self.evalMark(.Expression, exprPtr, expr.value, maybeExpected),
++        .Mark => try self.evalMark(exprPtr, expr.value, maybeExpected),
+ 
+         .Dot => try self.evalDot(expr.value),
+         
+@@ -224,10 +219,7 @@ fn evalFunction(self: *Comptime, exprPtr: defines.ExpressionPtr, extraPtr: defin
+     const returnTypeExpr = ast.extra[extraPtr + 2];
+     const bodyPtr = ast.extra[extraPtr + 3];
+ 
+-    var isComptime =
+-        if (self.typechecker.getMetadata(.Expression, exprPtr)) |metadata|
+-            if (std.mem.findScalar(u32, metadata, @intFromEnum(Value.Implicit.Metadata.Comptime))) |_| true else false
+-        else false;
++    var isComptime = self.typechecker.hasMetadata(exprPtr, "@comptime");
+ 
+     for (paramsRange.start..paramsRange.end) |paramPtrPtr| {
+         const param = ast.signatures.get(ast.extra[paramPtrPtr]);
+@@ -457,57 +449,37 @@ pub fn evalDot(self: *Comptime, extraPtr: defines.OpaquePtr) Error!Value.Ptr {
+ 
+ pub fn evalMark(
+     self: *Comptime,
+-    kind: Typechecker.Element.Kind,
+     ptr: defines.EitherPtr(defines.ExpressionPtr, defines.StatementPtr),
+     extraPtr: defines.OpaquePtr,
+     maybeExpected: ?TypeID,
+ ) Error!Value.Ptr {
+-    _ = try self.typechecker.typecheckMark(kind, ptr, extraPtr, maybeExpected);
++    _ = try self.typechecker.typecheckMark(ptr, extraPtr, maybeExpected);
+ 
+     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+ 
+-    const metadata = self.typechecker.getMetadata(kind, ast.extra[extraPtr + 2])
+-        orelse return common.debug.ShouldBeImpossible(@src()); 
+-
+-    for (metadata) |dataPtr| {
+-        const data = self.getValue(dataPtr);
+-        switch (data) {
+-            .Enum => |enm| {
+-                if (enm.Type != Builtin.Type("builtin_metadata")) {
+-                    continue;
+-                }
+-
+-                switch (enm.Value) {
+-                    Builtin.Metadata("@noComptime").? => {
+-                        self.report("Comptime evaluation of {s} is not possible due to '@noComptime' mark.", .{
+-                            if (kind == .Statement) "statement" else "expression",
+-                        });
+-                        return Error.ComptimeNotPossible;
+-                    },
+-                    Builtin.Metadata("@comptime").? => {
+-                        _ = self.typechecker.setFlag(.AttemptingEval, false);
+-
+-                        const exprType = try self.typechecker.typecheckExpression(ast.extra[extraPtr + 2], maybeExpected);
++    if (self.typechecker.hasMetadata(ast.extra[extraPtr + 2], "@comptime")) {
++        const exprType = try self.typechecker.typecheckExpression(ast.extra[extraPtr + 2], maybeExpected);
+ 
+-                        if (!(
+-                            self.typechecker.getFlag(.AttemptingEval)
+-                            or self.typechecker.typeTable.get(exprType) == .Function
+-                        )) {
+-                            self.report("Redundant @comptime mark in already comptime scope.", .{});
+-                            return Error.RedundantMark;
+-                        }
+-                    },
+-                    else => { },
+-                }
+-            },
+-            else => { },
++        // @Note force comptime eval when calling said function.
++        if (self.typechecker.typeTable.get(exprType) != .Function) {
++            self.report("Redundant @comptime mark in already comptime scope.", .{});
++            return Error.RedundantMark;
++        }
++    }
++    else if (
++        self.typechecker.hasMetadata(ast.extra[extraPtr + 2], "@noComptime")
++        and !self.typechecker.getFlag(.AttemptingEval)
++    ) {
++        const exprType = try self.typechecker.typecheckExpression(ast.extra[extraPtr + 2], maybeExpected);
++
++        // @Note force comptime eval when calling said function.
++        if (self.typechecker.typeTable.get(exprType) != .Function) {
++            self.report("Comptime evaluation of expression is not possible due to '@noComptime' mark.", .{ });
++            return Error.ComptimeNotPossible;
+         }
+     }
+ 
+-    return switch (kind) {
+-        .Statement => common.debug.NotImplemented(@src()),
+-        .Expression => self.eval(ast.extra[extraPtr + 2], maybeExpected),
+-    };
++    return self.eval(ast.extra[extraPtr + 2], maybeExpected);
+ }
+ 
+ pub fn evalSlicing(self: *Comptime, extraPtr: defines.OpaquePtr) Error!Value.Ptr {
+@@ -936,7 +908,12 @@ fn evalLiteral(self: *Comptime, tokenPtr: defines.TokenPtr, maybeExpected: ?Type
+         .String => .{ .String = lexeme },
+         .EnumLiteral =>
+             if (Typechecker.determineExpected(maybeExpected)) |expected|
+-                if (Builtin.Metadata(lexeme)) |metadata| return metadata
++                if (Builtin.Metadata(lexeme)) |metadata| .{
++                    .Enum = .{
++                        .Type = expected,
++                        .Value = metadata,
++                    },
++                }
+                 else switch (self.typechecker.typeTable.get(expected)) {
+                     .Enum => |enm| ret: for (enm.fields, 0..) |field, index| {
+                         if (std.mem.eql(u8, field, lexeme[1..])) {
+@@ -1031,10 +1008,7 @@ fn evalFuncType(self: *Comptime, exprPtr: defines.ExpressionPtr, extraPtr: defin
+     };
+ 
+     var argTypes = self.arena.allocator().alloc(TypeID, argSize) catch return Error.AllocatorFailure;
+-    var isComptime =
+-        if (self.typechecker.getMetadata(.Expression, exprPtr)) |metadata|
+-            if (std.mem.findScalar(u32, metadata, @intFromEnum(Comptime.Value.Implicit.Metadata.Comptime))) |_| true else false
+-        else false;
++    var isComptime = self.typechecker.hasMetadata(exprPtr, "@comptime");
+ 
+     switch (args) {
+         .Type => |argType| if (argSize != 0) {
+@@ -2001,17 +1975,6 @@ pub fn dumpMem(self: *const Comptime) void {
+     }
+ }
+ 
+-fn prepBuiltinMetadata(memory: *Memory) void {
+-    for (0..builtinMetadata.len) |metadata| {
+-        memory.appendAssumeCapacity(.{
+-            .Enum = .{
+-                .Type = Builtin.Type("builtin_metadata"),
+-                .Value = @intCast(metadata),
+-            },
+-        });
+-    }
+-}
+-
+ pub const Builtin = struct {
+     pub fn isBuiltinType(typeID: TypeID) bool {
+         return typeID <= Builtin.Type("any");
+@@ -2043,7 +2006,7 @@ pub const Builtin = struct {
+     }
+ 
+     pub fn Metadata(metadata: []const u8) ?defines.Offset {
+-        if (@typeInfo(@TypeOf(.{metadata})).@"struct".fields[0].is_comptime) comptime {
++        comptime if (@typeInfo(@TypeOf(.{metadata})).@"struct".fields[0].is_comptime) {
+             for (builtinMetadata, 0..) |item, index| {
+                 if (std.mem.eql(u8, item, metadata)) {
+                     return index;
+@@ -2109,4 +2072,5 @@ pub const builtinTypes = [_]struct {
+ pub const builtinMetadata = [_][]const u8 {
+     "@noComptime",
+     "@comptime",
++    "@export",
+ };
+diff --git a/src/typechecker/lowerer.zig b/src/typechecker/lowerer.zig
+index 89dc825..103b1c3 100644
+--- a/src/typechecker/lowerer.zig
++++ b/src/typechecker/lowerer.zig
+@@ -89,6 +89,9 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
+             } else .{
+                 .u8 = @intCast(val),
+             }},
++            1 => .{ .Integer = .{
++                .u8 = @intFromBool(ofType.Bool),
++            } },
+             else => |t| {
+                 common.log.err("Integer with size: {d}", .{t});
+                 return common.debug.ShouldBeImpossible(@src());
+@@ -264,7 +267,7 @@ pub fn statement(self: *Lowerer, statementPtr: defines.StatementPtr) Error!defin
+     const node: defines.Range = switch (stmt.type) {
+         .Block => try self.block(stmt.value),
+         .Expression =>
+-            if (ast.expressions.items(.type)[stmt.value] == .Assignment) return common.debug.NotImplemented(@src())
++            if (ast.expressions.items(.type)[stmt.value] == .Assignment) try self.assignment(ast.expressions.items(.value)[stmt.value])
+             else try self.expressionStmt(stmt.value),
+         .Conditional => try self.conditional(stmt.value, ast),
+         .While => try self.loop(.While, stmt.value, ast),
+@@ -280,7 +283,7 @@ pub fn statement(self: *Lowerer, statementPtr: defines.StatementPtr) Error!defin
+             };
+         },
+         .VariableDefinition => try self.variableDef(stmt.value),
+-        .Import, .Mark => return common.debug.ShouldBeImpossible(@src()),
++        .Import => return common.debug.ShouldBeImpossible(@src()),
+ 
+         .Defer => try self.@"defer"(stmt.value),
+ 
+@@ -297,6 +300,25 @@ pub fn statement(self: *Lowerer, statementPtr: defines.StatementPtr) Error!defin
+     return node;
+ }
+ 
++fn assignment(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!defines.Range {
++    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
++
++    const vexpr = ast.extra[extraPtr];
++    const rexpr = ast.extra[extraPtr + 1];
++    const vt = try self.typechecker.typecheckExpression(ast.extra[extraPtr], null);
++
++    const prev = self.typechecker.executer.setFlag(.ComptimeAllowed, false);
++    const expr = try self.expression(vexpr, vt);
++    _ = self.typechecker.executer.setFlag(.ComptimeAllowed, prev);
++    const rhs = try self.expression(rexpr, vt);
++
++    const res = try self.typechecker.builder.assignment(expr, rhs);
++    return .{
++        .start = res,
++        .end = res + 1,
++    };
++}
++
+ fn variableDef(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!defines.Range {
+     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+ 
+@@ -305,6 +327,18 @@ fn variableDef(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!defines.Range
+ 
+     const typeID = try self.typechecker.typecheckDecl(declPtr, null);
+ 
++    if (typeID == Comptime.Builtin.Type("type")) {
++        const vdef = try self.typechecker.builder.typeDef(
++            self.typechecker.executer.getValue(
++                try self.typechecker.executer.eval(decl.node, null),
++            ).Type,
++        );
++        return .{
++            .start = vdef,
++            .end = vdef + 1,
++        };
++    }
++
+     const node =
+         if (self.typechecker.executer.attemptEval(decl.node, typeID)) |someVal|
+             try self.typechecker.builder.literal(try self.addConstant(someVal, typeID))
+@@ -464,18 +498,22 @@ fn conditional(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.A
+     const finallyLabel = try self.typechecker.executer.generateRandomName(.Finally);
+ 
+     const cnd = try self.expression(conditionExpr, Comptime.Builtin.Type("bool"));
+-    const start = try self.typechecker.builder.cjump(elseLabel, cnd);
+-    const end = blk: {
+ 
++    const maybeElse =
++        if (ast.extra[extraPtr + 2] == 1) ast.extra[extraPtr + 3]
++        else null;
++
++    const start = try self.typechecker.builder.cjump(
++        if (maybeElse) |_| elseLabel else finallyLabel,
++        cnd
++    );
++
++    const end = blk: {
+         const body = ast.extra[extraPtr + 1];
+         _ = try self.statement(body);
+ 
+         _ = try self.typechecker.builder.jump(finallyLabel);
+ 
+-        const maybeElse =
+-            if (ast.extra[extraPtr + 2] == 1) ast.extra[extraPtr + 3]
+-            else null;
+-
+         if (maybeElse) |elseBranch| {
+             _ = try self.typechecker.builder.label(elseLabel);
+             _ = try self.statement(elseBranch);
+@@ -501,8 +539,8 @@ fn expressionStmt(self: *Lowerer, expr: defines.ExpressionPtr) Error!defines.Ran
+ }
+ 
+ fn @"return"(self: *Lowerer, expr: JIR.Ptr) Error!defines.Range {
+-    const start = try self.typechecker.builder.@"return"(expr);
+     const end = try self.unwindDefers(self.scopes.index);
++    const start = try self.typechecker.builder.@"return"(expr);
+     return .{
+         .start = start,
+         .end = if (end) |er| er.end else start + 1,
+@@ -523,18 +561,8 @@ fn block(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!defines.Range {
+         try self.typechecker.executer.generateRandomName(.Block),
+     );
+ 
+-    var alreadyDeferred = false;
+     for (statements.start..statements.end) |stmt| {
+         _ = try self.statement(ast.extra[@intCast(stmt)]);
+-
+-        if (stmt != statements.end - 1) {
+-            continue;
+-        }
+-
+-        alreadyDeferred = switch (ast.statements.items(.type)[ast.extra[stmt]]) {
+-            .Return, .Continue, .Break => true,
+-            else => false,
+-        };
+     }
+ 
+     const deferCount = self.scopes.pop() orelse 0;
+@@ -542,7 +570,7 @@ fn block(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!defines.Range {
+         const stmtPtr = self.defers.pop()
+             orelse return common.debug.ShouldBeImpossible(@src());
+ 
+-        if (!alreadyDeferred) {
++        if (!self.typechecker.getFlag(.CoveredAllPaths)) {
+             _ = try self.statement(stmtPtr);
+         }
+     }
+@@ -593,22 +621,56 @@ pub fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID
+ 
+         .Binary => self.binary(expr.value, ofType),
+         .Unary => self.unary(expr.value, ofType),
+-
+         .Conditional => self.conditionalExpr(expr.value, ofType),
+-
+         .Dot => self.dot(expr.value),
+-
+         .Indexing => self.indexing(expr.value),
+-
+         .ExpressionList => self.expressionList(expr.value),
+ 
+-        .Switch, .Call, .Slicing => |t| {
++        .Call => self.call(expr.value),
++
++        .Switch, .Slicing => |t| {
+             self.report("'{s}' lowering is not implemented.", .{@tagName(t)});
+             return common.debug.NotImplemented(@src());
+         },
+     };
+ }
+ 
++fn call(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
++    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
++
++    const func = ast.extra[extraPtr];
++    const argsListPtr = ast.extra[extraPtr + 1];
++    const argsList = ast.expressions.get(argsListPtr);
++    const argsRange = defines.Range{
++        .start = ast.extra[argsList.value],
++        .end = ast.extra[argsList.value + 1],
++    };
++
++    var res: ?defines.Range = null;
++
++    for (argsRange.start..argsRange.end) |exprPtr| {
++        const expr = try self.expression(ast.extra[@intCast(exprPtr)], try self.typechecker.typecheckExpression(ast.extra[@intCast(exprPtr)], null));
++
++        res =
++            if (res) |rr| .{
++                .start = rr.start,
++                .end = expr + 1,
++            }
++            else .{
++                .start = expr,
++                .end = expr + 1,
++            };
++    }
++
++    const rres = res orelse defines.Range{ .start = 0, .end = 0 };
++
++    return
++        if (try self.typechecker.typecheckExpression(func, null) == Comptime.Builtin.Type("type"))
++            self.typechecker.builder.grouping(rres.start, rres.end)
++        else
++            self.typechecker.builder.call(func, rres);
++}
++
+ fn expressionList(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
+     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+ 
+@@ -620,12 +682,12 @@ fn expressionList(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
+     var res: ?defines.Range = null;
+ 
+     for (exprs.start..exprs.end) |exprPtr| {
+-        const expr = try self.expression(@intCast(exprPtr), try self.typechecker.typecheckExpression(@intCast(exprPtr), null));
++        const expr = try self.expression(ast.extra[@intCast(exprPtr)], try self.typechecker.typecheckExpression(ast.extra[@intCast(exprPtr)], null));
+ 
+         res =
+             if (res) |rr| .{
+                 .start = rr.start,
+-                .end = expr,
++                .end = expr + 1,
+             }
+             else .{
+                 .start = expr,
+diff --git a/src/typechecker/resolver.zig b/src/typechecker/resolver.zig
+index d168480..78fe5b8 100644
+--- a/src/typechecker/resolver.zig
++++ b/src/typechecker/resolver.zig
+@@ -354,19 +354,6 @@ fn resolveStatement(self: *Resolver, stmt: defines.StatementPtr, topLevel: bool)
+             const body = ast.extra[statement.value + 1];
+             try self.resolveStatement(body, false);
+         },
+-        .Mark => {
+-            const marks = defines.Range{
+-                .start = ast.extra[statement.value],
+-                .end = ast.extra[statement.value + 1],
+-            };
+-
+-            for (marks.start..marks.end) |mark| {
+-                try self.resolveExpression(ast.extra[mark]);
+-            }
+-
+-            const marked = ast.extra[statement.value + 2];
+-            try self.resolveStatement(marked, topLevel);
+-        },
+         .VariableDefinition => {
+             const signature = ast.signatures.get(ast.extra[statement.value]);
+             const initializer = ast.extra[statement.value + 1];
+diff --git a/src/typechecker/typechecker.zig b/src/typechecker/typechecker.zig
+index b08ebf2..4c6865f 100644
+--- a/src/typechecker/typechecker.zig
++++ b/src/typechecker/typechecker.zig
+@@ -38,7 +38,7 @@ const eql = std.meta.eql;
+ pub const TypeTable = MultiArrayList(TypeInfo);
+ pub const TypeMap = collections.HashMap(TypeInfo, TypeID);
+ pub const TypeNameMap = std.AutoHashMapUnmanaged(TypeID, defines.StringPtr);
+-pub const MetadataMap = collections.HashMap(Element, []const Comptime.Value.Ptr);
++pub const MetadataMap = collections.HashMap(defines.ExpressionPtr, []const Comptime.Value.Ptr);
+ const LookupMap = collections.HashMap(defines.DeclPtr, TypecheckStatus);
+ 
+ pub const Flags = enum(u8) {
+@@ -46,9 +46,10 @@ pub const Flags = enum(u8) {
+     LValue = 1,
+     AttemptingEval = 2,
+     CanCycle = 3,
+-    CoveredAllPaths = 5,
+-    InLoop = 6,
+-    InDefer = 7,
++    CoveredAllPaths = 4,
++    InLoop = 5,
++    InDefer = 6,
++    Mutable = 7,
+ 
+     pub fn flag(flagToGet: Flags) u8 {
+         return @intFromEnum(flagToGet);
+@@ -65,16 +66,6 @@ const TypecheckStatus = struct {
+     result: TypeID,
+ };
+ 
+-pub const Element = struct {
+-    pub const Kind = enum {
+-        Statement,
+-        Expression,
+-    };
+-
+-    kind: Kind,
+-    value: defines.OpaquePtr,
+-};
+-
+ pub const Resolution = backend.C.JIR;
+ 
+ const Typechecker = @This();
+@@ -155,8 +146,10 @@ pub fn typecheck(self: *Typechecker, allocator: Allocator) Error!Resolution {
+         self.typeTable.appendAssumeCapacity(builtin.info);
+         self.typeMap.putAssumeCapacityNoClobber(builtin.info, @intCast(id));
+         const str = try self.builder.internString(builtin.name);
+-        self.typenameMap.putNoClobber(self.arena.allocator(), id, str)
+-            catch return Error.AllocatorFailure;
++        if (!std.mem.eql(u8, builtin.name, "entry_point")) {
++            self.typenameMap.putNoClobber(self.arena.allocator(), id, str)
++                catch return Error.AllocatorFailure;
++        }
+     }
+ 
+     self.builder.allocator = self.arena.allocator();
+@@ -193,7 +186,7 @@ pub fn typecheck(self: *Typechecker, allocator: Allocator) Error!Resolution {
+ pub fn typecheckStatement(self: *Typechecker, statementPtr: defines.StatementPtr, expected: TypeID) Error!void {
+     const ast = self.context.getAST(self.currentFile);
+ 
+-    _ = try self.lowerer.statement(statementPtr);
++    // _ = try self.lowerer.statement(statementPtr);
+ 
+     const stmt = ast.statements.get(statementPtr);
+     return switch (stmt.type) {
+@@ -208,7 +201,6 @@ pub fn typecheckStatement(self: *Typechecker, statementPtr: defines.StatementPtr
+         .Import => common.debug.ShouldBeImpossible(@src()),
+         .Defer => self.typecheckDefer(stmt.value),
+         .VariableDefinition => try self.typecheckVarDefStatement(stmt.value),
+-        .Mark => try self.typecheckStatementMark(statementPtr, stmt.value),
+         else => |t| {
+             self.report("Typechecking of '{s}' statements is not implemented.", .{
+                 @tagName(t),
+@@ -218,15 +210,6 @@ pub fn typecheckStatement(self: *Typechecker, statementPtr: defines.StatementPtr
+     };
+ }
+ 
+-fn typecheckStatementMark(
+-    self: *Typechecker,
+-    stmtPtr: defines.StatementPtr,
+-    extraPtr: defines.OpaquePtr,
+-) Error!void {
+-    _ = try self.typecheckMark(.Statement, stmtPtr, extraPtr, null);
+-    // TODO: Special marks, extern and such.
+-}
+-
+ fn typecheckVariableDef(
+     self: *Typechecker,
+     token: defines.TokenPtr,
+@@ -256,12 +239,6 @@ fn typecheckVariableDef(
+ 
+     blk: switch (self.typeTable.get(initializer)) {
+         .Type => {
+-            // @Maybe @Beware remove this. But currently local types cause problems.
+-            if (!topLevel) {
+-                self.report("Type definitions can only be done in top-level contexts.", .{});
+-                return Error.IllegalNonTopLevelOp;
+-            }
+-
+             const newType = self.executer.getValue(try self.executer.eval(node, expected)).Type;
+             const name = self.builder.getInternedString(switch (self.typeTable.get(newType)) {
+                 .Union => |uni| uni.name,
+@@ -384,13 +361,8 @@ fn typecheckVariableDef(
+             }
+         },
+         .Function => {
+-            // @Maybe @Beware remove this. But currently local types cause problems.
+-            if (!topLevel) {
+-                self.report("Function definitions can only be done in top-level contexts.", .{});
+-                return Error.IllegalNonTopLevelOp;
+-            }
+-
+             const fnc = self.executer.getValue(try self.executer.eval(node, expected)).Function;
++
+             if (self.builder.getInternedString(fnc.name)[0] != '$') {
+                 break :blk;
+             }
+@@ -400,10 +372,20 @@ fn typecheckVariableDef(
+ 
+             const symName = tokens.get(token).lexeme(self.context, self.currentFile);
+             const namespace = self.modules.modules.get(self.modules.modules.len - self.currentFile - 1).name;
+-            const newName = std.fmt.allocPrint(self.arena.allocator(), "{s}::{s}", .{
+-                namespace,
+-                symName,
+-            }) catch return Error.AllocatorFailure;
++            const newName = 
++                if (self.hasMetadata(node, "@export"))
++                    symName
++                else
++                    std.fmt.allocPrint(self.arena.allocator(), "{s}::{s}", .{
++                        namespace,
++                        symName,
++                    }) catch return Error.AllocatorFailure;
++
++            if (std.mem.eql(u8, namespace, "root") and std.mem.eql(u8, newName, "main")) {
++                self.report("Main function can't be exported.", .{});
++                return Error.ExportOfMainFunction;
++            }
++
+             const new = try self.builder.internString(newName);
+ 
+             const val = try self.executer.eval(node, expected);
+@@ -766,9 +748,32 @@ fn typecheckIfStatement(self: *Typechecker, extraPtr: defines.OpaquePtr, expecte
+ }
+ 
+ fn typecheckAssignment(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!void {
+-    _ = extraPtr;
+-    self.report("Assignment is not supported yet. You have to do a static single assignment.", .{});
+-    return common.debug.NotImplemented(@src());
++    const ast = self.context.getAST(self.currentFile);
++
++    const expr = ast.extra[extraPtr];
++    const rhs = ast.extra[extraPtr + 1];
++
++    const vtype = try self.typecheckExpression(expr, null);
++
++    if (!self.getFlag(.ConcreteValue)) {
++        self.report("Expected a concrete value for assignment.", .{});
++        return Error.AssignationOfNonConcreteValue;
++    }
++
++    const rtype = try self.typecheckExpression(rhs, null);
++
++    if (!self.getFlag(.Mutable)) {
++        self.report("Attempt to modify non-mutable value.", .{ });
++        return Error.MutabilityViolation;
++    }
++
++    if (!self.suitable(vtype, rtype)) {
++        self.report("Can't assign value of type '{s}' to value of type '{s}'.", .{
++            try self.typeName(self.arena.allocator(), vtype),
++            try self.typeName(self.arena.allocator(), rtype),
++        });
++        return Error.TypeMismatch;
++    }
+ }
+ 
+ fn typecheckExpressionStatement(self: *Typechecker, exprPtr: defines.OpaquePtr) Error!void {
+@@ -820,10 +825,15 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
+ 
+     const expr = ast.expressions.get(expressionPtr);
+     defer _ = self.setFlag(.ConcreteValue, switch (expr.type) {
+-        .Identifier, .Indexing, .Scoping => true,
++        .Identifier, .Indexing, .Scoping, .Dot => true,
+         else => false,
+     });
+ 
++    if (self.hasMetadata(expressionPtr, "@comptime")) {
++        const val = try self.executer.eval(expressionPtr, maybeExpected);
++        return self.typecheckValue(val, maybeExpected);
++    }
++
+     // @Note all literals should be handled here.
+     if (self.executer.attemptEval(expressionPtr, maybeExpected)) |result| {
+         return self.typecheckValue(result, maybeExpected);
+@@ -833,7 +843,13 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
+         .Identifier => {
+             self.lastToken = expr.value;
+             const decl = self.symbols.findDecl(.{ .file = self.currentFile, .expr = expressionPtr });
+-            return self.typecheckDecl(decl, maybeExpected);
++            const discoveredType = try self.typecheckDecl(decl, maybeExpected);
++
++            if (self.mutable(discoveredType)) {
++                _ = self.setFlag(.Mutable, true);
++            }
++
++            return discoveredType;
+         },
+         .Indexing => return self.typecheckIndexing(expr.value),
+         .Call => self.typecheckCall(expr.value, maybeExpected),
+@@ -857,7 +873,7 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
+ 
+         .Slicing => self.typecheckSlicing(expr.value),
+ 
+-        .Mark => self.typecheckMark(.Expression, expressionPtr, expr.value, maybeExpected),
++        .Mark => self.typecheckMark(expressionPtr, expr.value, maybeExpected),
+ 
+         .Dot => self.typecheckDot(expr.value),
+ 
+@@ -1204,7 +1220,7 @@ pub fn typecheckScoping(self: *Typechecker, expr: defines.ExpressionPtr) Error!T
+     for (defs) |def| {
+         if (def.name == try self.builder.internString(member)) {
+             if (def.public or self.symbols.canAccess(self.currentScope, scope)) {
+-                return self.discoverScopeDef(lhsTypeID, &def, scope);
++                return self.discoverScopeDef(lhsTypeID, &def, scope, expr);
+             }
+ 
+             self.report("'{s}' is inaccessible due to its visibility level.", .{
+@@ -1222,7 +1238,13 @@ pub fn typecheckScoping(self: *Typechecker, expr: defines.ExpressionPtr) Error!T
+     return Error.MissingDefinition;
+ }
+ 
+-pub fn discoverScopeDef(self: *Typechecker, from: TypeID, member: *const Types.FieldInfo, scope: defines.ScopePtr) Error!TypeID {
++pub fn discoverScopeDef(
++    self: *Typechecker,
++    from: TypeID,
++    member: *const Types.FieldInfo,
++    scope: defines.ScopePtr,
++    expr: defines.ExpressionPtr
++) Error!TypeID {
+     if (member.valueType != Comptime.Builtin.Type("incomplete")) {
+         return member.valueType;
+     }
+@@ -1232,9 +1254,18 @@ pub fn discoverScopeDef(self: *Typechecker, from: TypeID, member: *const Types.F
+         .name = self.builder.getInternedString(member.name),
+     }) orelse return common.debug.ShouldBeImpossible(@src());
+ 
++    self.symbols.resolutionMap.put(self.arena.allocator(), .{
++        .file = self.currentFile,
++        .expr = expr,
++    }, decl) catch return Error.AllocatorFailure;
++
+     const discoveredType = try self.typecheckDecl(decl, null);
+     const memberIndex = try self.definitionIndex(from, member.name);
+ 
++    if (self.mutable(discoveredType)) {
++        _ = self.setFlag(.Mutable, true);
++    }
++
+     switch (self.typeTable.get(from)) {
+         .Enum => |enm| {
+             var defs: []Types.FieldInfo = @constCast(enm.definitions);
+@@ -1493,10 +1524,10 @@ pub fn typecheckIndexing(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!
+     }
+ 
+     const maybeIndexable = self.typeTable.get(maybeIndexableId);
+-    switch (maybeIndexable) {
+-        .Array => { },
++    const inner = switch (maybeIndexable) {
++        .Array => |arr| arr.child,
+         .Pointer => |ptr| switch (ptr.size) {
+-            .Slice, .C => { },
++            .Slice, .C => ptr.child,
+             else => {
+                 self.report("Attempt to index a singular pointer '{s}'.", .{
+                     try self.typeName(self.arena.allocator(), maybeIndexableId),
+@@ -1510,6 +1541,13 @@ pub fn typecheckIndexing(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!
+             });
+             return Error.IndexingOfNonIndexableValue;
+         },
++    };
++
++    if (
++        self.mutable(maybeIndexableId)
++        and self.mutable(inner)
++    ) {
++        _ = self.setFlag(.Mutable, true);
+     }
+ 
+     const maybeIndexPtr = try self.typecheckExpression(ast.extra[extraPtr + 1], null);
+@@ -1802,17 +1840,14 @@ pub fn typecheckDot(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!TypeI
+ 
+ pub fn typecheckMark(
+     self: *Typechecker,
+-    kind: Element.Kind,
+     ptr: defines.EitherPtr(defines.StatementPtr, defines.ExpressionPtr),
+     extraPtr: defines.OpaquePtr,
+     maybeExpected: ?TypeID
+ ) Error!TypeID {
+-    // In case of the mark of a mark, ptr is the marked this, which is the
++    // @Note In case of the mark of a mark, ptr is the marked this, which is the
+     // current mark.
+-    if (self.getMetadata(kind, ptr)) |_| {
+-        self.report("Redundant marking of already marked {s}.", .{
+-            if (kind == .Statement) "statement" else "expression",
+-        });
++    if (self.getMetadata(ptr)) |_| {
++        self.report("Redundant marking of already marked expression.", .{ });
+         return Error.RedundantMark;
+     }
+ 
+@@ -1834,25 +1869,8 @@ pub fn typecheckMark(
+     }
+ 
+     const marked = ast.extra[extraPtr + 2];
+-    if (kind == .Statement and ast.statements.items(.type)[marked] == .VariableDefinition) {
+-        const varDef = ast.statements.get(marked);
+-        try self.setMetadata(kind, ast.extra[varDef.value + 1], metadata);
+-    }
+-
+-    try self.setMetadata(kind, marked, metadata);
+-
+-    if (kind == .Statement) {
+-        try self.typecheckStatement(marked, 0);
+-
+-        const markedStmt = ast.statements.get(marked);
+-        if (markedStmt.type == .VariableDefinition) {
+-            return self.typecheckExpression(ast.extra[markedStmt.value + 1], maybeExpected);
+-        }
+-        else return 0;
+-    }
+-    else {
+-        return self.typecheckExpression(marked, maybeExpected);
+-    }
++    try self.setMetadata(marked, metadata);
++    return self.typecheckExpression(marked, maybeExpected);
+ }
+ 
+ pub fn typecheckSlicing(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!TypeID {
+@@ -2611,6 +2629,8 @@ pub fn assertComparable(self: *const Typechecker, this: TypeID, that: TypeID) Er
+     try switch (thisType) {
+         .ComptimeInt => functional.throwIf(!self.isInt(that), Error.ComparisonOnIncompatibleTypes),
+         .ComptimeFloat => functional.throwIf(!self.isFloat(that), Error.ComparisonOnIncompatibleTypes),
++        .Integer => functional.throwIf(!self.isInt(that), Error.ComparisonOnIncompatibleTypes),
++        .Float => functional.throwIf(!self.isFloat(that), Error.ComparisonOnIncompatibleTypes),
+         .Array => |thisArr| switch (thatType) {
+             .Array => |thatArr| self.assertComparable(thisArr.child, thatArr.child),
+             else => Error.ComparisonOnIncompatibleTypes,
+@@ -2925,79 +2945,77 @@ pub fn typeName(self: *Typechecker, allocator: Allocator, typeID: TypeID) Error!
+     if (self.typenameMap.get(typeID)) |namePtr| {
+         return self.builder.getInternedString(namePtr);
+     }
+-    else return
+-        if (Comptime.Builtin.isBuiltinType(typeID)) Comptime.Builtin.TypeName(typeID)
+-        else ret: switch (self.typeTable.get(typeID)) {
+-            .Pointer => {
+-                const ptr: Types.Pointer = self.typeTable.get(typeID).Pointer;
+-                const child = try self.typeName(allocator, ptr.child);
+-
+-                const mut = if (ptr.mutable) "mut " else "";
+-                const prefix = switch (ptr.size) {
+-                    .Slice => "[]",
+-                    .Single => "*",
+-                    .C => "[@c]",
+-                };
++    else return ret: switch (self.typeTable.get(typeID)) {
++        .Pointer => {
++            const ptr: Types.Pointer = self.typeTable.get(typeID).Pointer;
++            const child = try self.typeName(allocator, ptr.child);
+ 
+-                var res = allocator.alloc(u8, child.len + prefix.len + mut.len) catch return Error.AllocatorFailure;
+-                res = std.fmt.bufPrint(res, "{s}{s}{s}", .{mut, prefix, child}) catch unreachable;
+-                self.typenameMap.putNoClobber(allocator, typeID, try self.builder.internString(res)) catch unreachable;
+-                break :ret res;
+-            },
+-            .Array => {
+-                const arr: Types.Array = self.typeTable.get(typeID).Array;
+-                const child = try self.typeName(allocator, arr.child);
+-
+-                const prefix = if (arr.mutable) "mut " else "";
+-                const size = std.fmt.allocPrint(allocator, "[{d}]", .{arr.len})
+-                    catch return Error.AllocatorFailure;
+-
+-                var res = allocator.alloc(u8, child.len + prefix.len + size.len) catch return Error.AllocatorFailure;
+-                res = std.fmt.bufPrint(res, "{s}{s}{s}", .{prefix, size, child}) catch unreachable;
+-                self.typenameMap.putNoClobber(allocator, typeID, try self.builder.internString(res)) catch unreachable;
+-                break :ret res;
+-            },
+-            .Struct, .Union, .Enum => typename(self, allocator, typeID),
+-            .Function => |func| {
+-                var res: []const u8 = if (func.mutable) "mut *fn (" else "*fn (";
+-
+-                for (0..func.argTypes.len) |index| {
+-                    res = std.fmt.allocPrint(allocator, "{s}{s}{s}", .{
+-                        res,
+-                        try self.typeName(allocator, func.argTypes[index]),
+-                        if (index == func.argTypes.len - 1) "" else ", ",
+-                    }) catch return Error.AllocatorFailure;
+-                }
++            const mut = if (ptr.mutable) "mut " else "";
++            const prefix = switch (ptr.size) {
++                .Slice => "[]",
++                .Single => "*",
++                .C => "[@c]",
++            };
+ 
++            var res = allocator.alloc(u8, child.len + prefix.len + mut.len) catch return Error.AllocatorFailure;
++            res = std.fmt.bufPrint(res, "{s}{s}{s}", .{mut, prefix, child}) catch unreachable;
++            self.typenameMap.putNoClobber(allocator, typeID, try self.builder.internString(res)) catch unreachable;
++            break :ret res;
++        },
++        .Array => {
++            const arr: Types.Array = self.typeTable.get(typeID).Array;
++            const child = try self.typeName(allocator, arr.child);
+ 
+-                res = std.fmt.allocPrint(allocator, "{s}) -> {s}", .{res, try self.typeName(allocator, func.returnType)}) catch return Error.AllocatorFailure;
+-                self.typenameMap.putNoClobber(allocator, typeID, try self.builder.internString(res)) catch unreachable;
+-                break :ret res;
+-            },
+-            .EnumLiteral => "enum_literal",
+-            .ComptimeFloat => "comptime_float",
+-            .ComptimeInt => "comptime_int",
+-            .Type => "type",
+-            .Any => "any",
+-            .Bool => "bool",
+-            .Float => "float",
+-            .Noreturn => "noreturn",
+-            .Void => "void",
+-            .Integer => |int| {
+-                const mut = if (int.mutable) "mut " else "";
+-                const sign = if (int.signed) "i" else "u"; 
+-                const size = std.fmt.allocPrint(
+-                    allocator,
+-                    "{d}",
+-                    .{int.size},
+-                ) catch return Error.AllocatorFailure;
+-
+-                var res = allocator.alloc(u8, sign.len + size.len + mut.len) catch return Error.AllocatorFailure;
+-                res = std.fmt.bufPrint(res, "{s}{s}{s}", .{mut, sign, size}) catch unreachable;
+-                self.typenameMap.putNoClobber(allocator, typeID, try self.builder.internString(res)) catch unreachable;
+-                break :ret res;
+-            },
+-        };
++            const prefix = if (arr.mutable) "mut " else "";
++            const size = std.fmt.allocPrint(allocator, "[{d}]", .{arr.len})
++                catch return Error.AllocatorFailure;
++
++            var res = allocator.alloc(u8, child.len + prefix.len + size.len) catch return Error.AllocatorFailure;
++            res = std.fmt.bufPrint(res, "{s}{s}{s}", .{prefix, size, child}) catch unreachable;
++            self.typenameMap.putNoClobber(allocator, typeID, try self.builder.internString(res)) catch unreachable;
++            break :ret res;
++        },
++        .Struct, .Union, .Enum => typename(self, allocator, typeID),
++        .Function => |func| {
++            var res: []const u8 = if (func.mutable) "mut *fn (" else "*fn (";
++
++            for (0..func.argTypes.len) |index| {
++                res = std.fmt.allocPrint(allocator, "{s}{s}{s}", .{
++                    res,
++                    try self.typeName(allocator, func.argTypes[index]),
++                    if (index == func.argTypes.len - 1) "" else ", ",
++                }) catch return Error.AllocatorFailure;
++            }
++
++
++            res = std.fmt.allocPrint(allocator, "{s}) -> {s}", .{res, try self.typeName(allocator, func.returnType)}) catch return Error.AllocatorFailure;
++            self.typenameMap.putNoClobber(allocator, typeID, try self.builder.internString(res)) catch unreachable;
++            break :ret res;
++        },
++        .EnumLiteral => "enum_literal",
++        .ComptimeFloat => "comptime_float",
++        .ComptimeInt => "comptime_int",
++        .Type => "type",
++        .Any => "any",
++        .Bool => "bool",
++        .Float => "float",
++        .Noreturn => "noreturn",
++        .Void => "void",
++        .Integer => |int| {
++            const mut = if (int.mutable) "mut " else "";
++            const sign = if (int.signed) "i" else "u"; 
++            const size = std.fmt.allocPrint(
++                allocator,
++                "{d}",
++                .{int.size},
++            ) catch return Error.AllocatorFailure;
++
++            var res = allocator.alloc(u8, sign.len + size.len + mut.len) catch return Error.AllocatorFailure;
++            res = std.fmt.bufPrint(res, "{s}{s}{s}", .{mut, sign, size}) catch unreachable;
++            self.typenameMap.putNoClobber(allocator, typeID, try self.builder.internString(res)) catch unreachable;
++            break :ret res;
++        },
++    };
+ }
+ 
+ pub fn determineExpected(maybeExpected: ?TypeID) ?TypeID {
+@@ -3029,23 +3047,51 @@ fn clearFlags(self: *Typechecker) void {
+ /// Assumes metadata doesn't exist for given element
+ pub fn setMetadata(
+     self: *Typechecker,
+-    kind: Element.Kind,
+-    element: defines.EitherPtr(defines.ExpressionPtr, defines.StatementPtr),
++    element: defines.ExpressionPtr,
+     metadata: []const Comptime.Value.Ptr,
+ ) Error!void {
+-    return self.metadata.put(self.arena.allocator(), .{
+-        .kind = kind,
+-        .value = element,
+-    }, metadata) catch Error.AllocatorFailure;
++    return self.metadata.put(self.arena.allocator(), element, metadata) catch Error.AllocatorFailure;
+ }
+ 
+ pub fn getMetadata(
+     self: *const Typechecker,
+-    elementType: Element.Kind,
+     value: defines.EitherPtr(defines.ExpressionPtr, defines.StatementPtr)
+ ) ?[]const defines.ExpressionPtr {
+-    return self.metadata.get(.{
+-        .kind = elementType,
+-        .value = value,
+-    });
++    return self.metadata.get(value);
++}
++
++pub fn hasMetadata(
++    self: *const Typechecker,
++    _value: defines.ExpressionPtr,
++    _meta: []const u8,
++) bool {
++    const ast = self.context.getAST(self.currentFile);
++
++    const value = blk: {
++        const expr = ast.expressions.get(_value);
++
++        break :blk
++            if (expr.type == .Mark) ast.extra[expr.value + 2]
++            else _value;
++    };
++
++    return
++        if (self.getMetadata(value)) |metadata| blk: {
++            for (metadata) |meta| {
++                const meval = self.executer.getValue(meta);
++
++                switch (meval) {
++                    .Enum => |enm|
++                        if (
++                            enm.Type == Comptime.Builtin.Type("builtin_metadata")
++                            and enm.Value == Comptime.Builtin.Metadata(_meta)
++                        ) break :blk true,
++
++                    else => { },
++                }
++            }
++
++            break :blk false;
++        }
++        else false;
+ }
+diff --git a/test/build/c/forward_decl.h b/test/build/c/forward_decl.h
+index 90b9ced..f57123f 100644
+--- a/test/build/c/forward_decl.h
++++ b/test/build/c/forward_decl.h
+@@ -12,17 +12,11 @@ typedef uint8_t jasl_bool;
+ 
+ typedef uint8_t* Slice_uint8_t;
+ 
+-typedef uint8_t* Slice_uint8_t;
+-
+-typedef uint8_t* Slice_uint8_t;
+-
+-typedef uint8_t* Slice_uint8_t;
++void test();
+ 
+-typedef uint8_t* Slice_uint8_t;
+-
+-typedef uint8_t* Slice_uint8_t;
+-
+-typedef uint8_t* Slice_uint8_t;
++typedef struct {
++	int32_t a;
++} __anon_Namespace_16049278749992822981__S;
+ 
+ int32_t const root__main();
+ 
+diff --git a/test/build/c/source.c b/test/build/c/source.c
+index e8525ac..cfedbb3 100644
+--- a/test/build/c/source.c
++++ b/test/build/c/source.c
+@@ -9,13 +9,13 @@ int main() {
+     return root__main();
+ }
+ 
++void test()
++{
++$$anon_Block_5035874246014170412: (void)(0);
++}
+ int32_t const root__main()
+ {
+ $$anon_Block_13496431321134511927: (void)(0);
+-    jasl_bool const c = 1;
+-    uint32_t const d = 5;
+-    {
+-$$anon_Block_12882719531207038732: (void)(0);
+-        return 1;
+-    }
++    __anon_Namespace_16049278749992822981__S const u32 = {5};
++    return 1;
+ }
+diff --git a/test/build/c/test b/test/build/c/test
+index 24ddcb6..5d90a09 100755
+Binary files a/test/build/c/test and b/test/build/c/test differ
+diff --git a/test/main.jasl b/test/main.jasl
+index 18ba8d2..e6b3f37 100644
+--- a/test/main.jasl
++++ b/test/main.jasl
+@@ -1,10 +1,13 @@
++let test = #(@export) fn () -> void {
++};
++
+ let main = fn () -> i32 {
+-    let c: bool = true;
+-    let d: u32 = if (c) 5 else 4;
++    let S = struct {
++        a: mut i32,
++    };
++
++    let c = S(5);
++    test();
+ 
+-    if c {
+-        return 1;
+-    } else {
+-        return 0;
+-    }
++    return 1;
+ };

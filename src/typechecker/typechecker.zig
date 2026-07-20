@@ -844,11 +844,6 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
             self.lastToken = expr.value;
             const decl = self.symbols.findDecl(.{ .file = self.currentFile, .expr = expressionPtr });
             const discoveredType = try self.typecheckDecl(decl, maybeExpected);
-
-            if (self.mutable(discoveredType)) {
-                _ = self.setFlag(.Mutable, true);
-            }
-
             return discoveredType;
         },
         .Indexing => return self.typecheckIndexing(expr.value),
@@ -1262,10 +1257,6 @@ pub fn discoverScopeDef(
     const discoveredType = try self.typecheckDecl(decl, null);
     const memberIndex = try self.definitionIndex(from, member.name);
 
-    if (self.mutable(discoveredType)) {
-        _ = self.setFlag(.Mutable, true);
-    }
-
     switch (self.typeTable.get(from)) {
         .Enum => |enm| {
             var defs: []Types.FieldInfo = @constCast(enm.definitions);
@@ -1543,12 +1534,7 @@ pub fn typecheckIndexing(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!
         },
     };
 
-    if (
-        self.mutable(maybeIndexableId)
-        and self.mutable(inner)
-    ) {
-        _ = self.setFlag(.Mutable, true);
-    }
+    _ = self.setFlag(.Mutable, self.mutable(maybeIndexableId) and self.mutable(inner));
 
     const maybeIndexPtr = try self.typecheckExpression(ast.extra[extraPtr + 1], null);
     const maybeIndex = self.typeTable.get(maybeIndexPtr);
@@ -1644,10 +1630,10 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
 
     if (isPresent.found_existing) {
         switch (isPresent.value_ptr.status) {
-            .Checked =>
-                if (isPresent.value_ptr.result != Comptime.Builtin.Type("incomplete"))
-                    return isPresent.value_ptr.result
-                else  { },
+            .Checked => if (isPresent.value_ptr.result != Comptime.Builtin.Type("incomplete")) {
+                _ = self.setFlag(.Mutable, self.mutable(isPresent.value_ptr.result));
+                return isPresent.value_ptr.result;
+            },
             .InProgress => {
                 if (!self.getFlag(.CanCycle)) {
                     self.report("Dependency cycle detected. '{s}' depends on itself.", .{
@@ -1722,7 +1708,7 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
         try self.lowerer.declaration(isPresent.key_ptr.*, &decl);
     }
 
-    return declType;
+    return self.typecheckDecl(declPtr, maybeExpected);
 }
 
 pub fn typecheckDot(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!TypeID {
@@ -1834,6 +1820,8 @@ pub fn typecheckDot(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!TypeI
         .Struct => |str| str.fields,
         else => return common.debug.ShouldBeImpossible(@src()),
     };
+
+    _ = self.setFlag(.Mutable, self.mutable(objectTypeID) and self.mutable(fields[index].valueType));
 
     return fields[index].valueType;
 }
