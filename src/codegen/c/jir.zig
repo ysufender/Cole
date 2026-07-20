@@ -72,6 +72,7 @@ pub const Node = struct {
         BitwiseAnd,
         Not,
         Negation,
+        Construction,
     };
 
     type: Type,
@@ -385,7 +386,8 @@ fn discoverFunctionsAndTypes(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void 
                     try self.write(out, "}} {s};\n\n", .{name});
                 },
 
-                else => return common.debug.ShouldBeImpossible(@src()),
+                // @Note type constants are already folded
+                else => { },
             }
         },
         else => { },
@@ -579,6 +581,26 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
             }
             try self.write(out, ")", .{});
         },
+
+        .Construction => {
+            const func = self.data[node.value];
+            const range = defines.Range{
+                .start = self.data[node.value + 1],
+                .end = self.data[node.value + 2],
+            };
+
+            try self.write(out, "{s}{{", .{
+                try self.getCName(func, null, true),
+            });
+            for (range.start..range.end) |idx| {
+                try self.operation(out, func);
+                if (idx == self.data[node.value + 1] - 1) {
+                    continue;
+                }
+                try self.write(out, ", ", .{});
+            }
+            try self.write(out, "}}", .{});
+        },
     };
 }
 
@@ -609,7 +631,19 @@ fn literal(self: *JIR, out: *Writer, ptr: Constant.Ptr) Error!void {
         },
         .Float => |fl| self.write(out, "{}", .{fl}),
         .Function => |func| self.write(out, "{s}", .{self.strings[func]}),
-        .Array, .Aggregate => |arr| {
+        .Aggregate => |agg| {
+            try self.write(out, "({s}){{", .{
+                try self.getCName(agg.type, null, true),
+            });
+            for (agg.data.start..agg.data.end) |idx| {
+                try self.literal(out, @intCast(idx));
+                if (idx != agg.data.end - 1) {
+                    try self.write(out, ", ", .{});
+                }
+            }
+            try self.write(out, "}}", .{});
+        },
+        .Array => |arr| {
             try self.write(out, "{{ ", .{});
             for (arr.data.start..arr.data.end) |idx| {
                 try self.literal(out, @intCast(idx));

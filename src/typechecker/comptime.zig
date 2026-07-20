@@ -830,7 +830,8 @@ fn evalDecl(self: *Comptime, declPtr: defines.DeclPtr, maybeExpected: ?TypeID) E
                         .Struct, .Enum, .Union => self.castValue(valuePtr, expected),
                         else => valuePtr,
                     }
-                else valuePtr;
+                else if (value == .Type) valuePtr
+                else self.castValue(valuePtr, expected);
         },
         .Capture => if (self.cache.get(.{
             .file = prevFile,
@@ -1893,7 +1894,11 @@ fn castValue(self: *Comptime, valuePtr: Value.Ptr, to: TypeID) Error!Value.Ptr {
         .Undefined => .{
             .Undefined = to, 
         },
-        else => return common.debug.ShouldBeImpossible(@src()),
+
+        else => |t| {
+            common.log.err("Value: {s}", .{@tagName(t)});
+            return common.debug.ShouldBeImpossible(@src());
+        }
     };
 
     self.memory.items[valuePtr] = newValue;
@@ -2068,6 +2073,8 @@ pub const builtinTypes = [_]struct {
     .{ .name = "entry_point", .info = .{ .Function = .{ .mutable = false, .isComptime = false, .argTypes = &.{}, .returnType = 1 } } },
     // builtin_metadata
     .{ .name = "builtin_metadata", .info = .{ .Enum = .{ .mutable = false, .name = Resolver.BuiltinIndex("any") + 5, .fields = &.{}, .definitions = &.{}, .scope = 0 } } },
+    // []u8
+    .{ .name = "string", .info = .{ .Pointer = .{ .mutable = false, .child = 2, .size = .Slice, }, } },
 };
 
 pub const builtinMetadata = [_][]const u8 {

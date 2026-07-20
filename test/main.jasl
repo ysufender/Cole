@@ -1,3 +1,4 @@
+/*
 let test = #(@export) fn () -> void {
 };
 
@@ -10,4 +11,15 @@ let main = fn () -> i32 {
     defer c = Some(1);
 
     return c.test;
+};
+*/
+
+let Some = struct {
+    test: mut i32
+};
+
+let main = fn () -> i32 {
+    let cello: mut Some = Some(1);
+    cello = Some(2);
+    return 1;
 };

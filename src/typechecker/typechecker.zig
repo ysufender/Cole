@@ -200,6 +200,7 @@ pub fn typecheckStatement(self: *Typechecker, statementPtr: defines.StatementPtr
         .Import => common.debug.ShouldBeImpossible(@src()),
         .Defer => self.typecheckDefer(stmt.value),
         .VariableDefinition => try self.typecheckVarDefStatement(stmt.value),
+        .InlineAssembly => { }, // @Note allow direct C code insertion
         else => |t| {
             self.report("Typechecking of '{s}' statements is not implemented.", .{
                 @tagName(t),
@@ -212,8 +213,9 @@ pub fn typecheckStatement(self: *Typechecker, statementPtr: defines.StatementPtr
 fn typecheckVariableDef(
     self: *Typechecker,
     decl: *const Resolver.Declaration,
-    expected: TypeID,
 ) Error!TypeID {
+    const expected = try self.expectType(decl.type);
+
     const initializer =
         if (decl.topLevel or expected == Comptime.Builtin.Type("type"))
             try self.typecheckValue(try self.executer.eval(decl.node, expected), expected)
@@ -752,18 +754,17 @@ fn typecheckAssignment(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!vo
 
     const vtype = try self.typecheckExpression(expr, null);
 
-    common.log.debug("assign LHS expr type = {s}", .{self.builder.getInternedString(self.typenameMap.get(vtype).?)});
     if (!self.getFlag(.ConcreteValue)) {
         self.report("Expected a concrete value for assignment.", .{});
         return Error.AssignationOfNonConcreteValue;
     }
 
-    const rtype = try self.typecheckExpression(rhs, null);
-
     if (!self.mutable(vtype)) {
         self.report("Attempt to modify non-mutable value.", .{ });
         return Error.MutabilityViolation;
     }
+
+    const rtype = try self.typecheckExpression(rhs, null);
 
     if (!self.suitable(vtype, rtype)) {
         self.report("Can't assign value of type '{s}' to value of type '{s}'.", .{
@@ -812,8 +813,12 @@ pub fn typecheckParameter(self: *Typechecker, decl: *const Resolver.Declaration)
     return self.typecheckExpression(decl.type, null);
 }
 
-pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.ExpressionPtr, maybeExpected: ?TypeID) Error!TypeID {
+pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.ExpressionPtr, _maybeExpected: ?TypeID) Error!TypeID {
     const ast = self.context.getAST(self.currentFile);
+
+    const maybeExpected =
+        if (_maybeExpected) |ex| ex
+        else Comptime.Builtin.Type("any");
 
     const expr = ast.expressions.get(expressionPtr);
     defer _ = self.setFlag(.ConcreteValue, switch (expr.type) {
@@ -916,11 +921,9 @@ pub fn typecheckValue(self: *Typechecker, val: Comptime.Value.Ptr, maybeExpected
         if (determineExpected(maybeExpected)) |expected| expected
         else Comptime.Builtin.Type("any");
 
-    return switch (self.executer.getValue(val)) {
-        .Int => self.infer(Comptime.Builtin.Type("comptime_int"), expected)
-            catch Comptime.Builtin.Type("comptime_int"),
-        .Float => self.infer(Comptime.Builtin.Type("comptime_float"), expected)
-            catch Comptime.Builtin.Type("comptime_float"),
+    return self.infer(switch (self.executer.getValue(val)) {
+        .Int => Comptime.Builtin.Type("comptime_int"),
+        .Float => Comptime.Builtin.Type("comptime_float"),
         .Bool => Comptime.Builtin.Type("bool"),
         .Enum => |enumeration| enumeration.Type,
         .Union => |uni| uni.Type,
@@ -932,7 +935,7 @@ pub fn typecheckValue(self: *Typechecker, val: Comptime.Value.Ptr, maybeExpected
         .Undefined => |undef| undef,
         .Slice => |slice| slice.Type,
         .String => Comptime.Builtin.Type("string"),
-    };
+    }, expected);
 }
 
 pub fn typecheckExpressionList(self: *Typechecker, extra: defines.OpaquePtr, _maybeExpected: ?TypeID) Error!TypeID {
@@ -1333,7 +1336,7 @@ pub fn typecheckCall(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpec
     const func = switch (maybeFunction) {
         .Type => {
             const typeToInit =
-                if (maybeExpected) |exp| exp
+                if (determineExpected(maybeExpected)) |exp| exp
                 else self.executer.getValue(try self.executer.eval(ast.extra[extraPtr], null)).Type;
 
             return self.typecheckExpressionList(
@@ -1683,7 +1686,7 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
     errdefer isPresent.value_ptr.status = .NotChecked;
 
     const declType = try switch (decl.kind) {
-        .Variable => self.typecheckVariableDef(&decl, maybeExpected orelse try self.expectType(decl.type)),
+        .Variable => self.typecheckVariableDef(&decl),
         .Namespace => {
             self.report("Operations on namespaces are not allowed.", .{});
             return Error.NamespaceAsValue;

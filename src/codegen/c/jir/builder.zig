@@ -141,6 +141,8 @@ pub inline fn cjump(self: *Builder, lbl: StringPtr, cnd: JIR.Ptr) Error!JIR.Ptr 
 pub inline fn exit(self: *Builder) Error!JIR.Ptr { return self.commonSingle(.Exit, 0); }
 pub inline fn scope(self: *Builder, name: StringPtr) Error!JIR.Ptr { return self.commonSingle(.Scope, name); }
 
+pub inline fn construct(self: *Builder, typeID: TypeID, start: JIR.Ptr, end: JIR.Ptr) Error!JIR.Ptr { return self.commonTernary(.Construction, typeID, start, end); }
+
 pub inline fn identifier(self: *Builder, decl: defines.StringPtr) Error!JIR.Ptr { return self.commonSingle(.Identifier, decl); }
 
 pub inline fn reference(self: *Builder, decl: StringPtr) Error!JIR.Ptr { return self.commonSingle(.Reference, decl); }

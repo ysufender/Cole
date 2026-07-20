@@ -60,12 +60,7 @@ pub fn topLevelDeclaration(self: *Lowerer, ptr: defines.DeclPtr, decl: *const De
         },
         else => {
             // @Note Top-level comptimeness is checked in the typechecker.
-            const node =
-                if (self.typechecker.executer.attemptEval(decl.node, typeID)) |someVal|
-                    try self.typechecker.builder.literal(try self.addConstant(someVal, typeID))
-                else
-                    try self.expression(decl.node, typeID);
-
+            const node = try self.expression(decl.node, typeID);
             _ = try self.typechecker.builder.variableDef(decl.topLevel, typeID, decl, node, self.typechecker);
         },
     }
@@ -112,12 +107,26 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
                 },
             }};
         },
-        .Enum => |val| .{ .Integer = .{ .u32 = val.Value } },
-        .Union => |uni| @"union": {
+        .Enum => |valu| blk: {
+            const cval = try self.typechecker.builder.addConstant(.{
+                .Integer = .{ .u32 = valu.Value },
+            });
+
+            break :blk .{
+                .Aggregate = .{
+                    .type = valu.Type,
+                    .data = .{
+                        .start = cval,
+                        .end = cval + 1,
+                    },
+                },
+            };
+        },
+        .Union => |uni| uni: {
             const start = self.typechecker.builder.constants.len;
             _ = try self.typechecker.builder.addConstant(.{ .Integer = .{ .u32 = uni.Tag } });
             _ = try self.addConstant(uni.Value, ofType.Union.fields[uni.Tag + 1].valueType);
-            break :@"union" .{ .Aggregate = .{
+            break :uni .{ .Aggregate = .{
                 .type = uni.Type,
                 .data = .{
                     .start = @intCast(start),
@@ -125,26 +134,9 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
                 },
             }};
         },
-        .String => |string| string: {
-            // @Beware strings are slices, so they are aggregate
-            // in the form [size, internedStringIndex]
-            const strPtr = try self.typechecker.builder.internString(string);
-
-            const start = self.typechecker.builder.constants.len;
-            _ = try self.typechecker.builder.addConstant(.{ .Integer = .{
-                .u32 = @intCast(string.len),
-            }});
-            _ = try self.typechecker.builder.addConstant(.{ .Integer = .{
-                .u32 = strPtr,
-            }});
-
-            break :string .{ .Aggregate = .{
-                .type = Comptime.Builtin.Type("string"),
-                .data = .{
-                    .start = @intCast(start),
-                    .end = @intCast(self.typechecker.builder.constants.len),
-                },
-            }};
+        .String => |string| {
+            _ = string;
+            return common.debug.NotImplemented(@src());
         },
         .Slice => |slice| slice: {
             const start = self.typechecker.builder.constants.len;
@@ -668,8 +660,12 @@ fn call(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     const rres = res orelse defines.Range{ .start = 0, .end = 0 };
 
     return
-        if (try self.typechecker.typecheckExpression(func, null) == Comptime.Builtin.Type("type"))
-            self.typechecker.builder.grouping(rres.start, rres.end)
+        if (try self.typechecker.typecheckExpression(func, null) == Comptime.Builtin.Type("type")) blk: {
+            const typeID = self.typechecker.executer.getValue(
+                try self.typechecker.executer.expectType(func),
+            ).Type;
+            break :blk self.typechecker.builder.construct(typeID, rres.start, rres.end);
+        }
         else
             self.typechecker.builder.call(func, rres);
 }

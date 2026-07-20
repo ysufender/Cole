@@ -294,7 +294,8 @@ fn statement(self: *Parser) StatementResult {
             self.report("Trailing semicolons are not permitted.", .{});
             return error.InvalidToken;
         },
-        .Defer => self.deferStatement(),
+        // .Defer => self.deferStatement(),
+        .Defer => return common.debug.NotImplemented(@src()),
         else => self.expressionStmt(),
     };
 }
