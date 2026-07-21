@@ -15,8 +15,8 @@
     Public Symbols:
         Epsilon,
         isApprox,
-        abs
-        pow
+        abs,
+        pow,
     Description:
         Contains definitions for mathematical operations. For more
         "theoric" side of the numbers, see std::numeric.

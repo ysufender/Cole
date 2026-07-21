@@ -168,16 +168,6 @@ pub const PrintContext = struct {
                 printer.print("Asm {s} ", .{printer.tokenLexeme(val)});
                 printer.write(";");
             },
-
-            .Mark => {
-                printer.write("Mark(");
-                for (ex[ex[val]..ex[val + 1]]) |hint| {
-                    printer.printExpr(@intCast(hint), depth + 1);
-                }
-                printer.indent(depth);
-                printer.write(")");
-                printer.printStmt(@intCast(ex[val + 2]), depth);
-            },
         }
     }
 

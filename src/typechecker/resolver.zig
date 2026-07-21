@@ -46,10 +46,12 @@ pub const Declaration = struct {
     };
 
     scope: defines.ScopePtr,
+    name: defines.ModulePtr,
     token: defines.TokenPtr,
     node: defines.StatementPtr,
     type: defines.ExpressionPtr,
     topLevel: bool,
+    parent: ?defines.DeclPtr = null,
     kind: Kind,
     public: bool,
 };
@@ -91,7 +93,7 @@ pub fn LookupContext(comptime T: type) type {
 
 pub const Resolution = struct {
     resolutionMap: ResolutionMap,
-    declarations: DeclarationList.Slice,
+    declarations: DeclarationList,
     lookup: LookupMap,
     scopes: ScopeList.Slice,
 
@@ -138,6 +140,7 @@ resolved: ResolutionMap,
 currentScope: defines.ScopePtr,
 modules: *const ModuleList,
 lastToken: defines.TokenPtr,
+lastDecl: ?defines.DeclPtr = null,
 
 pub fn init(gpa: Allocator, context: *Context, modules: *const ModuleList) Error!Resolver {
     var arena = Arena.init(gpa);
@@ -165,6 +168,7 @@ pub fn init(gpa: Allocator, context: *Context, modules: *const ModuleList) Error
     for (builtins, 0..) |b, i| {
         const decl = try decls.addOne(allocator);
         decls.set(decl, .{
+            .name = 0,
             .kind = .Builtin,
             .scope = builtin,
             .public = true,
@@ -196,6 +200,7 @@ pub fn init(gpa: Allocator, context: *Context, modules: *const ModuleList) Error
 
             const decl = try decls.addOne(allocator);
             decls.set(decl, .{
+                .name = 0,
                 .scope = scope,
                 .kind = .Variable,
                 .public = symbol.public,
@@ -254,7 +259,7 @@ pub fn resolve(self: *Resolver, allocator: Allocator) Error!Resolution {
 
     return collections.deepCopy(Resolution{
         .resolutionMap = self.resolved,
-        .declarations = self.decls.slice(),
+        .declarations = self.decls.mutableSlice(),
         .scopes = self.scopes.slice(),
         .lookup = self.lookup,
     }, allocator);
@@ -297,6 +302,9 @@ fn resolveModule(self: *Resolver) Error!void {
 }
 
 fn resolveStatement(self: *Resolver, stmt: defines.StatementPtr, topLevel: bool) Error!void {
+    const last = self.lastDecl;
+    defer self.lastDecl = last;
+
     const allocator = self.arena.allocator();
     const ast = self.context.getAST(self.dataIndex());
     const tokens = self.context.getTokens(ast.tokens);
@@ -346,19 +354,6 @@ fn resolveStatement(self: *Resolver, stmt: defines.StatementPtr, topLevel: bool)
             const body = ast.extra[statement.value + 1];
             try self.resolveStatement(body, false);
         },
-        .Mark => {
-            const marks = defines.Range{
-                .start = ast.extra[statement.value],
-                .end = ast.extra[statement.value + 1],
-            };
-
-            for (marks.start..marks.end) |mark| {
-                try self.resolveExpression(ast.extra[mark]);
-            }
-
-            const marked = ast.extra[statement.value + 2];
-            try self.resolveStatement(marked, topLevel);
-        },
         .VariableDefinition => {
             const signature = ast.signatures.get(ast.extra[statement.value]);
             const initializer = ast.extra[statement.value + 1];
@@ -371,7 +366,10 @@ fn resolveStatement(self: *Resolver, stmt: defines.StatementPtr, topLevel: bool)
                 if (topLevel) try self.look(signature.name)
                 else try self.decls.addOne(allocator);
 
+            ast.extra[statement.value + 2] = decl;
+
             self.decls.set(decl, .{
+                .name = self.dataIndex(),
                 .kind = .Variable,
                 .scope = self.currentScope,
                 .public = signature.public,
@@ -380,6 +378,8 @@ fn resolveStatement(self: *Resolver, stmt: defines.StatementPtr, topLevel: bool)
                 .type = signature.type,
                 .topLevel = topLevel,
             });
+
+            self.lastDecl = decl;
 
             if (topLevel) {
                 return self.resolveExpression(initializer);
@@ -415,6 +415,7 @@ fn resolveStatement(self: *Resolver, stmt: defines.StatementPtr, topLevel: bool)
 
             const decl = try self.decls.addOne(allocator);
             self.decls.set(decl, .{
+                .name = self.dataIndex(),
                 .kind = .Namespace,
                 .scope = self.currentScope,
                 .public = false,
@@ -451,8 +452,10 @@ fn resolveStatement(self: *Resolver, stmt: defines.StatementPtr, topLevel: bool)
             isPresent.value_ptr.* = decl;
         },
 
+        .Defer => try self.resolveStatement(statement.value, false),
+
         // Single expr statements
-        .Defer, .Return, .Discard, .Expression => try self.resolveExpression(statement.value),
+        .Return, .Discard, .Expression => try self.resolveExpression(statement.value),
 
         else => {},
     }
@@ -474,7 +477,7 @@ fn resolveExpression(self: *Resolver, exprPtr: defines.ExpressionPtr) Error!void
 
             const decl = try self.look(identifier);
 
-            const status = self.resolved.getOrPut(allocator, .{ .file = ast.tokens, .expr = exprPtr })
+            const status = self.resolved.getOrPut(allocator, .{ .file = self.dataIndex(), .expr = exprPtr })
                 catch return Error.AllocatorFailure;
 
             if (status.found_existing) {
@@ -716,6 +719,7 @@ fn resolveExpression(self: *Resolver, exprPtr: defines.ExpressionPtr) Error!void
 
                 const decl = try self.decls.addOne(allocator);
                 self.decls.set(decl, .{
+                    .name = self.dataIndex(),
                     .kind = .Parameter,
                     .scope = self.currentScope,
                     .public = false,
@@ -916,6 +920,7 @@ fn resolveSignature(self: *Resolver, signaturePtr: defines.SignaturePtr, comptim
 
                 const decl = try self.decls.addOne(allocator);
                 self.decls.set(decl, .{
+                    .name = self.dataIndex(),
                     .kind = t,
                     .scope = self.currentScope,
                     .public = field.public,
@@ -988,6 +993,7 @@ fn resolveSwitch(
 
             const decl = try self.decls.addOne(allocator);
             self.decls.set(decl, .{
+                .name = self.dataIndex(),
                 .scope = self.currentScope,
                 .kind = .Capture,
                 .public = false,
@@ -1033,6 +1039,7 @@ fn prepassScope(self: *Resolver, declarations: defines.Range) Error!void {
 
         const decl = try self.decls.addOne(allocator);
         self.decls.set(decl, .{
+            .name = self.dataIndex(),
             .kind = .Variable,
             .scope = self.currentScope,
             .public = false,
@@ -1075,12 +1082,15 @@ fn handleScopeDefs(self: *Resolver, declarations: defines.Range) Error!void {
         const field = ast.signatures.get(signature);
         self.lastToken = field.name;
 
+        const prev = self.lastDecl;
+
         if (field.type != 0) {
             try self.resolveExpression(field.type);
         }
 
         const decl = try self.look(field.name);
         self.decls.set(decl, .{
+            .name = self.dataIndex(),
             .kind = .Variable,
             .scope = self.currentScope,
             .public = field.public,
@@ -1088,8 +1098,11 @@ fn handleScopeDefs(self: *Resolver, declarations: defines.Range) Error!void {
             .node = initializer,
             .type = field.type,
             .topLevel = true,
+            .parent = self.lastDecl,
         });
-        
+
+        self.lastDecl = decl;
+        defer self.lastDecl = prev;
 
         try self.resolveExpression(initializer);
     }

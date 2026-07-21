@@ -1,12 +1,7 @@
-import switch_test;
+import std::io as io;
 
 let main = fn () -> i32 {
-    let this: bool = false;
-
-    if this {
-        return 1;
-    }
-    else {
-        return 0;
-    }
+    let msg = "Hello World";
+    io::println(msg);
+    return 1;
 };

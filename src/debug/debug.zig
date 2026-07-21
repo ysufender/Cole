@@ -8,12 +8,12 @@ const Error = common.CompilerError;
 pub const isDebug = @import("config").isDebug;
 
 pub fn NotImplemented(comptime src: std.builtin.SourceLocation) Error {
-    common.log.err("Not implemented in " ++ locationString(src) , .{});
+    common.log.warn("Not implemented in " ++ locationString(src) , .{});
     return Error.NotImplemented;
 }
 
 pub fn ShouldBeImpossible(comptime src: std.builtin.SourceLocation) Error {
-    common.log.err("Reached impossible branch in " ++ locationString(src) , .{});
+    common.log.warn("Reached impossible branch in " ++ locationString(src) , .{});
     return Error.ShouldBeImpossible;
 }
 
