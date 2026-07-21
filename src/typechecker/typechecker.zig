@@ -216,11 +216,17 @@ fn typecheckVariableDef(
 ) Error!TypeID {
     const expected = try self.expectType(decl.type);
 
+    const prev =
+        if (!self.mutable(expected)) self.executer.setFlag(.ComptimeBanned, true)
+        else self.executer.getFlag(.ComptimeBanned);
+
     const initializer =
         if (decl.topLevel or expected == Comptime.Builtin.Type("type"))
             try self.typecheckValue(try self.executer.eval(decl.node, expected), expected)
         else
             try self.typecheckExpression(decl.node, expected);
+
+    _ = self.executer.setFlag(.ComptimeBanned, prev);
 
     const res =
         if (self.suitable(expected, initializer))
@@ -760,7 +766,9 @@ fn typecheckAssignment(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!vo
     }
 
     if (!self.mutable(vtype)) {
-        self.report("Attempt to modify non-mutable value.", .{ });
+        self.report("Attempt to modify non-mutable value of type '{s}'.", .{
+            self.builder.getInternedString(self.typenameMap.get(vtype).?), 
+        });
         return Error.MutabilityViolation;
     }
 
@@ -841,12 +849,6 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
             self.lastToken = expr.value;
             const decl = self.symbols.findDecl(.{ .file = self.currentFile, .expr = expressionPtr });
             const discoveredType = try self.typecheckDecl(decl, maybeExpected);
-            const tokens = self.context.getTokens(ast.tokens);
-            common.log.debug("ident {s}: type={d} mutable={}", .{
-                tokens.get(expr.value).lexeme(self.context, self.currentFile),
-                discoveredType,
-                self.mutable(discoveredType),
-            }); 
             return discoveredType;
         },
         .Indexing => return self.typecheckIndexing(expr.value),
@@ -2587,18 +2589,16 @@ pub fn assertSuitable(self: *const Typechecker, this: TypeID, that: TypeID) Erro
             .ComptimeInt, .Integer => functional.throwIf(!self.isInt(that), Error.TypeMismatch),
             .ComptimeFloat, .Float => functional.throwIf(!self.isFloat(that), Error.TypeMismatch),
             // @Beware remove this altogether if you don't want structural coercion.
-            .Struct, .Union, .Enum =>
-                if (self.context.settings.hasFlag("--allow-structural-coercion")) self.assertStructurallyIdentical(this, that)
-                else {
-                    try functional.throwIf(std.meta.activeTag(thisType) != std.meta.activeTag(thatType), Error.TypeMismatch);
-                    const names: struct { usize, usize } = switch (thisType) {
-                        .Struct => .{ thisType.Struct.name, thatType.Struct.name },
-                        .Union => .{ thisType.Union.name, thatType.Union.name },
-                        .Enum => .{ thisType.Enum.name, thatType.Enum.name },
-                        else => return common.debug.ShouldBeImpossible(@src()),
-                    };
-                    try functional.throwIf(names.@"0" != names.@"1", Error.TypeMismatch);
-                },
+            .Struct, .Union, .Enum => {
+                try functional.throwIf(std.meta.activeTag(thisType) != std.meta.activeTag(thatType), Error.TypeMismatch);
+                const names: struct { usize, usize } = switch (thisType) {
+                    .Struct => .{ thisType.Struct.name, thatType.Struct.name },
+                    .Union => .{ thisType.Union.name, thatType.Union.name },
+                    .Enum => .{ thisType.Enum.name, thatType.Enum.name },
+                    else => return common.debug.ShouldBeImpossible(@src()),
+                };
+                try functional.throwIf(names.@"0" != names.@"1", Error.TypeMismatch);
+            },
             else => functional.throwIf(std.meta.activeTag(thisType) != std.meta.activeTag(thatType), Error.TypeMismatch),
         },
     };

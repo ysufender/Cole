@@ -553,7 +553,7 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
             });
         },
         .Grouping => {
-            try self.write(out, "{{", .{});
+            try self.write(out, "(", .{});
             for (self.data[node.value]..self.data[node.value + 1]) |idx| {
                 try self.operation(out, @intCast(idx));
                 if (idx == self.data[node.value + 1] - 1) {
@@ -561,7 +561,7 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
                 }
                 try self.write(out, ", ", .{});
             }
-            try self.write(out, "}}", .{});
+            try self.write(out, ")", .{});
         },
         .Call => {
             const func = self.data[node.value];
@@ -589,12 +589,12 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
                 .end = self.data[node.value + 2],
             };
 
-            try self.write(out, "{s}{{", .{
+            try self.write(out, "({s}){{", .{
                 try self.getCName(func, null, true),
             });
             for (range.start..range.end) |idx| {
-                try self.operation(out, func);
-                if (idx == self.data[node.value + 1] - 1) {
+                try self.operation(out, @intCast(idx));
+                if (idx != self.data[node.value + 1] - 1) {
                     continue;
                 }
                 try self.write(out, ", ", .{});

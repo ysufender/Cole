@@ -815,23 +815,13 @@ fn evalDecl(self: *Comptime, declPtr: defines.DeclPtr, maybeExpected: ?TypeID) E
     defer self.typechecker.currentFile = prevFile;
     defer self.typechecker.currentScope = prevScope;
 
-    const expected = try self.typechecker.typecheckDecl(declPtr, maybeExpected);
-
     return switch (decl.kind) {
         .Builtin => try self.evalBuiltin(&decl, maybeExpected),
         .Variable => blk: {
-            const valuePtr = try self.expectDefined(decl.node, maybeExpected);
-            const value = self.getValue(valuePtr);
+            const expected = try self.typechecker.typecheckDecl(declPtr, maybeExpected);
 
-            // @Beware remove this if you don't want structural coercion
-            break :blk
-                if (self.typechecker.context.settings.hasFlag("--allow-structural-coercion"))
-                    switch (value) {
-                        .Struct, .Enum, .Union => self.castValue(valuePtr, expected),
-                        else => valuePtr,
-                    }
-                else if (value == .Type) valuePtr
-                else self.castValue(valuePtr, expected);
+            const valuePtr = try self.expectDefined(decl.node, maybeExpected);
+            break :blk self.castValue(valuePtr, expected);
         },
         .Capture => if (self.cache.get(.{
             .file = prevFile,
@@ -1895,9 +1885,16 @@ fn castValue(self: *Comptime, valuePtr: Value.Ptr, to: TypeID) Error!Value.Ptr {
             .Undefined = to, 
         },
 
-        else => |t| {
-            common.log.err("Value: {s}", .{@tagName(t)});
-            return common.debug.ShouldBeImpossible(@src());
+        .Type =>
+            if (self.typechecker.typeTable.get(to) == .Type) value
+            else {
+                self.report("Attempt to cast value of type 'type'.", .{});
+                return Error.CastOfIncastableValue;
+            },
+
+        else => {
+            self.report("Attempt to cast value of type '{s}.'", .{@tagName(value)});
+            return Error.CastOfIncastableValue;
         }
     };
 
