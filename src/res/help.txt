@@ -18,5 +18,6 @@
 
         --allow-recursion           : Allow recursion, for some reason. Why don't you just iterate?
 
-        --backend, -B <backend>     : Specify a backend for the codegen. Available options are:
+        --backend                   : Specify a backend for the codegen. Available options are:
                                         c.
+        --backend-options, -B <opt> : Options to pass to backend.

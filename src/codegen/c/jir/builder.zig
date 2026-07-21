@@ -24,6 +24,7 @@ data: std.ArrayList(u32),
 allocator: Allocator,
 keyNodes: std.ArrayList(JIR.Ptr),
 strings: InternTable,
+topLevelAsms: std.ArrayList(defines.StringPtr),
 
 pub fn init(allocator: Allocator, counts: common.CompilerContext.Counts) Error!Builder {
     var strings = InternTable.empty;
@@ -39,6 +40,7 @@ pub fn init(allocator: Allocator, counts: common.CompilerContext.Counts) Error!B
         .constants = std.MultiArrayList(JIR.Constant).initCapacity(allocator, counts.bool + counts.float + counts.integer + counts.string)
             catch return Error.AllocatorFailure,
         .functions = try MultiArrayList(JIR.Function).init(allocator, counts.functions),
+        .topLevelAsms = try std.ArrayList(defines.StringPtr).initCapacity(allocator, 128),
         .strings = strings,
         .allocator = allocator,
     };
@@ -54,6 +56,7 @@ pub fn build(self: *const Builder, allocator: Allocator, typechecker: *const Typ
         .nodes = try collections.deepCopy(self.nodes.slice(), allocator),
         .keyNodes = try collections.deepCopy(self.keyNodes.items, allocator),
         .data = try collections.deepCopy(self.data.items, allocator),
+        .topLevelAsms = try collections.deepCopy(self.topLevelAsms.items, allocator),
         .context = typechecker.context,
     };
 }

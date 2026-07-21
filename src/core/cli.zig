@@ -14,6 +14,7 @@ const Flags = enum {
     None,
     Include,
     Backend,
+    BackendOptions,
     Flag,
     Output,
 };
@@ -38,7 +39,9 @@ const flags = std.StaticStringMap(Flags).initComptime(&(.{
     .{ "-I", .Include },
 
     .{ "--backend", .Backend },
-    .{ "-B", .Backend },
+
+    .{ "--backend-options", .BackendOptions },
+    .{ "-B", .BackendOptions },
 
     .{ "--parse-only", .Flag },
 
@@ -73,10 +76,11 @@ pub fn parseCLI(allocator: std.mem.Allocator, _args: std.process.Args, io: std.I
 
     var maybeFile: ?[]const u8 = null;
     var maybeOut: ?[]const u8 = null;
-    var workingDir: []const u8 = undefined;
+    var workingDir: []const u8 = std.Io.Dir.cwd().realPathFileAlloc(io, ".", allocator) catch return Error.AllocatorFailure;
     var includeDirs = NMap.empty;
     var maxErr: u32 = 5;
     var targetBackend = Backend.C;
+    var backendOptions: []const u8 = "";
     var cliFlags = common.CompilerSettings.FlagSet.empty;
 
     cliFlags.ensureTotalCapacity(allocator, 128) catch return Error.AllocatorFailure;
@@ -93,6 +97,10 @@ pub fn parseCLI(allocator: std.mem.Allocator, _args: std.process.Args, io: std.I
                     common.log.err("{s} is not a supported backend.", .{backend});
                     return Error.UnknownFlag;
                 };
+            },
+            .BackendOptions => {
+                const opts = args.next() orelse return Error.MissingFlag;
+                backendOptions = opts;
             },
             .Working => {
                 const dir = args.next() orelse return Error.MissingFlag;
@@ -179,6 +187,7 @@ pub fn parseCLI(allocator: std.mem.Allocator, _args: std.process.Args, io: std.I
             .maxErr = maxErr,
             .flags = cliFlags,
             .backend = targetBackend,
+            .backendFlags = backendOptions,
         }
         else {
             common.log.err("jaslc expects an input file.", .{});

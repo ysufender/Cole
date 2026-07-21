@@ -179,6 +179,7 @@ fn prepassImpl(self: *Prepass, ast: *const Parser.AST, name: []const u8) Error!v
                 errc += 1;
                 break :case;
             },
+            .InlineAssembly => { },
             .VariableDefinition => self.prepassVariableDef(ast, tokens, &file, statement.value) catch |err| {
                 lastErr = err;
                 errc += 1;

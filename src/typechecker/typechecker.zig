@@ -158,6 +158,28 @@ pub fn typecheck(self: *Typechecker, allocator: Allocator) Error!Resolution {
     defer self.arena.deinit();
     defer self.executer.deinit();
 
+    // @Note detect all top-level asms, they are not like imports.
+    {
+        var iter = self.modules.modules.iterator();
+        while (iter.next()) |module| {
+            const ast = self.context.getAST(module.dataIndex);
+
+            for (ast.statementMask) |_stmt| {
+                const stmt = ast.statements.get(_stmt);
+                if (stmt.type != .InlineAssembly) {
+                    continue;
+                }
+
+                const cstart = ast.extra[stmt.value];
+                const cend = ast.extra[stmt.value + 1];
+                const scode = self.context.getFile(ast.tokens)[cstart..cend];
+                const code = try self.builder.internString(scode);
+                self.builder.topLevelAsms.append(self.builder.allocator, code)
+                    catch return Error.AllocatorFailure;
+            }
+        }
+    }
+
     // TODO:                                             This part is not really nice, fix it.
     const mainPtr = self.symbols.lookup.get(.{ .scope = self.modules.modules.len - 1, .name = "main" }).?;
     const mainDecl = self.symbols.getDecl(mainPtr);
@@ -1622,9 +1644,6 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
 
     const isPresent = self.lookup.getOrPut(allocator, declPtr) catch return Error.AllocatorFailure;
 
-    const ast = self.context.getAST(self.currentFile);
-    const tokens = self.context.getTokens(ast.tokens);
-
     self.callstack.push(declPtr);
     defer _ = self.callstack.pop();
 
@@ -1654,28 +1673,8 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
         .topLevel = decl.topLevel,
         .public = decl.public,
         .parent = decl.parent,
-        .name =
-            try self.builder.internString(
-                if (decl.topLevel)
-                    std.fmt.allocPrint(
-                        self.arena.allocator(),
-                        "{s}::{s}", .{
-                        if (decl.parent != null and self.typeTable.get(try self.typecheckDecl(decl.parent.?, null)) == .Type) hasParent: {
-                            const rtypePtr = try self.executer.eval(self.symbols.getDecl(decl.parent.?).node, null);
-                            const rtype = self.executer.getValue(rtypePtr).Type;
-
-                            break :hasParent self.builder.getInternedString(switch (self.typeTable.get(rtype)) {
-                                .Struct => |str| str.name,
-                                .Enum => |enm| enm.name,
-                                .Union => |uni| uni.name,
-                                else => return common.debug.ShouldBeImpossible(@src()),
-                            });
-                        }
-                        else self.context.moduleNameMap.items[decl.name],
-                        tokens.get(decl.token).lexeme(self.context, self.currentFile)
-                    }) catch return Error.AllocatorFailure
-                else tokens.get(decl.token).lexeme(self.context, self.currentFile)
-            )});
+        .name = 0
+    });
     decl = self.symbols.declarations.get(declPtr);
 
     isPresent.value_ptr.* = .{
@@ -2726,6 +2725,12 @@ pub fn canBeMutable(self: *const Typechecker, typeID: TypeID) bool {
         .Function => !self.mutable(typeID),
         else => false,
     };
+}
+
+pub fn getMutable(self: *Typechecker, id: TypeID) Error!TypeID {
+    const immut = self.typeTable.get(id);
+    const mut = self.makeMutable(immut);
+    return self.registerType(mut);
 }
 
 pub fn makeMutable(_: *const Typechecker, info: TypeInfo) TypeInfo {

@@ -1,7 +1,19 @@
-import std::io as io;
+import raylib;
+
+let func = fn () -> float {
+    let b: mut float = 1.0;
+    b = cast(0);
+    return b;
+};
 
 let main = fn () -> i32 {
-    let msg = "Hello World";
-    io::println(msg);
+    raylib::InitWindow(300, 300, "Hello");
+
+    while !raylib::WindowShouldClose() {
+    }
+
+    raylib::CloseWindow();
+    _ = func();
+
     return 1;
 };

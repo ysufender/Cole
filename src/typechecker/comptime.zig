@@ -131,10 +131,7 @@ pub fn attemptEval(self: *Comptime, exprPtr: defines.ExpressionPtr, maybeExpecte
 }
 
 pub fn eval(self: *Comptime, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeID) Error!Value.Ptr {
-    if (
-        self.getFlag(.ComptimeBanned)
-        or self.typechecker.hasMetadata(exprPtr, "@noComptime")
-    ) {
+    if (self.getFlag(.ComptimeBanned)) {
         self.report("Comptime execution is not possible in this context.", .{});
         return Error.ComptimeNotPossible;
     }
@@ -263,6 +260,9 @@ fn evalFunction(self: *Comptime, exprPtr: defines.ExpressionPtr, extraPtr: defin
         .expr = exprPtr
     }) orelse return common.debug.ShouldBeImpossible(@src());
     defer self.typechecker.currentScope = prev;
+
+    const pc = self.typechecker.setFlag(.CoveredAllPaths, false);
+    defer _ = self.typechecker.setFlag(.CoveredAllPaths, pc);
 
     try self.typechecker.typecheckStatement(bodyPtr, returnType);
 
@@ -829,7 +829,7 @@ fn evalDecl(self: *Comptime, declPtr: defines.DeclPtr, maybeExpected: ?TypeID) E
     return switch (decl.kind) {
         .Builtin => try self.evalBuiltin(&decl, maybeExpected),
         .Variable => blk: {
-            const expected = try self.typechecker.typecheckDecl(declPtr, maybeExpected);
+            const expected = maybeExpected orelse try self.expectType(decl.type);
             const valuePtr = try self.expectDefined(decl.node, maybeExpected);
             break :blk self.castValue(valuePtr, expected);
         },

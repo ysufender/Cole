@@ -462,28 +462,27 @@ fn loop(
         ) catch return Error.AllocatorFailure
     );
 
-    const endLabel = try self.typechecker.builder.internString(
+    const cndLabel = try self.typechecker.builder.internString(
         std.fmt.allocPrint(
             self.typechecker.arena.allocator(),
-            "{s}_End", .{
+            "{s}_Check", .{
                 loopLabel,
             }
         ) catch return Error.AllocatorFailure
     );
 
-    const start = try self.typechecker.builder.label(startLabel);
 
     const conditionPtr = ast.extra[extraPtr];
     const cnd = try self.expression(conditionPtr, Comptime.Builtin.Type("bool"));
 
-    _ = try self.typechecker.builder.cjump(endLabel, cnd);
+    _ = try self.typechecker.builder.jump(cndLabel);
 
     const bodyPtr = ast.extra[extraPtr + 1];
     self.lastLoopDepth = self.scopes.index;
+    const start = try self.typechecker.builder.label(startLabel);
     _ = try self.statement(bodyPtr);
-    _ = try self.typechecker.builder.jump(startLabel);
-
-    const end = try self.typechecker.builder.label(endLabel);
+    _ = try self.typechecker.builder.label(cndLabel);
+    const end = try self.typechecker.builder.cjump(startLabel, cnd);
 
     return .{
         .start = start,

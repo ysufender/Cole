@@ -122,6 +122,7 @@ typeNames: TypeNameMap,
 constants: Constant.List,
 functions: Function.List,
 nodes: Node.List.Slice,
+topLevelAsms: std.ArrayList(defines.StringPtr).Slice,
 keyNodes: []const Ptr,
 data: []const u32,
 allocator: Allocator = undefined,
@@ -139,34 +140,6 @@ pub fn dump(self: *const JIR) void {
     while (iterator.next()) |node| {
         common.log.debug("{s}", .{@tagName(node.type)});
     }
-}
-
-pub fn compile(self: *JIR, dir: std.Io.Dir) Error!void {
-    var proc = std.process.spawn(self.context.io, .{
-        .create_no_window = true,
-        .cwd = .{ .dir = dir },
-        .argv = &.{
-            "gcc",
-            "source.c",
-            "-o",
-            self.context.settings.outputFile orelse "out",
-        },
-    }) catch {
-        common.log.err("Failed to invoke 'gcc'.", .{});
-        return Error.BackendError;
-    };
-
-    const term = proc.wait(self.context.io) catch {
-        common.log.err("Failed to invoke 'gcc'.", .{});
-        return Error.BackendError;
-    };
-
-    return switch (term) {
-        .exited => |ex|
-            if (ex == 0) { }
-            else Error.BackendError,
-        else => Error.BackendError,
-    };
 }
 
 pub fn codegen(self: *JIR, context: *Context) Error!std.Io.Dir {
@@ -417,6 +390,12 @@ fn sourceGen(self: *JIR, out: *Writer) Error!void {
         common.log.err("Failed to flush source file.", .{});
     };
 
+    for (self.topLevelAsms) |asmn| {
+        const asmc = self.strings[asmn];
+        try self.write(out, "{s}", .{asmc});
+    }
+    try self.write(out, "\n", .{});
+
     for (self.keyNodes) |keyNode| {
         const node = self.nodes.get(@intCast(keyNode));
         switch (node.type) {
@@ -442,12 +421,12 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
             var args: []const u8 = "";
             for (0.., typeInfo.argTypes) |i, typePtr| {
                 // @Important TODO: Function parameter names WHY AREN'T THEY HERE???
-                args = std.fmt.allocPrint(self.allocator, "{s}{s}{s}{s} {s}", .{
+                args = std.fmt.allocPrint(self.allocator, "{s}{s} {s}{s}{s}", .{
                     args,
                     try self.getCName(typePtr, null, false),
+                    self.strings[func.args[i]],
                     if (i == typeInfo.argTypes.len - 1) "" else ",",
                     if (i == typeInfo.argTypes.len - 1) "" else " ",
-                    self.strings[func.args[i]],
                 }) catch return Error.AllocatorFailure;
             }
 
