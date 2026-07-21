@@ -25,8 +25,8 @@ const Cache = collections.HashMap(Resolver.ResolutionKey, Value.Ptr);
 const Memory = std.ArrayList(Value);
 
 pub const Flags = enum(u3) {
-    ComptimeBanned = 1,
-    LValue = 2,
+    ComptimeBanned = 0,
+    LValue = 1,
 
     pub fn flag(flagToGet: Flags) u3 {
         return @intFromEnum(flagToGet);
@@ -131,14 +131,20 @@ pub fn attemptEval(self: *Comptime, exprPtr: defines.ExpressionPtr, maybeExpecte
 }
 
 pub fn eval(self: *Comptime, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeID) Error!Value.Ptr {
-    if (self.getFlag(.ComptimeBanned)) {
-        self.report("Comptime execution is not possible in this context.", .{});
-        return Error.ComptimeNotPossible;
-    }
-
     const typechecker = self.typechecker;
     const file = typechecker.currentFile;
     const ast = typechecker.context.getAST(file);
+
+    if (
+        self.getFlag(.ComptimeBanned)
+        and (
+            ast.expressions.get(exprPtr).type == .FunctionDefinition
+            and typechecker.hasMetadata(exprPtr, "@noComptime")
+        )
+    ) {
+        self.report("Comptime execution is not possible in this context.", .{});
+        return Error.ComptimeNotPossible;
+    }
 
     const key = Resolver.ResolutionKey{
         .file = file,
@@ -829,7 +835,13 @@ fn evalDecl(self: *Comptime, declPtr: defines.DeclPtr, maybeExpected: ?TypeID) E
     return switch (decl.kind) {
         .Builtin => try self.evalBuiltin(&decl, maybeExpected),
         .Variable => blk: {
-            const expected = maybeExpected orelse try self.expectType(decl.type);
+            const expected = try self.typechecker.typecheckDecl(declPtr, maybeExpected);
+
+            if (self.typechecker.mutable(expected)) {
+                self.report("Comptime evaluation of mutable variable is not possible.", .{});
+                return Error.ComptimeNotPossible;
+            }
+
             const valuePtr = try self.expectDefined(decl.node, maybeExpected);
             break :blk self.castValue(valuePtr, expected);
         },
@@ -1848,8 +1860,9 @@ fn castValue(self: *Comptime, valuePtr: Value.Ptr, to: TypeID) Error!Value.Ptr {
             .Integer => value,
             else => .{ .Float = @floatFromInt(fromInt) },
         },
-        .Bool => |fromBool| .{
-            .Int = @intFromBool(fromBool),
+        .Bool => |fromBool| switch (self.typechecker.typeTable.get(to)) {
+            .Bool => .{ .Bool = fromBool },
+            else => .{ .Int = @intFromBool(fromBool) },
         },
         .Enum => |fromEnum| .{
             .Enum = .{

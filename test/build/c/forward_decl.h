@@ -18,8 +18,6 @@ jasl_bool const raylib__WindowShouldClose();
 
 void raylib__CloseWindow();
 
-float const root__func();
-
 int32_t const root__main();
 
 

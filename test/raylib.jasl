@@ -30,8 +30,9 @@ pub let InitWindow = fn (width: i32, height: i32, title: []u8) -> void {
 };
 
 pub let WindowShouldClose = fn () -> bool {
-    asm { return WindowShouldClose(); }
-    return false;
+    let res: mut bool = #(@noComptime) false;
+    asm { res = WindowShouldClose(); }
+    return res;
 };
 
 pub let CloseWindow = fn () -> void {

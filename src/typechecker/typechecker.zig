@@ -189,7 +189,7 @@ pub fn typecheck(self: *Typechecker, allocator: Allocator) Error!Resolution {
         return Error.PublicEntryPoint;
     }
 
-    const mainType = try self.typecheckDecl(mainPtr, null);
+    const mainType = try self.typecheckDecl(mainPtr, Comptime.Builtin.Type("entry_point"));
     self.clearFlags();
     if (mainType != Comptime.Builtin.Type("entry_point")) {
         const main = self.symbols.getDecl(mainPtr);
@@ -206,8 +206,6 @@ pub fn typecheck(self: *Typechecker, allocator: Allocator) Error!Resolution {
 
 pub fn typecheckStatement(self: *Typechecker, statementPtr: defines.StatementPtr, expected: TypeID) Error!void {
     const ast = self.context.getAST(self.currentFile);
-
-    // _ = try self.lowerer.statement(statementPtr);
 
     const stmt = ast.statements.get(statementPtr);
     return switch (stmt.type) {
@@ -246,7 +244,7 @@ fn typecheckVariableDef(
 
     const res =
         if (self.suitable(expected, initializer))
-            try self.infer(expected, initializer)
+            try self.coerce(expected, initializer)
         else  {
             self.report(
                 "Mismatching initializer type in variable definition."
@@ -934,15 +932,18 @@ pub fn typecheckIfExpression(self: *Typechecker, extraPtr: defines.OpaquePtr, ma
         return Error.DivergingBranches;
     }
 
-    return self.infer(thenBranch, elseBranch) catch common.debug.ShouldBeImpossible(@src());
+    return self.coerce(thenBranch, elseBranch) catch common.debug.ShouldBeImpossible(@src());
 }
 
 pub fn typecheckValue(self: *Typechecker, val: Comptime.Value.Ptr, maybeExpected: ?TypeID) Error!TypeID {
-    const expected =
-        if (determineExpected(maybeExpected)) |expected| expected
+    const expected = determineExpected(maybeExpected) orelse
+        if (false) {
+            self.report("Expected a known target type for comptime typechecking.", .{});
+            return Error.InferenceError;
+        }
         else Comptime.Builtin.Type("any");
 
-    return self.infer(switch (self.executer.getValue(val)) {
+    return self.coerce(expected, switch (self.executer.getValue(val)) {
         .Int => Comptime.Builtin.Type("comptime_int"),
         .Float => Comptime.Builtin.Type("comptime_float"),
         .Bool => Comptime.Builtin.Type("bool"),
@@ -956,7 +957,7 @@ pub fn typecheckValue(self: *Typechecker, val: Comptime.Value.Ptr, maybeExpected
         .Undefined => |undef| undef,
         .Slice => |slice| slice.Type,
         .String => Comptime.Builtin.Type("string"),
-    }, expected);
+    });
 }
 
 pub fn typecheckExpressionList(self: *Typechecker, extra: defines.OpaquePtr, _maybeExpected: ?TypeID) Error!TypeID {
@@ -1072,7 +1073,7 @@ fn typecheckEnumInitialization(self: *Typechecker, ast: *const Parser.AST, enm: 
             return Error.TypeMismatch;
         }
 
-        _ = try self.infer(expected, rhs);
+        _ = try self.coerce(expected, rhs);
     }
 }
 
@@ -1664,6 +1665,8 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
         }
     }
 
+    const tokens = self.context.getTokens(self.currentFile);
+
     self.symbols.declarations.set(declPtr, .{
         .type = decl.type,
         .scope = decl.scope,
@@ -1673,9 +1676,12 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
         .topLevel = decl.topLevel,
         .public = decl.public,
         .parent = decl.parent,
-        .name = 0
+        .name = try self.builder.internString(tokens.get(decl.token).lexeme(self.context, self.currentFile)),
     });
     decl = self.symbols.declarations.get(declPtr);
+
+    if (decl.name == try self.builder.internString("b")) {
+    }
 
     isPresent.value_ptr.* = .{
         .status = .InProgress,
@@ -1975,7 +1981,7 @@ pub fn typecheckBinary(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!Ty
                 break :res Error.BitwiseOnUnsupportedType;
             }
 
-            break :res self.infer(lhs, rhs);
+            break :res self.coerce(lhs, rhs);
         },
         .LeftShift, .RightShift => {
             if (!self.isInt(lhs)) {
@@ -2028,7 +2034,7 @@ pub fn typecheckBinary(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!Ty
                 break :res Error.ArithmeticOnNonNumericType;
             }
 
-            break :res self.infer(lhs, rhs);
+            break :res self.coerce(lhs, rhs);
         },
 
         else => common.debug.ShouldBeImpossible(@src()),
@@ -2555,12 +2561,12 @@ pub fn structurallyIdentical(self: *const Typechecker, this: TypeID, that: TypeI
 
 /// Check if 'this' can be assigned to 'that'
 pub fn suitable(self: *const Typechecker, this: TypeID, that: TypeID) bool {
-    self.assertSuitable(this, that) catch return false;
+    self.assertCanCoerce(this, that) catch return false;
     return true;
 }
 
-/// Assert that 'this' can be assigned to 'that'
-pub fn assertSuitable(self: *const Typechecker, this: TypeID, that: TypeID) Error!void {
+/// Assert that 'that' can coerce to 'this'
+pub fn assertCanCoerce(self: *const Typechecker, this: TypeID, that: TypeID) Error!void {
     const thisType = self.typeTable.get(this);
     const thatType = self.typeTable.get(that);
 
@@ -2570,21 +2576,22 @@ pub fn assertSuitable(self: *const Typechecker, this: TypeID, that: TypeID) Erro
     if (thisAny and thatAny) {
         return Error.InferenceError;
     }
-    else if (thisAny) {
-        return;
-    }
-    else if (thatAny) {
+    else if (thisAny or thatAny) {
         return;
     }
 
     return switch (thatType) {
         .Noreturn => { },
-        .Any => return common.debug.ShouldBeImpossible(@src()),
+        .ComptimeInt => functional.throwIf(!self.isInt(this), Error.TypeMismatch),
+        .ComptimeFloat => functional.throwIf(!self.isFloat(this), Error.TypeMismatch),
+        .Float => functional.throwIf(thisType != .Float, Error.TypeMismatch),
+        .Integer => |itype| switch (thisType) {
+            .Integer => |i2type| functional.throwIf(itype.size > i2type.size, Error.TypeMismatch),
+            else => functional.throwIf(!self.isInt(this), Error.TypeMismatch),
+        },
         else => switch (thisType) {
-            .Any => return common.debug.ShouldBeImpossible(@src()),
-            .ComptimeInt, .Integer => functional.throwIf(!self.isInt(that), Error.TypeMismatch),
-            .ComptimeFloat, .Float => functional.throwIf(!self.isFloat(that), Error.TypeMismatch),
-            // @Beware remove this altogether if you don't want structural coercion.
+            .ComptimeInt, .Integer,
+            .ComptimeFloat, .Float => Error.TypeMismatch,
             .Struct, .Union, .Enum => {
                 try functional.throwIf(std.meta.activeTag(thisType) != std.meta.activeTag(thatType), Error.TypeMismatch);
                 const names: struct { usize, usize } = switch (thisType) {
@@ -2668,28 +2675,39 @@ pub fn maybeSwitchable(self: *const Typechecker, this: TypeID) ?TypeInfo {
 }
 
 /// Assumes Typechecker.suitable has already been called for 'this' and 'that'
-pub fn infer(self: *const Typechecker, this: TypeID, that: TypeID) Error!TypeID {
-    try self.assertSuitable(this, that);
+/// Checks which of 'this' or 'that' is more suitable in general.
+pub fn coerce(self: *Typechecker, this: TypeID, that: TypeID) Error!TypeID {
+    self.assertCanCoerce(this, that) catch |err| {
+        self.report("Failed to infer type ('{s}' and '{s}')", .{
+            try self.typeName(self.arena.allocator(), this),
+            try self.typeName(self.arena.allocator(), that),
+        });
+        return err;
+    };
 
     const thisType = self.typeTable.get(this);
     const thatType = self.typeTable.get(that);
 
+    if (thisType == .Any and thatType == .Any) {
+        self.report("Failed to infer type in unknown context ('any' and 'any').", .{});
+        return Error.InferenceError;
+    }
+    else if (thisType == .Any) {
+        return that;
+    }
+    else if (thatType == .Any) {
+        return this;
+    }
+
     return switch (thatType) {
         .Noreturn => that,
-        .Any => this,
-        .ComptimeInt, .ComptimeFloat => switch (thisType) {
-            .Any => that,
-            else => this,
-        },
+        .ComptimeInt, .ComptimeFloat => this,
         else => switch (thisType) {
-            .Any => that,
-            .ComptimeInt, .ComptimeFloat => switch (thatType) {
-                .Any => this,
-                else => that,
-            },
+            .ComptimeInt, .ComptimeFloat => that,
             .Integer =>
                 if (thatType.Integer.size > thisType.Integer.size) that
                 else this,
+            .Noreturn => that,
             else => this,
         },
     };
