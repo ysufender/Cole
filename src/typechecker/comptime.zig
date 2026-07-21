@@ -2088,4 +2088,5 @@ pub const builtinMetadata = [_][]const u8 {
     "@noComptime",
     "@comptime",
     "@export",
+    "@extern",
 };

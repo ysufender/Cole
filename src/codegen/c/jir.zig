@@ -458,7 +458,7 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
             });
             
             for (func.body.start..func.body.end) |ptr| {
-                if (isStmt(self.nodes.items(.type)[ptr])) {
+                if (self.isStmt(self.nodes.get(@intCast(ptr)))) {
                     try self.operation(out, @intCast(ptr));
                 }
             }
@@ -471,7 +471,7 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
                 _ = std.mem.replace(u8, self.strings[self.data[node.value + 2]], "$", "_", @constCast(self.strings[self.data[node.value + 2]]));
                 try self.write(out, "{s}{s}", .{
                     try self.getCName(info.Pointer.child, self.data[node.value + 2], false),
-                    if (self.data[node.value + 3] == 1) ";" else " = ",
+                    if (self.data[node.value + 3] == 1) ";\n" else " = ",
                 });
             }
             else {
@@ -498,7 +498,7 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
 
         .Exit => {
             self.indent -= 1;
-            try self.writeln(out, "}}\n", .{});
+            try self.writeln(out, "}}\n\n", .{});
         },
 
         .Add => try self.commonBinary(out, node.value, "+"),
@@ -569,22 +569,29 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
             try self.write(out, ")", .{});
         },
         .Call => {
-            const func = self.data[node.value];
+            const func = self.data[node.value + 1];
             const range = defines.Range{
-                .start = self.data[node.value + 1],
-                .end = self.data[node.value + 2],
+                .start = self.data[node.value + 2],
+                .end = self.data[node.value + 3],
             };
+
+            if (self.data[node.value] == 1) {
+                try self.indentf(out);
+            }
 
             try self.operation(out, func);
             try self.write(out, "(", .{});
             for (range.start..range.end) |idx| {
                 try self.operation(out, @intCast(idx));
-                if (idx == self.data[node.value + 1] - 1) {
+                if (idx == self.data[node.value + 3] - 1) {
                     continue;
                 }
                 try self.write(out, ", ", .{});
             }
-            try self.write(out, ")", .{});
+            try self.write(out, "){s}", .{
+                if (self.data[node.value] == 1) ";\n"
+                else ""
+            });
         },
 
         .Construction => {
@@ -609,7 +616,7 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
 
         .Asm => {
             const str = self.strings[node.value];
-            try self.write(out, "/*Inserted Code*/\n{s}", .{
+            try self.write(out, "/*Inserted Code*/\n{s}\n", .{
                 str,
             });
         },
@@ -785,14 +792,26 @@ fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool
         else name;
 }
 
-fn isStmt(nt: Node.Type) bool {
-    return switch (nt) {
+fn isStmt(self: *const JIR, nt: Node) bool {
+    const res = switch (nt.type) {
         .FunctionDef, .Return, .JumpIf,
         .Jump, .Label, .Exit, .Scope,
         .Assignment, .VariableDef, .Asm => true,
 
         else => false,
     };
+
+    if (nt.type != .Call) {
+        return res;
+    }
+
+    return self.data[nt.value] == 1;
+}
+
+fn indentf(self: *JIR, out: *Writer) Error!void {
+    for (0..self.indent) |_| {
+        out.print("    ", .{}) catch return Error.IOError;
+    }
 }
 
 fn write(_: *JIR, out: *Writer, comptime msg: []const u8, args: anytype) Error!void {
@@ -800,8 +819,6 @@ fn write(_: *JIR, out: *Writer, comptime msg: []const u8, args: anytype) Error!v
 }
 
 fn writeln(self: *JIR, out: *Writer, comptime msg: []const u8, args: anytype) Error!void {
-    for (0..self.indent) |_| {
-        out.print("    ", .{}) catch return Error.IOError;
-    }
+    try self.indentf(out);
     return out.print(msg, args) catch Error.IOError;
 }

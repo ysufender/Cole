@@ -174,7 +174,21 @@ pub inline fn negate(self: *Builder, rhs: JIR.Ptr) Error!JIR.Ptr { return self.c
 pub inline fn grouping(self: *Builder, exprStart: JIR.Ptr, exprEnd: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.Grouping, exprStart, exprEnd); }
 
 pub inline fn ternary(self: *Builder, cnd: JIR.Ptr, then: JIR.Ptr, otherwise: JIR.Ptr) Error!JIR.Ptr { return self.commonTernary(.Ternary, cnd, then, otherwise); }
-pub inline fn call(self: *Builder, expr: JIR.Ptr, args: defines.Range) Error!JIR.Ptr { return self.commonTernary(.Call, expr, args.start, args.end); }
+
+pub inline fn call(self: *Builder, stmt: bool, expr: JIR.Ptr, args: defines.Range) Error!JIR.Ptr {
+    const start: u32 = @intCast(self.data.items.len);
+    self.data.append(self.allocator, @intFromBool(stmt)) catch return Error.AllocatorFailure;
+    self.data.append(self.allocator, expr) catch return Error.AllocatorFailure;
+    self.data.append(self.allocator, args.start) catch return Error.AllocatorFailure;
+    self.data.append(self.allocator, args.end) catch return Error.AllocatorFailure;
+
+    const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
+    self.nodes.set(res, .{
+        .type = .Call,
+        .value = start,
+    });
+    return res;
+}
 
 inline fn commonTernary(
     self: *Builder,

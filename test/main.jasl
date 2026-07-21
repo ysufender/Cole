@@ -1,18 +1,7 @@
-let print = fn (msg: []u8) -> void {
-    asm {
-        #include <stdio.h>
-        printf("%s", msg.ptr);
-    }
-};
-
-let println = fn (msg: []u8) -> void {
-    asm {
-        #include <stdio.h>
-        printf("%s\n", msg.ptr);
-    }
-};
+import std::io as io;
 
 let main = fn () -> i32 {
-    println("Hello World");
+    let msg = "Hello World";
+    io::println(msg);
     return 1;
 };

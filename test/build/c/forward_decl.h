@@ -12,7 +12,7 @@ typedef uint8_t jasl_bool;
 
 typedef struct { uint8_t* ptr; uint32_t len; } Slice_uint8_t;
 
-void root__println(Slice_uint8_t const);
+void std__io__println(Slice_uint8_t const);
 
 int32_t const root__main();
 

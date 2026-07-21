@@ -269,10 +269,12 @@ fn typecheckVariableDef(
                 else if (decl.topLevel) self.modules.modules.get(self.modules.modules.len - self.currentFile - 1).name
                 else try self.executer.generateRandomNameString(.Type);
 
-            const newName = std.fmt.allocPrint(self.arena.allocator(), "{s}::{s}", .{
-                namespace,
-                symName,
-            }) catch return Error.AllocatorFailure;
+            const newName =
+                if (self.hasMetadata(decl.node, "@extern")) symName
+                else std.fmt.allocPrint(self.arena.allocator(), "{s}::{s}", .{
+                    namespace,
+                    symName,
+                }) catch return Error.AllocatorFailure;
             const new = try self.builder.internString(newName);
 
             self.typeTable.set(newType, switch (self.typeTable.get(newType)) {
@@ -844,12 +846,6 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
             self.lastToken = expr.value;
             const decl = self.symbols.findDecl(.{ .file = self.currentFile, .expr = expressionPtr });
             const discoveredType = try self.typecheckDecl(decl, maybeExpected);
-            const tokens = self.context.getTokens(ast.tokens);
-            common.log.debug("ident {s}: type={d} mutable={}", .{
-                tokens.get(expr.value).lexeme(self.context, self.currentFile),
-                discoveredType,
-                self.mutable(discoveredType),
-            }); 
             return discoveredType;
         },
         .Indexing => return self.typecheckIndexing(expr.value),

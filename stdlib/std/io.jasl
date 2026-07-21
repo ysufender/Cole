@@ -1,0 +1,27 @@
+/*
+    This file is a part of the JASL Standard Library,
+    and is licensed under MIT License.
+
+    Any user code that imports this module agrees that it
+    will satisfy the specifications stated further.
+
+    DISCLAIMER:
+        The traits and conventions mentioned in this document
+        are to be obeyed, otherwise neither JASL STDLib nor the
+        compiler can guarantee a well defined program.
+
+    Name:
+        std::io
+    Public Symbols:
+        print,
+        println,
+    Description:
+        Input/Output utilities.
+*/
+
+pub let println = fn (msg: []u8) -> void {
+    asm {
+        #include <stdio.h>
+        printf("%s\n", msg);
+    }
+};

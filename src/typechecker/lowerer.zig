@@ -259,7 +259,13 @@ pub fn statement(self: *Lowerer, statementPtr: defines.StatementPtr) Error!defin
         .Block => try self.block(stmt.value),
         .Expression =>
             if (ast.expressions.items(.type)[stmt.value] == .Assignment) try self.assignment(ast.expressions.items(.value)[stmt.value])
-            else try self.expressionStmt(stmt.value),
+            else {
+                const res = try self.call(true, stmt.value, ast.expressions.get(stmt.value).value, try self.typechecker.typecheckExpression(stmt.value, null));
+                return .{
+                    .start = res,
+                    .end = res + 1,
+                };
+            },
         .Conditional => try self.conditional(stmt.value, ast),
         .While => try self.loop(.While, stmt.value, ast),
         .Return => try self.@"return"(try self.expression(stmt.value, try self.typechecker.typecheckExpression(stmt.value, null))),
@@ -638,7 +644,7 @@ pub fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID
         .Indexing => self.indexing(expr.value),
         .ExpressionList => self.expressionList(expr.value),
 
-        .Call => self.call(exprPtr, expr.value, ofType),
+        .Call => self.call(false, exprPtr, expr.value, ofType),
 
         .Switch, .Slicing => |t| {
             self.report("'{s}' lowering is not implemented.", .{@tagName(t)});
@@ -649,6 +655,7 @@ pub fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID
 
 fn call(
     self: *Lowerer,
+    stmt: bool,
     exprPtr: defines.ExpressionPtr,
     extraPtr: defines.OpaquePtr,
     ofType: TypeID,
@@ -681,7 +688,9 @@ fn call(
 
     const rres = res orelse defines.Range{ .start = 0, .end = 0 };
 
-    return switch (self.typechecker.typeTable.get(try self.typechecker.typecheckExpression(func, null))) {
+    const funcType = try self.typechecker.typecheckExpression(func, null);
+
+    return switch (self.typechecker.typeTable.get(funcType)) {
         .Type => blk: {
             const typeID = self.typechecker.executer.getValue(
                 try self.typechecker.executer.expectType(func),
@@ -690,7 +699,11 @@ fn call(
         },
         .Function => |fnc|
             if (fnc.isComptime) self.literal(exprPtr, ofType)
-            else self.typechecker.builder.call(func, rres),
+            else self.typechecker.builder.call(
+                stmt,
+                try self.expression(func, funcType),
+                rres
+            ),
         else => common.debug.ShouldBeImpossible(@src()),
     };
 }
