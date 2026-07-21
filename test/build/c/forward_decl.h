@@ -10,11 +10,9 @@
 
 typedef uint8_t jasl_bool;
 
-typedef uint8_t* Slice_uint8_t;
+typedef struct { uint8_t* ptr; uint32_t len; } Slice_uint8_t;
 
-typedef struct {
-	int32_t test;
-} root__Some;
+void root__println(Slice_uint8_t const);
 
 int32_t const root__main();
 

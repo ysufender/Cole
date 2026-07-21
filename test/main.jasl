@@ -1,25 +1,18 @@
-/*
-let test = #(@export) fn () -> void {
+let print = fn (msg: []u8) -> void {
+    asm {
+        #include <stdio.h>
+        printf("%s", msg.ptr);
+    }
+};
+
+let println = fn (msg: []u8) -> void {
+    asm {
+        #include <stdio.h>
+        printf("%s\n", msg.ptr);
+    }
 };
 
 let main = fn () -> i32 {
-    let Some = struct {
-        test: mut i32
-    };
-
-    let c: mut Some = Some(0);
-    defer c = Some(1);
-
-    return c.test;
-};
-*/
-
-let Some = struct {
-    test: mut i32
-};
-
-let main = fn () -> i32 {
-    let cello: mut Some = Some(1);
-    cello = Some(2);
+    println("Hello World");
     return 1;
 };

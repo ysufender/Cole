@@ -125,19 +125,20 @@ pub fn init(typechecker: *Typechecker, gpa: Allocator) Error!Comptime {
 }
 
 pub fn attemptEval(self: *Comptime, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeID) ?Value.Ptr {
-    if (
-        self.getFlag(.ComptimeBanned)
-        or self.typechecker.hasMetadata(exprPtr, "@noComptime")
-    ) {
-        return null;
-    }
-
     const prev = self.typechecker.setFlag(.AttemptingEval, true);
     defer _ = self.typechecker.setFlag(.AttemptingEval, prev);
     return self.eval(exprPtr, maybeExpected) catch null;
 }
 
 pub fn eval(self: *Comptime, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeID) Error!Value.Ptr {
+    if (
+        self.getFlag(.ComptimeBanned)
+        or self.typechecker.hasMetadata(exprPtr, "@noComptime")
+    ) {
+        self.report("Comptime execution is not possible in this context.", .{});
+        return Error.ComptimeNotPossible;
+    }
+
     const typechecker = self.typechecker;
     const file = typechecker.currentFile;
     const ast = typechecker.context.getAST(file);
@@ -210,6 +211,7 @@ pub fn eval(self: *Comptime, exprPtr: defines.ExpressionPtr, maybeExpected: ?Typ
 
 fn evalFunction(self: *Comptime, exprPtr: defines.ExpressionPtr, extraPtr: defines.OpaquePtr) Error!Value.Ptr {
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+    const tokens = self.typechecker.context.getTokens(ast.tokens);
 
     const paramsRange = defines.Range{
         .start = ast.extra[extraPtr],
@@ -217,6 +219,8 @@ fn evalFunction(self: *Comptime, exprPtr: defines.ExpressionPtr, extraPtr: defin
     };
 
     const argTypes = self.typechecker.arena.allocator().alloc(TypeID, paramsRange.len())
+        catch return Error.AllocatorFailure;
+    const argNames = self.typechecker.arena.allocator().alloc(defines.StringPtr, paramsRange.len())
         catch return Error.AllocatorFailure;
 
     const returnTypeExpr = ast.extra[extraPtr + 2];
@@ -228,6 +232,9 @@ fn evalFunction(self: *Comptime, exprPtr: defines.ExpressionPtr, extraPtr: defin
         const param = ast.signatures.get(ast.extra[paramPtrPtr]);
         const argType = self.getValue(try self.expectType(param.type)).Type;
         argTypes[paramPtrPtr - paramsRange.start] = argType;
+
+        const name = tokens.get(param.name).lexeme(self.typechecker.context, self.typechecker.currentFile);
+        argNames[paramPtrPtr - paramsRange.start] = try self.typechecker.builder.internString(name);
 
         if (self.typechecker.typeTable.get(argType).isComptime(&self.typechecker.typeTable)) {
             isComptime = true;
@@ -273,6 +280,7 @@ fn evalFunction(self: *Comptime, exprPtr: defines.ExpressionPtr, extraPtr: defin
         .signature = functionType,
         .body = try self.typechecker.lowerer.statement(bodyPtr),
         .name = try self.generateRandomName(.Function),
+        .args = argNames,
     };
 
     return self.appendValue(.{
@@ -336,8 +344,12 @@ fn evalLambda(self: *Comptime, exprPtr: defines.ExpressionPtr, extraPtr: defines
     });
     defer self.typechecker.currentScope = prev;
 
+    const argNames = self.typechecker.arena.allocator().alloc(defines.StringPtr, paramsRange.len())
+        catch return Error.AllocatorFailure;
+
     for (paramsRange.start..paramsRange.end) |index| {
         const paramName = tokens.get(ast.extra[index]).lexeme(self.typechecker.context, self.typechecker.currentFile);
+        argNames[index - paramsRange.start] = try self.typechecker.builder.internString(paramName);
         if (self.typechecker.symbols.lookup.get(.{ .scope = self.typechecker.currentScope, .name = paramName })) |param| {
             self.typechecker.lookup.put(self.typechecker.arena.allocator(), param, .{
                 .status = .Checked,
@@ -387,6 +399,7 @@ fn evalLambda(self: *Comptime, exprPtr: defines.ExpressionPtr, extraPtr: defines
             .end = retStmt + 1,
         },
         .name = try self.generateRandomName(.Function),
+        .args = argNames,
     };
 
     return self.appendValue(.{
@@ -798,9 +811,7 @@ fn evalIfExpression(self: *Comptime, extraPtr: defines.OpaquePtr, maybeExpected:
         else self.expectDefined(conditional.otherwise, maybeExpected);
 }
 
-fn evalDecl(self: *Comptime, declPtr: defines.DeclPtr, maybeExpected: ?TypeID) Error!Value.Ptr {
-    const decls = self.typechecker.symbols.declarations;
-
+fn evalDecl(self: *Comptime, declPtr: defines.DeclPtr, maybeExpected: ?TypeID) Error!Value.Ptr {    const decls = self.typechecker.symbols.declarations;
     const decl  = decls.get(declPtr);
 
     const prevToken = self.typechecker.lastToken;
@@ -819,7 +830,6 @@ fn evalDecl(self: *Comptime, declPtr: defines.DeclPtr, maybeExpected: ?TypeID) E
         .Builtin => try self.evalBuiltin(&decl, maybeExpected),
         .Variable => blk: {
             const expected = try self.typechecker.typecheckDecl(declPtr, maybeExpected);
-
             const valuePtr = try self.expectDefined(decl.node, maybeExpected);
             break :blk self.castValue(valuePtr, expected);
         },

@@ -134,9 +134,8 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
                 },
             }};
         },
-        .String => |string| {
-            _ = string;
-            return common.debug.NotImplemented(@src());
+        .String => |string| .{
+            .String = try self.typechecker.builder.internString(string),
         },
         .Slice => |slice| slice: {
             const start = self.typechecker.builder.constants.len;
@@ -281,7 +280,9 @@ pub fn statement(self: *Lowerer, statementPtr: defines.StatementPtr) Error!defin
 
         .For => return common.debug.ShouldBeImpossible(@src()),
 
-        .InlineAssembly, .Switch => |t| {
+        .InlineAssembly => try self.inlineAsm(stmt.value),
+
+        .Switch => |t| {
             self.report("Statement '{s}' is not implemented.", .{
                 @tagName(t),
             });
@@ -290,6 +291,22 @@ pub fn statement(self: *Lowerer, statementPtr: defines.StatementPtr) Error!defin
     };
 
     return node;
+}
+
+fn inlineAsm(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!defines.Range {
+    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+    const src = self.typechecker.context.getFile(ast.tokens);
+
+    const cstart = ast.extra[extraPtr];
+    const cend = ast.extra[extraPtr + 1];
+    const code = try self.typechecker.builder.internString(src[cstart..cend]);
+
+    const res = try self.typechecker.builder.inlineAsm(code);
+
+    return .{
+        .start = res,
+        .end = res + 1,
+    };
 }
 
 fn assignment(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!defines.Range {
@@ -621,7 +638,7 @@ pub fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID
         .Indexing => self.indexing(expr.value),
         .ExpressionList => self.expressionList(expr.value),
 
-        .Call => self.call(expr.value),
+        .Call => self.call(exprPtr, expr.value, ofType),
 
         .Switch, .Slicing => |t| {
             self.report("'{s}' lowering is not implemented.", .{@tagName(t)});
@@ -630,7 +647,12 @@ pub fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID
     };
 }
 
-fn call(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
+fn call(
+    self: *Lowerer,
+    exprPtr: defines.ExpressionPtr,
+    extraPtr: defines.OpaquePtr,
+    ofType: TypeID,
+) Error!JIR.Ptr {
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
 
     const func = ast.extra[extraPtr];
@@ -643,8 +665,8 @@ fn call(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
 
     var res: ?defines.Range = null;
 
-    for (argsRange.start..argsRange.end) |exprPtr| {
-        const expr = try self.expression(ast.extra[@intCast(exprPtr)], try self.typechecker.typecheckExpression(ast.extra[@intCast(exprPtr)], null));
+    for (argsRange.start..argsRange.end) |ptr| {
+        const expr = try self.expression(ast.extra[@intCast(ptr)], try self.typechecker.typecheckExpression(ast.extra[@intCast(ptr)], null));
 
         res =
             if (res) |rr| .{
@@ -659,15 +681,18 @@ fn call(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
 
     const rres = res orelse defines.Range{ .start = 0, .end = 0 };
 
-    return
-        if (try self.typechecker.typecheckExpression(func, null) == Comptime.Builtin.Type("type")) blk: {
+    return switch (self.typechecker.typeTable.get(try self.typechecker.typecheckExpression(func, null))) {
+        .Type => blk: {
             const typeID = self.typechecker.executer.getValue(
                 try self.typechecker.executer.expectType(func),
             ).Type;
             break :blk self.typechecker.builder.construct(typeID, rres.start, rres.end);
-        }
-        else
-            self.typechecker.builder.call(func, rres);
+        },
+        .Function => |fnc|
+            if (fnc.isComptime) self.literal(exprPtr, ofType)
+            else self.typechecker.builder.call(func, rres),
+        else => common.debug.ShouldBeImpossible(@src()),
+    };
 }
 
 fn expressionList(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {

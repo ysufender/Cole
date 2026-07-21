@@ -216,17 +216,11 @@ fn typecheckVariableDef(
 ) Error!TypeID {
     const expected = try self.expectType(decl.type);
 
-    const prev =
-        if (!self.mutable(expected)) self.executer.setFlag(.ComptimeBanned, true)
-        else self.executer.getFlag(.ComptimeBanned);
-
     const initializer =
         if (decl.topLevel or expected == Comptime.Builtin.Type("type"))
             try self.typecheckValue(try self.executer.eval(decl.node, expected), expected)
         else
             try self.typecheckExpression(decl.node, expected);
-
-    _ = self.executer.setFlag(.ComptimeBanned, prev);
 
     const res =
         if (self.suitable(expected, initializer))
@@ -401,6 +395,7 @@ fn typecheckVariableDef(
                     .name = func.name,
                     .signature = func.signature,
                     .body = func.body,
+                    .args = func.args,
                 },
             };
 
@@ -849,6 +844,12 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
             self.lastToken = expr.value;
             const decl = self.symbols.findDecl(.{ .file = self.currentFile, .expr = expressionPtr });
             const discoveredType = try self.typecheckDecl(decl, maybeExpected);
+            const tokens = self.context.getTokens(ast.tokens);
+            common.log.debug("ident {s}: type={d} mutable={}", .{
+                tokens.get(expr.value).lexeme(self.context, self.currentFile),
+                discoveredType,
+                self.mutable(discoveredType),
+            }); 
             return discoveredType;
         },
         .Indexing => return self.typecheckIndexing(expr.value),

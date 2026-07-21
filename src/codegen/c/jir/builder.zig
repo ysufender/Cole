@@ -144,6 +144,7 @@ pub inline fn scope(self: *Builder, name: StringPtr) Error!JIR.Ptr { return self
 pub inline fn construct(self: *Builder, typeID: TypeID, start: JIR.Ptr, end: JIR.Ptr) Error!JIR.Ptr { return self.commonTernary(.Construction, typeID, start, end); }
 
 pub inline fn identifier(self: *Builder, decl: defines.StringPtr) Error!JIR.Ptr { return self.commonSingle(.Identifier, decl); }
+pub inline fn inlineAsm(self: *Builder, code: defines.StringPtr) Error!JIR.Ptr { return self.commonSingle(.Asm, code); }
 
 pub inline fn reference(self: *Builder, decl: StringPtr) Error!JIR.Ptr { return self.commonSingle(.Reference, decl); }
 pub inline fn dereference(self: *Builder, expr: JIR.Ptr) Error!JIR.Ptr { return self.commonSingle(.Dereference, expr); }

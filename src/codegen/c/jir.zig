@@ -73,6 +73,7 @@ pub const Node = struct {
         Not,
         Negation,
         Construction,
+        Asm,
     };
 
     type: Type,
@@ -94,6 +95,7 @@ pub const Constant = union(enum) {
         i8: i8,
         u8: u8,
     },
+    String: defines.StringPtr,
     Float: f32,
     Aggregate: ConstantArray, 
     Array: ConstantArray,
@@ -107,6 +109,7 @@ pub const Function = struct {
 
     name: defines.StringPtr,
     signature: TypeID,
+    args: []const defines.StringPtr,
     body: defines.Range,
 };
 
@@ -258,7 +261,7 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
                         try self.getCName(ptr.child, null, true),
                     }) catch return Error.AllocatorFailure;
 
-                    try self.write(out, "typedef {s}* {s};\n\n", .{
+                    try self.write(out, "typedef struct {{ {s}* ptr; uint32_t len; }} {s};\n\n", .{
                         try self.getCName(ptr.child, null, false), name
                     });
                 },
@@ -390,6 +393,7 @@ fn discoverFunctionsAndTypes(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void 
                 else => { },
             }
         },
+
         else => { },
     }
 }
@@ -438,11 +442,12 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
             var args: []const u8 = "";
             for (0.., typeInfo.argTypes) |i, typePtr| {
                 // @Important TODO: Function parameter names WHY AREN'T THEY HERE???
-                args = std.fmt.allocPrint(self.allocator, "{s}{s}{s}{s}", .{
+                args = std.fmt.allocPrint(self.allocator, "{s}{s}{s}{s} {s}", .{
                     args,
                     try self.getCName(typePtr, null, false),
                     if (i == typeInfo.argTypes.len - 1) "" else ",",
                     if (i == typeInfo.argTypes.len - 1) "" else " ",
+                    self.strings[func.args[i]],
                 }) catch return Error.AllocatorFailure;
             }
 
@@ -573,7 +578,7 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
             try self.operation(out, func);
             try self.write(out, "(", .{});
             for (range.start..range.end) |idx| {
-                try self.operation(out, func);
+                try self.operation(out, @intCast(idx));
                 if (idx == self.data[node.value + 1] - 1) {
                     continue;
                 }
@@ -600,6 +605,13 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
                 try self.write(out, ", ", .{});
             }
             try self.write(out, "}}", .{});
+        },
+
+        .Asm => {
+            const str = self.strings[node.value];
+            try self.write(out, "/*Inserted Code*/\n{s}", .{
+                str,
+            });
         },
     };
 }
@@ -652,6 +664,14 @@ fn literal(self: *JIR, out: *Writer, ptr: Constant.Ptr) Error!void {
                 }
             }
             try self.write(out, " }}", .{});
+        },
+        .String => |str| {
+            const rstr = self.strings[str];
+            try self.write(out, "({s}){{(uint8_t*)\"{s}\\0\", {d}}}", .{
+                try self.getCName(Comptime.Builtin.Type("string"), null, true),
+                rstr,
+                rstr.len,
+            });
         },
     };
 }
@@ -769,7 +789,7 @@ fn isStmt(nt: Node.Type) bool {
     return switch (nt) {
         .FunctionDef, .Return, .JumpIf,
         .Jump, .Label, .Exit, .Scope,
-        .Assignment, .VariableDef => true,
+        .Assignment, .VariableDef, .Asm => true,
 
         else => false,
     };

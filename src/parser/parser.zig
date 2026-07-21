@@ -369,15 +369,21 @@ fn block(self: *Parser) StatementResult {
 }
 
 fn inlineAssembly(self: *Parser) StatementResult {
-    const asmly = (try self.consume(.String, error.MissingBrace, "Expected string literal after 'asm' statement."));
+    const cstart = self.tokens.get(try self.consume(.LBrace, error.MissingBrace, "Expected a block after 'asm' statement.")).end;
+    while (!self.check(.RBrace)) {
+        _ = self.advance();
+    }
+    const cend = self.tokens.get(try self.consume(.RBrace, error.MissingBrace, "Missing enclosing brace '}' after block.")).start;
+
+    const start: defines.OpaquePtr = @intCast(self.extra.items.len);
+    self.extra.append(self.allocator(), cstart) catch return error.AllocatorFailure;
+    self.extra.append(self.allocator(), cend) catch return error.AllocatorFailure;
 
     const result = try self.alloc(Statement);
     self.statementMap.set(result, .{
         .type = .InlineAssembly,
-        .value = asmly,
+        .value = start,
     });
-
-    _ = try self.consume(.Semicolon, error.MissingSemicolon, "Expected semicolon after statement.");
 
     return result;
 }
