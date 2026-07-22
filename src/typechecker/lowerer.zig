@@ -49,6 +49,10 @@ pub fn topLevelDeclaration(self: *Lowerer, ptr: defines.DeclPtr, decl: *const De
     switch (typeInfo) {
         .Function => { },
         .Type => {
+            if (self.typechecker.hasMetadata(decl.node, "@extern")) {
+                return;
+            }
+
             const typeDefPtr = self.typechecker.executer.expectType(decl.node)
                 catch return common.debug.ShouldBeImpossible(@src());
             const typeDef = self.typechecker.executer.getValue(typeDefPtr).Type;

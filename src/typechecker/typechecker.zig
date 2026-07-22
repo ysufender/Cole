@@ -255,19 +255,9 @@ fn typecheckVariableDef(
             return Error.TypeMismatch;
         };
 
-    blk: switch (self.typeTable.get(initializer)) {
+    switch (self.typeTable.get(initializer)) {
         .Type => {
             const newType = self.executer.getValue(try self.executer.eval(decl.node, expected)).Type;
-            const name = self.builder.getInternedString(switch (self.typeTable.get(newType)) {
-                .Union => |uni| uni.name,
-                .Struct => |str| str.name,
-                .Enum => |enm| enm.name,
-                else => break :blk,
-            });
-
-            if (name[0] != '$') {
-                break :blk;
-            }
 
             const ast = self.context.getAST(self.currentFile);
             const tokens = self.context.getTokens(ast.tokens);
@@ -374,12 +364,6 @@ fn typecheckVariableDef(
             }
         },
         .Function => {
-            const fnc = self.executer.getValue(try self.executer.eval(decl.node, expected)).Function;
-
-            if (self.builder.getInternedString(fnc.name)[0] != '$') {
-                break :blk;
-            }
-
             const ast = self.context.getAST(self.currentFile);
             const tokens = self.context.getTokens(ast.tokens);
 
@@ -399,11 +383,12 @@ fn typecheckVariableDef(
             }
 
             const val = try self.executer.eval(decl.node, expected);
-            const func = self.executer.getValue(val).Function;
+            var func = self.executer.getValue(val).Function;
+            func.name = new;
 
             self.executer.memory.items[val] = .{
                 .Function = .{
-                    .name = new,
+                    .name = func.name,
                     .signature = func.signature,
                     .body = func.body,
                     .args = func.args,
@@ -824,7 +809,7 @@ fn typecheckBlock(self: *Typechecker, extraPtr: defines.OpaquePtr, expected: Typ
 }
 
 pub fn typecheckParameter(self: *Typechecker, decl: *const Resolver.Declaration) Error!TypeID {
-    return self.typecheckExpression(decl.type, null);
+    return try self.expectType(decl.type);
 }
 
 pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.ExpressionPtr, _maybeExpected: ?TypeID) Error!TypeID {

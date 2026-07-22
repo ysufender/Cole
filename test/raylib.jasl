@@ -7,18 +7,23 @@ code {
 }
 
 pub let Vector2 = #(@extern) struct {
-    pub x: mut float,
-    pub y: float,
+    x: mut float,
+    y: mut float,
 
-    pub let Scale = fn (c: Vector2, f: float) -> Vector2 {
+    pub let Scale = fn (v: Vector2, s: float) -> Vector2 {
+        return Vector2(v.x * s, v.y * s);
     }; 
+
+    pub let Add = fn (v: Vector2, v2: Vector2) -> Vector2 {
+        return Vector2(v.x + v2.x, v.y + v2.y);
+    };
 };
 
 pub let Color = #(@extern) struct {
-    pub r: u8,
-    pub g: u8,
-    pub b: u8,
-    pub a: u8,
+    r: u8,
+    g: u8,
+    b: u8,
+    a: u8,
 
     pub let Red = Color(255, 0, 0, 255);
     pub let Blue = Color(0, 0, 255, 255);
@@ -69,5 +74,5 @@ pub let DrawText = fn (
 };
 
 pub let DrawCircle = fn (center: Vector2, radius: float, color: Color) -> void {
-    code { DrawCircle(center, radius, color); }
+    code { DrawCircleV(center, radius, color); }
 };

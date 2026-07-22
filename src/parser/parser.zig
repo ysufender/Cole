@@ -1032,13 +1032,13 @@ fn structDefinition(self: *Parser) ExpressionResult {
                         _ = self.advance();
                         try definitions.append(try self.variable(true));
                     },
-                    .Identifier => {
-                        try fieldList.push(try self.variableSignature(true, true));
-                        if (!self.match(&.{.Comma})) break;
-                    },
+                    //.Identifier => {
+                    //    try fieldList.push(try self.variableSignature(true, true));
+                    //    if (!self.match(&.{.Comma})) break;
+                    //},
                     else => {
                         _ = self.advance();
-                        self.report("Expected a field after 'pub' specifier.", .{});
+                        self.report("Expected a definition after 'pub' specifier.", .{});
                         return error.InvalidToken;
                     },
                 }

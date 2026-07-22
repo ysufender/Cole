@@ -213,6 +213,16 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
         out.flush() catch common.log.err("Failed to flush forward declarations.", .{});
     }
 
+    try self.write(out, "/* Top-level inserted code */\n", .{});
+    for (self.topLevelAsms) |asmn| {
+        const asmc = std.mem.trim(u8, self.strings[asmn], " \t\n\r");
+
+        if (std.mem.startsWith(u8, asmc, "#include")) {
+            try self.write(out, "{s}", .{asmc});
+        }
+    }
+    try self.write(out, "\n\n", .{});
+
     for (0..self.types.len) |typeID| {
         const typeInfo = self.types.get(@intCast(typeID));
 
@@ -372,6 +382,16 @@ fn discoverFunctionsAndTypes(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void 
 }
 
 fn sourceGen(self: *JIR, out: *Writer) Error!void {
+    try self.write(out, "/* Top-level inserted code */\n", .{});
+    for (self.topLevelAsms) |asmn| {
+        const asmc = std.mem.trim(u8, self.strings[asmn], " \t\n\r");
+
+        if (!std.mem.startsWith(u8, asmc, "#include")) {
+            try self.write(out, "{s}", .{asmc});
+        }
+    }
+    try self.write(out, "\n\n", .{});
+
     try self.write(out, 
     \\/*
     \\ * This file has been automatically generated
@@ -389,12 +409,6 @@ fn sourceGen(self: *JIR, out: *Writer) Error!void {
     defer out.flush() catch {
         common.log.err("Failed to flush source file.", .{});
     };
-
-    for (self.topLevelAsms) |asmn| {
-        const asmc = self.strings[asmn];
-        try self.write(out, "{s}", .{asmc});
-    }
-    try self.write(out, "\n", .{});
 
     for (self.keyNodes) |keyNode| {
         const node = self.nodes.get(@intCast(keyNode));
@@ -595,7 +609,7 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
 
         .Code => {
             const str = self.strings[node.value];
-            try self.write(out, "/*Inserted Code*/\n{s}\n", .{
+            try self.write(out, "/* Inserted Code */\n{s}\n", .{
                 str,
             });
         },
