@@ -7,8 +7,11 @@ code {
 }
 
 pub let Vector2 = #(@extern) struct {
-    pub x: float,
+    pub x: mut float,
     pub y: float,
+
+    pub let Scale = fn (c: Vector2, f: float) -> Vector2 {
+    }; 
 };
 
 pub let Color = #(@extern) struct {

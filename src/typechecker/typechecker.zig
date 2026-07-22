@@ -385,29 +385,25 @@ fn typecheckVariableDef(
 
             const symName = tokens.get(decl.token).lexeme(self.context, self.currentFile);
             const namespace = self.modules.modules.get(self.modules.modules.len - self.currentFile - 1).name;
-            const newName = 
-                if (self.hasMetadata(decl.node, "@export"))
-                    symName
-                else
-                    std.fmt.allocPrint(self.arena.allocator(), "{s}::{s}", .{
-                        namespace,
-                        symName,
-                    }) catch return Error.AllocatorFailure;
+            const newName =
+                if (self.hasMetadata(decl.node, "@export")) symName
+                else std.fmt.allocPrint(self.arena.allocator(), "{s}::{s}", .{
+                    namespace,
+                    symName,
+                }) catch return Error.AllocatorFailure;
+            const new = try self.builder.internString(newName);
 
             if (std.mem.eql(u8, namespace, "root") and std.mem.eql(u8, newName, "main")) {
                 self.report("Main function can't be exported.", .{});
                 return Error.ExportOfMainFunction;
             }
 
-            const new = try self.builder.internString(newName);
-
             const val = try self.executer.eval(decl.node, expected);
-            var func = self.executer.getValue(val).Function;
-            func.name = new;
+            const func = self.executer.getValue(val).Function;
 
             self.executer.memory.items[val] = .{
                 .Function = .{
-                    .name = func.name,
+                    .name = new,
                     .signature = func.signature,
                     .body = func.body,
                     .args = func.args,
@@ -782,7 +778,7 @@ fn typecheckAssignment(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!vo
         return Error.MutabilityViolation;
     }
 
-    const rtype = try self.typecheckExpression(rhs, null);
+    const rtype = try self.typecheckExpression(rhs, vtype);
 
     if (!self.suitable(vtype, rtype)) {
         self.report("Can't assign value of type '{s}' to value of type '{s}'.", .{
@@ -1229,7 +1225,8 @@ pub fn typecheckScoping(self: *Typechecker, expr: defines.ExpressionPtr) Error!T
     }
 
     const index = try self.definitionIndex(lhsTypeID, try self.builder.internString(member));
-    return defs[index].valueType;
+
+    return self.discoverScopeDef(lhsTypeID, &defs[index], scope, expr);
 }
 
 pub fn discoverScopeDef(
@@ -1626,9 +1623,10 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
 
     if (isPresent.found_existing) {
         switch (isPresent.value_ptr.status) {
-            .Checked => if (isPresent.value_ptr.result != Comptime.Builtin.Type("incomplete")) {
-                return isPresent.value_ptr.result;
-            } else {},
+            .Checked =>
+                if (isPresent.value_ptr.result != Comptime.Builtin.Type("incomplete")) {
+                    return isPresent.value_ptr.result;
+                } else {},
             .InProgress => {
                 if (!self.getFlag(.CanCycle)) {
                     self.report("Dependency cycle detected. '{s}' depends on itself.", .{
@@ -1656,12 +1654,9 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
     });
     decl = self.symbols.declarations.get(declPtr);
 
-    if (decl.name == try self.builder.internString("b")) {
-    }
-
     isPresent.value_ptr.* = .{
         .status = .InProgress,
-        .result = 0,
+        .result = Comptime.Builtin.Type("incomplete"),
     };
     errdefer isPresent.value_ptr.status = .NotChecked;
 
@@ -2704,6 +2699,7 @@ pub fn mutable(self: *const Typechecker, typeID: TypeID) bool {
         .Pointer => |ptr| ptr.mutable,
         .Array => |arr| arr.mutable,
         .Function => |func| func.mutable,
+        .ComptimeFloat, .ComptimeInt => true,
         else => false,
     };
 }

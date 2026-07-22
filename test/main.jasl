@@ -9,7 +9,7 @@ let main = fn () -> i32 {
     while !raylib::WindowShouldClose() {
         let delta = raylib::GetFrameTime();
 
-        pos = raylib::Vector2(pos.x + vel.x, pos.y + vel.y);
+        raylib::Vector2::Scale(pos, 5.0);
 
         raylib::BeginDrawing();
         {
