@@ -271,6 +271,11 @@ pub fn parse(self: *Parser) common.CompilerError!defines.ASTPtr {
 //
 
 fn statement(self: *Parser) StatementResult {
+    if (self.isAtEnd()) {
+        self.report("Unexpected EOF. Expected a statement.", .{});
+        return Error.MissingStatement;
+    }
+
     return switch (self.tokens.items(.type)[self.advance()]) {
         .LBrace => self.block(),
         .Code => self.inlineC(),

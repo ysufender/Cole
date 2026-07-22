@@ -1,0 +1,20 @@
+info: Compilation settings:
+	Input File: tests/fixtures/invalid/unbalanced_brace.jasl
+	Working Dir: /home/yusuf/proj/JASL
+	Include Dirs: []
+
+error: Trailing semicolons are not permitted.
+error: .... In /home/yusuf/proj/JASL/tests/fixtures/invalid/unbalanced_brace.jasl 5:2
+error: };
+error:  ^ Here.
+
+error: Error: 173 <InvalidToken>
+
+/home/yusuf/proj/JASL/src/parser/parser.zig:252:9: 0x1334702 in parse (jaslc-debug)
+        return lastErr;
+        ^
+/home/yusuf/proj/JASL/src/main.zig:72:17: 0x11ba264 in innerMain (jaslc-debug)
+    const ast = try parser.parse();
+                ^
+error: Compiler exited with code 173 <InvalidToken>
+EXIT:0

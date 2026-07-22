@@ -1,0 +1,60 @@
+info: Compilation settings:
+	Input File: tests/fixtures/valid/basic_fn.jasl
+	Working Dir: /home/yusuf/proj/JASL
+	Include Dirs: []
+
+------------BEGIN  AST: /home/yusuf/proj/JASL/tests/fixtures/valid/basic_fn.jasl------------
+Let add: Ident() = FnDef (
+       a: Ident(i32)       b: Ident(i32)    -> Ident(i32){
+    Block {
+     Return Binary(^) Ident(a)Ident(b);
+    }
+
+};
+Let main: Ident() = FnDef (
+    -> Ident(i32){
+    Block {
+     Let      x: Ident(i32)      = Call Ident(add)(Literal(2), Literal(3));
+     If       Binary(?op) Ident(x)Literal(4)      then        Block {
+        Return Literal(0);
+       }
+
+       else        Block {
+        Return Literal(1);
+       }
+
+
+    }
+
+};
+------------END  AST: /home/yusuf/proj/JASL/tests/fixtures/valid/basic_fn.jasl------------
+
+warning: Not implemented in typechecker/comptime.zig at 863:78
+warning: Not implemented in typechecker/comptime.zig at 863:78
+warning: Not implemented in typechecker/comptime.zig at 863:78
+warning: Not implemented in typechecker/comptime.zig at 863:78
+warning: Not implemented in typechecker/comptime.zig at 863:78
+warning: Not implemented in typechecker/comptime.zig at 863:78
+warning: Not implemented in typechecker/comptime.zig at 863:78
+warning: Not implemented in typechecker/comptime.zig at 863:78
+warning: Not implemented in typechecker/comptime.zig at 863:78
+warning: Not implemented in typechecker/comptime.zig at 863:78
+warning: Not implemented in typechecker/comptime.zig at 863:78
+warning: Not implemented in typechecker/comptime.zig at 863:78
+warning: Not implemented in typechecker/comptime.zig at 863:78
+warning: Not implemented in typechecker/comptime.zig at 863:78
+warning: Not implemented in typechecker/comptime.zig at 863:78
+warning: Not implemented in typechecker/comptime.zig at 1620:70
+warning: Not implemented in typechecker/comptime.zig at 1620:70
+warning: Not implemented in typechecker/comptime.zig at 1620:70
+warning: Not implemented in typechecker/comptime.zig at 1620:70
+warning: Not implemented in typechecker/comptime.zig at 1620:70
+warning: Not implemented in typechecker/comptime.zig at 1620:70
+warning: Not implemented in typechecker/comptime.zig at 1620:70
+warning: Not implemented in typechecker/comptime.zig at 1620:70
+warning: Not implemented in typechecker/comptime.zig at 1620:70
+warning: Not implemented in typechecker/comptime.zig at 1620:70
+warning: Not implemented in typechecker/comptime.zig at 1620:70
+warning: Not implemented in typechecker/comptime.zig at 1620:70
+info: Compiler exited successfully.
+EXIT:0

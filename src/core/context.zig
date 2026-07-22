@@ -104,6 +104,44 @@ pub fn init(baseAllocator: std.mem.Allocator, mainInit: std.process.Init) Error!
     };
 }
 
+pub fn initForTest(baseAllocator: std.mem.Allocator, io: std.Io, inputFile: []const u8) Error!Context {
+    var arena = std.heap.ArenaAllocator.init(baseAllocator);
+    errdefer arena.deinit();
+
+    const allocator = arena.allocator();
+
+    var resolved = ResolveMap.empty;
+    resolved.ensureTotalCapacity(allocator, 512) catch return error.AllocatorFailure;
+
+    const settings = CompilerSettings{
+        .inputFile = inputFile,
+        .outputFile = null,
+        .workingDir = ".",
+        .includeDirs = &.{},
+        .maxErr = 5,
+        .backend = .C,
+        .backendFlags = "",
+        .flags = blk: {
+            var f = CompilerSettings.FlagSet.empty;
+            f.ensureTotalCapacity(allocator, 32) catch return error.AllocatorFailure;
+            break :blk f;
+        },
+    };
+
+    return .{
+        .filenameMap = FileNameMap.initCapacity(allocator, 32) catch return error.AllocatorFailure,
+        .moduleNameMap = ModuleNameMap.initCapacity(allocator, 32) catch return error.AllocatorFailure,
+        .fileMap = FileMap.initCapacity(allocator, 32) catch return error.AllocatorFailure,
+        .tokenMap = TokenMap.initCapacity(allocator, 32) catch return error.AllocatorFailure,
+        .astMap = ASTMap.initCapacity(allocator, 32) catch return error.AllocatorFailure,
+        .arena = arena,
+        .io = io,
+        .resolved = resolved,
+        .settings = settings,
+        .counts = .{},
+    };
+}
+
 pub fn deinit(self: *Context) void {
     self.arena.deinit();
 }

@@ -5,6 +5,7 @@ out
 .zig-cache
 zig-out
 .vscode
+test
 
 *.out
 *.massif*

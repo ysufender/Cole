@@ -1,0 +1,21 @@
+info: Compilation settings:
+	Input File: tests/fixtures/invalid/binary_garbage.jasl
+	Working Dir: /home/yusuf/proj/JASL
+	Include Dirs: []
+
+error: Unexpected character '\'
+error: .... In /home/yusuf/proj/JASL/tests/fixtures/invalid/binary_garbage.jasl 1:1
+error: 
+error: ^ Here.
+
+/home/yusuf/proj/JASL/src/lexer/lexer.zig:423:17: 0x135e660 in scanToken (jaslc-debug)
+                return Error.UnexpectedCharacter;
+                ^
+/home/yusuf/proj/JASL/src/lexer/lexer.zig:217:9: 0x135a1e9 in lex (jaslc-debug)
+        try self.scanToken();
+        ^
+/home/yusuf/proj/JASL/src/main.zig:65:20: 0x11ba139 in innerMain (jaslc-debug)
+    const tokens = try lexer.lex();
+                   ^
+error: Compiler exited with code 178 <UnexpectedCharacter>
+EXIT:0

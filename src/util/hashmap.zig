@@ -28,3 +28,57 @@ fn Context(comptime Key: type) type {
 pub fn HashMap(comptime Key: type, comptime Value: type) type {
     return std.hash_map.HashMapUnmanaged(Key, Value, Context(Key), std.hash_map.default_max_load_percentage);
 }
+
+//
+// Tests
+//
+const testing = std.testing;
+
+test "HashMap: struct key hashes by content, not identity" {
+    const Key = struct { a: i32, b: i32 };
+    var map = HashMap(Key, []const u8).empty;
+    defer map.deinit(testing.allocator);
+
+    try map.put(testing.allocator, .{ .a = 1, .b = 2 }, "first");
+
+    // A separate struct instance with identical field values must hit
+    // the same bucket — this is the whole point of the custom
+    // DeepRecursive Context over AutoContext.
+    const lookup = Key{ .a = 1, .b = 2 };
+    try testing.expectEqualStrings("first", map.get(lookup).?);
+
+    try testing.expect(map.get(.{ .a = 1, .b = 3 }) == null);
+}
+
+test "HashMap: []const u8 key hashes by content" {
+    var map = HashMap([]const u8, i32).empty;
+    defer map.deinit(testing.allocator);
+
+    try map.put(testing.allocator, "hello", 1);
+
+    // Same bytes, different slice/allocation.
+    var buf: [5]u8 = undefined;
+    @memcpy(&buf, "hello");
+    try testing.expectEqual(@as(i32, 1), map.get(buf[0..]).?);
+}
+
+test "HashMap: plain scalar key falls back to AutoContext" {
+    var map = HashMap(i32, []const u8).empty;
+    defer map.deinit(testing.allocator);
+
+    try map.put(testing.allocator, 42, "answer");
+    try testing.expectEqualStrings("answer", map.get(42).?);
+    try testing.expect(map.get(43) == null);
+}
+
+test "HashMap: overwrite via put" {
+    const Key = struct { a: i32 };
+    var map = HashMap(Key, i32).empty;
+    defer map.deinit(testing.allocator);
+
+    try map.put(testing.allocator, .{ .a = 1 }, 100);
+    try map.put(testing.allocator, .{ .a = 1 }, 200);
+
+    try testing.expectEqual(@as(usize, 1), map.count());
+    try testing.expectEqual(@as(i32, 200), map.get(.{ .a = 1 }).?);
+}

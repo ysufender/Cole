@@ -24,28 +24,29 @@ var config: struct {
 pub fn build(b: *std.Build) void {
     _ = configureBuild(b);
     buildCompiler(b);
-    buildTools(b);
     addDebugTarget(b);
+    addTestStep(b);
 }
 
-fn buildTools(b: *std.Build) void {
-    if (config.tools.compiler_debugger) {
-        const exe = b.addExecutable(.{
-            .name = "jaslcdbg",
-            .root_module = b.createModule(.{
-                .root_source_file = b.path("tools/compiler_debugger/main.zig"),
-                .optimize = .Debug,
-                .target = config.native,
-                .link_libc = config.native.result.os.tag == .windows,
-            }),
-        });
-        exe.root_module.addIncludePath(b.path("tools/compiler_debugger/"));
-        const install = b.addInstallArtifact(exe, .{
-            .dest_dir = .{ .override = .{ .custom = "tools" } }
-        });
+fn addTestStep(b: *std.Build) void {
+    const opts = b.addOptions();
+    opts.addOption(bool, "isDebug", true);
+    opts.addOption([]const u8, "version", "test");
 
-        b.getInstallStep().dependOn(&install.step);
-    }
+    const tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/tests.zig"),
+            .target = config.native,
+            .optimize = .Debug,
+            .link_libc = config.native.result.os.tag == .windows,
+        }),
+    });
+    tests.root_module.addEmbedPath(b.path(resourcePath));
+    tests.root_module.addOptions("config", opts);
+
+    const run = b.addRunArtifact(tests);
+    const step = b.step("test", "Run unit tests reachable from src/main.zig");
+    step.dependOn(&run.step);
 }
 
 fn buildCompiler(b: *std.Build) void {

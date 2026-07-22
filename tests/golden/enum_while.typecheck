@@ -1,0 +1,28 @@
+info: Compilation settings:
+	Input File: tests/fixtures/valid/enum_while.jasl
+	Working Dir: /home/yusuf/proj/JASL
+	Include Dirs: []
+
+------------BEGIN  AST: /home/yusuf/proj/JASL/tests/fixtures/valid/enum_while.jasl------------
+Let Color: Ident() = Enum {
+   Red,
+   Green,
+   Blue,
+  };
+Let main: Ident() = FnDef (
+    -> Ident(i32){
+    Block {
+     Let      i: Ident(i32)      = Literal(0);
+     While       Binary(?op) Ident(i)Literal(10)      do        Block {
+        ExprStmt Assign Ident(i)Binary(^) Ident(i)Literal(1);
+       }
+
+
+     Return Ident(i);
+    }
+
+};
+------------END  AST: /home/yusuf/proj/JASL/tests/fixtures/valid/enum_while.jasl------------
+
+info: Compiler exited successfully.
+EXIT:0

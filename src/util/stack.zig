@@ -149,3 +149,105 @@ pub fn Stack(comptime T: type) type {
         }
     };
 }
+
+//
+// Tests
+//
+const testing = std.testing;
+
+test "StaticStack: push/pop LIFO order" {
+    var s = StaticStack(i32, 4){};
+    try s.push(1);
+    try s.push(2);
+    try s.push(3);
+
+    try testing.expectEqual(@as(i32, 3), s.pop().?);
+    try testing.expectEqual(@as(i32, 2), s.pop().?);
+    try testing.expectEqual(@as(i32, 1), s.pop().?);
+    try testing.expectEqual(@as(?i32, null), s.pop());
+}
+
+test "StaticStack: push past capacity returns OutOfMemory" {
+    var s = StaticStack(i32, 2){};
+    try s.push(1);
+    try s.push(2);
+    try testing.expectError(Error.OutOfMemory, s.push(3));
+}
+
+test "StaticStack: empty() reflects state" {
+    var s = StaticStack(i32, 2){};
+    try testing.expect(s.empty());
+    try s.push(1);
+    try testing.expect(!s.empty());
+    _ = s.pop();
+    try testing.expect(s.empty());
+}
+
+test "StaticStack: peek doesn't consume" {
+    var s = StaticStack(i32, 2){};
+    try s.push(42);
+    try testing.expectEqual(@as(i32, 42), s.peek().*);
+    try testing.expectEqual(@as(i32, 42), s.peek().*);
+    try testing.expectEqual(@as(i32, 42), s.pop().?);
+}
+
+test "Stack: grows past initial capacity" {
+    var s = try Stack(i32).init(testing.allocator, 1);
+    defer s.allocator.free(s.items);
+
+    var i: i32 = 0;
+    while (i < 100) : (i += 1) {
+        try s.push(i);
+    }
+
+    i = 99;
+    while (i >= 0) : (i -= 1) {
+        try testing.expectEqual(i, s.pop().?);
+    }
+    try testing.expectEqual(@as(?i32, null), s.pop());
+}
+
+test "Stack: empty/peek" {
+    var s = try Stack(i32).init(testing.allocator, 4);
+    defer s.allocator.free(s.items);
+
+    try testing.expect(s.empty());
+    try s.push(7);
+    try testing.expect(!s.empty());
+    try testing.expectEqual(@as(i32, 7), s.peek().*);
+}
+
+test "StaticRingStack: LIFO within capacity" {
+    var s = StaticRingStack(i32, 4){};
+    s.push(1);
+    s.push(2);
+    s.push(3);
+
+    try testing.expectEqual(@as(?i32, 3), s.pop());
+    try testing.expectEqual(@as(?i32, 2), s.pop());
+    try testing.expectEqual(@as(?i32, 1), s.pop());
+    try testing.expectEqual(@as(?i32, null), s.pop());
+}
+
+test "StaticRingStack: pushing past capacity overwrites oldest, size caps at Size" {
+    var s = StaticRingStack(i32, 3){};
+    s.push(1);
+    s.push(2);
+    s.push(3);
+    s.push(4); // overwrites the slot 1 occupied
+
+    try testing.expect(!s.empty());
+    // Most recent 3 values survive, in LIFO order: 4, 3, 2.
+    try testing.expectEqual(@as(?i32, 4), s.pop());
+    try testing.expectEqual(@as(?i32, 3), s.pop());
+    try testing.expectEqual(@as(?i32, 2), s.pop());
+    try testing.expectEqual(@as(?i32, null), s.pop());
+}
+
+test "StaticRingStack: empty() reflects state" {
+    var s = StaticRingStack(i32, 2){};
+    try testing.expect(s.empty());
+    s.push(1);
+    try testing.expect(!s.empty());
+}
+

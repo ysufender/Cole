@@ -433,6 +433,28 @@ fn loop(
 
 
     const conditionPtr = ast.extra[extraPtr];
+
+    if (self.typechecker.executer.attemptEval(conditionPtr, Comptime.Builtin.Type("bool"))) |res| {
+        if (self.typechecker.executer.getValue(res).Bool) {
+            var loopData: [3]JIR.Ptr = undefined;
+
+            const bodyPtr = ast.extra[extraPtr + 1];
+            self.lastLoopDepth = self.scopes.index;
+            const start = try self.typechecker.builder.label(startLabel);
+            loopData[0] = start;
+            loopData[1] = try self.statement(bodyPtr);
+            loopData[2] = try self.typechecker.builder.jump(startLabel);
+
+            return self.typechecker.builder.scope(
+                try self.typechecker.executer.generateRandomName(.Block),
+                &loopData,
+            );
+        }
+        else {
+            return self.typechecker.builder.label(try self.typechecker.executer.generateRandomName(.OptimizedLoop));
+        }
+    }
+
     const cnd = try self.expression(conditionPtr, Comptime.Builtin.Type("bool"));
 
     var loopData: [5]JIR.Ptr = undefined;
@@ -466,7 +488,7 @@ fn conditional(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.A
             return self.statement(ast.extra[extraPtr + 3]);
         }
 
-        return self.typechecker.builder.nodes.len;
+        return self.typechecker.builder.label(try self.typechecker.executer.generateRandomName(.OptimizedConditional));
     }
 
     const elseLabel = try self.typechecker.executer.generateRandomName(.Else);

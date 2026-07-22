@@ -1,0 +1,11 @@
+import raylib;
+
+let main = fn () -> i32 {
+    raylib::InitWindow(500, 600, "Hello World");
+
+    while !raylib::WindowShouldClose {
+    }
+
+    raylib::CloseWindow();
+
+    return 0;

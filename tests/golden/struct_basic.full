@@ -1,0 +1,28 @@
+info: Compilation settings:
+	Input File: tests/fixtures/valid/struct_basic.jasl
+	Working Dir: /home/yusuf/proj/JASL
+	Include Dirs: []
+
+error: Expected semicolon after statement.
+	Expected Semicolon, Received LBrace
+error: .... In /home/yusuf/proj/JASL/tests/fixtures/valid/struct_basic.jasl 7:26
+error:     let p: Point = Point { x: 1, y: 2 };
+error:                          ^ Here.
+
+error: Error: 182 <MissingSemicolon>
+
+error: Expected a primary expression, got '}' instead.
+error: .... In /home/yusuf/proj/JASL/tests/fixtures/valid/struct_basic.jasl 9:1
+error: };
+error: ^ Here.
+
+error: Error: 173 <InvalidToken>
+
+/home/yusuf/proj/JASL/src/parser/parser.zig:252:9: 0x1334702 in parse (jaslc-debug)
+        return lastErr;
+        ^
+/home/yusuf/proj/JASL/src/main.zig:72:17: 0x11ba264 in innerMain (jaslc-debug)
+    const ast = try parser.parse();
+                ^
+error: Compiler exited with code 192 <MultipleErrors>
+EXIT:0

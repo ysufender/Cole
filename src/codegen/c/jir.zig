@@ -490,8 +490,7 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
             }
 
             self.indent -= 1;
-
-            try self.writeln(out, "\n}}\n\n", .{ });
+            try self.writeln(out, "}}\n\n", .{ });
         },
 
         .Exit => common.debug.ShouldBeImpossible(self.context.log, @src()),
