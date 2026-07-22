@@ -16,10 +16,10 @@ pub let Color = #(@extern) struct {
     pub g: u8,
     pub b: u8,
     pub a: u8,
-};
 
-pub let Red = Color(255, 0, 0, 255);
-pub let Blue = Color(0, 0, 255, 255);
+    pub let Red = Color(255, 0, 0, 255);
+    pub let Blue = Color(0, 0, 255, 255);
+};
 
 pub let Rectangle = #(@extern) struct {
     x     : float,

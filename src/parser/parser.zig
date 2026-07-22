@@ -759,25 +759,30 @@ fn unary(self: *Parser) ExpressionResult {
     return self.postfix();
 }
 
+fn scopingChain(self: *Parser, initial: defines.ExpressionPtr) ExpressionResult {
+    var expr = initial;
+    while (self.match(&.{.DoubleColon})) {
+        const member = try self.consume(.Identifier, error.MissingIdentifier, "Expected member name in scope resolution.");
+
+        const start: defines.OpaquePtr = @intCast(self.extra.items.len);
+        self.extra.append(self.allocator(), expr) catch return error.AllocatorFailure;
+        self.extra.append(self.allocator(), member) catch return error.AllocatorFailure;
+
+        const newExpr = try self.alloc(Expression);
+        self.expressionMap.set(newExpr, .{
+            .type = .Scoping,
+            .value = start
+        });
+        expr = newExpr;
+    }
+    return expr;
+}
+
 fn postfix(self: *Parser) ExpressionResult {
-    var expr = try self.primary();
+    var expr = try self.scopingChain(try self.primary());
 
     while (true) {
-        if (self.match(&.{.DoubleColon})) {
-            const member = try self.consume(.Identifier, error.MissingIdentifier, "Expected member name in scope resolution.");
-            
-            const start: defines.OpaquePtr = @intCast(self.extra.items.len);
-            self.extra.append(self.allocator(), expr) catch return error.AllocatorFailure;
-            self.extra.append(self.allocator(), member) catch return error.AllocatorFailure;
-
-            const newExpr = try self.alloc(Expression);
-            self.expressionMap.set(newExpr, .{
-                .type = .Scoping,
-                .value = start,
-            });
-            expr = newExpr;
-        }
-        else if (self.match(&.{.LParen})) {
+        if (self.match(&.{.LParen})) {
             assert(self.current > 0);
             self.current -= 1;
             const args = try self.primary();
@@ -1337,7 +1342,8 @@ fn typeExpression(self: *Parser) ExpressionResult {
                 .type = .Identifier,
                 .value = typename,
             });
-            return expr;
+
+            return self.scopingChain(expr);
         },
 
         else => {

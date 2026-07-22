@@ -336,22 +336,20 @@ fn typecheckVariableDef(
             self.typenameMap.put(self.arena.allocator(), newType, new)
                 catch return Error.AllocatorFailure;
 
-            const defs: []Types.FieldInfo = @constCast(switch (self.typeTable.get(newType)) {
+            var defs: []Types.FieldInfo = @constCast(switch (self.typeTable.get(newType)) {
                 .Struct => |str| str.definitions,
                 .Enum => |enm| enm.definitions,
                 .Union => |uni| uni.definitions,
                 else => return common.debug.ShouldBeImpossible(@src()),
             });
 
-            var idx: u32 = 0;
-            while (idx < defs.len) : (idx += 1) {
-                const def = defs[idx];
-
+            for (defs, 0..) |def, idx| {
                 const nname = std.fmt.allocPrint(self.arena.allocator(),
                     "{s}::{s}", .{
                         newName,
                         self.builder.getInternedString(def.name),
                 }) catch return Error.AllocatorFailure;
+
                 defs[idx] = Types.FieldInfo{
                     .name = try self.builder.internString(nname),
                     .valueType = def.valueType,
@@ -361,7 +359,7 @@ fn typecheckVariableDef(
 
                 const scope = self.symbols.resolutionMap.get(.{
                     .file = self.currentFile,
-                    .expr = decl.node,
+                    .expr = self.unwrapMark(decl.node),
                 }) orelse return common.debug.ShouldBeImpossible(@src());
 
                 const rres = self.symbols.lookup.fetchRemove(.{
@@ -373,11 +371,6 @@ fn typecheckVariableDef(
                     .scope = scope,
                     .name = nname,
                 }, rres.value);
-
-                assert(self.symbols.lookup.getOrPutAssumeCapacity(.{
-                    .scope = scope,
-                    .name = nname
-                }).found_existing);
             }
         },
         .Function => {
@@ -1235,25 +1228,8 @@ pub fn typecheckScoping(self: *Typechecker, expr: defines.ExpressionPtr) Error!T
         else => return common.debug.NotImplemented(@src()),
     }
 
-    for (defs) |def| {
-        if (def.name == try self.builder.internString(member)) {
-            if (def.public or self.symbols.canAccess(self.currentScope, scope)) {
-                return self.discoverScopeDef(lhsTypeID, &def, scope, expr);
-            }
-
-            self.report("'{s}' is inaccessible due to its visibility level.", .{
-                member,
-            });
-            return Error.AccessSpecifierMismatch;
-        }
-    }
-
-    self.report("Couldn't find definition '{s}' in type '{s}'.", .{
-        member,
-        try self.typeName(self.arena.allocator(), lhsTypeID),
-    });
-
-    return Error.MissingDefinition;
+    const index = try self.definitionIndex(lhsTypeID, try self.builder.internString(member));
+    return defs[index].valueType;
 }
 
 pub fn discoverScopeDef(
@@ -1411,7 +1387,7 @@ pub fn typecheckCall(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpec
     for (func.argTypes, args, 0..) |arg, expr, index| {
         const exprType = try self.typecheckExpression(expr, arg);
 
-        if (exprType != arg) {
+        self.assertCanCoerce(arg, exprType) catch {
             self.report(
                 "Argument type mismatch in function call."
                 ++ " In argument {d}: expected {s}, received {s}", .{
@@ -1420,7 +1396,7 @@ pub fn typecheckCall(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpec
                 try self.typeName(self.arena.allocator(), exprType),
             });
             return Error.TypeMismatch;
-        }
+        };
     }
 
     return func.returnType;
@@ -3097,4 +3073,13 @@ pub fn hasMetadata(
             break :blk false;
         }
         else false;
+}
+
+fn unwrapMark(self: *Typechecker, exprPtr: defines.ExpressionPtr) defines.ExpressionPtr {
+    const ast = self.context.getAST(self.currentFile);
+    var e = exprPtr;
+    while (ast.expressions.items(.type)[e] == .Mark) {
+        e = ast.extra[ast.expressions.items(.value)[e] + 2];
+    }
+    return e;
 }

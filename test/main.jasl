@@ -3,18 +3,23 @@ import raylib;
 let main = fn () -> i32 {
     raylib::InitWindow(600, 500, "Hello World");
 
+    let pos: mut raylib::Vector2 = raylib::Vector2(160.0, 160.0);
+    let vel = raylib::Vector2(15.0, 16.0);
+
     while !raylib::WindowShouldClose() {
         let delta = raylib::GetFrameTime();
 
+        pos = raylib::Vector2(pos.x + vel.x, pos.y + vel.y);
+
         raylib::BeginDrawing();
         {
-            raylib::ClearBackground(raylib::Red);
+            raylib::ClearBackground(raylib::Color::Red);
             raylib::DrawText(
                 "Hello World",
                 275, 240, 20,
-                raylib::Blue,
+                raylib::Color::Blue,
             );
-            raylib::DrawCircle((160.0, 160.0), 15, raylib::Blue);
+            raylib::DrawCircle(pos, 15.0, raylib::Color::Blue);
         }
         raylib::EndDrawing();
     }
