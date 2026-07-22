@@ -34,6 +34,7 @@ pub const Module = struct {
         const ast = context.getAST(self.dataIndex);
         std.debug.print("\nModule {s}:\n", .{self.name});
         std.debug.print("\tFile: {s}\n", .{context.getFileName(self.dataIndex)});
+        std.debug.print("\tData Index: {d}\n", .{self.dataIndex});
         std.debug.print("\tAST:\n", .{});
         ast.print(context);
         std.debug.print("\tDependencies:\n", .{});

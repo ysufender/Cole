@@ -1,5 +1,5 @@
-import std::io;
 import raylib;
+import std::io;
 
 let absf = fn (f: float) -> float {
     return if (f > 0) f else -f;

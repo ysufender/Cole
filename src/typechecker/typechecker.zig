@@ -276,7 +276,7 @@ fn typecheckVariableDef(
                         else => return common.debug.ShouldBeImpossible(self.context.log, @src()),
                     });
                 }
-                else if (decl.topLevel) self.modules.modules.get(self.modules.modules.len - self.currentFile - 1).name
+                else if (decl.topLevel) self.modules.modules.get(if (self.currentFile == 0) self.modules.modules.len - 1 else self.currentFile).name
                 else try self.executer.generateRandomNameString(.Type);
 
             const newName =
@@ -368,7 +368,20 @@ fn typecheckVariableDef(
             const tokens = self.context.getTokens(ast.tokens);
 
             const symName = tokens.get(decl.token).lexeme(self.context, self.currentFile);
-            const namespace = self.modules.modules.get(self.modules.modules.len - self.currentFile - 1).name;
+            const namespace =
+                if (decl.parent != null and self.typeTable.get(try self.typecheckDecl(decl.parent.?, null)) == .Type) hasParent: {
+                    const rtypePtr = try self.executer.eval(self.symbols.getDecl(decl.parent.?).node, null);
+                    const rtype = self.executer.getValue(rtypePtr).Type;
+
+                    break :hasParent self.builder.getInternedString(switch (self.typeTable.get(rtype)) {
+                        .Struct => |str| str.name,
+                        .Enum => |enm| enm.name,
+                        .Union => |uni| uni.name,
+                        else => return common.debug.ShouldBeImpossible(self.context.log, @src()),
+                    });
+                }
+                else if (decl.topLevel) self.modules.modules.get(if (self.currentFile == 0) self.modules.modules.len - 1 else self.currentFile).name
+                else try self.executer.generateRandomNameString(.Type);
             const newName =
                 if (self.hasMetadata(decl.node, "@export")) symName
                 else std.fmt.allocPrint(self.arena.allocator(), "{s}::{s}", .{
