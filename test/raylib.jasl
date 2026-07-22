@@ -2,23 +2,26 @@
  * RayLib bindings.
  */
 
-asm {
+code {
     #include "raylib.h"
 }
 
-pub let Vector2 = struct {
+pub let Vector2 = #(@extern) struct {
     pub x: float,
     pub y: float,
 };
 
-pub let Color = struct {
+pub let Color = #(@extern) struct {
     pub r: u8,
     pub g: u8,
     pub b: u8,
     pub a: u8,
 };
 
-pub let Rectangle = struct {
+pub let Red = Color(255, 0, 0, 255);
+pub let Blue = Color(0, 0, 255, 255);
+
+pub let Rectangle = #(@extern) struct {
     x     : float,
     y     : float,
     width : float,
@@ -26,15 +29,42 @@ pub let Rectangle = struct {
 };
 
 pub let InitWindow = fn (width: i32, height: i32, title: []u8) -> void {
-    asm { InitWindow(width, height, (char const*)title.ptr); }
+    code { InitWindow(width, height, (char const*)title.ptr); }
 };
 
 pub let WindowShouldClose = fn () -> bool {
-    let res: mut bool = undefined;
-    asm { res = WindowShouldClose(); }
+    let res: mut bool = false;
+    code { res = WindowShouldClose(); }
     return res;
 };
 
 pub let CloseWindow = fn () -> void {
-    asm { CloseWindow(); }
+    code { CloseWindow(); }
+};
+
+pub let SetTargetFPS = fn (fps: i32) -> void {
+    code { SetTargetFPS(fps); }
+};
+
+pub let BeginDrawing = fn () -> void { code { BeginDrawing(); } };
+pub let EndDrawing = fn () -> void { code { EndDrawing(); } };
+pub let ClearBackground = fn (color: Color) -> void { code { ClearBackground(color); } };
+pub let GetFrameTime = fn () -> float {
+    let res: mut float = undefined;
+    code { res = GetFrameTime(); }
+    return res;
+};
+
+pub let DrawText = fn (
+    text: []u8,
+    posX: i32,
+    posY: i32,
+    fontSize: i32,
+    color: Color
+) -> void {
+    code { DrawText(text.ptr, posX, posY, fontSize, color); }
+};
+
+pub let DrawCircle = fn (center: Vector2, radius: float, color: Color) -> void {
+    code { DrawCircle(center, radius, color); }
 };

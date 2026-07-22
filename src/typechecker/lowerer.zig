@@ -286,7 +286,7 @@ pub fn statement(self: *Lowerer, statementPtr: defines.StatementPtr) Error!defin
 
         .For => return common.debug.ShouldBeImpossible(@src()),
 
-        .InlineAssembly => try self.inlineAsm(stmt.value),
+        .InlineC => try self.inlineC(stmt.value),
 
         .Switch => |t| {
             self.report("Statement '{s}' is not implemented.", .{
@@ -299,7 +299,7 @@ pub fn statement(self: *Lowerer, statementPtr: defines.StatementPtr) Error!defin
     return node;
 }
 
-fn inlineAsm(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!defines.Range {
+fn inlineC(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!defines.Range {
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
     const src = self.typechecker.context.getFile(ast.tokens);
 
@@ -307,7 +307,7 @@ fn inlineAsm(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!defines.Range {
     const cend = ast.extra[extraPtr + 1];
     const code = try self.typechecker.builder.internString(src[cstart..cend]);
 
-    const res = try self.typechecker.builder.inlineAsm(code);
+    const res = try self.typechecker.builder.inlineC(code);
 
     return .{
         .start = res,

@@ -164,7 +164,7 @@ pub const PrintContext = struct {
                 printer.write(";");
             },
 
-            .InlineAssembly => {
+            .InlineC => {
                 printer.print("Asm {s} ", .{printer.tokenLexeme(val)});
                 printer.write(";");
             },

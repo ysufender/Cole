@@ -1,19 +1,25 @@
 import raylib;
 
-let Str = struct {
-    f: float,
-};
-
 let main = fn () -> i32 {
-    raylib::InitWindow(500, 600, "Hello World");
-
-    let f: Str = (1.0);
+    raylib::InitWindow(600, 500, "Hello World");
 
     while !raylib::WindowShouldClose() {
+        let delta = raylib::GetFrameTime();
+
+        raylib::BeginDrawing();
+        {
+            raylib::ClearBackground(raylib::Red);
+            raylib::DrawText(
+                "Hello World",
+                275, 240, 20,
+                raylib::Blue,
+            );
+            raylib::DrawCircle((160.0, 160.0), 15, raylib::Blue);
+        }
+        raylib::EndDrawing();
     }
 
     raylib::CloseWindow();
 
     return 0;
 };
-

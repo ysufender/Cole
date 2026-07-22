@@ -73,7 +73,7 @@ pub const Node = struct {
         Not,
         Negation,
         Construction,
-        Asm,
+        Code,
     };
 
     type: Type,
@@ -593,7 +593,7 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
             try self.write(out, "}}", .{});
         },
 
-        .Asm => {
+        .Code => {
             const str = self.strings[node.value];
             try self.write(out, "/*Inserted Code*/\n{s}\n", .{
                 str,
@@ -775,7 +775,7 @@ fn isStmt(self: *const JIR, nt: Node) bool {
     const res = switch (nt.type) {
         .FunctionDef, .Return, .JumpIf,
         .Jump, .Label, .Exit, .Scope,
-        .Assignment, .VariableDef, .Asm => true,
+        .Assignment, .VariableDef, .Code => true,
 
         else => false,
     };

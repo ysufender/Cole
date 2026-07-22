@@ -166,7 +166,7 @@ pub fn typecheck(self: *Typechecker, allocator: Allocator) Error!Resolution {
 
             for (ast.statementMask) |_stmt| {
                 const stmt = ast.statements.get(_stmt);
-                if (stmt.type != .InlineAssembly) {
+                if (stmt.type != .InlineC) {
                     continue;
                 }
 
@@ -220,7 +220,7 @@ pub fn typecheckStatement(self: *Typechecker, statementPtr: defines.StatementPtr
         .Import => common.debug.ShouldBeImpossible(@src()),
         .Defer => self.typecheckDefer(stmt.value),
         .VariableDefinition => try self.typecheckVarDefStatement(stmt.value),
-        .InlineAssembly => { }, // @Note allow direct C code insertion
+        .InlineC => { }, // @Note allow direct C code insertion
         else => |t| {
             self.report("Typechecking of '{s}' statements is not implemented.", .{
                 @tagName(t),
@@ -2449,10 +2449,11 @@ pub fn assertCastable(self: *Typechecker, from: TypeID, to: TypeID) Error!void {
             .Integer => |int| try functional.throwIf(int.size <= 0, Error.SizeMismatch),
             else => return Error.IncompatibleTypes,
         },
-        .ComptimeInt => try functional.throwIf(!self.isInt(to), Error.IncompatibleTypes),
-        .ComptimeFloat => try functional.throwIf(!self.isFloat(to), Error.IncompatibleTypes),
+        .ComptimeInt => try functional.throwIf(!self.isInt(to) and !self.isFloat(to), Error.IncompatibleTypes),
+        .ComptimeFloat => try functional.throwIf(!self.isFloat(to) and !self.isInt(to), Error.IncompatibleTypes),
         .Integer => |fromInt| switch (toType) {
             .Integer => |toInt| try functional.throwIf(!toInt.canContain(fromInt), Error.SizeMismatch),
+            .ComptimeInt => {},
             .Float => try functional.throwIf(
                 fmax(f32) < @as(f32, @floatFromInt(fromInt.range().max))
                 or fmin(f32) > @as(f32, @floatFromInt(fromInt.range().min)),
@@ -2461,11 +2462,7 @@ pub fn assertCastable(self: *Typechecker, from: TypeID, to: TypeID) Error!void {
             else => return Error.IncompatibleTypes,
         },
         .Float => switch (toType) {
-            .Integer => |toInt| try functional.throwIf(
-                fmax(f32) > @as(f32, @floatFromInt(toInt.range().max))
-                or fmin(f32) < @as(f32, @floatFromInt(toInt.range().min)),
-                Error.SizeMismatch,
-            ),
+            .Integer, .ComptimeInt, .ComptimeFloat => {},
             else => return Error.IncompatibleTypes,
         },
         .Pointer => |fromPtr| switch (toType) {

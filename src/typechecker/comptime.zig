@@ -1865,11 +1865,11 @@ fn castValue(self: *Comptime, valuePtr: Value.Ptr, to: TypeID) Error!Value.Ptr {
         },
         .Function => value,
         .Float => |fromFloat| switch (self.typechecker.typeTable.get(to)) {
-            .Integer => .{ .Int = @intFromFloat(fromFloat) },
-            else => value,
+            .Float, .ComptimeFloat => value,
+            else => .{ .Int = @intFromFloat(fromFloat) },
         },
         .Int => |fromInt| switch (self.typechecker.typeTable.get(to)) {
-            .Integer => value,
+            .Integer, .ComptimeInt => value,
             else => .{ .Float = @floatFromInt(fromInt) },
         },
         .Bool => |fromBool| switch (self.typechecker.typeTable.get(to)) {

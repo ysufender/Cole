@@ -60,7 +60,7 @@ pub const Expression = struct {
 pub const Statement = struct {
     pub const Type = enum {
         Block,
-        InlineAssembly,
+        InlineC,
         Return,
         Conditional,
         Switch,
@@ -273,7 +273,7 @@ pub fn parse(self: *Parser) common.CompilerError!defines.ASTPtr {
 fn statement(self: *Parser) StatementResult {
     return switch (self.tokens.items(.type)[self.advance()]) {
         .LBrace => self.block(),
-        .Asm => self.inlineAssembly(),
+        .Code => self.inlineC(),
         .Switch => self.commonSwitch(.Statement),
         .If => self.conditional(),
         .While, .For => |loop| self.loopStatement(loop),
@@ -368,7 +368,7 @@ fn block(self: *Parser) StatementResult {
     return result;
 }
 
-fn inlineAssembly(self: *Parser) StatementResult {
+fn inlineC(self: *Parser) StatementResult {
     const cstart = self.tokens.get(try self.consume(.LBrace, error.MissingBrace, "Expected a block after 'asm' statement.")).end;
     while (!self.check(.RBrace)) {
         _ = self.advance();
@@ -381,7 +381,7 @@ fn inlineAssembly(self: *Parser) StatementResult {
 
     const result = try self.alloc(Statement);
     self.statementMap.set(result, .{
-        .type = .InlineAssembly,
+        .type = .InlineC,
         .value = start,
     });
 
@@ -1520,7 +1520,7 @@ fn synchronize(self: *Parser) void {
     while (!self.isAtEnd()) {
         switch (self.tokens.items(.type)[self.peek()]) {
             .Fn, .Let, .Pub,
-            .While, .If, .Asm,
+            .While, .If, .Code,
             .Continue, .Return, .Import,
             .Defer, .Discard, .Break => return,
             else => {},
