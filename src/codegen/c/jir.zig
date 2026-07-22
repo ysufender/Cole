@@ -218,7 +218,7 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
         const asmc = std.mem.trim(u8, self.strings[asmn], " \t\n\r");
 
         if (std.mem.startsWith(u8, asmc, "#include")) {
-            try self.write(out, "{s}", .{asmc});
+            try self.write(out, "{s}\n", .{asmc});
         }
     }
     try self.write(out, "\n\n", .{});
@@ -483,14 +483,15 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
                 self.strings[self.data[node.value]],
             });
             self.indent += 1;
+            const len = self.data[node.value + 1];
 
-            for (0..self.data[node.value + 1]) |idx| {
+            for (0..len) |idx| {
                 try self.operation(out, self.data[node.value + 2 + idx]);
             }
 
             self.indent -= 1;
 
-            try self.writeln(out, "\n}}\n", .{ });
+            try self.writeln(out, "\n}}\n\n", .{ });
         },
 
         .Exit => common.debug.ShouldBeImpossible(self.context.log, @src()),
@@ -553,9 +554,10 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
         },
         .Grouping => {
             try self.write(out, "(", .{});
+            const len = self.data[node.value];
             for (0..self.data[node.value]) |idx| {
                 try self.operation(out, self.data[@intCast(node.value + 1 + idx)]);
-                if (idx == self.data[node.value + 1] - 1) {
+                if (idx == len - 1) {
                     continue;
                 }
                 try self.write(out, ", ", .{});
@@ -781,8 +783,8 @@ fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool
 fn isStmt(self: *const JIR, nt: Node) bool {
     const res = switch (nt.type) {
         .FunctionDef, .Return, .JumpIf,
-        .Jump, .Label, .Exit, .Scope,
-        .Assignment, .VariableDef, .Code => true,
+        .Jump, .Label, .Scope,
+        .Assignment, .VariableDef, .Code, => true,
 
         else => false,
     };

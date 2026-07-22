@@ -19,9 +19,10 @@
         Input/Output utilities.
 */
 
+code {
+    #include <stdio.h>
+}
+
 pub let println = fn (msg: []u8) -> void {
-    asm {
-        #include <stdio.h>
-        printf("%s\n", msg);
-    }
+    code { printf("%s\n", msg); }
 };

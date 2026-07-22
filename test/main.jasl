@@ -1,16 +1,30 @@
+import std::io;
 import raylib;
+
+let absf = fn (f: float) -> float {
+    return if (f > 0) f else -f;
+};
 
 let main = fn () -> i32 {
     raylib::InitWindow(600, 500, "Hello World");
 
-    let pos: mut raylib::Vector2 = raylib::Vector2(160.0, 160.0);
-    let vel = raylib::Vector2(15.0, 16.0);
+    let pos: mut raylib::Vector2 = (160.0, 160.0);
+    let vel: mut raylib::Vector2 = (100.0, 100.0);
 
     while !raylib::WindowShouldClose() {
         let delta = raylib::GetFrameTime();
 
         let deltaVel = raylib::Vector2::Scale(vel, delta);
         pos = raylib::Vector2::Add(pos, deltaVel);
+
+        if absf(pos.x - 280.0) >= 265.0 {
+            std::io::println("Flip!");
+            vel = raylib::Vector2(-vel.x, vel.y);
+        }
+
+        if absf(pos.y - 250.0) >= 235.0 {
+            vel = raylib::Vector2(vel.x, -vel.y);
+        }
 
         raylib::BeginDrawing();
         {

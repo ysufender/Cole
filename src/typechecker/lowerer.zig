@@ -435,16 +435,21 @@ fn loop(
     const conditionPtr = ast.extra[extraPtr];
     const cnd = try self.expression(conditionPtr, Comptime.Builtin.Type("bool"));
 
-    _ = try self.typechecker.builder.jump(cndLabel);
+    var loopData: [5]JIR.Ptr = undefined;
 
+    loopData[0] = try self.typechecker.builder.jump(cndLabel);
     const bodyPtr = ast.extra[extraPtr + 1];
     self.lastLoopDepth = self.scopes.index;
     const start = try self.typechecker.builder.label(startLabel);
-    _ = try self.statement(bodyPtr);
-    _ = try self.typechecker.builder.label(cndLabel);
-    _ = try self.typechecker.builder.cjump(startLabel, cnd);
+    loopData[1] = start;
+    loopData[2] = try self.statement(bodyPtr);
+    loopData[3] = try self.typechecker.builder.label(cndLabel);
+    loopData[4] = try self.typechecker.builder.cjump(startLabel, cnd);
 
-    return start;
+    return self.typechecker.builder.scope(
+        try self.typechecker.executer.generateRandomName(.Block),
+        &loopData,
+    );
 }
 
 fn conditional(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.AST) Error!JIR.Ptr {
@@ -473,24 +478,32 @@ fn conditional(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.A
         if (ast.extra[extraPtr + 2] == 1) ast.extra[extraPtr + 3]
         else null;
 
+    var data: [6]JIR.Ptr = undefined;
+
     const start = try self.typechecker.builder.cjump(
         if (maybeElse) |_| elseLabel else finallyLabel,
         cnd
     );
+    data[0] = start;
 
     const body = ast.extra[extraPtr + 1];
-    _ = try self.statement(body);
+    data[1] = try self.statement(body);
 
-    _ = try self.typechecker.builder.jump(finallyLabel);
+    data[2] = try self.typechecker.builder.jump(finallyLabel);
 
     if (maybeElse) |elseBranch| {
-        _ = try self.typechecker.builder.label(elseLabel);
-        _ = try self.statement(elseBranch);
+        data[3] = try self.typechecker.builder.label(elseLabel);
+        data[4] = try self.statement(elseBranch);
+        data[5] = try self.typechecker.builder.label(finallyLabel);
+    }
+    else {
+        data[3] = try self.typechecker.builder.label(finallyLabel);
     }
 
-    _ = try self.typechecker.builder.label(finallyLabel);
-
-    return start;
+    return self.typechecker.builder.scope(
+        try self.typechecker.executer.generateRandomName(.Block),
+        if (maybeElse) |_| data[0..6] else data[0..4]
+    );
 }
 
 fn expressionStmt(self: *Lowerer, expr: defines.ExpressionPtr) Error!JIR.Ptr {
