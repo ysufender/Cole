@@ -1,1 +1,3 @@
 The Bool fix solves only a part of the bug. Various Values in castValue have the same problem. Fix it sometime.
+
+Example: [in comptime](https://codeberg.org/ysufender/JASL/src/commit/1cd1137a4e9aa10f9e7090b95727c58494ac9281/src/typechecker/comptime.zig#L1856)
