@@ -110,7 +110,7 @@ pub const Function = struct {
     name: defines.StringPtr,
     signature: TypeID,
     args: []const defines.StringPtr,
-    body: JIR.Ptr,
+    body: defines.Range,
 };
 
 const JIR = @This();
@@ -414,20 +414,22 @@ fn sourceGen(self: *JIR, out: *Writer) Error!void {
         const node = self.nodes.get(@intCast(keyNode));
         switch (node.type) {
             .VariableDef => if (self.data[node.value] == 1) {
-                try self.operation(out, keyNode);
+                _ = try self.operation(out, keyNode);
             },
-            .FunctionDef => try self.operation(out, keyNode),
+            .FunctionDef => _ = try self.operation(out, keyNode),
             else => { },
         }
     }
 }
 
-fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
+fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!Ptr {
     const node = self.nodes.get(nodePtr);
+    var lastOp: defines.Offset = nodePtr;
 
     try switch (node.type) {
         .TypeDef => { },
         .FunctionDef => {
+            lastOp += 2;
             const name = self.strings[self.data[node.value]];
             const func = self.functions.get(self.data[node.value + 1]);
             const typeInfo = self.types.get(func.signature).Function;
@@ -450,7 +452,13 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
                 args
             });
             
-            try self.operation(out, func.body);
+            var ptr = func.body.start;
+            while (ptr < func.body.end) {
+                if (self.isStmt(self.nodes.get(@intCast(ptr)))) {
+                    lastOp = try self.operation(out, @intCast(ptr));
+                    ptr = lastOp;
+                }
+            }
         },
         .VariableDef => {
             const typeID = self.data[node.value + 1];
@@ -472,65 +480,65 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
             }
 
             if (self.data[node.value + 3] == 0) {
-                try self.operation(out, self.data[node.value + 4]);
+                lastOp = try self.operation(out, self.data[node.value + 4]);
                 try self.write(out, ";\n", .{ });
+            }
+            else {
+                lastOp += 4;
             }
         },
         .Identifier => try self.write(out, "{s}", .{self.strings[node.value]}),
         .Literal => self.literal(out, node.value),
         .Scope => {
             try self.writeln(out, "{{\n{s}: (void)(0);\n", .{
-                self.strings[self.data[node.value]],
+                self.strings[node.value],
             });
             self.indent += 1;
-
-            for (0..self.data[node.value + 1]) |idx| {
-                try self.operation(out, self.data[node.value + 2 + idx]);
-            }
-
-            self.indent -= 1;
-
-            try self.writeln(out, "\n}}\n", .{ });
         },
 
-        .Exit => common.debug.ShouldBeImpossible(self.context.log, @src()),
+        .Exit => {
+            self.indent -= 1;
+            try self.writeln(out, "}}\n\n", .{});
+        },
 
-        .Add => try self.commonBinary(out, node.value, "+"),
-        .Sub => try self.commonBinary(out, node.value, "-"),
-        .And => try self.commonBinary(out, node.value, "&&"),
-        .Div => try self.commonBinary(out, node.value, "/"),
-        .Mul => try self.commonBinary(out, node.value, "*"),
-        .Or => try self.commonBinary(out, node.value, "||"),
-        .Xor => try self.commonBinary(out, node.value, "^"),
-        .LeftShift => try self.commonBinary(out, node.value, "<<"),
-        .RightShift => try self.commonBinary(out, node.value, ">>"),
-        .Lesser => try self.commonBinary(out, node.value, "<"),
-        .LesserEqual => try self.commonBinary(out, node.value, "<="),
-        .Greater => try self.commonBinary(out, node.value, ">"),
-        .GreaterEqual => try self.commonBinary(out, node.value, ">="),
-        .Equal => try self.commonBinary(out, node.value, "=="),
-        .NotEqual => try self.commonBinary(out, node.value, "!="),
-        .BitwiseAnd => try self.commonBinary(out, node.value, "&"),
-        .BitwiseOr => try self.commonBinary(out, node.value, "|"),
+        .Add => return self.commonBinary(out, node.value, "+"),
+        .Sub => return self.commonBinary(out, node.value, "-"),
+        .And => return self.commonBinary(out, node.value, "&&"),
+        .Div => return self.commonBinary(out, node.value, "/"),
+        .Mul => return self.commonBinary(out, node.value, "*"),
+        .Or => return self.commonBinary(out, node.value, "||"),
+        .Xor => return self.commonBinary(out, node.value, "^"),
+        .LeftShift => return self.commonBinary(out, node.value, "<<"),
+        .RightShift => return self.commonBinary(out, node.value, ">>"),
+        .Lesser => return self.commonBinary(out, node.value, "<"),
+        .LesserEqual => return self.commonBinary(out, node.value, "<="),
+        .Greater => return self.commonBinary(out, node.value, ">"),
+        .GreaterEqual => return self.commonBinary(out, node.value, ">="),
+        .Equal => return self.commonBinary(out, node.value, "=="),
+        .NotEqual => return self.commonBinary(out, node.value, "!="),
+        .BitwiseAnd => return self.commonBinary(out, node.value, "&"),
+        .BitwiseOr => return self.commonBinary(out, node.value, "|"),
 
         .Label => try self.writeln(out, "{s}: (void)(0);\n", .{self.strings[node.value]}),
         .Jump => try self.writeln(out, "goto {s};\n", .{self.strings[node.value]}),
         .JumpIf => {
             try self.writeln(out, "if (", .{});
-            try self.operation(out, self.data[node.value + 1]);
+            _ = try self.operation(out, self.data[node.value + 1]);
             try self.write(out, ") goto {s};\n", .{self.strings[self.data[node.value]]});
+            lastOp += 2;
         },
         .Return => {
             try self.writeln(out, "return ", .{});
-            try self.operation(out, node.value);
+            _ = try self.operation(out, node.value);
             try self.write(out, ";\n", .{});
         },
         .Ternary => {
-            try self.operation(out, self.data[node.value]);
+            _ = try self.operation(out, self.data[node.value]);
             try self.write(out, " ? ", .{});
             try self.operation(out, self.data[node.value + 1]);
             try self.write(out, " : ", .{});
             try self.operation(out, self.data[node.value + 2]);
+            lastOp += 3;
         },
 
         .Reference => try self.commonSingle(out, node.value, "&"),
@@ -544,27 +552,35 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
             try self.write(out, " = ", .{});
             try self.operation(out, self.data[node.value + 1]);
             try self.write(out, ";\n", .{});
+            lastOp += 2;
         },
         .Dot => {
             try self.operation(out, self.data[node.value]);
             try self.write(out, ".{s}", .{
                 self.strings[self.data[node.value + 1]],
             });
+            lastOp += 2;
         },
         .Grouping => {
             try self.write(out, "(", .{});
-            for (0..self.data[node.value]) |idx| {
-                try self.operation(out, self.data[@intCast(node.value + 1 + idx)]);
+            var idx = self.data[node.value];
+            while (idx < self.data[node.value + 1]) {
+                idx = try self.operation(out, @intCast(idx));
                 if (idx == self.data[node.value + 1] - 1) {
                     continue;
                 }
                 try self.write(out, ", ", .{});
             }
             try self.write(out, ")", .{});
+
+            lastOp = idx;
         },
         .Call => {
             const func = self.data[node.value + 1];
-            const len = self.data[node.value + 2];
+            const range = defines.Range{
+                .start = self.data[node.value + 2],
+                .end = self.data[node.value + 3],
+            };
 
             if (self.data[node.value] == 1) {
                 try self.indentf(out);
@@ -572,8 +588,10 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
 
             try self.operation(out, func);
             try self.write(out, "(", .{});
-            for (0..len) |idx| {
-                try self.operation(out, self.data[@intCast(node.value + 3 + idx)]);
+
+            var idx = range.start;
+            while (idx < range.end) {
+                idx = try self.operation(out, @intCast(idx));
                 if (idx == self.data[node.value + 3] - 1) {
                     continue;
                 }
@@ -583,21 +601,30 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
                 if (self.data[node.value] == 1) ";\n"
                 else ""
             });
+
+            lastOp = idx;
         },
 
         .Construction => {
-            const typeToCtor = self.data[node.value];
-            const len = self.data[node.value + 1];
+            const func = self.data[node.value];
+            const range = defines.Range{
+                .start = self.data[node.value + 1],
+                .end = self.data[node.value + 2],
+            };
             try self.write(out, "({s}){{", .{
-                try self.getCName(typeToCtor, null, true),
+                try self.getCName(func, null, true),
             });
-            for (0..len) |idx| {
-                try self.operation(out, self.data[@intCast(node.value + 2 + idx)]);
-                if (idx != len - 1) {
+
+            var idx = range.start;
+            while (idx < range.end) {
+                if (idx != range.start) {
                     try self.write(out, ", ", .{});
                 }
+                idx = try self.operation(out, @intCast(idx));
             }
             try self.write(out, "}}", .{});
+
+            lastOp = idx;
         },
 
         .Code => {
@@ -607,6 +634,8 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
             });
         },
     };
+
+    return lastOp;
 }
 
 fn commonSingle(self: *JIR, out: *Writer, ptr: Ptr, comptime op: []const u8) Error!void {
@@ -615,12 +644,14 @@ fn commonSingle(self: *JIR, out: *Writer, ptr: Ptr, comptime op: []const u8) Err
     try self.write(out, ")", .{});
 }
 
-fn commonBinary(self: *JIR, out: *Writer, ptr: Ptr, comptime op: []const u8) Error!void {
+fn commonBinary(self: *JIR, out: *Writer, ptr: Ptr, comptime op: []const u8) Error!Ptr {
     try self.write(out, "(", .{});
-    try self.operation(out, self.data[ptr]);
+    _ = try self.operation(out, self.data[ptr]);
     try self.write(out, " "++op++" ", .{});
-    try self.operation(out, self.data[ptr + 1]);
+    _ = try self.operation(out, self.data[ptr + 1]);
     try self.write(out, ")", .{});
+
+    return Ptr + 2;
 }
 
 fn literal(self: *JIR, out: *Writer, ptr: Constant.Ptr) Error!void {
@@ -681,7 +712,7 @@ fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool
     switch (typeInfo) {
         .Type, .Any, .EnumLiteral => {
             common.log.err("Unsupported {s}", .{@tagName(typeInfo)});
-            return common.debug.ShouldBeImpossible(self.context.log, @src());
+            return common.debug.ShouldBeImpossible(@src());
         },
 
         .Void => return "void",

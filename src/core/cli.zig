@@ -51,6 +51,9 @@ const flags = std.StaticStringMap(Flags).initComptime(&(.{
 
     .{ "--allow-recursion", .Flag },
 
+    .{ "--supress-warnings", .Flag },
+    .{ "-s", .Flag },
+
 } ++ if (common.debug.isDebug) .{
 
     .{ "--print-ast", .Flag },

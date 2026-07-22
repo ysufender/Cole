@@ -142,9 +142,34 @@ pub inline fn assignment(self: *Builder, decl: JIR.Ptr, expr: JIR.Ptr) Error!JIR
 pub inline fn jump(self: *Builder, lbl: StringPtr) Error!JIR.Ptr { return self.commonSingle(.Jump, lbl); }
 pub inline fn cjump(self: *Builder, lbl: StringPtr, cnd: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.JumpIf, lbl, cnd); }
 pub inline fn exit(self: *Builder) Error!JIR.Ptr { return self.commonSingle(.Exit, 0); }
-pub inline fn scope(self: *Builder, name: StringPtr) Error!JIR.Ptr { return self.commonSingle(.Scope, name); }
 
-pub inline fn construct(self: *Builder, typeID: TypeID, start: JIR.Ptr, end: JIR.Ptr) Error!JIR.Ptr { return self.commonTernary(.Construction, typeID, start, end); }
+pub inline fn scope(self: *Builder, name: defines.StringPtr, args: []const JIR.Ptr) Error!JIR.Ptr {
+    const start: u32 = @intCast(self.data.items.len);
+    self.data.append(self.allocator, name) catch return Error.AllocatorFailure;
+    self.data.append(self.allocator, @intCast(args.len)) catch return Error.AllocatorFailure;
+    self.data.appendSlice(self.allocator, args) catch return Error.AllocatorFailure;
+
+    const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
+    self.nodes.set(res, .{
+        .type = .Scope,
+        .value = start,
+    });
+    return res;
+}
+
+pub inline fn construct(self: *Builder, typeID: TypeID, args: []const JIR.Ptr) Error!JIR.Ptr {
+    const start: u32 = @intCast(self.data.items.len);
+    self.data.append(self.allocator, typeID) catch return Error.AllocatorFailure;
+    self.data.append(self.allocator, @intCast(args.len)) catch return Error.AllocatorFailure;
+    self.data.appendSlice(self.allocator, args) catch return Error.AllocatorFailure;
+
+    const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
+    self.nodes.set(res, .{
+        .type = .Construction,
+        .value = start,
+    });
+    return res;
+}
 
 pub inline fn identifier(self: *Builder, decl: defines.StringPtr) Error!JIR.Ptr { return self.commonSingle(.Identifier, decl); }
 pub inline fn inlineC(self: *Builder, code: defines.StringPtr) Error!JIR.Ptr { return self.commonSingle(.Code, code); }
@@ -174,16 +199,28 @@ pub inline fn bitwiseOr(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Pt
 pub inline fn bitwiseAnd(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.BitwiseAnd, lhs, rhs); }
 pub inline fn not(self: *Builder, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonSingle(.Not, rhs); }
 pub inline fn negate(self: *Builder, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonSingle(.Negation, rhs); }
-pub inline fn grouping(self: *Builder, exprStart: JIR.Ptr, exprEnd: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.Grouping, exprStart, exprEnd); }
+
+pub inline fn grouping(self: *Builder, args: []const JIR.Ptr) Error!JIR.Ptr {
+    const start: u32 = @intCast(self.data.items.len);
+    self.data.append(self.allocator, @intCast(args.len)) catch return Error.AllocatorFailure;
+    self.data.appendSlice(self.allocator, args) catch return Error.AllocatorFailure;
+
+    const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
+    self.nodes.set(res, .{
+        .type = .Grouping,
+        .value = start,
+    });
+    return res;
+}
 
 pub inline fn ternary(self: *Builder, cnd: JIR.Ptr, then: JIR.Ptr, otherwise: JIR.Ptr) Error!JIR.Ptr { return self.commonTernary(.Ternary, cnd, then, otherwise); }
 
-pub inline fn call(self: *Builder, stmt: bool, expr: JIR.Ptr, args: defines.Range) Error!JIR.Ptr {
+pub inline fn call(self: *Builder, stmt: bool, expr: JIR.Ptr, args: []const JIR.Ptr) Error!JIR.Ptr {
     const start: u32 = @intCast(self.data.items.len);
     self.data.append(self.allocator, @intFromBool(stmt)) catch return Error.AllocatorFailure;
     self.data.append(self.allocator, expr) catch return Error.AllocatorFailure;
-    self.data.append(self.allocator, args.start) catch return Error.AllocatorFailure;
-    self.data.append(self.allocator, args.end) catch return Error.AllocatorFailure;
+    self.data.append(self.allocator, @intCast(args.len)) catch return Error.AllocatorFailure;
+    self.data.appendSlice(self.allocator, args) catch return Error.AllocatorFailure;
 
     const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
     self.nodes.set(res, .{

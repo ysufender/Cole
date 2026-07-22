@@ -275,7 +275,7 @@ fn evalFunction(self: *Comptime, exprPtr: defines.ExpressionPtr, extraPtr: defin
     self.typechecker.currentScope = self.typechecker.symbols.tryGetDecl(.{
         .file = self.typechecker.currentFile,
         .expr = exprPtr
-    }) orelse return common.debug.ShouldBeImpossible(@src());
+    }) orelse return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
     defer self.typechecker.currentScope = prev;
 
     const pc = self.typechecker.setFlag(.CoveredAllPaths, false);
@@ -373,18 +373,18 @@ fn evalLambda(self: *Comptime, exprPtr: defines.ExpressionPtr, extraPtr: defines
                 .result = expected.argTypes[index - paramsRange.start],
             }) catch return Error.AllocatorFailure;
         }
-        else return common.debug.ShouldBeImpossible(@src());
+        else return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
     }
 
-    const declPtr = self.typechecker.callstack.peek() orelse return common.debug.ShouldBeImpossible(@src());
-    const declStatus = self.typechecker.lookup.getPtr(declPtr) orelse return common.debug.ShouldBeImpossible(@src());
+    const declPtr = self.typechecker.callstack.peek() orelse return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
+    const declStatus = self.typechecker.lookup.getPtr(declPtr) orelse return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
 
     // @Beware TODO: May cause strange bugs, properly design sometime.
     if (self.typechecker.context.settings.hasFlag("--allow-recursion")) {
         if (declStatus.status == .InProgress) {
             declStatus.* = .{
                 .status = .Checked,
-                .result = maybeExpected orelse return common.debug.ShouldBeImpossible(@src()),
+                .result = maybeExpected orelse return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
             };
         }
     }
@@ -410,11 +410,8 @@ fn evalLambda(self: *Comptime, exprPtr: defines.ExpressionPtr, extraPtr: defines
     const retExpr = try self.typechecker.lowerer.expression(ast.extra[extraPtr + 2], expected.returnType);
     const retStmt = try self.typechecker.builder.@"return"(retExpr);
     const functionDef = JIR.Function{
-        .signature = maybeExpected orelse return common.debug.ShouldBeImpossible(@src()),
-        .body = .{
-            .start = retStmt,
-            .end = retStmt + 1,
-        },
+        .signature = maybeExpected orelse return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
+        .body = retStmt,
         .name = try self.generateRandomName(.Function),
         .args = argNames,
     };
@@ -457,7 +454,7 @@ pub fn evalDot(self: *Comptime, extraPtr: defines.OpaquePtr) Error!Value.Ptr {
                     .To = slice.To,
                 },
             })
-            else common.debug.ShouldBeImpossible(@src()),
+            else common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
         .Struct => |str| str.Fields.at(try self.typechecker.fieldIndex(str.Type, try self.typechecker.builder.internString(member))),
         .Union => |uni| {
             const index = try self.typechecker.fieldIndex(uni.Type, try self.typechecker.builder.internString(member));
@@ -476,7 +473,7 @@ pub fn evalDot(self: *Comptime, extraPtr: defines.OpaquePtr) Error!Value.Ptr {
 
             return uni.Value;
         },
-        else => common.debug.ShouldBeImpossible(@src()),
+        else => common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
     };
 }
 
@@ -532,7 +529,7 @@ pub fn evalSlicing(self: *Comptime, extraPtr: defines.OpaquePtr) Error!Value.Ptr
                 .To = ptr.To,
             },
         }).Slice,
-        else => return common.debug.ShouldBeImpossible(@src()),
+        else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
     };
 
     if (startIndex >= self.memory.items.len or endIndex > self.memory.items.len) {
@@ -616,7 +613,7 @@ pub fn evalBinary(self: *Comptime, extraPtr: defines.OpaquePtr) Error!Value.Ptr 
                     .Pipe => lhs | rhs,
                     .Xor => lhs ^ rhs,
                     .Ampersand => lhs & rhs,
-                    else => return common.debug.ShouldBeImpossible(@src()),
+                    else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
                 },
             });
         },
@@ -630,7 +627,7 @@ pub fn evalBinary(self: *Comptime, extraPtr: defines.OpaquePtr) Error!Value.Ptr 
                 .Bool = multiplier and switch (lhs) {
                     .Int => lhs.Int > rhs.Int,
                     .Float => lhs.Float > rhs.Float,
-                    else => return common.debug.ShouldBeImpossible(@src()),
+                    else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
                 }
             });
         },
@@ -644,7 +641,7 @@ pub fn evalBinary(self: *Comptime, extraPtr: defines.OpaquePtr) Error!Value.Ptr 
                 .Bool = multiplier and switch (lhs) {
                     .Int => lhs.Int < rhs.Int,
                     .Float => lhs.Float < rhs.Float,
-                    else => return common.debug.ShouldBeImpossible(@src()),
+                    else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
                 }
             });
 
@@ -657,12 +654,12 @@ pub fn evalBinary(self: *Comptime, extraPtr: defines.OpaquePtr) Error!Value.Ptr 
                 .Plus => switch (lhs) {
                     .Int => .{ .Int = lhs.Int + rhs.Int },
                     .Float => .{ .Float = lhs.Float + rhs.Float },
-                    else => return common.debug.ShouldBeImpossible(@src()),
+                    else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
                 },
                 .Minus => switch (lhs) {
                     .Int => .{ .Int = lhs.Int - rhs.Int },
                     .Float => .{ .Float = lhs.Float - rhs.Float },
-                    else => return common.debug.ShouldBeImpossible(@src()),
+                    else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
                 },
                 .Slash => switch (lhs) {
                     .Int => .{
@@ -685,17 +682,17 @@ pub fn evalBinary(self: *Comptime, extraPtr: defines.OpaquePtr) Error!Value.Ptr 
                             break :blk lhs.Float / rhs.Float;
                         }
                     },
-                    else => return common.debug.ShouldBeImpossible(@src()),
+                    else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
                 },
                 .Star => switch (lhs) {
                     .Int => .{ .Int = lhs.Int * rhs.Int },
                     .Float => .{ .Float = lhs.Float * rhs.Float },
-                    else => return common.debug.ShouldBeImpossible(@src()),
+                    else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
                 },
-                else => return common.debug.ShouldBeImpossible(@src()),
+                else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
             });
         },
-        else => return common.debug.ShouldBeImpossible(@src()),
+        else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
     }
 }
 
@@ -711,11 +708,11 @@ pub fn evalUnary(self: *Comptime, extraPtr: defines.OpaquePtr) Error!Value.Ptr {
         .Minus => switch (rhs) {
             .Float => |float| self.setValue(rhsPtr, .{ .Float = -float }),
             .Int => |int| self.setValue(rhsPtr, .{ .Int = -int }),
-            else => return common.debug.ShouldBeImpossible(@src()),
+            else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
         },
         .Tilde => self.setValue(rhsPtr, .{ .Int = ~rhs.Int }),
         .Bang => self.setValue(rhsPtr, .{ .Bool = !rhs.Bool }),
-        else => return common.debug.ShouldBeImpossible(@src()),
+        else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
     }
 
     return rhsPtr;
@@ -751,7 +748,7 @@ fn evalSwitchExpression(self: *Comptime, extraPtr: defines.OpaquePtr, maybeExpec
 
                 const captureCount = ast.extra[case + 1];
                 if (captureCount > 1) {
-                    return common.debug.ShouldBeImpossible(@src());
+                    return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
                 }
                 else if (captureCount > 0) {
                     const firstCapture = ast.extra[case + 2];
@@ -765,7 +762,7 @@ fn evalSwitchExpression(self: *Comptime, extraPtr: defines.OpaquePtr, maybeExpec
                 return self.expectDefined(ast.extra[case + 3], resultType);
             }
 
-            return common.debug.ShouldBeImpossible(@src());
+            return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
         },
         .Union => |uni| {
             const cases = defines.Range{
@@ -790,7 +787,7 @@ fn evalSwitchExpression(self: *Comptime, extraPtr: defines.OpaquePtr, maybeExpec
 
                 const captureCount = ast.extra[case + 1];
                 if (captureCount > 1) {
-                    return common.debug.ShouldBeImpossible(@src());
+                    return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
                 }
                 else if (captureCount > 0) {
                     const firstCapture = ast.extra[case + 2];
@@ -804,9 +801,9 @@ fn evalSwitchExpression(self: *Comptime, extraPtr: defines.OpaquePtr, maybeExpec
                 return self.expectDefined(ast.extra[case + 3], resultType);
             }
 
-            return common.debug.ShouldBeImpossible(@src());
+            return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
         },
-        else => return common.debug.ShouldBeImpossible(@src()),
+        else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
     }
 }
 
@@ -863,7 +860,7 @@ fn evalDecl(self: *Comptime, declPtr: defines.DeclPtr, maybeExpected: ?TypeID) E
         else Error.ComptimeNotPossible,
         else => |t| {
             self.report("{s} declaration is not implemented.", .{@tagName(t)});
-            return common.debug.NotImplemented(@src());
+            return common.debug.NotImplemented(self.typechecker.context.log, @src());
         },
     };
 }
@@ -972,7 +969,7 @@ fn evalLiteral(self: *Comptime, tokenPtr: defines.TokenPtr, maybeExpected: ?Type
                 });
                 return Error.InferenceError;
             },
-        else => return common.debug.ShouldBeImpossible(@src()),
+        else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
     };
 
     return self.appendValue(value);
@@ -1463,7 +1460,7 @@ pub fn constructFromList(self: *Comptime, typeID: TypeID, _range: defines.Range)
         .Type, .Function,
         .Bool, .Float, .Integer,
         .ComptimeInt, .ComptimeFloat => self.expectDefined(ast.extra[range.at(0)], typeID),
-        else => common.debug.ShouldBeImpossible(@src())
+        else => common.debug.ShouldBeImpossible(self.typechecker.context.log, @src())
     };
 }
 
@@ -1583,7 +1580,7 @@ fn evalScoping(self: *Comptime, expr: defines.ExpressionPtr) Error!Value.Ptr {
     return self.evalDecl(self.typechecker.symbols.lookup.get(.{
         .scope = scope,
         .name = member,
-    }) orelse return common.debug.ShouldBeImpossible(@src()), null);
+    }) orelse return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()), null);
 }
 
 fn evalCall(self: *Comptime, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID) Error!Value.Ptr {
@@ -1615,12 +1612,12 @@ fn evalCall(self: *Comptime, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID
             id,
         ),
         .Function => |func| func,
-        else => return common.debug.ShouldBeImpossible(@src()),
+        else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
     };
 
     _ = function;
     self.report("Comptime function calls are not (yet) supported.", .{});
-    return common.debug.NotImplemented(@src());
+    return common.debug.NotImplemented(self.typechecker.context.log, @src());
 }
 
 fn evalIndexing(self: *Comptime, extraPtr: defines.OpaquePtr) Error!Value.Ptr {
@@ -1659,7 +1656,7 @@ fn evalIndexing(self: *Comptime, extraPtr: defines.OpaquePtr) Error!Value.Ptr {
             }
             else return @intCast(ptr.To + index.Int),
         else => {
-            return common.debug.ShouldBeImpossible(@src());
+            return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
         },
     };
 
@@ -1694,14 +1691,14 @@ fn evalIndexing(self: *Comptime, extraPtr: defines.OpaquePtr) Error!Value.Ptr {
                     },
                 });
             },
-            else => common.debug.ShouldBeImpossible(@src()),
+            else => common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
         }
         else switch (slice) {
             .String => |s| self.appendValue(.{
                 .Int = s[@intCast(index.Int)],
             }),
             .Slice => slice.Slice.at(@intCast(index.Int)),
-            else => common.debug.ShouldBeImpossible(@src()),
+            else => common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
         };
 }
 
@@ -2042,7 +2039,7 @@ pub const Builtin = struct {
             }
         }
 
-        common.debug.ShouldBeImpossible(@src()) catch unreachable;
+        unreachable;
     }
 
     pub fn Metadata(metadata: []const u8) ?defines.Offset {

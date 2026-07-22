@@ -40,7 +40,7 @@ pub fn topLevelDeclaration(self: *Lowerer, ptr: defines.DeclPtr, decl: *const De
     // prevent ODR violations.
 
     const status = self.typechecker.lookup.get(ptr)
-        orelse return common.debug.ShouldBeImpossible(@src());
+        orelse return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
 
     assert(status.status == .Checked);
 
@@ -54,7 +54,7 @@ pub fn topLevelDeclaration(self: *Lowerer, ptr: defines.DeclPtr, decl: *const De
             }
 
             const typeDefPtr = self.typechecker.executer.expectType(decl.node)
-                catch return common.debug.ShouldBeImpossible(@src());
+                catch return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
             const typeDef = self.typechecker.executer.getValue(typeDefPtr).Type;
             const info = self.typechecker.typeTable.get(typeDef);
             if (info == .Union and info.Union.isTagged) {
@@ -93,7 +93,7 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
             } },
             else => |t| {
                 common.log.err("Integer with size: {d}", .{t});
-                return common.debug.ShouldBeImpossible(@src());
+                return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
             },
         },
         .Float => |val| .{ .Float = val },
@@ -147,7 +147,7 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
             const child = switch (ofType) {
                 .Array => |arr| arr.child,
                 .Pointer => |ptr| ptr.child,
-                else => return common.debug.ShouldBeImpossible(@src()),
+                else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
             };
 
             for (0..slice.Size) |index| {
@@ -184,7 +184,7 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
 
                         break :pointer .{ .Pointer = try self.typechecker.builder.addConstant(implicitArray) };
                     },
-                    else => return common.debug.ShouldBeImpossible(@src()),
+                    else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
             };
         },
         .Pointer => |ptr| blk: {
@@ -215,12 +215,12 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
             var stderr = _stderr.interface;
             common.debug.stackTrace(@frameAddress(), &stderr);
 
-            return common.debug.ShouldBeImpossible(@src());
+            return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
         },
         .Function => |func| .{
             .Function = func.name,
         },
-        .Type => return common.debug.ShouldBeImpossible(@src()),
+        .Type => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
     });
 }
 
@@ -233,7 +233,7 @@ fn unwindDefers(self: *Lowerer, upTo: u32) Error!?defines.Range {
     for (0..upTo) |_| {
         const deferCount = tmpScopes.pop() orelse 0;
         for (0..deferCount) |_| {
-            const stmtPtr = tmpDefers.pop() orelse return common.debug.ShouldBeImpossible(@src());
+            const stmtPtr = tmpDefers.pop() orelse return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
             const stmtRange = try self.statement(stmtPtr);
 
             range =
@@ -255,40 +255,27 @@ fn unwindDefers(self: *Lowerer, upTo: u32) Error!?defines.Range {
 // Statement
 //
 
-pub fn statement(self: *Lowerer, statementPtr: defines.StatementPtr) Error!defines.Range {
+pub fn statement(self: *Lowerer, statementPtr: defines.StatementPtr) Error!JIR.Ptr {
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
 
     const stmt = ast.statements.get(statementPtr);
-    const node: defines.Range = switch (stmt.type) {
+    const node: JIR.Ptr = switch (stmt.type) {
         .Block => try self.block(stmt.value),
         .Expression =>
             if (ast.expressions.items(.type)[stmt.value] == .Assignment) try self.assignment(ast.expressions.items(.value)[stmt.value])
-            else {
-                const res = try self.call(true, stmt.value, ast.expressions.get(stmt.value).value, try self.typechecker.typecheckExpression(stmt.value, null));
-                return .{
-                    .start = res,
-                    .end = res + 1,
-                };
-            },
+            else try self.call(true, stmt.value, ast.expressions.get(stmt.value).value, try self.typechecker.typecheckExpression(stmt.value, null)),
         .Conditional => try self.conditional(stmt.value, ast),
         .While => try self.loop(.While, stmt.value, ast),
         .Return => try self.@"return"(try self.expression(stmt.value, try self.typechecker.typecheckExpression(stmt.value, null))),
         .Break => try self.@"break"(),
         .Continue => try self.@"continue"(),
-        .Discard => blk: {
-            const start = try self.expression(stmt.value, try self.typechecker.typecheckExpression(stmt.value, null));
-
-            break :blk .{
-                .start = start,
-                .end = start + 1,
-            };
-        },
+        .Discard => try self.expression(stmt.value, try self.typechecker.typecheckExpression(stmt.value, null)),
         .VariableDefinition => try self.variableDef(stmt.value),
-        .Import => return common.debug.ShouldBeImpossible(@src()),
+        .Import => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
 
         .Defer => try self.@"defer"(stmt.value),
 
-        .For => return common.debug.ShouldBeImpossible(@src()),
+        .For => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
 
         .InlineC => try self.inlineC(stmt.value),
 
@@ -296,14 +283,14 @@ pub fn statement(self: *Lowerer, statementPtr: defines.StatementPtr) Error!defin
             self.report("Statement '{s}' is not implemented.", .{
                 @tagName(t),
             });
-            return common.debug.NotImplemented(@src());
+            return common.debug.NotImplemented(self.typechecker.context.log, @src());
         },
     };
 
     return node;
 }
 
-fn inlineC(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!defines.Range {
+fn inlineC(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
     const src = self.typechecker.context.getFile(ast.tokens);
 
@@ -313,13 +300,10 @@ fn inlineC(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!defines.Range {
 
     const res = try self.typechecker.builder.inlineC(code);
 
-    return .{
-        .start = res,
-        .end = res + 1,
-    };
+    return res; 
 }
 
-fn assignment(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!defines.Range {
+fn assignment(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
 
     const vexpr = ast.extra[extraPtr];
@@ -333,13 +317,10 @@ fn assignment(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!defines.Range {
     const rhs = try self.expression(rexpr, vt);
 
     const res = try self.typechecker.builder.assignment(expr, rhs);
-    return .{
-        .start = res,
-        .end = res + 1,
-    };
+    return res; 
 }
 
-fn variableDef(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!defines.Range {
+fn variableDef(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
 
     const declPtr = ast.extra[extraPtr + 2];
@@ -355,10 +336,7 @@ fn variableDef(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!defines.Range 
                 try self.typechecker.executer.eval(decl.node, null),
             ).Type,
         );
-        return .{
-            .start = vdef,
-            .end = vdef + 1,
-        };
+        return vdef;
     }
 
     const node =
@@ -374,26 +352,20 @@ fn variableDef(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!defines.Range 
         node,
         self.typechecker,
     );
-    return .{
-        .start = def,
-        .end = def + 1,
-    };
+    return def; 
 }
 
-fn @"defer"(self: *Lowerer, stmtPtr: defines.StatementPtr) Error!defines.Range {
+fn @"defer"(self: *Lowerer, stmtPtr: defines.StatementPtr) Error!JIR.Ptr {
     const deferCount = self.scopes.pop() orelse {
         self.report("Defer statement outisde deferrable scope.", .{});
         return Error.DeferOutsideDeferrableScope;
     };
     try self.scopes.push(deferCount + 1);
     try self.defers.push(stmtPtr);
-    return .{
-        .start = 0,
-        .end = 0,
-    };
+    return 0;
 }
 
-fn @"continue"(self: *Lowerer) Error!defines.Range {
+fn @"continue"(self: *Lowerer) Error!JIR.Ptr {
     const startLabel = std.fmt.allocPrint(
         self.typechecker.arena.allocator(),
         "{s}_Start", .{
@@ -401,24 +373,16 @@ fn @"continue"(self: *Lowerer) Error!defines.Range {
         },
     ) catch return Error.AllocatorFailure;
 
-    const start = try self.unwindDefers(self.scopes.index - self.lastLoopDepth);
+    // _ = try self.unwindDefers(self.scopes.index - self.lastLoopDepth);
 
     const end = try self.typechecker.builder.jump(
         try self.typechecker.builder.internString(startLabel),
     );
 
-    return
-        if (start) |sr| .{
-            .start = sr.start,
-            .end = end,
-        }
-        else .{
-            .start = end,
-            .end = end + 1,
-        };
+    return end;
 }
 
-fn @"break"(self: *Lowerer) Error!defines.Range {
+fn @"break"(self: *Lowerer) Error!JIR.Ptr {
     const endLabel = std.fmt.allocPrint(
         self.typechecker.arena.allocator(),
         "{s}_End", .{
@@ -426,21 +390,13 @@ fn @"break"(self: *Lowerer) Error!defines.Range {
         },
     ) catch return Error.AllocatorFailure;
 
-    const start = try self.unwindDefers(self.scopes.index - self.lastLoopDepth);
+    // const start = try self.unwindDefers(self.scopes.index - self.lastLoopDepth);
 
     const end = try self.typechecker.builder.jump(
         try self.typechecker.builder.internString(endLabel),
     );
 
-    return
-        if (start) |sr| .{
-            .start = sr.start,
-            .end = end,
-        }
-        else .{
-            .start = end,
-            .end = end + 1,
-        };
+    return end;
 }
 
 fn loop(
@@ -451,8 +407,8 @@ fn loop(
     },
     extraPtr: defines.OpaquePtr,
     ast: *const Parser.AST,
-) Error!defines.Range {
-    if (loopType == .For) return common.debug.ShouldBeImpossible(@src());
+) Error!JIR.Ptr {
+    if (loopType == .For) return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
 
     const loopLabel = try self.typechecker.executer.generateRandomNameString(.Loop);
     self.lastLoop = loopLabel;
@@ -486,15 +442,12 @@ fn loop(
     const start = try self.typechecker.builder.label(startLabel);
     _ = try self.statement(bodyPtr);
     _ = try self.typechecker.builder.label(cndLabel);
-    const end = try self.typechecker.builder.cjump(startLabel, cnd);
+    _ = try self.typechecker.builder.cjump(startLabel, cnd);
 
-    return .{
-        .start = start,
-        .end = end + 1,
-    };
+    return start;
 }
 
-fn conditional(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.AST) Error!defines.Range {
+fn conditional(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.AST) Error!JIR.Ptr {
     const conditionExpr = ast.extra[extraPtr];
 
     if (self.typechecker.executer.attemptEval(conditionExpr, null)) |comptimeConditionPtr| {
@@ -508,11 +461,7 @@ fn conditional(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.A
             return self.statement(ast.extra[extraPtr + 3]);
         }
 
-        const start = self.typechecker.builder.nodes.len;
-        return .{
-            .start = start,
-            .end = start + 1,
-        };
+        return self.typechecker.builder.nodes.len;
     }
 
     const elseLabel = try self.typechecker.executer.generateRandomName(.Else);
@@ -529,46 +478,34 @@ fn conditional(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.A
         cnd
     );
 
-    const end = blk: {
-        const body = ast.extra[extraPtr + 1];
-        _ = try self.statement(body);
+    const body = ast.extra[extraPtr + 1];
+    _ = try self.statement(body);
 
-        _ = try self.typechecker.builder.jump(finallyLabel);
+    _ = try self.typechecker.builder.jump(finallyLabel);
 
-        if (maybeElse) |elseBranch| {
-            _ = try self.typechecker.builder.label(elseLabel);
-            _ = try self.statement(elseBranch);
-        }
+    if (maybeElse) |elseBranch| {
+        _ = try self.typechecker.builder.label(elseLabel);
+        _ = try self.statement(elseBranch);
+    }
 
-        break :blk try self.typechecker.builder.label(finallyLabel);
-    };
+    _ = try self.typechecker.builder.label(finallyLabel);
 
-    return .{
-        .start = start,
-        .end = end + 1,
-    };
+    return start;
 }
 
-fn expressionStmt(self: *Lowerer, expr: defines.ExpressionPtr) Error!defines.Range {
+fn expressionStmt(self: *Lowerer, expr: defines.ExpressionPtr) Error!JIR.Ptr {
     const exprType = self.typechecker.typecheckExpression(expr, null)
-        catch return common.debug.ShouldBeImpossible(@src());
-    const res = try self.expression(expr, exprType);
-    return .{
-        .start = res,
-        .end = res + 1,
-    };
+        catch return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
+    return self.expression(expr, exprType);
 }
 
-fn @"return"(self: *Lowerer, expr: JIR.Ptr) Error!defines.Range {
-    const end = try self.unwindDefers(self.scopes.index);
+fn @"return"(self: *Lowerer, expr: JIR.Ptr) Error!JIR.Ptr {
+    // const end = try self.unwindDefers(self.scopes.index);
     const start = try self.typechecker.builder.@"return"(expr);
-    return .{
-        .start = start,
-        .end = if (end) |er| er.end else start + 1,
-    };
+    return start;
 }
 
-fn block(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!defines.Range {
+fn block(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
 
     const statements = defines.Range{
@@ -578,30 +515,34 @@ fn block(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!defines.Range {
 
     try self.scopes.push(0);
 
-    const start = try self.typechecker.builder.scope(
-        try self.typechecker.executer.generateRandomName(.Block),
-    );
+    _ = self.typechecker.builder.data.addOne(self.typechecker.builder.allocator)
+        catch return Error.AllocatorFailure;
 
-    for (statements.start..statements.end) |stmt| {
-        _ = try self.statement(ast.extra[@intCast(stmt)]);
+    // const start = try self.typechecker.builder.scope(
+    //    try self.typechecker.executer.generateRandomName(.Block),
+    // );
+
+    const stmts = self.typechecker.builder.allocator.alloc(JIR.Ptr, statements.len())
+        catch return Error.AllocatorFailure;
+
+    for (statements.start..statements.end, 0..) |stmt, i| {
+        stmts[i] = try self.statement(ast.extra[@intCast(stmt)]);
     }
 
     const deferCount = self.scopes.pop() orelse 0;
     for (0..deferCount) |_| {
         const stmtPtr = self.defers.pop()
-            orelse return common.debug.ShouldBeImpossible(@src());
+            orelse return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
 
         if (!self.typechecker.getFlag(.CoveredAllPaths)) {
             _ = try self.statement(stmtPtr);
         }
     }
 
-    const end = try self.typechecker.builder.exit();
-
-    return .{
-        .start = start,
-        .end = end + 1,
-    };
+    return self.typechecker.builder.scope(
+        try self.typechecker.executer.generateRandomName(.Block),
+        stmts,
+    );
 }
 
 
@@ -626,7 +567,7 @@ pub fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID
         .FunctionType, .ArrayType,
         .CPointerType, .MutableType, .PointerType,
         .Lambda, .FunctionDefinition,
-        .SliceType, .Scoping => common.debug.ShouldBeImpossible(@src()),
+        .SliceType, .Scoping => common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
 
         .Assignment => {
             self.report(
@@ -637,7 +578,7 @@ pub fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID
                 ++ "matter. I won't even give a stacktrace for you to debug.",
                 .{}
             );
-            return common.debug.ShouldBeImpossible(@src());
+            return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
         },
 
         .Binary => self.binary(expr.value, ofType),
@@ -651,7 +592,7 @@ pub fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID
 
         .Switch, .Slicing => |t| {
             self.report("'{s}' lowering is not implemented.", .{@tagName(t)});
-            return common.debug.NotImplemented(@src());
+            return common.debug.NotImplemented(self.typechecker.context.log, @src());
         },
     };
 }
@@ -673,23 +614,12 @@ fn call(
         .end = ast.extra[argsList.value + 1],
     };
 
-    var res: ?defines.Range = null;
+    const args = self.typechecker.builder.allocator.alloc(JIR.Ptr, argsRange.len())
+        catch return Error.AllocatorFailure;
 
-    for (argsRange.start..argsRange.end) |ptr| {
-        const expr = try self.expression(ast.extra[@intCast(ptr)], try self.typechecker.typecheckExpression(ast.extra[@intCast(ptr)], null));
-
-        res =
-            if (res) |rr| .{
-                .start = rr.start,
-                .end = expr + 1,
-            }
-            else .{
-                .start = expr,
-                .end = expr + 1,
-            };
+    for (argsRange.start..argsRange.end, 0..) |ptr, i| {
+        args[i] = try self.expression(ast.extra[@intCast(ptr)], try self.typechecker.typecheckExpression(ast.extra[@intCast(ptr)], null));
     }
-
-    const rres = res orelse defines.Range{ .start = 0, .end = 0 };
 
     const funcType = try self.typechecker.typecheckExpression(func, null);
 
@@ -698,16 +628,16 @@ fn call(
             const typeID = self.typechecker.executer.getValue(
                 try self.typechecker.executer.expectType(func),
             ).Type;
-            break :blk self.typechecker.builder.construct(typeID, rres.start, rres.end);
+            break :blk self.typechecker.builder.construct(typeID, args);
         },
         .Function => |fnc|
             if (fnc.isComptime) self.literal(exprPtr, ofType)
             else self.typechecker.builder.call(
                 stmt,
                 try self.expression(func, funcType),
-                rres
+                args
             ),
-        else => common.debug.ShouldBeImpossible(@src()),
+        else => common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
     };
 }
 
@@ -719,25 +649,15 @@ fn expressionList(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
         .end = ast.extra[extraPtr + 1],
     };
 
-    var res: ?defines.Range = null;
+    const exs = self.typechecker.builder.allocator.alloc(JIR.Ptr, exprs.len())
+        catch return Error.AllocatorFailure;
 
-    for (exprs.start..exprs.end) |exprPtr| {
+    for (exprs.start..exprs.end, 0..) |exprPtr, i| {
         const t = try self.typechecker.typecheckExpression(ast.extra[@intCast(exprPtr)], null);
-        const expr = try self.expression(ast.extra[@intCast(exprPtr)], t);
-
-        res =
-            if (res) |rr| .{
-                .start = rr.start,
-                .end = expr + 1,
-            }
-            else .{
-                .start = expr,
-                .end = expr + 1,
-            };
+        exs[i] = try self.expression(ast.extra[@intCast(exprPtr)], t);
     }
 
-    const rres = res orelse defines.Range{ .start = 0, .end = 0 };
-    return self.typechecker.builder.grouping(rres.start, rres.end);
+    return self.typechecker.builder.grouping(exs);
 }
 
 fn indexing(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
@@ -755,7 +675,7 @@ fn indexing(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
             },
             else => try self.expression(exprPtr, typeID),
         },
-        else => return common.debug.ShouldBeImpossible(@src()),
+        else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
     };
 
     const indexPtr = ast.extra[extraPtr + 1];
@@ -806,7 +726,7 @@ fn unary(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR.
         .Bang => self.typechecker.builder.not(rhs),
         .Minus => self.typechecker.builder.negate(rhs),
         .Tilde => self.typechecker.builder.invert(rhs),
-        else => common.debug.ShouldBeImpossible(@src()),
+        else => common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
     };
 }
 
@@ -834,7 +754,7 @@ fn binary(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR
         .Or => self.typechecker.builder.@"or"(lhs, rhs),
         .Pipe => self.typechecker.builder.bitwiseOr(lhs, rhs),
         .Ampersand => self.typechecker.builder.bitwiseAnd(lhs, rhs),
-        else => common.debug.ShouldBeImpossible(@src()),
+        else => common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
     };
 }
 

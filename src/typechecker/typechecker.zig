@@ -217,7 +217,7 @@ pub fn typecheckStatement(self: *Typechecker, statementPtr: defines.StatementPtr
         .Switch => self.typecheckSwitchStatement(stmt.value, expected),
         .While => self.typecheckWhileStatement(stmt.value, expected),
         .Break, .Continue => self.typecheckLoopControl(stmt.value),
-        .Import => common.debug.ShouldBeImpossible(@src()),
+        .Import => common.debug.ShouldBeImpossible(self.context.log, @src()),
         .Defer => self.typecheckDefer(stmt.value),
         .VariableDefinition => try self.typecheckVarDefStatement(stmt.value),
         .InlineC => { }, // @Note allow direct C code insertion
@@ -225,7 +225,7 @@ pub fn typecheckStatement(self: *Typechecker, statementPtr: defines.StatementPtr
             self.report("Typechecking of '{s}' statements is not implemented.", .{
                 @tagName(t),
             });
-            return common.debug.NotImplemented(@src());
+            return common.debug.NotImplemented(self.context.log, @src());
         },
     };
 }
@@ -273,7 +273,7 @@ fn typecheckVariableDef(
                         .Struct => |str| str.name,
                         .Enum => |enm| enm.name,
                         .Union => |uni| uni.name,
-                        else => return common.debug.ShouldBeImpossible(@src()),
+                        else => return common.debug.ShouldBeImpossible(self.context.log, @src()),
                     });
                 }
                 else if (decl.topLevel) self.modules.modules.get(self.modules.modules.len - self.currentFile - 1).name
@@ -330,7 +330,7 @@ fn typecheckVariableDef(
                 .Struct => |str| str.definitions,
                 .Enum => |enm| enm.definitions,
                 .Union => |uni| uni.definitions,
-                else => return common.debug.ShouldBeImpossible(@src()),
+                else => return common.debug.ShouldBeImpossible(self.context.log, @src()),
             });
 
             for (defs, 0..) |def, idx| {
@@ -350,12 +350,12 @@ fn typecheckVariableDef(
                 const scope = self.symbols.resolutionMap.get(.{
                     .file = self.currentFile,
                     .expr = self.unwrapMark(decl.node),
-                }) orelse return common.debug.ShouldBeImpossible(@src());
+                }) orelse return common.debug.ShouldBeImpossible(self.context.log, @src());
 
                 const rres = self.symbols.lookup.fetchRemove(.{
                     .scope = scope,
                     .name = self.builder.getInternedString(def.name),
-                }) orelse return common.debug.ShouldBeImpossible(@src());
+                }) orelse return common.debug.ShouldBeImpossible(self.context.log, @src());
 
                 self.symbols.lookup.putAssumeCapacityNoClobber(.{
                     .scope = scope,
@@ -484,7 +484,7 @@ fn typecheckSwitchStatement(self: *Typechecker, extraPtr: defines.OpaquePtr, exp
     return switch (itemType) {
         .Enum => |enm| self.typecheckSwitchStatementOnEnum(ast, itemTypeID, &enm, range, expected),
         .Union => |uni| self.typecheckSwitchStatementOnUnion(ast, itemTypeID, &uni, range, expected),
-        else => return common.debug.ShouldBeImpossible(@src()),
+        else => return common.debug.ShouldBeImpossible(self.context.log, @src()),
     };
 }
 
@@ -503,7 +503,7 @@ fn typecheckSwitchStatementOnUnion(
     const tag = self.typeTable.get(uni.tag).Enum;
 
     var fieldMap = std.DynamicBitSet.initEmpty(bufferAllocator.allocator(), tag.fields.len)
-        catch return common.debug.ShouldBeImpossible(@src());
+        catch return common.debug.ShouldBeImpossible(self.context.log, @src());
 
     var case = range.start;
     while (case < range.end) : (case += 4) {
@@ -566,7 +566,7 @@ fn typecheckSwitchStatementOnUnion(
 
             const field = try self.builder.internString(fieldName);
             const captureType = uni.fields[
-                self.fieldIndex(itemTypeID, field) catch return common.debug.ShouldBeImpossible(@src())
+                self.fieldIndex(itemTypeID, field) catch return common.debug.ShouldBeImpossible(self.context.log, @src())
             ].valueType;
 
             self.lookup.putNoClobber(self.arena.allocator(), captureDecl, .{
@@ -610,7 +610,7 @@ fn typecheckSwitchStatementOnEnum(
     var bufferAllocator = std.heap.FixedBufferAllocator.init(@ptrCast(&fieldBuffer));
 
     var fieldMap = std.DynamicBitSet.initEmpty(bufferAllocator.allocator(), enm.fields.len)
-        catch return common.debug.ShouldBeImpossible(@src());
+        catch return common.debug.ShouldBeImpossible(self.context.log, @src());
 
     var case = range.start;
     while (case < range.end) : (case += 4) {
@@ -906,7 +906,7 @@ pub fn typecheckIfExpression(self: *Typechecker, extraPtr: defines.OpaquePtr, ma
         return Error.DivergingBranches;
     }
 
-    return self.coerce(thenBranch, elseBranch) catch common.debug.ShouldBeImpossible(@src());
+    return self.coerce(thenBranch, elseBranch) catch common.debug.ShouldBeImpossible(self.context.log, @src());
 }
 
 pub fn typecheckValue(self: *Typechecker, val: Comptime.Value.Ptr, maybeExpected: ?TypeID) Error!TypeID {
@@ -1007,7 +1007,7 @@ pub fn typecheckExpressionListRange(self: *Typechecker, range: defines.Range, ex
 
             try self.typecheckGeneralInitialization(ast, expected, range);
         },
-        else => return common.debug.ShouldBeImpossible(@src()),
+        else => return common.debug.ShouldBeImpossible(self.context.log, @src()),
     }
 
     return expected;
@@ -1180,7 +1180,7 @@ pub fn typecheckScoping(self: *Typechecker, expr: defines.ExpressionPtr) Error!T
                 .Struct => |str| str.name,
                 .Union => |str| str.name,
                 .Enum => |str| str.name,
-                else => return common.debug.NotImplemented(@src()),
+                else => return common.debug.NotImplemented(self.context.log, @src()),
             }),
             member
     }) catch return Error.AllocatorFailure;
@@ -1206,7 +1206,7 @@ pub fn typecheckScoping(self: *Typechecker, expr: defines.ExpressionPtr) Error!T
             defs = uni.definitions;
             scope = uni.scope;
         },
-        else => return common.debug.NotImplemented(@src()),
+        else => return common.debug.NotImplemented(self.context.log, @src()),
     }
 
     const index = try self.definitionIndex(lhsTypeID, try self.builder.internString(member));
@@ -1228,7 +1228,7 @@ pub fn discoverScopeDef(
     const decl = self.symbols.lookup.get(.{
         .scope = scope,
         .name = self.builder.getInternedString(member.name),
-    }) orelse return common.debug.ShouldBeImpossible(@src());
+    }) orelse return common.debug.ShouldBeImpossible(self.context.log, @src());
 
     self.symbols.resolutionMap.put(self.arena.allocator(), .{
         .file = self.currentFile,
@@ -1283,7 +1283,7 @@ pub fn discoverScopeDef(
                 },
             });
         },
-        else => return common.debug.ShouldBeImpossible(@src()),
+        else => return common.debug.ShouldBeImpossible(self.context.log, @src()),
     }
 
     return discoveredType;
@@ -1439,7 +1439,7 @@ pub fn typecheckCast(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpec
             Error.MismatchingSliceChildType => self.report("Cast from slice type '{s}' to '{s}' will alter the length of the slice.", rargs),
             Error.InferenceError => self.report("Illegal cast from '{s}' to unknown type '{s}'.", rargs),
             Error.RedundantCast => self.report("Redundant cast from type '{s}' to '{s}'.", rargs),
-            else => return common.debug.ShouldBeImpossible(@src()),
+            else => return common.debug.ShouldBeImpossible(self.context.log, @src()),
         }
 
         return err;
@@ -1549,7 +1549,7 @@ pub fn typecheckIndexing(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!
             const child = switch (maybeIndexable) {
                 .Array => |arr| arr.child,
                 .Pointer => |ptr| ptr.child,
-                else => break :blk common.debug.ShouldBeImpossible(@src()),
+                else => break :blk common.debug.ShouldBeImpossible(self.context.log, @src()),
             };
 
             const newPointer = TypeInfo{
@@ -1565,7 +1565,7 @@ pub fn typecheckIndexing(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!
         else switch (maybeIndexable) {
             .Array => |arr| arr.child,
             .Pointer => |ptr| ptr.child,
-            else => common.debug.ShouldBeImpossible(@src()),
+            else => common.debug.ShouldBeImpossible(self.context.log, @src()),
         };
 }
 
@@ -1651,7 +1651,7 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
             self.report("Operations on namespaces are not allowed.", .{});
             return Error.NamespaceAsValue;
         },
-        .Builtin, .Capture => return common.debug.ShouldBeImpossible(@src()),
+        .Builtin, .Capture => return common.debug.ShouldBeImpossible(self.context.log, @src()),
         .Parameter => self.typecheckParameter(&decl),
         else => {
             self.report("{s} is not implemented.", .{@tagName(decl.kind)});
@@ -1778,7 +1778,7 @@ pub fn typecheckDot(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!TypeI
             break :blk uni.fields;
         },
         .Struct => |str| str.fields,
-        else => return common.debug.ShouldBeImpossible(@src()),
+        else => return common.debug.ShouldBeImpossible(self.context.log, @src()),
     };
 
     return fields[index].valueType;
@@ -1993,7 +1993,7 @@ pub fn typecheckBinary(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!Ty
             break :res self.coerce(lhs, rhs);
         },
 
-        else => common.debug.ShouldBeImpossible(@src()),
+        else => common.debug.ShouldBeImpossible(self.context.log, @src()),
     };
 }
 
@@ -2046,7 +2046,7 @@ pub fn typecheckUnary(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!Typ
                 return Error.BitwiseOnUnsupportedType;
             },
         },
-        else => common.debug.ShouldBeImpossible(@src()),
+        else => common.debug.ShouldBeImpossible(self.context.log, @src()),
     };
 }
 
@@ -2081,7 +2081,7 @@ pub fn typecheckSwitchExpression(self: *Typechecker, extraPtr: defines.OpaquePtr
     return switch (itemType) {
         .Enum => |enm| self.typecheckSwitchOnEnum(ast, itemTypeID, &enm, range, maybeExpected),
         .Union => |uni| self.typecheckSwitchOnUnion(ast, itemTypeID, &uni, range, maybeExpected),
-        else => return common.debug.ShouldBeImpossible(@src()),
+        else => return common.debug.ShouldBeImpossible(self.context.log, @src()),
     };
 }
 
@@ -2100,7 +2100,7 @@ fn typecheckSwitchOnUnion(
     const tag = self.typeTable.get(uni.tag).Enum;
 
     var fieldMap = std.DynamicBitSet.initEmpty(bufferAllocator.allocator(), tag.fields.len)
-        catch return common.debug.ShouldBeImpossible(@src());
+        catch return common.debug.ShouldBeImpossible(self.context.log, @src());
 
     var expected: ?TypeID = determineExpected(maybeExpected);
     var case = range.start;
@@ -2164,7 +2164,7 @@ fn typecheckSwitchOnUnion(
 
             const field = try self.builder.internString(fieldName);
             const captureType = uni.fields[
-                self.fieldIndex(itemTypeID, field) catch return common.debug.ShouldBeImpossible(@src())
+                self.fieldIndex(itemTypeID, field) catch return common.debug.ShouldBeImpossible(self.context.log, @src())
             ].valueType;
 
             self.lookup.putNoClobber(self.arena.allocator(), captureDecl, .{
@@ -2205,7 +2205,7 @@ fn typecheckSwitchOnUnion(
         return Error.UnhandledSwitchCases;
     }
 
-    return expected orelse common.debug.ShouldBeImpossible(@src());
+    return expected orelse common.debug.ShouldBeImpossible(self.context.log, @src());
 }
 
 fn typecheckSwitchOnEnum(
@@ -2221,7 +2221,7 @@ fn typecheckSwitchOnEnum(
     var bufferAllocator = std.heap.FixedBufferAllocator.init(@ptrCast(&fieldBuffer));
 
     var fieldMap = std.DynamicBitSet.initEmpty(bufferAllocator.allocator(), enm.fields.len)
-        catch return common.debug.ShouldBeImpossible(@src());
+        catch return common.debug.ShouldBeImpossible(self.context.log, @src());
 
     var expected: ?TypeID = determineExpected(maybeExpected);
     var case = range.start;
@@ -2317,7 +2317,7 @@ fn typecheckSwitchOnEnum(
         return Error.UnhandledSwitchCases;
     }
 
-    return expected orelse common.debug.ShouldBeImpossible(@src());
+    return expected orelse common.debug.ShouldBeImpossible(self.context.log, @src());
 }
 
 pub fn registerType(self: *Typechecker, newType: TypeInfo) Error!TypeID {
@@ -2502,7 +2502,7 @@ pub fn assertStructurallyIdentical(self: *const Typechecker, this: TypeID, that:
                 }
             }
         },
-        else => return common.debug.ShouldBeImpossible(@src()),
+        else => return common.debug.ShouldBeImpossible(self.context.log, @src()),
     }
 }
 
@@ -2551,7 +2551,7 @@ pub fn assertCanCoerce(self: *const Typechecker, this: TypeID, that: TypeID) Err
                     .Struct => .{ thisType.Struct.name, thatType.Struct.name },
                     .Union => .{ thisType.Union.name, thatType.Union.name },
                     .Enum => .{ thisType.Enum.name, thatType.Enum.name },
-                    else => return common.debug.ShouldBeImpossible(@src()),
+                    else => return common.debug.ShouldBeImpossible(self.context.log, @src()),
                 };
                 try functional.throwIf(names.@"0" != names.@"1", Error.TypeMismatch);
             },

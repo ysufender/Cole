@@ -21,3 +21,4 @@
         --backend                   : Specify a backend for the codegen. Available options are:
                                         c.
         --backend-options, -B <opt> : Options to pass to backend.
+        --supress-warnings, -s      : Do not print warning messages to stdout.

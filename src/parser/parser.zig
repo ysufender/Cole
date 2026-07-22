@@ -295,7 +295,7 @@ fn statement(self: *Parser) StatementResult {
             return error.InvalidToken;
         },
         // .Defer => self.deferStatement(),
-        .Defer => return common.debug.NotImplemented(@src()),
+        .Defer => return common.debug.NotImplemented(self.context.log, @src()),
         else => self.expressionStmt(),
     };
 }
@@ -460,7 +460,7 @@ fn loopStatement(self: *Parser, loopToken: Lexer.TokenType) StatementResult {
         .type = switch (loopToken) {
             .For => {
                 self.report("For loop is not implemented.", .{});
-                return common.debug.NotImplemented(@src());
+                return common.debug.NotImplemented(self.context.log, @src());
             },
             .While => .While,
             else => unreachable,
@@ -983,30 +983,36 @@ fn function(self: *Parser) ExpressionResult {
             return expr;
         },
         .Pipe => {
-            const paramsStart = self.scratch.items.len;
-            while (!self.check(.Pipe)) {
-                self.scratch.append(self.allocator(), self.advance()) catch return error.AllocatorFailure;
-                if (!self.match(&.{.Comma})) break;
+            self.report("Lambda functions are not (yet) supported.", .{});
+
+            if (false) {
+                const paramsStart = self.scratch.items.len;
+                while (!self.check(.Pipe)) {
+                    self.scratch.append(self.allocator(), self.advance()) catch return error.AllocatorFailure;
+                    if (!self.match(&.{.Comma})) break;
+                }
+                _ = try self.consume(.Pipe, error.MissingParenthesis, "Expected closing pipe '|' after capture list.");
+                const params = try self.commitScratch(paramsStart);
+
+                const body = try self.ifExpression();
+
+                const start: defines.OpaquePtr = @intCast(self.extra.items.len);
+                self.extra.append(self.allocator(), params.start) catch return error.AllocatorFailure;
+                self.extra.append(self.allocator(), params.end) catch return error.AllocatorFailure;
+                self.extra.append(self.allocator(), body) catch return error.AllocatorFailure;
+
+                self.stats.functions += 1;
+
+                const expr = try self.alloc(Expression);
+                self.expressionMap.set(expr, .{
+                    .type = .Lambda,
+                    .value = start,
+                });
+
+                return expr;
             }
-            _ = try self.consume(.Pipe, error.MissingParenthesis, "Expected closing pipe '|' after capture list.");
-            const params = try self.commitScratch(paramsStart);
 
-            const body = try self.ifExpression();
-
-            const start: defines.OpaquePtr = @intCast(self.extra.items.len);
-            self.extra.append(self.allocator(), params.start) catch return error.AllocatorFailure;
-            self.extra.append(self.allocator(), params.end) catch return error.AllocatorFailure;
-            self.extra.append(self.allocator(), body) catch return error.AllocatorFailure;
-
-            self.stats.functions += 1;
-
-            const expr = try self.alloc(Expression);
-            self.expressionMap.set(expr, .{
-                .type = .Lambda,
-                .value = start,
-            });
-
-            return expr;
+            return Error.NotImplemented;
         },
         else => {
             self.report("Expected a parameter list or lambda capture.", .{});

@@ -37,6 +37,6 @@ pub fn setFlag(self: *Self, flag: []const u8) Error!void {
     }
 }
 
-pub fn hasFlag(self: *Self, flag: []const u8) bool {
+pub fn hasFlag(self: *const Self, flag: []const u8) bool {
     return self.flags.contains(flag);
 }

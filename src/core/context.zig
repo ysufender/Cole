@@ -2,7 +2,7 @@ const std = @import("std");
 const defines = @import("defines.zig");
 const collections = @import("../util/collections.zig");
 const cli = @import("cli.zig");
-const log = @import("log.zig");
+const Log = @import("log.zig");
 
 const Error = @import("common.zig").CompilerError;
 const Lexer = @import("../lexer/lexer.zig");
@@ -71,6 +71,7 @@ io: std.Io,
 counts: Counts,
 
 settings: CompilerSettings,
+log: Log = undefined,
 
 pub fn init(baseAllocator: std.mem.Allocator, mainInit: std.process.Init) Error!Context {
     var arena = std.heap.ArenaAllocator.init(baseAllocator);
@@ -80,7 +81,7 @@ pub fn init(baseAllocator: std.mem.Allocator, mainInit: std.process.Init) Error!
 
     const settings = cli.parseCLI(allocator, mainInit.minimal.args, mainInit.io) catch |err| {
         if (err != error.Terminate) {
-            log.err("Couldn't parse CLI input.", .{});
+            Log.err("Couldn't parse CLI input.", .{});
         }
         return err;
     };
@@ -117,21 +118,21 @@ pub fn openRead(self: *Context, file: []const u8) Error!defines.FilePtr {
     self.filenameMap.append(self.arena.allocator(), path) catch return error.AllocatorFailure;
 
     var sourceFile = std.Io.Dir.openFileAbsolute(self.io, path, .{ }) catch {
-        log.err("Couldn't open source file '{s}'.", .{file});
+        Log.err("Couldn't open source file '{s}'.", .{file});
         return error.IOError;
     };
     defer sourceFile.close(self.io);
 
     var fileReader = sourceFile.reader(self.io, &.{});
     const sourceSize = fileReader.getSize() catch {
-        log.err("Couldn't get the size of file {s}", .{path});
+        Log.err("Couldn't get the size of file {s}", .{path});
         return error.IOError;
     };
 
     self.fileMap.append(
         self.arena.allocator(),
         fileReader.interface.readAlloc(self.arena.allocator(), sourceSize) catch |err| {
-            log.err("Couldn't read file {s}\n\tInfo: {s}", .{path, @errorName(err)});
+            Log.err("Couldn't read file {s}\n\tInfo: {s}", .{path, @errorName(err)});
             return error.IOError;
         }
     ) catch return error.AllocatorFailure;
@@ -147,7 +148,7 @@ pub fn openRead(self: *Context, file: []const u8) Error!defines.FilePtr {
 
 pub fn openWrite(self: *Context, file: []const u8) Error!std.fs.File {
     return std.Io.Dir.createFileAbsolute(self.io, file, .{ .truncate = true }) catch {
-        log.err("Couldn't open target file {s}", .{file});
+        Log.err("Couldn't open target file {s}", .{file});
         return error.IOError;
     };
 }
@@ -250,17 +251,17 @@ pub fn getFileId(self: *Context, file: []const u8) defines.FilePtr {
 }
 
 pub fn stats(self: *Context) void {
-    log.info("Stats:", .{});
-    log.info("\tTotal Module Count:              {d}", .{self.counts.modules});
-    log.info("\tTotal Top-Level Signature Count: {d}", .{self.counts.topLevels});
-    log.info("\tTotal Tokens:                    {d}", .{self.counts.tokens});
-    log.info("\tTotal Expressions:               {d}", .{self.counts.expressions});
-    log.info("\tTotal Extras:                    {d}", .{self.counts.extras});
-    log.info("", .{});
+    Log.info("Stats:", .{});
+    Log.info("\tTotal Module Count:              {d}", .{self.counts.modules});
+    Log.info("\tTotal Top-Level Signature Count: {d}", .{self.counts.topLevels});
+    Log.info("\tTotal Tokens:                    {d}", .{self.counts.tokens});
+    Log.info("\tTotal Expressions:               {d}", .{self.counts.expressions});
+    Log.info("\tTotal Extras:                    {d}", .{self.counts.extras});
+    Log.info("", .{});
 
-    log.info("\tProcessed Files:", .{});
+    Log.info("\tProcessed Files:", .{});
     for (self.filenameMap.items) |file| {
-        log.info("\t\t{s}", .{file});
+        Log.info("\t\t{s}", .{file});
     }
-    log.info("", .{});
+    Log.info("", .{});
 }

@@ -54,6 +54,7 @@ pub fn main(init: std.process.Init) void {
 fn innerMain(allocator: std.mem.Allocator, init: std.process.Init) common.CompilerError!void {
     // Init Context
     var context = try common.CompilerContext.init(allocator, init);
+    context.log.context = &context;
     errdefer context.deinit();
 
     var lexer = try Lexer.init(

@@ -2,14 +2,22 @@ const std = @import("std");
 const builtin = @import("builtin");
 const common = @import("common.zig");
 
+const Log = @This();
+
+context: *const common.CompilerContext,
+
+pub fn init(context: *const common.CompilerContext) Log {
+    return .{ .context = context };
+}
+
 pub fn info(comptime fmt: []const u8, args: anytype) void {
     if (!builtin.is_test) {
         std.log.info(fmt, args);
     }
 }
 
-pub fn warn(comptime fmt: []const u8, args: anytype) void {
-    if (!builtin.is_test) {
+pub fn warn(self: Log, comptime fmt: []const u8, args: anytype) void {
+    if (!builtin.is_test and !self.context.settings.hasFlag("--supress-warnings")) {
         std.log.warn(fmt, args);
     }
 }

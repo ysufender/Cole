@@ -3,8 +3,8 @@ const common = @This();
 const std = @import("std");
 const builtin = @import("builtin");
 const defines = @import("defines.zig");
-
 pub const log = @import("log.zig");
+
 pub const debug = @import("../debug/debug.zig");
 
 pub const CompilerContext = @import("context.zig");

@@ -486,7 +486,7 @@ fn resolveExpression(self: *Resolver, exprPtr: defines.ExpressionPtr) Error!void
                     ++ " Attempt to resolve identifier '{s}', multiple times.", .{
                     tokens.get(identifier).lexeme(self.context, ast.tokens)
                 });
-                return common.debug.ShouldBeImpossible(@src());
+                return common.debug.ShouldBeImpossible(self.context.log, @src());
             }
 
             status.value_ptr.* = decl;
@@ -941,7 +941,7 @@ fn resolveSignature(self: *Resolver, signaturePtr: defines.SignaturePtr, comptim
                     };
             }
         },
-        else => common.debug.ShouldBeImpossible(@src()),
+        else => common.debug.ShouldBeImpossible(self.context.log, @src()),
     }
 }
 
