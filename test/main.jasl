@@ -1,7 +1,13 @@
 import raylib;
 
+let Str = struct {
+    f: float,
+};
+
 let main = fn () -> i32 {
     raylib::InitWindow(500, 600, "Hello World");
+
+    let f: Str = (1.0);
 
     while !raylib::WindowShouldClose() {
     }

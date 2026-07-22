@@ -6,19 +6,19 @@ asm {
     #include "raylib.h"
 }
 
-pub let Vector2 = #(@extern) struct {
+pub let Vector2 = struct {
     pub x: float,
     pub y: float,
 };
 
-pub let Color = #(@extern) struct {
+pub let Color = struct {
     pub r: u8,
     pub g: u8,
     pub b: u8,
     pub a: u8,
 };
 
-pub let Rectangle = #(@extern) struct {
+pub let Rectangle = struct {
     x     : float,
     y     : float,
     width : float,
@@ -30,7 +30,7 @@ pub let InitWindow = fn (width: i32, height: i32, title: []u8) -> void {
 };
 
 pub let WindowShouldClose = fn () -> bool {
-    let res: mut bool = #(@noComptime) false;
+    let res: mut bool = undefined;
     asm { res = WindowShouldClose(); }
     return res;
 };

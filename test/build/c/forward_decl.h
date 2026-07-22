@@ -14,6 +14,10 @@ typedef struct { uint8_t* ptr; uint32_t len; } Slice_uint8_t;
 
 void raylib__InitWindow(int32_t const, int32_t const, Slice_uint8_t const);
 
+typedef struct {
+	float const f;
+} root__Str;
+
 jasl_bool const raylib__WindowShouldClose();
 
 void raylib__CloseWindow();

@@ -125,6 +125,17 @@ pub fn init(typechecker: *Typechecker, gpa: Allocator) Error!Comptime {
 }
 
 pub fn attemptEval(self: *Comptime, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeID) ?Value.Ptr {
+    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+    if (
+        self.getFlag(.ComptimeBanned)
+        or (
+            ast.expressions.get(exprPtr).type != .FunctionDefinition
+            and self.typechecker.hasMetadata(exprPtr, "@noComptime")
+        )
+    ) {
+        return null;
+    }
+
     const prev = self.typechecker.setFlag(.AttemptingEval, true);
     defer _ = self.typechecker.setFlag(.AttemptingEval, prev);
     return self.eval(exprPtr, maybeExpected) catch null;
@@ -137,8 +148,8 @@ pub fn eval(self: *Comptime, exprPtr: defines.ExpressionPtr, maybeExpected: ?Typ
 
     if (
         self.getFlag(.ComptimeBanned)
-        and (
-            ast.expressions.get(exprPtr).type == .FunctionDefinition
+        or (
+            ast.expressions.get(exprPtr).type != .FunctionDefinition
             and typechecker.hasMetadata(exprPtr, "@noComptime")
         )
     ) {
@@ -1853,15 +1864,16 @@ fn castValue(self: *Comptime, valuePtr: Value.Ptr, to: TypeID) Error!Value.Ptr {
             },
         },
         .Function => value,
-        .Float => |fromFloat| .{
-            .Int = @intFromFloat(fromFloat),
+        .Float => |fromFloat| switch (self.typechecker.typeTable.get(to)) {
+            .Integer => .{ .Int = @intFromFloat(fromFloat) },
+            else => value,
         },
         .Int => |fromInt| switch (self.typechecker.typeTable.get(to)) {
             .Integer => value,
             else => .{ .Float = @floatFromInt(fromInt) },
         },
         .Bool => |fromBool| switch (self.typechecker.typeTable.get(to)) {
-            .Bool => .{ .Bool = fromBool },
+            .Bool => value,
             else => .{ .Int = @intFromBool(fromBool) },
         },
         .Enum => |fromEnum| .{
