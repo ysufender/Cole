@@ -96,7 +96,7 @@ $$anon_Block_9944550705755129845: (void)(0);
 int32_t const root__main()
 {
 $$anon_Block_4907636064931205134: (void)(0);
-    raylib__InitWindow(600, 500, (Slice_uint8_t){(uint8_t*)"Hello World\0", 11}, );
+    raylib__InitWindow(600, 500, (Slice_uint8_t){(uint8_t*)"Hello World\0", 11});
     Vector2 pos = (Vector2){160, 160};
     Vector2 const vel = (Vector2){15, 16};
     $$anon_Loop_16745735485697338677_Start: (void)(0);

@@ -574,7 +574,7 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
             try self.write(out, "(", .{});
             for (0..len) |idx| {
                 try self.operation(out, self.data[@intCast(node.value + 3 + idx)]);
-                if (idx == self.data[node.value + 3] - 1) {
+                if (idx == len - 1) {
                     continue;
                 }
                 try self.write(out, ", ", .{});
