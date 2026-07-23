@@ -23,6 +23,35 @@ code {
     #include <stdio.h>
 }
 
+let FILE = #(@extern) struct { };
+
+pub let File = struct {
+
+    handle: *mut FILE,
+
+    pub let OpenMode = enum {
+        Read,
+        Write,
+        ReadWrite,
+    };
+
+    pub let open = fn (path: []u8, mode: OpenMode) -> File {
+        let file: mut *mut FILE = undefined;
+
+        if mode == @Read {
+            code { file = fopen(path.ptr, "r"); }
+        }
+        else if mode == @Write {
+            code { file = fopen(path.ptr, "w"); }
+        }
+        else {
+            code { file = fopen(path.ptr, "w+"); }
+        }
+
+        return File(file);
+    };
+};
+
 pub let println = fn (msg: []u8) -> void {
     code { printf("%s\n", msg.ptr); }
 };

@@ -88,26 +88,44 @@ fn addTargets(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
         const exe = b.addExecutable(.{
             .name = "jaslc",
             .version = version,
-            .root_module = b.createModule(
-                if (optimize == .Debug) .{
-                    .root_source_file = b.path("src/main.zig"),
-                    .target = target,
-                    .optimize = optimize,
-                    .link_libc  = target.result.os.tag == .windows,
-                    .error_tracing = true,
-                    .omit_frame_pointer = false,
-                }
-                else .{
-                    .root_source_file = b.path("src/main.zig"),
-                    .target = target,
-                    .optimize = optimize,
-                    .link_libc  = target.result.os.tag == .windows,
-                    .strip = true,
-                }
-            ),
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/main.zig"),
+                .target = target,
+                .optimize = optimize,
+                .strip = true,
+                .link_libc = true,
+            }),
         });
         exe.root_module.addEmbedPath(b.path(resourcePath));
         exe.root_module.addOptions("config", opts);
+        exe.root_module.addIncludePath(b.path("vendor/tinycc/"));
+        exe.root_module.addObjectFile(b.path("vendor/tinycc/libtcc.a"));
+
+        var vendor = std.Io.Dir.cwd().createFile(b.graph.io, "vendor/vendor.zig", .{ })
+            catch return;
+        vendor.writePositionalAll(b.graph.io,
+            \\pub const stdnoreturn = @embedFile("tinycc/include/stdnoreturn.h");
+            \\pub const stdalign = @embedFile("tinycc/include/stdalign.h");
+            \\pub const stdarg = @embedFile("tinycc/include/stdarg.h");
+            \\pub const stdatomic = @embedFile("tinycc/include/stdatomic.h");
+            \\pub const stdbool = @embedFile("tinycc/include/stdbool.h");
+            \\pub const stddef = @embedFile("tinycc/include/stddef.h");
+            \\pub const libtcc1 = @embedFile("tinycc/libtcc1.a");
+            ,0
+        ) catch return;
+        vendor.close(b.graph.io);
+
+        exe.root_module.addAnonymousImport("vendor", .{
+            .root_source_file = b.path("vendor/vendor.zig"),
+        });
+
+        const configure = b.addSystemCommand(&.{"./configure"});
+        configure.setCwd(b.path("vendor/tinycc"));
+
+        const make = b.addSystemCommand(&.{"make"});
+        make.setCwd(b.path("vendor/tinycc"));
+        make.step.dependOn(&configure.step);
+
         const install = b.addInstallArtifact(exe, .{
             .dest_dir = .{ .override = .{ .custom = b.pathJoin(&.{
                 targetName,
@@ -120,6 +138,9 @@ fn addTargets(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
             "Build for {s}",
             .{targetName},
         ) catch unreachable);
+
+        step.dependOn(&configure.step);
+        step.dependOn(&make.step);
         step.dependOn(&install.step);
         step.dependOn(b.getInstallStep());
     }

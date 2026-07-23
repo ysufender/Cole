@@ -199,8 +199,8 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
     \\ * by the JASL compiler.
     \\ */
     \\
-    \\#ifndef JASL_CODEGEN_C_FORWARD_DECLS_H
-    \\#define JASL_CODEGEN_C_FORWARD_DECLS_H
+    \\#ifndef JASL_CODEGEN_C_FORWARD_DECL_H
+    \\#define JASL_CODEGEN_C_FORWARD_DECL_H
     \\
     \\#include <stdint.h>
     \\
@@ -209,7 +209,7 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
     \\
     , .{});
     defer { 
-        self.write(out, "\n#endif /* JASL_CODEGEN_C_FORWARD_DECLS_H */\n" , .{}) catch common.log.err("Failed to end header.", .{});
+        self.write(out, "\n#endif /* JASL_CODEGEN_C_FORWARD_DECL_H */\n" , .{}) catch common.log.err("Failed to end header.", .{});
         out.flush() catch common.log.err("Failed to flush forward declarations.", .{});
     }
 
@@ -306,55 +306,74 @@ fn discoverFunctionsAndTypes(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void 
         },
         .TypeDef => {
             const typeID = node.value;
+
             const typeInfo = self.types.get(typeID);
 
             switch (typeInfo) {
                 .Struct => |str| {
-                    try self.write(out, "typedef struct {{\n", .{});
-                    for (str.fields) |field| {
-                        try self.write(out, "\t{s} {s};\n", .{
-                            try self.getCName(field.valueType, null, false),
-                            self.strings[field.name],
-                        });
-                    }
-                    const name = self.strings[str.name];
-                    _ = std.mem.replace(u8, name, ":", "_", @constCast(name));
-                    _ = std.mem.replace(u8, name, "$", "_", @constCast(name));
-                    try self.write(out, "}} {s};\n\n", .{name});
-                },
-
-                .Union => |uni|{
-                    if (uni.isTagged) {
+                    if (!typeInfo.isZeroBit()) {
                         try self.write(out, "typedef struct {{\n", .{});
-                        try self.write(out, "\t{s} {s};\n", .{
-                            try self.getCName(uni.fields[0].valueType, null, false),
-                            self.strings[uni.fields[0].name],
-                        });
-                        try self.write(out, "\tunion {{\n", .{});
-                        for (uni.fields[1..]) |field| {
-                            try self.write(out, "\t\t{s} {s};\n", .{
-                                try self.getCName(field.valueType, null, false),
-                                self.strings[field.name],
-                            });
-                        }
-                        try self.write(out, "\t}};\n", .{});
-                        const name = self.strings[uni.name];
-                        _ = std.mem.replace(u8, name, ":", "_", @constCast(name));
-                        _ = std.mem.replace(u8, name, "$", "_", @constCast(name));
-                        try self.write(out, "}} {s};\n\n", .{name});
-                    }
-                    else {
-                        try self.write(out, "typedef union {{\n", .{});
-                        for (uni.fields) |field| {
+                        for (str.fields) |field| {
                             try self.write(out, "\t{s} {s};\n", .{
                                 try self.getCName(field.valueType, null, false),
                                 self.strings[field.name],
                             });
                         }
+                    }
+                    const name = self.strings[str.name];
+                    _ = std.mem.replace(u8, name, ":", "_", @constCast(name));
+                    _ = std.mem.replace(u8, name, "$", "_", @constCast(name));
+                    try self.write(out, "{s} {s};\n\n", .{
+                        if (typeInfo.isZeroBit()) "typedef void"
+                        else "}",
+                        name
+                    });
+                },
+
+                .Union => |uni|{
+                    if (uni.isTagged) {
+                        if (!typeInfo.isZeroBit()) {
+                            try self.write(out, "typedef struct {{\n", .{});
+                            try self.write(out, "\t{s} {s};\n", .{
+                                try self.getCName(uni.fields[0].valueType, null, false),
+                                self.strings[uni.fields[0].name],
+                            });
+                            try self.write(out, "\tunion {{\n", .{});
+                            for (uni.fields[1..]) |field| {
+                                try self.write(out, "\t\t{s} {s};\n", .{
+                                    try self.getCName(field.valueType, null, false),
+                                    self.strings[field.name],
+                                });
+                            }
+                            try self.write(out, "\t}};\n", .{});
+                        }
                         const name = self.strings[uni.name];
                         _ = std.mem.replace(u8, name, ":", "_", @constCast(name));
                         _ = std.mem.replace(u8, name, "$", "_", @constCast(name));
-                        try self.write(out, "}} {s};\n\n", .{name});
+                        try self.write(out, "{s} {s};\n\n", .{
+                            if (typeInfo.isZeroBit()) "typedef void"
+                            else "}",
+                            name
+                        });
+                    }
+                    else {
+                        if (!typeInfo.isZeroBit()) {
+                            try self.write(out, "typedef union {{\n", .{});
+                            for (uni.fields) |field| {
+                                try self.write(out, "\t{s} {s};\n", .{
+                                    try self.getCName(field.valueType, null, false),
+                                    self.strings[field.name],
+                                });
+                            }
+                        }
+                        const name = self.strings[uni.name];
+                        _ = std.mem.replace(u8, name, ":", "_", @constCast(name));
+                        _ = std.mem.replace(u8, name, "$", "_", @constCast(name));
+                        try self.write(out, "{s} {s};\n\n", .{
+                            if (typeInfo.isZeroBit()) "typedef void"
+                            else "}",
+                            name
+                        });
                     }
                 },
 
@@ -362,14 +381,20 @@ fn discoverFunctionsAndTypes(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void 
                     const name = self.strings[enm.name];
                     _ = std.mem.replace(u8, name, ":", "_", @constCast(name));
                     _ = std.mem.replace(u8, name, "$", "_", @constCast(name));
-                    try self.write(out, "typedef enum {{\n", .{});
-                    for (enm.fields) |field| {
-                        try self.write(out, "\t{s}_{s},\n", .{
-                            name,
-                            field,
-                        });
+                    if (!typeInfo.isZeroBit()) {
+                        try self.write(out, "typedef enum __attribute__((aligned (sizeof(uint32_t)))) {{\n", .{});
+                        for (enm.fields) |field| {
+                            try self.write(out, "\t{s}_{s},\n", .{
+                                name,
+                                field,
+                            });
+                        }
                     }
-                    try self.write(out, "}} {s};\n\n", .{name});
+                    try self.write(out, "{s} {s};\n\n", .{
+                        if (typeInfo.isZeroBit()) "typedef void"
+                        else "}",
+                        name
+                    });
                 },
 
                 // @Note type constants are already folded
@@ -662,7 +687,7 @@ fn literal(self: *JIR, out: *Writer, ptr: Constant.Ptr) Error!void {
         .String => |str| {
             const rstr = self.strings[str];
             try self.write(out, "({s}){{(uint8_t*)\"{s}\\0\", {d}}}", .{
-                try self.getCName(Comptime.Builtin.Type("string"), null, true),
+                try self.getCName(Comptime.Builtin.Type("[]u8"), null, true),
                 rstr,
                 rstr.len,
             });

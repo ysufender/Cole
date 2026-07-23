@@ -943,7 +943,7 @@ pub fn typecheckValue(self: *Typechecker, val: Comptime.Value.Ptr, maybeExpected
         .Void => Comptime.Builtin.Type("void"),
         .Undefined => |undef| undef,
         .Slice => |slice| slice.Type,
-        .String => Comptime.Builtin.Type("string"),
+        .String => Comptime.Builtin.Type("[]u8"),
     });
 }
 
@@ -1077,10 +1077,10 @@ fn typecheckStructInitialization(self: *Typechecker, ast: *const Parser.AST, str
 
     for (str.fields, 0..) |field, index| {
         const initializerType =
-            if (field.isComptime) try self.typecheckValue(try self.executer.eval(
+            if (false and field.isComptime) try self.typecheckValue(try self.executer.eval(
                 ast.extra[range.at(@intCast(index))],
                 field.valueType,
-            ), null)
+            ), field.valueType)
             else try self.typecheckExpression(
                 ast.extra[range.at(@intCast(index))],
                 field.valueType,
@@ -1162,7 +1162,7 @@ fn typecheckUnionInitialization(self: *Typechecker, ast: *const Parser.AST, uni:
 
     const field = uni.fields[findex];
     _ = try self.typecheckExpressionListRange(range.subRange(1), field.valueType);
-    if (field.isComptime) {
+    if (false and field.isComptime) {
         _ = try self.executer.constructFromList(
             field.valueType,
             range.subRange(1),
@@ -1908,7 +1908,7 @@ pub fn typecheckBinary(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!Ty
     const operator: Lexer.TokenType = @enumFromInt(ast.extra[extraPtr + 1]);
 
     const lhs = try self.typecheckExpression(ast.extra[extraPtr], null);
-    const rhs = try self.typecheckExpression(ast.extra[extraPtr + 2], null);
+    const rhs = try self.typecheckExpression(ast.extra[extraPtr + 2], lhs);
 
     return res: switch (operator) {
         .Or, .And => {

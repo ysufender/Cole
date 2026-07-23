@@ -244,7 +244,13 @@ fn evalFunction(self: *Comptime, exprPtr: defines.ExpressionPtr, extraPtr: defin
 
     for (paramsRange.start..paramsRange.end) |paramPtrPtr| {
         const param = ast.signatures.get(ast.extra[paramPtrPtr]);
-        const argType = self.getValue(try self.expectType(param.type)).Type;
+        const argType = Typechecker.determineExpected(
+            self.getValue(try self.expectType(param.type)).Type
+        ) orelse {
+            self.report("Unknown argument type in function signatures is not allowed.", .{});
+            return Error.IllegalGenericType;
+        };
+
         argTypes[paramPtrPtr - paramsRange.start] = argType;
 
         const name = tokens.get(param.name).lexeme(self.typechecker.context, self.typechecker.currentFile);
@@ -2103,7 +2109,7 @@ pub const builtinTypes = [_]struct {
     // builtin_metadata
     .{ .name = "builtin_metadata", .info = .{ .Enum = .{ .mutable = false, .name = Resolver.BuiltinIndex("any") + 5, .fields = &.{}, .definitions = &.{}, .scope = 0 } } },
     // []u8
-    .{ .name = "string", .info = .{ .Pointer = .{ .mutable = false, .child = 2, .size = .Slice, }, } },
+    .{ .name = "[]u8", .info = .{ .Pointer = .{ .mutable = false, .child = 2, .size = .Slice, }, } },
 };
 
 pub const builtinMetadata = [_][]const u8 {

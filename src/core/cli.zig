@@ -64,7 +64,7 @@ const flags = std.StaticStringMap(Flags).initComptime(&(.{
     .{ "--dump-stats", .Flag },
 
     .{ "--dump-jir", .Flag },
-}));
+} else .{}));
 
 const helpText =
     @embedFile("../res/help.txt")
@@ -83,7 +83,7 @@ pub fn parseCLI(allocator: std.mem.Allocator, _args: std.process.Args, io: std.I
     var includeDirs = NMap.empty;
     var maxErr: u32 = 5;
     var targetBackend = Backend.C;
-    var backendOptions: []const u8 = "";
+    var backendOptions: ?[]const u8 = null;
     var cliFlags = common.CompilerSettings.FlagSet.empty;
 
     cliFlags.ensureTotalCapacity(allocator, 128) catch return Error.AllocatorFailure;

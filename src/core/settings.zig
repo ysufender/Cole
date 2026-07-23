@@ -15,7 +15,7 @@ workingDir: []const u8,
 includeDirs: [][]const u8,
 maxErr: u32,
 backend: Backend,
-backendFlags: []const u8,
+backendFlags: ?[]const u8,
 flags: FlagSet,
 
 pub fn print(self: *const Self, allocator: std.mem.Allocator) void {
