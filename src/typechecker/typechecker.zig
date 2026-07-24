@@ -2400,10 +2400,6 @@ pub fn assertCastable(self: *Typechecker, from: TypeID, to: TypeID, unsafe: bool
         return Error.RedundantCast;
     }
 
-    if ((!self.mutable(from) and self.mutable(to)) and !unsafe) {
-        return Error.MutabilityViolation;
-    }
-
     switch (fromType) {
         .Enum => |enm| switch (toType) {
             .Enum => try self.assertStructurallyIdentical(from, to),
@@ -2439,7 +2435,10 @@ pub fn assertCastable(self: *Typechecker, from: TypeID, to: TypeID, unsafe: bool
             else => return Error.IncompatibleTypes,
         },
         .Pointer => |fromPtr| switch (toType) {
-            .Pointer => |toPtr| try self.assertCastablePtr(fromPtr, toPtr),
+            .Pointer => |toPtr| {
+                try self.assertCastablePtr(fromPtr, toPtr);
+                try functional.throwIf(toPtr.mutable and !fromPtr.mutable and !unsafe, Error.MutabilityViolation);
+            },
             else => return Error.IncompatibleTypes,
         },
         .Function => switch (toType) {

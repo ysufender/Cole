@@ -5,9 +5,7 @@ let HEIGHT = 480;
 
 let main = fn () -> i32 {
 	let ply: mut Player = (20, 100, 20, 70, 0);
-
 	let cpu: mut Player = (WIDTH-35, 100, 20, 70, 0);
-
 	let b: mut Ball = (WIDTH/2.0 - 10.0, 120.0, -5.0, -5.0, 10.0);
 
 	rl::InitWindow(WIDTH, HEIGHT, "Ping pong");
@@ -39,8 +37,6 @@ let main = fn () -> i32 {
 
 		b.x = b.bx + b.x;
 		b.y = b.by + b.y;
-
-		
 
 		if b.x < 5 {
 			cpu.score = cpu.score + 1;

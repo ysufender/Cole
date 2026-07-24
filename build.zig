@@ -95,6 +95,7 @@ fn addTargets(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
                 .target = target,
                 .optimize = optimize,
                 .strip = true,
+                .code_model = .small,
                 .link_libc = true,
             }),
         });

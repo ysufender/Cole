@@ -115,7 +115,7 @@ pub const Function = struct {
 
 const JIR = @This();
 
-cstrings: std.AutoHashMapUnmanaged(TypeID, []const u8) = undefined,
+cstrings: std.AutoHashMapUnmanaged(TypeID, []const u8) = .empty,
 strings: [][]const u8,
 types: Typechecker.TypeTable.Slice,
 typeNames: TypeNameMap,
@@ -176,7 +176,7 @@ pub fn codegen(self: *JIR, context: *Context) Error!std.Io.Dir {
 
     self.cstrings = .empty;
 
-    var wbuf: [256]u8 = undefined;
+    var wbuf = std.mem.zeroes([512]u8);
     var forwardDeclFile = cOut.createFile(context.io, "forward_decl.h", .{ })
         catch return Error.IOError;
     defer forwardDeclFile.close(context.io);
