@@ -228,14 +228,15 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
 
         switch (typeInfo) {
             .Array => |arr| {
-                const name = std.fmt.allocPrint(self.allocator, "Array_{s}_{d}_t[{d}]", .{
+                const name = std.fmt.allocPrint(self.allocator, "Array_{s}_{d}_t", .{
                     try self.getCName(arr.child, null, true),
-                    arr.len,
                     arr.len,
                 }) catch return Error.AllocatorFailure;
 
-                try self.write(out, "typedef {s} {s};\n\n", .{
-                    try self.getCName(arr.child, null, false), name
+                try self.write(out, "typedef struct {{ {s} data[{d}]; }} {s};\n\n", .{
+                    try self.getCName(arr.child, null, false),
+                    arr.len,
+                    name
                 });
             },
             .Pointer => |ptr| switch (ptr.size) {
@@ -614,6 +615,7 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
         .Construction => {
             const typeToCtor = self.data[node.value];
             const len = self.data[node.value + 1];
+
             try self.write(out, "({s}){{", .{
                 try self.getCName(typeToCtor, null, true),
             });
@@ -675,14 +677,16 @@ fn literal(self: *JIR, out: *Writer, ptr: Constant.Ptr) Error!void {
             try self.write(out, "}}", .{});
         },
         .Array => |arr| {
-            try self.write(out, "{{ ", .{});
+            try self.write(out, "({s}){{", .{
+                try self.getCName(arr.type, null, true),
+            });
             for (arr.data.start..arr.data.end) |idx| {
                 try self.literal(out, @intCast(idx));
                 if (idx != arr.data.end - 1) {
                     try self.write(out, ", ", .{});
                 }
             }
-            try self.write(out, " }}", .{});
+            try self.write(out, "}}", .{ });
         },
         .String => |str| {
             const rstr = self.strings[str];
@@ -711,7 +715,7 @@ fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool
         },
 
         .Void => return "void",
-        .Noreturn => return "void",
+        .Noreturn => return "void __attribute__((noreturn))",
 
         .Bool => |v| name = std.fmt.allocPrint(self.allocator, "jasl_bool{s}", .{
             if (v) "" else " const"

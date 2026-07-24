@@ -24,5 +24,6 @@ Let main: Ident() = FnDef (
 };
 ------------END  AST: /home/yusuf/proj/JASL/tests/fixtures/valid/enum_while.jasl------------
 
+/home/yusuf/proj/JASL/build/c/source.c:24: warning: assignment of read-only location
 info: Compiler exited successfully.
 EXIT:0

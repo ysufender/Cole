@@ -43,6 +43,11 @@ pub fn compile(outDir: Dir, allocator: std.mem.Allocator, context: *common.Compi
             report("Failed to libc include path.");
             return Error.BackendError;
         }
+
+        if (tcc.tcc_add_include_path(state, "/usr/local/include") == -1) {
+            report("Failed to libc include path.");
+            return Error.BackendError;
+        }
     }
 
     var cpath = std.mem.zeroes([std.Io.Dir.max_path_bytes]u8);
@@ -57,6 +62,7 @@ pub fn compile(outDir: Dir, allocator: std.mem.Allocator, context: *common.Compi
     } 
 
     if (context.settings.backendFlags) |options| {
+        common.log.info("Compiling with options: {s}", .{options});
         if (tcc.tcc_set_options(state, options.ptr) == -1) {
             report("Failed to parse command line.");
             return Error.BackendError;
@@ -74,7 +80,7 @@ pub fn compile(outDir: Dir, allocator: std.mem.Allocator, context: *common.Compi
     }
 
     if (tcc.tcc_output_file(state, output) == -1) {
-        report("Failed to write output.");
+        report("Failed to link sources.");
         return Error.BackendError;
     }
 }

@@ -201,8 +201,8 @@ pub fn eval(self: *Comptime, exprPtr: defines.ExpressionPtr, maybeExpected: ?Typ
         .Conditional => try self.evalIfExpression(expr.value, maybeExpected),
         .Switch => try self.evalSwitchExpression(expr.value, maybeExpected),
 
-        .Unary => try self.evalUnary(expr.value),
-        .Binary => try self.evalBinary(expr.value),
+        .Unary => try self.evalUnary(expr.value, maybeExpected),
+        .Binary => try self.evalBinary(expr.value, maybeExpected),
 
         .Slicing => try self.evalSlicing(expr.value),
 
@@ -572,8 +572,8 @@ pub fn evalSlicing(self: *Comptime, extraPtr: defines.OpaquePtr) Error!Value.Ptr
     });
 }
 
-pub fn evalBinary(self: *Comptime, extraPtr: defines.OpaquePtr) Error!Value.Ptr {
-    _ = try self.typechecker.typecheckBinary(extraPtr);
+pub fn evalBinary(self: *Comptime, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID) Error!Value.Ptr {
+    _ = try self.typechecker.typecheckBinary(extraPtr, maybeExpected);
 
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
 
@@ -582,7 +582,7 @@ pub fn evalBinary(self: *Comptime, extraPtr: defines.OpaquePtr) Error!Value.Ptr 
     switch (operation) {
         .Or, .And => |logic| {
             const isOr = logic == .Or;
-            const lhs = self.getValue(try self.expectDefined(ast.extra[extraPtr], null));
+            const lhs = self.getValue(try self.expectDefined(ast.extra[extraPtr], maybeExpected));
 
             if (lhs.Bool == if (isOr) true else false) {
                 return self.appendValue(.{
@@ -590,7 +590,7 @@ pub fn evalBinary(self: *Comptime, extraPtr: defines.OpaquePtr) Error!Value.Ptr 
                 });
             }
 
-            const rhs = self.getValue(try self.expectDefined(ast.extra[extraPtr + 1], null));
+            const rhs = self.getValue(try self.expectDefined(ast.extra[extraPtr + 1], maybeExpected));
             return self.appendValue(.{
                 .Bool =
                     if (isOr) lhs.Bool or rhs.Bool
@@ -702,13 +702,13 @@ pub fn evalBinary(self: *Comptime, extraPtr: defines.OpaquePtr) Error!Value.Ptr 
     }
 }
 
-pub fn evalUnary(self: *Comptime, extraPtr: defines.OpaquePtr) Error!Value.Ptr {
-    _ = try self.typechecker.typecheckUnary(extraPtr);
+pub fn evalUnary(self: *Comptime, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID) Error!Value.Ptr {
+    _ = try self.typechecker.typecheckUnary(extraPtr, maybeExpected);
 
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
 
     const operator: Lexer.TokenType = @enumFromInt(ast.extra[extraPtr]);
-    const rhsPtr = try self.expectDefined(ast.extra[extraPtr + 1], null);
+    const rhsPtr = try self.expectDefined(ast.extra[extraPtr + 1], maybeExpected);
     const rhs = self.getValue(rhsPtr);
     switch (operator) {
         .Minus => switch (rhs) {
@@ -875,7 +875,8 @@ fn evalBuiltinCall(self: *Comptime, extraPtr: defines.OpaquePtr, declPtr: define
     const BI = Resolver.BuiltinIndex;
 
     return switch (declPtr) {
-        BI("cast") => self.evalCast(extraPtr, maybeExpected),
+        BI("cast") => self.evalCast(extraPtr, maybeExpected, false),
+        BI("unsafeCast") => self.evalCast(extraPtr, maybeExpected, true),
         BI("as") => self.evalTypeForwarding(extraPtr, maybeExpected),
         BI("typeOf") => self.evalTypeOf(extraPtr),
         BI("compileError") => self.evalCompileError(extraPtr),
@@ -1287,8 +1288,8 @@ fn evalUnionType(self: *Comptime, expr: defines.ExpressionPtr) Error!Value.Ptr {
     });
 }
 
-fn evalCast(self: *Comptime, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID) Error!Value.Ptr {
-    const targetType = try self.typechecker.typecheckCast(extraPtr, maybeExpected);
+fn evalCast(self: *Comptime, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID, unsafe: bool) Error!Value.Ptr {
+    const targetType = try self.typechecker.typecheckCast(extraPtr, maybeExpected, unsafe);
 
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
 

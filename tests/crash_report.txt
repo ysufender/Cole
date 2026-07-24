@@ -1,12 +1,12 @@
 Crash triage report
 binary:     ./zig-out/bin/jaslc-debug
 crashes:    tests/crashes
-generated:  2026-07-22T22:31:37Z
+generated:  2026-07-23T22:30:45Z
 total files: 12
 distinct signatures: 1
 ================================================================
 
-## [1/1] 12 hit(s) — /home/yusuf/proj/JASL/src/parser/parser.zig:252:9: 0x1334702 in parse (jaslc-debug)
+## [1/1] 12 hit(s) — /home/yusuf/proj/JASL/src/parser/parser.zig:252:9: 0x1399370 in parse (jaslc-debug)
 ----------------------------------------------------------------
 files: signal_125_-6.jasl signal_134_-6.jasl signal_135_-6.jasl signal_173_-6.jasl signal_18_-6.jasl signal_314_-6.jasl signal_526_-6.jasl signal_64_-6.jasl signal_712_-6.jasl signal_742_-6.jasl signal_95_-6.jasl signal_97_-6.jasl
 
@@ -38,10 +38,10 @@ output:
     
     error: Error: 191 <MissingStatement>
     
-    /home/yusuf/proj/JASL/src/parser/parser.zig:252:9: 0x1334702 in parse (jaslc-debug)
+    /home/yusuf/proj/JASL/src/parser/parser.zig:252:9: 0x1399370 in parse (jaslc-debug)
             return lastErr;
             ^
-    /home/yusuf/proj/JASL/src/main.zig:72:17: 0x11ba264 in innerMain (jaslc-debug)
+    /home/yusuf/proj/JASL/src/main.zig:73:17: 0x11e6381 in innerMain (jaslc-debug)
         const ast = try parser.parse();
                     ^
     error: Compiler exited with code 191 <MissingStatement>

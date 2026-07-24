@@ -18,10 +18,10 @@ error: ^ Here.
 
 error: Error: 173 <InvalidToken>
 
-/home/yusuf/proj/JASL/src/parser/parser.zig:252:9: 0x1334702 in parse (jaslc-debug)
+/home/yusuf/proj/JASL/src/parser/parser.zig:252:9: 0x1399370 in parse (jaslc-debug)
         return lastErr;
         ^
-/home/yusuf/proj/JASL/src/main.zig:72:17: 0x11ba264 in innerMain (jaslc-debug)
+/home/yusuf/proj/JASL/src/main.zig:73:17: 0x11e6381 in innerMain (jaslc-debug)
     const ast = try parser.parse();
                 ^
 error: Compiler exited with code 192 <MultipleErrors>

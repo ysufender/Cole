@@ -872,8 +872,8 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
         .Conditional => self.typecheckIfExpression(expr.value, maybeExpected),
         .Switch => self.typecheckSwitchExpression(expr.value, maybeExpected),
 
-        .Unary => self.typecheckUnary(expr.value),
-        .Binary => self.typecheckBinary(expr.value),
+        .Unary => self.typecheckUnary(expr.value, maybeExpected),
+        .Binary => self.typecheckBinary(expr.value, maybeExpected),
 
         .Slicing => self.typecheckSlicing(expr.value),
 
@@ -967,10 +967,12 @@ pub fn typecheckExpressionList(self: *Typechecker, extra: defines.OpaquePtr, _ma
     }
 
     const expected =
-        if (maybeExpected) |expected| expected
-        else if (range.len() == 1) {
-            return self.typecheckExpression(ast.extra[range.at(0)], null);
-        }
+        if (maybeExpected) |expected|
+            if (range.len() == 1) switch (self.typeTable.get(expected)) {
+                .Struct, .Union, .Enum, .Array => expected,
+                else => return self.typecheckExpression(ast.extra[range.at(0)], expected),
+            }
+            else expected
         else {
             self.report("Couldn't infer the type of expression list.", .{});
             return Error.InferenceError;
@@ -1110,10 +1112,7 @@ fn typecheckArrayInitialization(self: *Typechecker, ast: *const Parser.AST, arr:
     }
 
     for (0..arr.len) |index| {
-        const item = try self.typecheckValue(
-            try self.executer.eval(ast.extra[range.at(@intCast(index))], arr.child),
-            arr.child,
-        );
+        const item = try self.typecheckExpression(ast.extra[range.at(@intCast(index))], arr.child);
 
         if (self.suitable(arr.child, item)) {
             continue;
@@ -1379,15 +1378,15 @@ pub fn typecheckCall(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpec
         return Error.ArgumentCountMismatch;
     }
 
-    for (func.argTypes, args, 0..) |arg, expr, index| {
-        const exprType = try self.typecheckExpression(expr, arg);
+    for (func.argTypes, args, 0..) |argType, expr, index| {
+        const exprType = try self.typecheckExpression(expr, argType);
 
-        self.assertCanCoerce(arg, exprType) catch {
+        self.assertCanCoerce(argType, exprType) catch {
             self.report(
                 "Argument type mismatch in function call."
                 ++ " In argument {d}: expected {s}, received {s}", .{
                 index,
-                try self.typeName(self.arena.allocator(), arg),
+                try self.typeName(self.arena.allocator(), argType),
                 try self.typeName(self.arena.allocator(), exprType),
             });
             return Error.TypeMismatch;
@@ -1401,7 +1400,8 @@ pub fn typecheckBuiltinCall(self: *Typechecker, extraPtr: defines.ExpressionPtr,
     const BI = Resolver.BuiltinIndex;
 
     return switch (declPtr) {
-        BI("cast") => self.typecheckCast(extraPtr, maybeExpected),
+        BI("cast") => self.typecheckCast(extraPtr, maybeExpected, false),
+        BI("unsafeCast") => self.typecheckCast(extraPtr, maybeExpected, true),
         BI("as") => self.typecheckTypeForwarding(extraPtr, maybeExpected),
         BI("typeOf") => self.executer.getValue(try self.executer.evalTypeOf(extraPtr)).Type,
         BI("compileError") => Comptime.Builtin.Type("noreturn"),
@@ -1414,7 +1414,7 @@ pub fn typecheckBuiltinCall(self: *Typechecker, extraPtr: defines.ExpressionPtr,
     };
 }
 
-pub fn typecheckCast(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID) Error!TypeID {
+pub fn typecheckCast(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID, unsafe: bool) Error!TypeID {
     const targetType =
         if (determineExpected(maybeExpected)) |target| target
         else {
@@ -1435,9 +1435,9 @@ pub fn typecheckCast(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpec
         return Error.NotImplemented;
     }
 
-    const thingToCastType = try self.typecheckExpression(ast.extra[thingToCastRange.at(0)], null);
+    const thingToCastType = try self.typecheckExpression(ast.extra[thingToCastRange.at(0)], targetType);
 
-    self.assertCastable(thingToCastType, targetType) catch |err| {
+    self.assertCastable(thingToCastType, targetType, unsafe) catch |err| {
         const rargs = .{
             try self.typeName(self.arena.allocator(), thingToCastType),
             try self.typeName(self.arena.allocator(), targetType),
@@ -1902,12 +1902,12 @@ pub fn typecheckSlicing(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!T
     return resultType;
 }
 
-pub fn typecheckBinary(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!TypeID {
+pub fn typecheckBinary(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID) Error!TypeID {
     const ast = self.context.getAST(self.currentFile);
 
     const operator: Lexer.TokenType = @enumFromInt(ast.extra[extraPtr + 1]);
 
-    const lhs = try self.typecheckExpression(ast.extra[extraPtr], null);
+    const lhs = try self.typecheckExpression(ast.extra[extraPtr], maybeExpected);
     const rhs = try self.typecheckExpression(ast.extra[extraPtr + 2], lhs);
 
     return res: switch (operator) {
@@ -2010,11 +2010,11 @@ pub fn typecheckBinary(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!Ty
     };
 }
 
-pub fn typecheckUnary(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!TypeID {
+pub fn typecheckUnary(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID) Error!TypeID {
     const ast = self.context.getAST(self.currentFile);
 
     const token: Lexer.TokenType = @enumFromInt(ast.extra[extraPtr]);
-    const rhsType = try self.typecheckExpression(ast.extra[extraPtr + 1], null);
+    const rhsType = try self.typecheckExpression(ast.extra[extraPtr + 1], maybeExpected);
     const rhs = self.typeTable.get(rhsType);
 
     return switch (token) {
@@ -2383,7 +2383,7 @@ pub fn dumpCallStack(self: *Typechecker) void {
     }
 }
 
-pub fn assertCastable(self: *Typechecker, from: TypeID, to: TypeID) Error!void {
+pub fn assertCastable(self: *Typechecker, from: TypeID, to: TypeID, unsafe: bool) Error!void {
     const fmax = std.math.floatMax;
     const fmin = struct{fn fmin(comptime T: type) T { return -fmax(T); }}.fmin;
 
@@ -2400,7 +2400,7 @@ pub fn assertCastable(self: *Typechecker, from: TypeID, to: TypeID) Error!void {
         return Error.RedundantCast;
     }
 
-    if (!self.mutable(from) and self.mutable(to)) {
+    if ((!self.mutable(from) and self.mutable(to)) and !unsafe) {
         return Error.MutabilityViolation;
     }
 
@@ -2421,7 +2421,11 @@ pub fn assertCastable(self: *Typechecker, from: TypeID, to: TypeID) Error!void {
         .ComptimeInt => try functional.throwIf(!self.isInt(to) and !self.isFloat(to), Error.IncompatibleTypes),
         .ComptimeFloat => try functional.throwIf(!self.isFloat(to) and !self.isInt(to), Error.IncompatibleTypes),
         .Integer => |fromInt| switch (toType) {
-            .Integer => |toInt| try functional.throwIf(!toInt.canContain(fromInt), Error.SizeMismatch),
+            .Integer => |toInt| try functional.throwIf(
+                if (unsafe) !self.isInt(to)
+                else !toInt.canContain(fromInt),
+                Error.SizeMismatch
+            ),
             .ComptimeInt => {},
             .Float => try functional.throwIf(
                 fmax(f32) < @as(f32, @floatFromInt(fromInt.range().max))
@@ -2548,9 +2552,9 @@ pub fn assertCanCoerce(self: *const Typechecker, this: TypeID, that: TypeID) Err
 
     return switch (thatType) {
         .Noreturn => { },
-        .ComptimeInt => functional.throwIf(!self.isInt(this), Error.TypeMismatch),
-        .ComptimeFloat => functional.throwIf(!self.isFloat(this), Error.TypeMismatch),
-        .Float => functional.throwIf(thisType != .Float, Error.TypeMismatch),
+        .ComptimeInt => functional.throwIf(!self.isInt(this) and !self.isFloat(this), Error.TypeMismatch),
+        .ComptimeFloat => functional.throwIf(!self.isFloat(this) and !self.isInt(this), Error.TypeMismatch),
+        .Float => functional.throwIf(!self.isFloat(this), Error.TypeMismatch),
         .Integer => |itype| switch (thisType) {
             .Integer => |i2type| functional.throwIf(itype.size > i2type.size, Error.TypeMismatch),
             else => functional.throwIf(!self.isInt(this), Error.TypeMismatch),
@@ -2670,9 +2674,12 @@ pub fn coerce(self: *Typechecker, this: TypeID, that: TypeID) Error!TypeID {
         .ComptimeInt, .ComptimeFloat => this,
         else => switch (thisType) {
             .ComptimeInt, .ComptimeFloat => that,
-            .Integer =>
-                if (thatType.Integer.size > thisType.Integer.size) that
-                else this,
+            .Integer => switch (thatType) {
+                .Integer =>
+                    if (thatType.Integer.size > thisType.Integer.size) that
+                    else this,
+                else => this,
+            },
             .Noreturn => that,
             else => this,
         },
@@ -2783,6 +2790,18 @@ pub fn makeMutable(_: *const Typechecker, info: TypeInfo) TypeInfo {
         },
         else => unreachable,
     };
+}
+
+/// Assumes 'of' is an array type.
+pub fn sliceOf(self: *Typechecker, of: TypeID) Error!u32 {
+    const arr = self.typeTable.get(of).Array;
+    return self.registerType(.{
+        .Pointer = .{
+            .mutable = arr.mutable,
+            .size = .Slice,
+            .child = arr.child,
+        },
+    });
 }
 
 /// In bytes

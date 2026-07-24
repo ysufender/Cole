@@ -1229,7 +1229,7 @@ pub const builtins = [_][]const u8 {
     "undefined", "typeInfo", "hasField", "compileError",
     "bitSizeOf", "unreachable", "enumStr", "typeOf",
     "field", "fieldIndex", "hasDef", "definitionIndex",
-    "this", "sizeOf", "bitSet", "cast",
+    "this", "sizeOf", "bitSet", "cast", "unsafeCast",
     "as", "compileLog",
 };
 

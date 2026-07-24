@@ -225,7 +225,7 @@ pub fn lex(self: *Lexer) common.CompilerError!defines.TokenListPtr {
             .start = self.start,
             .end = self.current,
         }
-    ) catch return Error.InternalError;
+    ) catch return Error.ShouldBeImpossible;
 
     self.start = 0;
     self.current = 0;

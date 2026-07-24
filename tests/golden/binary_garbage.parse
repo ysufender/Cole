@@ -8,13 +8,13 @@ error: .... In /home/yusuf/proj/JASL/tests/fixtures/invalid/binary_garbage.jasl 
 error: 
 error: ^ Here.
 
-/home/yusuf/proj/JASL/src/lexer/lexer.zig:423:17: 0x135e660 in scanToken (jaslc-debug)
+/home/yusuf/proj/JASL/src/lexer/lexer.zig:423:17: 0x13c9721 in scanToken (jaslc-debug)
                 return Error.UnexpectedCharacter;
                 ^
-/home/yusuf/proj/JASL/src/lexer/lexer.zig:217:9: 0x135a1e9 in lex (jaslc-debug)
+/home/yusuf/proj/JASL/src/lexer/lexer.zig:217:9: 0x13c4b77 in lex (jaslc-debug)
         try self.scanToken();
         ^
-/home/yusuf/proj/JASL/src/main.zig:65:20: 0x11ba139 in innerMain (jaslc-debug)
+/home/yusuf/proj/JASL/src/main.zig:66:20: 0x11e6228 in innerMain (jaslc-debug)
     const tokens = try lexer.lex();
                    ^
 error: Compiler exited with code 178 <UnexpectedCharacter>

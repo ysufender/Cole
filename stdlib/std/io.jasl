@@ -50,6 +50,16 @@ pub let File = struct {
 
         return File(file);
     };
+
+    pub let ok = fn (file: File) -> bool {
+        let status: mut bool = false;
+        code { status = file.handle != NULL; }
+        return status;
+    };
+
+    pub let close = fn (file: File) -> void {
+        code { fclose(file.handle); }
+    };
 };
 
 pub let println = fn (msg: []u8) -> void {

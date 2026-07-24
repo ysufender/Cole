@@ -29,32 +29,32 @@ Let main: Ident() = FnDef (
 };
 ------------END  AST: /home/yusuf/proj/JASL/tests/fixtures/valid/basic_fn.jasl------------
 
-warning: Not implemented in typechecker/comptime.zig at 863:78
-warning: Not implemented in typechecker/comptime.zig at 863:78
-warning: Not implemented in typechecker/comptime.zig at 863:78
-warning: Not implemented in typechecker/comptime.zig at 863:78
-warning: Not implemented in typechecker/comptime.zig at 863:78
-warning: Not implemented in typechecker/comptime.zig at 863:78
-warning: Not implemented in typechecker/comptime.zig at 863:78
-warning: Not implemented in typechecker/comptime.zig at 863:78
-warning: Not implemented in typechecker/comptime.zig at 863:78
-warning: Not implemented in typechecker/comptime.zig at 863:78
-warning: Not implemented in typechecker/comptime.zig at 863:78
-warning: Not implemented in typechecker/comptime.zig at 863:78
-warning: Not implemented in typechecker/comptime.zig at 863:78
-warning: Not implemented in typechecker/comptime.zig at 863:78
-warning: Not implemented in typechecker/comptime.zig at 863:78
-warning: Not implemented in typechecker/comptime.zig at 1620:70
-warning: Not implemented in typechecker/comptime.zig at 1620:70
-warning: Not implemented in typechecker/comptime.zig at 1620:70
-warning: Not implemented in typechecker/comptime.zig at 1620:70
-warning: Not implemented in typechecker/comptime.zig at 1620:70
-warning: Not implemented in typechecker/comptime.zig at 1620:70
-warning: Not implemented in typechecker/comptime.zig at 1620:70
-warning: Not implemented in typechecker/comptime.zig at 1620:70
-warning: Not implemented in typechecker/comptime.zig at 1620:70
-warning: Not implemented in typechecker/comptime.zig at 1620:70
-warning: Not implemented in typechecker/comptime.zig at 1620:70
-warning: Not implemented in typechecker/comptime.zig at 1620:70
+warning: Not implemented in typechecker/comptime.zig at 869:78
+warning: Not implemented in typechecker/comptime.zig at 869:78
+warning: Not implemented in typechecker/comptime.zig at 869:78
+warning: Not implemented in typechecker/comptime.zig at 869:78
+warning: Not implemented in typechecker/comptime.zig at 869:78
+warning: Not implemented in typechecker/comptime.zig at 869:78
+warning: Not implemented in typechecker/comptime.zig at 869:78
+warning: Not implemented in typechecker/comptime.zig at 869:78
+warning: Not implemented in typechecker/comptime.zig at 869:78
+warning: Not implemented in typechecker/comptime.zig at 869:78
+warning: Not implemented in typechecker/comptime.zig at 869:78
+warning: Not implemented in typechecker/comptime.zig at 869:78
+warning: Not implemented in typechecker/comptime.zig at 869:78
+warning: Not implemented in typechecker/comptime.zig at 869:78
+warning: Not implemented in typechecker/comptime.zig at 869:78
+warning: Not implemented in typechecker/comptime.zig at 1626:70
+warning: Not implemented in typechecker/comptime.zig at 1626:70
+warning: Not implemented in typechecker/comptime.zig at 1626:70
+warning: Not implemented in typechecker/comptime.zig at 1626:70
+warning: Not implemented in typechecker/comptime.zig at 1626:70
+warning: Not implemented in typechecker/comptime.zig at 1626:70
+warning: Not implemented in typechecker/comptime.zig at 1626:70
+warning: Not implemented in typechecker/comptime.zig at 1626:70
+warning: Not implemented in typechecker/comptime.zig at 1626:70
+warning: Not implemented in typechecker/comptime.zig at 1626:70
+warning: Not implemented in typechecker/comptime.zig at 1626:70
+warning: Not implemented in typechecker/comptime.zig at 1626:70
 info: Compiler exited successfully.
 EXIT:0

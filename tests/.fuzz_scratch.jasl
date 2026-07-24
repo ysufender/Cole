@@ -1,10 +1,12 @@
 let add = fn (a: i32, b: i32) -> i32 {
-    return a + $;
+    return a + b;
 };
 
 let main = fn () -> i32 {
-    let x: i32 = add(2, 3);
-    ifÑx > 4 {
+    let x: i32 = add(2 = add(2, 3);
+    if x > 4 {
         return 0;
-    } else {G    B   return 1;
-    ¿};
+    } else {
+        return 1;
+    }
+};
