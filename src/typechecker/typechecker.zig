@@ -461,6 +461,18 @@ fn typecheckWhileStatement(self: *Typechecker, extraPtr: defines.OpaquePtr, expe
         return Error.TypeMismatch;
     }
 
+    if (self.executer.attemptEval(conditionPtr, Comptime.Builtin.Type("bool"))) |_cnd| {
+        const cnd = self.executer.getValue(_cnd).Bool;
+
+        if (cnd) {
+            const prev = self.setFlag(.InLoop, true);
+            defer _ = self.setFlag(.InLoop, prev);
+            try self.typecheckStatement(bodyPtr, expected);
+        }
+
+        return;
+    }
+
     const prev = self.setFlag(.InLoop, true);
     defer _ = self.setFlag(.InLoop, prev);
     try self.typecheckStatement(bodyPtr, expected);
@@ -742,6 +754,27 @@ fn typecheckIfStatement(self: *Typechecker, extraPtr: defines.OpaquePtr, expecte
         return Error.TypeMismatch;
     }
 
+    if (self.executer.attemptEval(conditionExpr, Comptime.Builtin.Type("bool"))) |_cnd| {
+        const cnd = self.executer.getValue(_cnd).Bool;
+
+        if (cnd) {
+            try self.typecheckStatement(body, expected);
+        }
+        else {
+            _ = self.setFlag(.CoveredAllPaths, false);
+            const coveredIf = self.getFlag(.CoveredAllPaths);
+            const coveredElse =
+                if (maybeOtherwise) |otherwise| blk: {
+                    try self.typecheckStatement(otherwise, expected);
+                    break :blk self.getFlag(.CoveredAllPaths);
+                }
+                else false;
+            _ = self.setFlag(.CoveredAllPaths, coveredIf and coveredElse);
+        }
+
+        return;
+    }
+
     try self.typecheckStatement(body, expected);
     const coveredIf = self.getFlag(.CoveredAllPaths);
 
@@ -752,7 +785,6 @@ fn typecheckIfStatement(self: *Typechecker, extraPtr: defines.OpaquePtr, expecte
             break :blk self.getFlag(.CoveredAllPaths);
         }
         else false;
-
     _ = self.setFlag(.CoveredAllPaths, coveredIf and coveredElse);
 }
 
@@ -1404,8 +1436,11 @@ pub fn typecheckBuiltinCall(self: *Typechecker, extraPtr: defines.ExpressionPtr,
         BI("unsafeCast") => self.typecheckCast(extraPtr, maybeExpected, true),
         BI("as") => self.typecheckTypeForwarding(extraPtr, maybeExpected),
         BI("typeOf") => self.executer.getValue(try self.executer.evalTypeOf(extraPtr)).Type,
-        BI("compileError") => Comptime.Builtin.Type("noreturn"),
-        BI("compileLog") => Comptime.Builtin.Type("void"),
+        BI("compileError") => return self.executer.evalCompileError(extraPtr),
+        BI("compileLog") => {
+            _ = try self.executer.evalCompileLog(extraPtr);
+            return Comptime.Builtin.Type("void");
+        },
         BI("unreachable") => Comptime.Builtin.Type("noreturn"),
         else => {
             self.report("Builtin '{s}' is not suitable in this context.", .{Resolver.builtins[declPtr]});

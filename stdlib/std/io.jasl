@@ -25,15 +25,15 @@ code {
 
 let FILE = #(@extern) struct { };
 
+pub let OpenMode = enum {
+    Read,
+    Write,
+    ReadWrite,
+};
+
 pub let File = struct {
-
     handle: *mut FILE,
-
-    pub let OpenMode = enum {
-        Read,
-        Write,
-        ReadWrite,
-    };
+    mode: OpenMode,
 
     pub let open = fn (path: []u8, mode: OpenMode) -> File {
         let file: mut *mut FILE = undefined;
@@ -48,13 +48,17 @@ pub let File = struct {
             code { file = fopen(path.ptr, "w+"); }
         }
 
-        return File(file);
+        return File(file, mode);
     };
 
     pub let ok = fn (file: File) -> bool {
         let status: mut bool = false;
         code { status = file.handle != NULL; }
         return status;
+    };
+
+    pub let writeln = fn (file: File, line: []u8) -> void {
+        code { fprintf(file.handle, line.ptr); }
     };
 
     pub let close = fn (file: File) -> void {

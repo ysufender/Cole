@@ -1,0 +1,14 @@
+import std::io as io;
+
+let main = fn () -> i32 {
+    let file = io::File::open("demo/file/mest.txt", @Write);
+    if !io::File::ok(file) {
+        io::println("Error opening file.");
+        return 1;
+    }
+
+    io::File::writeln(file, "Hello World");
+    io::File::close(file);
+
+    return 0;
+};
