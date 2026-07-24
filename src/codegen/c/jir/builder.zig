@@ -91,19 +91,14 @@ pub fn variableDef(
     self: *Builder,
     topLevel: bool,
     typeID: TypeID,
-    decl: *const Declaration,
+    name: defines.StringPtr,
+    isUndefined: bool,
     initializer: JIR.Ptr,
-    typechecker: *Typechecker,
 ) Error!JIR.Ptr {
-    const isUndefined =
-        if (typechecker.executer.attemptEval(decl.node, typeID)) |v|
-            typechecker.executer.getValue(v) == .Undefined
-        else false;
-
     const start: u32 = @intCast(self.data.items.len);
     self.data.append(self.allocator, @intFromBool(topLevel)) catch return Error.AllocatorFailure;
     self.data.append(self.allocator, typeID) catch return Error.AllocatorFailure;
-    self.data.append(self.allocator, decl.name) catch return Error.AllocatorFailure;
+    self.data.append(self.allocator, name) catch return Error.AllocatorFailure;
     self.data.append(self.allocator, @intFromBool(isUndefined)) catch return Error.AllocatorFailure;
     if (!isUndefined) {
         self.data.append(self.allocator, initializer) catch return Error.AllocatorFailure;

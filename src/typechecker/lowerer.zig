@@ -66,7 +66,14 @@ pub fn topLevelDeclaration(self: *Lowerer, ptr: defines.DeclPtr, decl: *const De
         else => {
             // @Note Top-level comptimeness is checked in the typechecker.
             const node = try self.expression(decl.node, typeID);
-            _ = try self.typechecker.builder.variableDef(decl.topLevel, typeID, decl, node, self.typechecker);
+            _ = try self.typechecker.builder.variableDef(
+                decl.topLevel,
+                typeID,
+                decl.name,
+                if (self.typechecker.executer.attemptEval(decl.node, typeID)) |i| self.typechecker.executer.getValue(i) == .Undefined
+                else false,
+                node
+            );
         },
     }
 }
@@ -313,15 +320,119 @@ pub fn statement(self: *Lowerer, statementPtr: defines.StatementPtr) Error!JIR.P
 
         .InlineC => try self.inlineC(stmt.value),
 
-        .Switch => |t| {
-            self.report("Statement '{s}' is not implemented.", .{
-                @tagName(t),
-            });
-            return common.debug.NotImplemented(self.typechecker.context.log, @src());
-        },
+        .Switch => try self.@"switch"(stmt.value),
     };
 
     return node;
+}
+
+fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
+    var typechecker = self.typechecker;
+    var exec = typechecker.executer;
+
+    const ast = typechecker.context.getAST(self.typechecker.currentFile);
+    const tokens = typechecker.context.getTokens(ast.tokens);
+
+    const enumOrUnionType = try typechecker.typecheckExpression(ast.extra[extraPtr], null);
+    const enumOrUnion = try self.expression(ast.extra[extraPtr], enumOrUnionType);
+    const typeInfo = typechecker.typeTable.get(enumOrUnionType);
+    const tag: struct { type: TypeID, fields: []const []const u8 } = switch (typeInfo) {
+        .Enum => |enm| .{ .type = enumOrUnionType, .fields = enm.fields },
+        .Union => |uni| .{ .type = uni.tag, .fields = typechecker.typeTable.get(uni.tag).Enum.fields },
+        else => return common.debug.ShouldBeImpossible(undefined, @src()),
+    };
+
+    const switchEnd = try exec.generateRandomName(.SwitchEnd);
+
+    const caseRange = defines.Range{
+        .start = ast.extra[extraPtr + 1],
+        .end = ast.extra[extraPtr + 2],
+    };
+
+    var ptrs = typechecker.arena.allocator().alloc(JIR.Ptr, @divFloor(caseRange.len(), 4) + 1)
+        catch return Error.AllocatorFailure;
+
+    var idx: u32 = 0;
+    while (idx < caseRange.len()) : (idx += 4) {
+        const caseIndex = ast.extra[caseRange.at(idx)];
+
+        if (caseIndex == Parser.AnyType) {
+            const bodyPtr = ast.extra[caseRange.at(idx + 3)];
+            ptrs[@divFloor(idx, 4)] = try self.statement(bodyPtr);
+            continue;
+        }
+
+        const caseValue = exec.getValue(try exec.eval(caseIndex, tag.type)).Enum.Value;
+        const case = try self.expression(caseIndex, tag.type);
+
+        const caseEnd = try exec.generateRandomName(.CaseEnd);
+        const cnd =
+            if (typeInfo == .Union) res: {
+                const tagFieldName = try typechecker.builder.internString("tag");
+                const tagField = try typechecker.builder.dot(enumOrUnion, tagFieldName);
+                break :res try typechecker.builder.notEqual(tagField, case);
+            }
+            else try typechecker.builder.notEqual(enumOrUnion, case);
+
+        const caseJump = try typechecker.builder.cjump(caseEnd, cnd);
+
+        const captureCount = ast.extra[caseRange.at(idx + 1)];
+        const bodyPtr = ast.extra[caseRange.at(idx + 3)];
+
+        const switchFull = res: {
+            if (captureCount == 1) {
+                const nameStr = tokens
+                                .get(ast.expressions.get(ast.extra[caseRange.at(idx + 2)]).value)
+                                .lexeme(typechecker.context, ast.tokens);
+
+                const name = try typechecker.builder.internString(nameStr);
+                const capturedField = typeInfo.Union.fields[caseValue + 1];
+                const capture = try typechecker.builder.variableDef(
+                    false,
+                    capturedField.valueType,
+                    name,
+                    false,
+                    try typechecker.builder.dot(enumOrUnion, capturedField.name),
+                );
+
+                const body = try self.statement(bodyPtr);
+                const caseEndLbl = try typechecker.builder.label(caseEnd);
+
+                break :res try typechecker.builder.scope(
+                    try exec.generateRandomName(.Case), &.{
+                        caseJump,
+                        capture,
+                        body,
+                        try typechecker.builder.jump(switchEnd),
+                        caseEndLbl,
+                    },
+                );
+            }
+            else {
+                const body = try self.statement(bodyPtr);
+                const caseEndLbl = try typechecker.builder.label(caseEnd);
+
+                break :res try typechecker.builder.scope(
+                    try exec.generateRandomName(.Case), &.{
+                        caseJump,
+                        body,
+                        try typechecker.builder.jump(switchEnd),
+                        caseEndLbl,
+                    },
+                );
+            }
+        };
+
+        ptrs[@divFloor(idx, 4)] = switchFull;
+    }
+
+    const switchEndLabel = try typechecker.builder.label(switchEnd); 
+    ptrs[@divFloor(caseRange.len(), 4)] = switchEndLabel;
+
+    return typechecker.builder.scope(
+        try exec.generateRandomName(.Switch),
+        ptrs,
+    );
 }
 
 fn inlineC(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
@@ -382,9 +493,10 @@ fn variableDef(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     const def = try self.typechecker.builder.variableDef(
         decl.topLevel,
         typeID,
-        &decl,
+        decl.name,
+        if (self.typechecker.executer.attemptEval(decl.node, typeID)) |i| self.typechecker.executer.getValue(i) == .Undefined
+        else false,
         node,
-        self.typechecker,
     );
     return def; 
 }

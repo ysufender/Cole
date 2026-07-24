@@ -1414,17 +1414,26 @@ fn commonSwitch(
 
     const scratchStart = self.scratch.items.len;
     while (!self.check(.RBrace)) {
-        if (self.match(&.{.Else})) {
-            self.scratch.append(self.allocator(), AnyType) catch return error.AllocatorFailure;
-        }
-        else {
-            self.scratch.append(self.allocator(), try self.ifExpression()) catch return error.AllocatorFailure;
-        }
+        const generic = res: {
+            if (self.match(&.{.Else})) {
+                self.scratch.append(self.allocator(), AnyType) catch return error.AllocatorFailure;
+                break :res true;
+            }
+            else {
+                self.scratch.append(self.allocator(), try self.ifExpression()) catch return error.AllocatorFailure;
+                break :res false;
+            }
+        };
 
         _ = try self.consume(.Arrow, error.MissingArrow, "Expected '->' after switch case.");
 
         // @Note Multi-captures in case I add destruction
         if (self.match(&.{.Pipe})) {
+            if (generic) {
+                self.report("Capture on else prong are not allowed.", .{});
+                return Error.CaptureOnElseProng;
+            }
+
             const firstCapture = try self.alloc(Expression);
             self.expressionMap.set(firstCapture, .{
                 .type = .Identifier,
