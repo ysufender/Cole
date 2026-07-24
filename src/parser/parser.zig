@@ -1429,6 +1429,11 @@ fn commonSwitch(
 
         // @Note Multi-captures in case I add destruction
         if (self.match(&.{.Pipe})) {
+            if (switchType == .Expression) {
+                self.report("Capture on switch expressions are not allowed.", .{});
+                return Error.CaptureOnSwitchExpression;
+            }
+
             if (generic) {
                 self.report("Capture on else prong are not allowed.", .{});
                 return Error.CaptureOnElseProng;

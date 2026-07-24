@@ -771,11 +771,80 @@ pub fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID
 
         .Call => self.call(false, exprPtr, expr.value, ofType),
 
-        .Switch, .Slicing => |t| {
+        .Switch => self.switchExpr(expr.value, ofType),
+
+        .Slicing => |t| {
             self.report("'{s}' lowering is not implemented.", .{@tagName(t)});
             return common.debug.NotImplemented(self.typechecker.context.log, @src());
         },
     };
+}
+
+fn switchExpr(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR.Ptr {
+    var typechecker = self.typechecker;
+
+    const ast = typechecker.context.getAST(self.typechecker.currentFile);
+
+    const enumOrUnionType = try typechecker.typecheckExpression(ast.extra[extraPtr], null);
+    const enumOrUnion = try self.expression(ast.extra[extraPtr], enumOrUnionType);
+    const typeInfo = typechecker.typeTable.get(enumOrUnionType);
+    const tag: struct { type: TypeID, fields: []const []const u8 } = switch (typeInfo) {
+        .Enum => |enm| .{ .type = enumOrUnionType, .fields = enm.fields },
+        .Union => |uni| .{ .type = uni.tag, .fields = typechecker.typeTable.get(uni.tag).Enum.fields },
+        else => return common.debug.ShouldBeImpossible(undefined, @src()),
+    };
+
+    const caseRange = defines.Range{
+        .start = ast.extra[extraPtr + 1],
+        .end = ast.extra[extraPtr + 2],
+    };
+    const numCases = @divFloor(caseRange.len(), 4);
+
+    var conds = typechecker.arena.allocator().alloc(JIR.Ptr, numCases)
+        catch return Error.AllocatorFailure;
+    var vals = typechecker.arena.allocator().alloc(JIR.Ptr, numCases)
+        catch return Error.AllocatorFailure;
+    var defaultVal: ?JIR.Ptr = null;
+    var written: u32 = 0;
+
+    var idx: u32 = 0;
+    while (idx < caseRange.len()) : (idx += 4) {
+        const caseIndex = ast.extra[caseRange.at(idx)];
+        const bodyPtr = ast.extra[caseRange.at(idx + 3)];
+        const captureCount = ast.extra[caseRange.at(idx + 1)];
+
+        if (captureCount != 0) {
+            return common.debug.NotImplemented(self.typechecker.context.log, @src());
+        }
+
+        if (caseIndex == Parser.AnyType) {
+            defaultVal = try self.expression(bodyPtr, ofType);
+            continue;
+        }
+
+        const case = try self.expression(caseIndex, tag.type);
+
+        const cnd = if (typeInfo == .Union) res: {
+            const tagFieldName = try typechecker.builder.internString("tag");
+            const tagField = try typechecker.builder.dot(enumOrUnion, tagFieldName);
+            break :res try typechecker.builder.equal(tagField, case);
+        } else try typechecker.builder.equal(enumOrUnion, case);
+
+        conds[written] = cnd;
+        vals[written] = try self.expression(bodyPtr, ofType);
+        written += 1;
+    }
+
+    var result: JIR.Ptr = defaultVal orelse
+        return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
+
+    var j: u32 = written;
+    while (j > 0) {
+        j -= 1;
+        result = try typechecker.builder.ternary(conds[j], vals[j], result);
+    }
+
+    return result;
 }
 
 fn call(
