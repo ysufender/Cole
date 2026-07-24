@@ -64,7 +64,15 @@ void raylib__DrawCircle(int32_t const, int32_t const, float const, Color const);
 
 void raylib__EndDrawing();
 
-jasl_bool const raylib__IsKeyDown(KeyboardKey const);
+jasl_bool const raylib__IsKeyDown(uint32_t const);
+
+extern uint32_t const W;
+
+extern uint32_t const UP;
+
+extern uint32_t const S;
+
+extern uint32_t const DOWN;
 
 void raylib__CloseWindow();
 

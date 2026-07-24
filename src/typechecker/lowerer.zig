@@ -528,7 +528,7 @@ fn conditional(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.A
     const elseLabel = try self.typechecker.executer.generateRandomName(.Else);
     const finallyLabel = try self.typechecker.executer.generateRandomName(.Finally);
 
-    const cnd = try self.expression(conditionExpr, Comptime.Builtin.Type("bool"));
+    const cnd = try self.typechecker.builder.not(try self.expression(conditionExpr, Comptime.Builtin.Type("bool")));
 
     const maybeElse =
         if (ast.extra[extraPtr + 2] == 1) ast.extra[extraPtr + 3]

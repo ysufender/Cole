@@ -10,7 +10,8 @@
 
         --working, -w  <path>       : Set working directory
         --max-err, -m  <count>      : Set max error count before terminating the compilation. Defaults to 10
-        --include, -I  <path>       : Add <path> to the searchpath of the compiler. Can be relative or absolute
+        --include, -I  <path>       : Add <path> to the searchpath of the compiler. Can be relative or absolute.
+                                      Included path will also be used by the backend.
 
         --parse-only                : Parse the project, do not compile
         --typecheck-only            : Typecheck the project, do not compile
@@ -18,7 +19,6 @@
 
         --allow-recursion           : Allow recursion, for some reason. Why don't you just iterate?
 
-        --backend                   : Specify a backend for the codegen. Available options are:
-                                        c.
-        --backend-options, -B <opt> : Options to pass to backend.
-        --supress-warnings, -s      : Do not print warning messages to stdout.
+        --link, -l     <lib>        : Link <lib>, found from the searchpath, to the final
+                                      output.
+        --link-dir, -L <path>       : Add <path> to library searchpath.

@@ -12,19 +12,28 @@ const Self = @This();
 inputFile: []const u8,
 outputFile: ?[]const u8,
 workingDir: []const u8,
-includeDirs: [][]const u8,
+includeDirs: []const []const u8,
+linkDirs: []const []const u8,
+libraries: []const []const u8,
 maxErr: u32,
 backend: Backend,
-backendFlags: ?[]const u8,
 flags: FlagSet,
 
 pub fn print(self: *const Self, allocator: std.mem.Allocator) void {
     log.info(
         "Compilation settings:"
-        ++ "\n\tInput File: {s}"
-        ++ "\n\tWorking Dir: {s}"
+        ++ "\n\tInput File  : {s}"
+        ++ "\n\tWorking Dir : {s}"
+        ++ "\n\tLink Dirs   : [{s}]"
+        ++ "\n\tLibraries   : [{s}]"
         ++ "\n\tInclude Dirs: [{s}]\n",
-        .{self.inputFile, self.workingDir, std.mem.join(allocator, ", ", self.includeDirs) catch ""}
+        .{
+            self.inputFile,
+            self.workingDir,
+            std.mem.join(allocator, ", ", self.linkDirs) catch "",
+            std.mem.join(allocator, ", ", self.libraries) catch "",
+            std.mem.join(allocator, ", ", self.includeDirs) catch "",
+        }
     );
 }
 

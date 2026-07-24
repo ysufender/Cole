@@ -98,10 +98,11 @@ fn addTargets(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
                 .link_libc = true,
             }),
         });
-        exe.root_module.addEmbedPath(b.path(resourcePath));
-        exe.root_module.addOptions("config", opts);
 
         const tcc = addTCC(b, exe.root_module);
+
+        exe.root_module.addEmbedPath(b.path(resourcePath));
+        exe.root_module.addOptions("config", opts);
 
         const install = b.addInstallArtifact(exe, .{
             .dest_dir = .{ .override = .{ .custom = b.pathJoin(&.{

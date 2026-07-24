@@ -934,7 +934,10 @@ fn evalLiteral(self: *Comptime, tokenPtr: defines.TokenPtr, maybeExpected: ?Type
                 self.report("Given literal '{s}' is too big for comptime evaluation.", .{lexeme});
                 return Error.IntegerOverflow;
             },
-            else => unreachable,
+            else => {
+                self.report("Error while parsing integer literal '{s}'. {s}", .{lexeme, @errorName(err)});
+                return Error.InternalError;
+            },
         }},
         .String => .{ .String = lexeme },
         .EnumLiteral =>

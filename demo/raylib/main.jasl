@@ -63,12 +63,12 @@ let main = fn () -> i32 {
 		}
 		
 
-		if rl::IsKeyDown(@W) or rl::IsKeyDown(@UP) {
+		if rl::IsKeyDown(rl::W) or rl::IsKeyDown(rl::UP) {
 			if ply.y >= 5 {
 			    ply.y = ply.y - 5;
             }
 		}
-        else if rl::IsKeyDown(@S) or rl::IsKeyDown(@DOWN) {
+        else if rl::IsKeyDown(rl::S) or rl::IsKeyDown(rl::DOWN) {
 			if ply.y <= (HEIGHT-ply.h) {
 			    ply.y = ply.y + 5;
             }
@@ -83,7 +83,7 @@ let main = fn () -> i32 {
  * Helpers
  */
 let intToChar = fn (a: u8) -> [2]u8 {
-    let str: [2]u8 = (a, 0);
+    let str: [2]u8 = (48 + a , 0);
 	return str;
 };
 

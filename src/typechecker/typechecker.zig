@@ -255,7 +255,7 @@ fn typecheckVariableDef(
             return Error.TypeMismatch;
         };
 
-    switch (self.typeTable.get(initializer)) {
+    blk: switch (self.typeTable.get(initializer)) {
         .Type => {
             const newType = self.executer.getValue(try self.executer.eval(decl.node, expected)).Type;
 
@@ -320,7 +320,7 @@ fn typecheckVariableDef(
                     },
                 },
 
-                else => unreachable,
+                else => break :blk,
             });
 
             self.typenameMap.put(self.arena.allocator(), newType, new)

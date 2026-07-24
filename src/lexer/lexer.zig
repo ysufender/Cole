@@ -338,7 +338,9 @@ fn scanToken(self: *Lexer) common.CompilerError!void {
 
             _ = try self.consume('\'', "Expected closing single quote (')");
             self.start += 1;
+            self.current -= 1;
             try self.addToken(.Integer);
+            self.current += 1;
         },
         '"' => {
             const index =
