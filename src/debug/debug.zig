@@ -12,8 +12,8 @@ pub fn NotImplemented(log: common.log, comptime src: std.builtin.SourceLocation)
     return Error.NotImplemented;
 }
 
-pub fn ShouldBeImpossible(log: common.log, comptime src: std.builtin.SourceLocation) Error {
-    log.warn("Reached impossible branch in " ++ locationString(src) , .{});
+pub fn ShouldBeImpossible(_: common.log, comptime src: std.builtin.SourceLocation) Error {
+    std.log.err("Reached impossible branch in " ++ locationString(src) , .{});
     return Error.ShouldBeImpossible;
 }
 

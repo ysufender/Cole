@@ -13,16 +13,8 @@
     Name:
         std::io
     Public Symbols:
-        print,
-        println,
     Description:
         Input/Output utilities.
 */
 
-code {
-    #include <stdio.h>
-}
 
-pub let println = fn (msg: []u8) -> void {
-    code { printf("%s\n", msg.ptr); }
-};

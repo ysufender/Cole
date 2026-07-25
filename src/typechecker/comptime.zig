@@ -201,8 +201,8 @@ pub fn eval(self: *Comptime, exprPtr: defines.ExpressionPtr, maybeExpected: ?Typ
         .Conditional => try self.evalIfExpression(expr.value, maybeExpected),
         .Switch => try self.evalSwitchExpression(expr.value, maybeExpected),
 
-        .Unary => try self.evalUnary(expr.value),
-        .Binary => try self.evalBinary(expr.value),
+        .Unary => try self.evalUnary(expr.value, maybeExpected),
+        .Binary => try self.evalBinary(expr.value, maybeExpected),
 
         .Slicing => try self.evalSlicing(expr.value),
 
@@ -244,7 +244,13 @@ fn evalFunction(self: *Comptime, exprPtr: defines.ExpressionPtr, extraPtr: defin
 
     for (paramsRange.start..paramsRange.end) |paramPtrPtr| {
         const param = ast.signatures.get(ast.extra[paramPtrPtr]);
-        const argType = self.getValue(try self.expectType(param.type)).Type;
+        const argType = Typechecker.determineExpected(
+            self.getValue(try self.expectType(param.type)).Type
+        ) orelse {
+            self.report("Unknown argument type in function signatures is not allowed.", .{});
+            return Error.IllegalGenericType;
+        };
+
         argTypes[paramPtrPtr - paramsRange.start] = argType;
 
         const name = tokens.get(param.name).lexeme(self.typechecker.context, self.typechecker.currentFile);
@@ -261,6 +267,10 @@ fn evalFunction(self: *Comptime, exprPtr: defines.ExpressionPtr, extraPtr: defin
         self.report("Unknown return type in function signatures is not allowed.", .{});
         return Error.IllegalGenericType;
     };
+
+    const lret = self.typechecker.lowerer.lastReturnType;
+    defer self.typechecker.lowerer.lastReturnType = lret;
+    self.typechecker.lowerer.lastReturnType = returnType;
 
     const functionType = try self.typechecker.registerType(.{
         .Function = .{
@@ -496,10 +506,7 @@ pub fn evalMark(
             return Error.RedundantMark;
         }
     }
-    else if (
-        self.typechecker.hasMetadata(ast.extra[extraPtr + 2], "@noComptime")
-        and !self.typechecker.getFlag(.AttemptingEval)
-    ) {
+    else if (self.typechecker.hasMetadata(ast.extra[extraPtr + 2], "@noComptime")) {
         const exprType = try self.typechecker.typecheckExpression(ast.extra[extraPtr + 2], maybeExpected);
 
         // @Note force comptime eval when calling said function.
@@ -566,8 +573,8 @@ pub fn evalSlicing(self: *Comptime, extraPtr: defines.OpaquePtr) Error!Value.Ptr
     });
 }
 
-pub fn evalBinary(self: *Comptime, extraPtr: defines.OpaquePtr) Error!Value.Ptr {
-    _ = try self.typechecker.typecheckBinary(extraPtr);
+pub fn evalBinary(self: *Comptime, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID) Error!Value.Ptr {
+    _ = try self.typechecker.typecheckBinary(extraPtr, maybeExpected);
 
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
 
@@ -576,7 +583,7 @@ pub fn evalBinary(self: *Comptime, extraPtr: defines.OpaquePtr) Error!Value.Ptr 
     switch (operation) {
         .Or, .And => |logic| {
             const isOr = logic == .Or;
-            const lhs = self.getValue(try self.expectDefined(ast.extra[extraPtr], null));
+            const lhs = self.getValue(try self.expectDefined(ast.extra[extraPtr], maybeExpected));
 
             if (lhs.Bool == if (isOr) true else false) {
                 return self.appendValue(.{
@@ -584,7 +591,7 @@ pub fn evalBinary(self: *Comptime, extraPtr: defines.OpaquePtr) Error!Value.Ptr 
                 });
             }
 
-            const rhs = self.getValue(try self.expectDefined(ast.extra[extraPtr + 1], null));
+            const rhs = self.getValue(try self.expectDefined(ast.extra[extraPtr + 1], maybeExpected));
             return self.appendValue(.{
                 .Bool =
                     if (isOr) lhs.Bool or rhs.Bool
@@ -696,13 +703,13 @@ pub fn evalBinary(self: *Comptime, extraPtr: defines.OpaquePtr) Error!Value.Ptr 
     }
 }
 
-pub fn evalUnary(self: *Comptime, extraPtr: defines.OpaquePtr) Error!Value.Ptr {
-    _ = try self.typechecker.typecheckUnary(extraPtr);
+pub fn evalUnary(self: *Comptime, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID) Error!Value.Ptr {
+    _ = try self.typechecker.typecheckUnary(extraPtr, maybeExpected);
 
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
 
     const operator: Lexer.TokenType = @enumFromInt(ast.extra[extraPtr]);
-    const rhsPtr = try self.expectDefined(ast.extra[extraPtr + 1], null);
+    const rhsPtr = try self.expectDefined(ast.extra[extraPtr + 1], maybeExpected);
     const rhs = self.getValue(rhsPtr);
     switch (operator) {
         .Minus => switch (rhs) {
@@ -869,7 +876,8 @@ fn evalBuiltinCall(self: *Comptime, extraPtr: defines.OpaquePtr, declPtr: define
     const BI = Resolver.BuiltinIndex;
 
     return switch (declPtr) {
-        BI("cast") => self.evalCast(extraPtr, maybeExpected),
+        BI("cast") => self.evalCast(extraPtr, maybeExpected, false),
+        BI("unsafeCast") => self.evalCast(extraPtr, maybeExpected, true),
         BI("as") => self.evalTypeForwarding(extraPtr, maybeExpected),
         BI("typeOf") => self.evalTypeOf(extraPtr),
         BI("compileError") => self.evalCompileError(extraPtr),
@@ -927,7 +935,10 @@ fn evalLiteral(self: *Comptime, tokenPtr: defines.TokenPtr, maybeExpected: ?Type
                 self.report("Given literal '{s}' is too big for comptime evaluation.", .{lexeme});
                 return Error.IntegerOverflow;
             },
-            else => unreachable,
+            else => {
+                self.report("Error while parsing integer literal '{s}'. {s}", .{lexeme, @errorName(err)});
+                return Error.InternalError;
+            },
         }},
         .String => .{ .String = lexeme },
         .EnumLiteral =>
@@ -1281,8 +1292,8 @@ fn evalUnionType(self: *Comptime, expr: defines.ExpressionPtr) Error!Value.Ptr {
     });
 }
 
-fn evalCast(self: *Comptime, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID) Error!Value.Ptr {
-    const targetType = try self.typechecker.typecheckCast(extraPtr, maybeExpected);
+fn evalCast(self: *Comptime, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID, unsafe: bool) Error!Value.Ptr {
+    const targetType = try self.typechecker.typecheckCast(extraPtr, maybeExpected, unsafe);
 
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
 
@@ -1892,26 +1903,40 @@ fn castValue(self: *Comptime, valuePtr: Value.Ptr, to: TypeID) Error!Value.Ptr {
                 .Value = fromUni.Value,
             },
         },
-        .Slice => |slice| switch (self.typechecker.typeTable.get(to).Pointer.size) {
-            .Single, .C => |size| .{
-                .Pointer = .{
-                    .Type = self.typechecker.typeMap.get(TypeInfo{
-                        .Pointer = .{
-                            .mutable = self.typechecker.mutable(slice.Type), 
-                            .size = size,
-                            .child = self.typechecker.typeTable.get(slice.Type).Pointer.child,
-                        },
-                    }).?,
-                    .To = slice.To,
+        .Slice => |slice| switch (self.typechecker.typeTable.get(to)) {
+            .Pointer => |ptr| switch (ptr.size) {
+                .Single, .C => |size| .{
+                    .Pointer = .{
+                        .Type = self.typechecker.typeMap.get(TypeInfo{
+                            .Pointer = .{
+                                .mutable = self.typechecker.mutable(slice.Type), 
+                                .size = size,
+                                .child = switch (self.typechecker.typeTable.get(slice.Type)) {
+                                    .Pointer => |slicePtr| slicePtr.child,
+                                    .Array => |arr| arr.child,
+                                    else => return common.debug.ShouldBeImpossible(undefined, @src()),
+                                },
+                            },
+                        }).?,
+                        .To = slice.To,
+                    },
+                },
+                .Slice => .{
+                    .Slice = .{
+                        .Size = slice.Size,
+                        .To = slice.To,
+                        .Type = to,
+                    },
                 },
             },
-            .Slice => .{
+            .Array => |arr| .{
                 .Slice = .{
-                    .Size = slice.Size,
-                    .To = slice.To,
                     .Type = to,
+                    .Size = arr.len,
+                    .To = slice.To,
                 },
             },
+            else => return common.debug.ShouldBeImpossible(undefined, @src()),
         },
         .Undefined => .{
             .Undefined = to, 
@@ -2098,12 +2123,10 @@ pub const builtinTypes = [_]struct {
     .{ .name = "mut any", .info = .{ .Any = true } },
     // incomplete
     .{ .name = "incomplete", .info = .{ .Struct = .{ .mutable = false, .name = Resolver.BuiltinIndex("any") + 3, .fields = &.{}, .definitions = &.{}, .scope = 0 } } },
-    // entry_point
-    .{ .name = "entry_point", .info = .{ .Function = .{ .mutable = false, .isComptime = false, .argTypes = &.{}, .returnType = 1 } } },
     // builtin_metadata
     .{ .name = "builtin_metadata", .info = .{ .Enum = .{ .mutable = false, .name = Resolver.BuiltinIndex("any") + 5, .fields = &.{}, .definitions = &.{}, .scope = 0 } } },
     // []u8
-    .{ .name = "string", .info = .{ .Pointer = .{ .mutable = false, .child = 2, .size = .Slice, }, } },
+    .{ .name = "[]u8", .info = .{ .Pointer = .{ .mutable = false, .child = 2, .size = .Slice, }, } },
 };
 
 pub const builtinMetadata = [_][]const u8 {

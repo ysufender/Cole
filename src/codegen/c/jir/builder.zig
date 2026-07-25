@@ -91,19 +91,14 @@ pub fn variableDef(
     self: *Builder,
     topLevel: bool,
     typeID: TypeID,
-    decl: *const Declaration,
+    name: defines.StringPtr,
+    isUndefined: bool,
     initializer: JIR.Ptr,
-    typechecker: *Typechecker,
 ) Error!JIR.Ptr {
-    const isUndefined =
-        if (typechecker.executer.attemptEval(decl.node, typeID)) |v|
-            typechecker.executer.getValue(v) == .Undefined
-        else false;
-
     const start: u32 = @intCast(self.data.items.len);
     self.data.append(self.allocator, @intFromBool(topLevel)) catch return Error.AllocatorFailure;
     self.data.append(self.allocator, typeID) catch return Error.AllocatorFailure;
-    self.data.append(self.allocator, decl.name) catch return Error.AllocatorFailure;
+    self.data.append(self.allocator, name) catch return Error.AllocatorFailure;
     self.data.append(self.allocator, @intFromBool(isUndefined)) catch return Error.AllocatorFailure;
     if (!isUndefined) {
         self.data.append(self.allocator, initializer) catch return Error.AllocatorFailure;
@@ -174,7 +169,7 @@ pub inline fn construct(self: *Builder, typeID: TypeID, args: []const JIR.Ptr) E
 pub inline fn identifier(self: *Builder, decl: defines.StringPtr) Error!JIR.Ptr { return self.commonSingle(.Identifier, decl); }
 pub inline fn inlineC(self: *Builder, code: defines.StringPtr) Error!JIR.Ptr { return self.commonSingle(.Code, code); }
 
-pub inline fn reference(self: *Builder, decl: StringPtr) Error!JIR.Ptr { return self.commonSingle(.Reference, decl); }
+pub inline fn reference(self: *Builder, decl: JIR.Ptr) Error!JIR.Ptr { return self.commonSingle(.Reference, decl); }
 pub inline fn dereference(self: *Builder, expr: JIR.Ptr) Error!JIR.Ptr { return self.commonSingle(.Dereference, expr); }
 pub inline fn literal(self: *Builder, constant: JIR.Constant.Ptr) Error!JIR.Ptr { return self.commonSingle(.Literal, constant); }
 pub inline fn add(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.Add, lhs, rhs); }

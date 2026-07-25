@@ -5,6 +5,7 @@ const collections = @import("util/collections.zig");
 const defines = @import("core/defines.zig");
 const debug = @import("debug/debug.zig");
 const platform = @import("core/platform.zig");
+const backend = @import("codegen/backend.zig");
 
 const Error = common.CompilerError;
 const Lexer = @import("lexer/lexer.zig");
@@ -135,7 +136,8 @@ fn innerMain(allocator: std.mem.Allocator, init: std.process.Init) common.Compil
     // has ended.
     _ = context.arena.reset(.retain_capacity);
 
-    _ = try loweredIR.codegen(&context);
+    const outDir = try loweredIR.codegen(&context);
+    try backend.C.compile(outDir, allocator, &context);
 }
 
 var MainProcInit: std.process.Init = undefined;

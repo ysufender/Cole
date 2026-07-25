@@ -22,8 +22,9 @@
         "theoric" side of the numbers, see std::numeric.
 */
 
-import std::collections as C;
-import std::numeric as N;
+code {
+    #include <math.h>
+}
 
 pub let Epsilon = 0.000000119209;
 
@@ -35,6 +36,8 @@ pub let abs = fn (T: type, number: N::Signed::Trait(T)) -> N::Numeric::Trait(T) 
     return bitSet(number, bitSizeOf(T), 0);
 };
 
-pub let pow = fn (base: float, power: float) -> float {
-    // TODO
+pub let sin = fn (angle: float) -> float {
+    let res: mut float = 0.0;
+    code { res = sinf(180 * angle); }
+    return res;
 };

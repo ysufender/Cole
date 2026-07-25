@@ -1,5 +1,6 @@
 const std = @import("std");
 
+
 const resourcePath = "res/";
 
 var targets = [_]std.Target.Query{
@@ -38,7 +39,7 @@ fn addTestStep(b: *std.Build) void {
             .root_source_file = b.path("src/tests.zig"),
             .target = config.native,
             .optimize = .Debug,
-            .link_libc = config.native.result.os.tag == .windows,
+            .link_libc = true,
         }),
     });
     tests.root_module.addEmbedPath(b.path(resourcePath));
@@ -46,6 +47,7 @@ fn addTestStep(b: *std.Build) void {
 
     const run = b.addRunArtifact(tests);
     const step = b.step("test", "Run unit tests reachable from src/main.zig");
+    step.dependOn(&addTCC(b, tests.root_module).step);
     step.dependOn(&run.step);
 }
 
@@ -88,26 +90,22 @@ fn addTargets(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
         const exe = b.addExecutable(.{
             .name = "jaslc",
             .version = version,
-            .root_module = b.createModule(
-                if (optimize == .Debug) .{
-                    .root_source_file = b.path("src/main.zig"),
-                    .target = target,
-                    .optimize = optimize,
-                    .link_libc  = target.result.os.tag == .windows,
-                    .error_tracing = true,
-                    .omit_frame_pointer = false,
-                }
-                else .{
-                    .root_source_file = b.path("src/main.zig"),
-                    .target = target,
-                    .optimize = optimize,
-                    .link_libc  = target.result.os.tag == .windows,
-                    .strip = true,
-                }
-            ),
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/main.zig"),
+                .target = target,
+                .optimize = optimize,
+                .strip = true,
+                .code_model = .small,
+                .link_libc = true,
+                .error_tracing = false,
+            }),
         });
+
+        const tcc = addTCC(b, exe.root_module);
+
         exe.root_module.addEmbedPath(b.path(resourcePath));
         exe.root_module.addOptions("config", opts);
+
         const install = b.addInstallArtifact(exe, .{
             .dest_dir = .{ .override = .{ .custom = b.pathJoin(&.{
                 targetName,
@@ -120,9 +118,44 @@ fn addTargets(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
             "Build for {s}",
             .{targetName},
         ) catch unreachable);
+
+        step.dependOn(&tcc.step);
         step.dependOn(&install.step);
         step.dependOn(b.getInstallStep());
     }
+}
+
+fn addTCC(b: *std.Build, module: *std.Build.Module) *std.Build.Step.Run {
+    module.addIncludePath(b.path("vendor/tinycc/"));
+    module.addObjectFile(b.path("vendor/tinycc/libtcc.a"));
+
+    var vendor = std.Io.Dir.cwd().createFile(b.graph.io, "vendor/vendor.zig", .{ })
+        catch unreachable;
+
+    vendor.writePositionalAll(b.graph.io,
+        \\pub const stdnoreturn = @embedFile("tinycc/include/stdnoreturn.h");
+        \\pub const stdalign = @embedFile("tinycc/include/stdalign.h");
+        \\pub const stdarg = @embedFile("tinycc/include/stdarg.h");
+        \\pub const stdatomic = @embedFile("tinycc/include/stdatomic.h");
+        \\pub const stdbool = @embedFile("tinycc/include/stdbool.h");
+        \\pub const stddef = @embedFile("tinycc/include/stddef.h");
+        \\pub const libtcc1 = @embedFile("tinycc/libtcc1.a");
+        ,0
+    ) catch unreachable;
+    vendor.close(b.graph.io);
+
+    module.addAnonymousImport("vendor", .{
+        .root_source_file = b.path("vendor/vendor.zig"),
+    });
+
+    const configure = b.addSystemCommand(&.{"./configure"});
+    configure.setCwd(b.path("vendor/tinycc"));
+
+    const make = b.addSystemCommand(&.{"make"});
+    make.setCwd(b.path("vendor/tinycc"));
+    make.step.dependOn(&configure.step);
+    
+    return make;
 }
 
 fn addDebugTarget(b: *std.Build) void {
@@ -139,7 +172,7 @@ fn addDebugTarget(b: *std.Build) void {
             .root_source_file = b.path("src/main.zig"),
             .target = config.native,
             .optimize = .Debug,
-            .link_libc  = config.native.result.os.tag == .windows,
+            .link_libc  = true,
             .error_tracing = true,
             .omit_frame_pointer = false,
         }),
@@ -151,6 +184,7 @@ fn addDebugTarget(b: *std.Build) void {
     const install = b.addInstallArtifact(exe, .{});
 
     const step = b.step(targetName, "Build for debug on native platform");
+    step.dependOn(&addTCC(b, exe.root_module).step);
     step.dependOn(&install.step);
     step.dependOn(b.getInstallStep());
 }

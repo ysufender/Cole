@@ -115,7 +115,7 @@ pub const Function = struct {
 
 const JIR = @This();
 
-cstrings: std.AutoHashMapUnmanaged(TypeID, []const u8) = undefined,
+cstrings: std.AutoHashMapUnmanaged(TypeID, []const u8) = .empty,
 strings: [][]const u8,
 types: Typechecker.TypeTable.Slice,
 typeNames: TypeNameMap,
@@ -176,7 +176,7 @@ pub fn codegen(self: *JIR, context: *Context) Error!std.Io.Dir {
 
     self.cstrings = .empty;
 
-    var wbuf: [256]u8 = undefined;
+    var wbuf = std.mem.zeroes([512]u8);
     var forwardDeclFile = cOut.createFile(context.io, "forward_decl.h", .{ })
         catch return Error.IOError;
     defer forwardDeclFile.close(context.io);
@@ -199,8 +199,8 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
     \\ * by the JASL compiler.
     \\ */
     \\
-    \\#ifndef JASL_CODEGEN_C_FORWARD_DECLS_H
-    \\#define JASL_CODEGEN_C_FORWARD_DECLS_H
+    \\#ifndef JASL_CODEGEN_C_FORWARD_DECL_H
+    \\#define JASL_CODEGEN_C_FORWARD_DECL_H
     \\
     \\#include <stdint.h>
     \\
@@ -209,7 +209,7 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
     \\
     , .{});
     defer { 
-        self.write(out, "\n#endif /* JASL_CODEGEN_C_FORWARD_DECLS_H */\n" , .{}) catch common.log.err("Failed to end header.", .{});
+        self.write(out, "\n#endif /* JASL_CODEGEN_C_FORWARD_DECL_H */\n" , .{}) catch common.log.err("Failed to end header.", .{});
         out.flush() catch common.log.err("Failed to flush forward declarations.", .{});
     }
 
@@ -223,29 +223,51 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
     }
     try self.write(out, "\n\n", .{});
 
+    var visited = std.StringHashMapUnmanaged(void).empty;
+
     for (0..self.types.len) |typeID| {
         const typeInfo = self.types.get(@intCast(typeID));
 
         switch (typeInfo) {
             .Array => |arr| {
-                const name = std.fmt.allocPrint(self.allocator, "Array_{s}_{d}_t[{d}]", .{
+                const name = std.fmt.allocPrint(self.allocator, "{s}Array_{s}_{d}_t", .{
+                    if (arr.mutable) "" else "const_",
                     try self.getCName(arr.child, null, true),
-                    arr.len,
                     arr.len,
                 }) catch return Error.AllocatorFailure;
 
-                try self.write(out, "typedef {s} {s};\n\n", .{
-                    try self.getCName(arr.child, null, false), name
+                const res = visited.getOrPut(self.allocator, name)
+                    catch return Error.AllocatorFailure;
+                if (res.found_existing) {
+                    continue;
+                }
+                res.key_ptr.* = name;
+
+                try self.write(out, "typedef struct {s} {{ {s} data[{d}]; }} {s};\n\n", .{
+                    name,
+                    try self.getCName(arr.child, null, false),
+                    arr.len,
+                    name
                 });
             },
             .Pointer => |ptr| switch (ptr.size) {
                 .Slice => {
-                    const name = std.fmt.allocPrint(self.allocator, "Slice_{s}", .{
+                    const name = std.fmt.allocPrint(self.allocator, "{s}Slice_{s}", .{
+                        if (ptr.mutable) "" else "const_",
                         try self.getCName(ptr.child, null, true),
                     }) catch return Error.AllocatorFailure;
 
-                    try self.write(out, "typedef struct {{ {s}* ptr; uint32_t len; }} {s};\n\n", .{
-                        try self.getCName(ptr.child, null, false), name
+                    const res = visited.getOrPut(self.allocator, name)
+                        catch return Error.AllocatorFailure;
+                    if (res.found_existing) {
+                        continue;
+                    }
+                    res.key_ptr.* = name;
+
+                    try self.write(out, "typedef struct {s} {{ {s}* ptr; uint32_t len; }} {s};\n\n", .{
+                        name,
+                        try self.getCName(ptr.child, null, false),
+                        name,
                     });
                 },
                 else => { },
@@ -306,55 +328,74 @@ fn discoverFunctionsAndTypes(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void 
         },
         .TypeDef => {
             const typeID = node.value;
+
             const typeInfo = self.types.get(typeID);
 
             switch (typeInfo) {
                 .Struct => |str| {
-                    try self.write(out, "typedef struct {{\n", .{});
-                    for (str.fields) |field| {
-                        try self.write(out, "\t{s} {s};\n", .{
-                            try self.getCName(field.valueType, null, false),
-                            self.strings[field.name],
-                        });
-                    }
                     const name = self.strings[str.name];
                     _ = std.mem.replace(u8, name, ":", "_", @constCast(name));
                     _ = std.mem.replace(u8, name, "$", "_", @constCast(name));
-                    try self.write(out, "}} {s};\n\n", .{name});
-                },
-
-                .Union => |uni|{
-                    if (uni.isTagged) {
-                        try self.write(out, "typedef struct {{\n", .{});
-                        try self.write(out, "\t{s} {s};\n", .{
-                            try self.getCName(uni.fields[0].valueType, null, false),
-                            self.strings[uni.fields[0].name],
-                        });
-                        try self.write(out, "\tunion {{\n", .{});
-                        for (uni.fields[1..]) |field| {
-                            try self.write(out, "\t\t{s} {s};\n", .{
-                                try self.getCName(field.valueType, null, false),
-                                self.strings[field.name],
-                            });
-                        }
-                        try self.write(out, "\t}};\n", .{});
-                        const name = self.strings[uni.name];
-                        _ = std.mem.replace(u8, name, ":", "_", @constCast(name));
-                        _ = std.mem.replace(u8, name, "$", "_", @constCast(name));
-                        try self.write(out, "}} {s};\n\n", .{name});
-                    }
-                    else {
-                        try self.write(out, "typedef union {{\n", .{});
-                        for (uni.fields) |field| {
+                    if (!typeInfo.isZeroBit()) {
+                        try self.write(out, "typedef struct {s} {{\n", .{name});
+                        for (str.fields) |field| {
                             try self.write(out, "\t{s} {s};\n", .{
                                 try self.getCName(field.valueType, null, false),
                                 self.strings[field.name],
                             });
                         }
+                    }
+                    try self.write(out, "{s} {s};\n\n", .{
+                        if (typeInfo.isZeroBit()) "typedef void"
+                        else "}",
+                        name
+                    });
+                },
+
+                .Union => |uni|{
+                    if (uni.isTagged) {
                         const name = self.strings[uni.name];
                         _ = std.mem.replace(u8, name, ":", "_", @constCast(name));
                         _ = std.mem.replace(u8, name, "$", "_", @constCast(name));
-                        try self.write(out, "}} {s};\n\n", .{name});
+                        if (!typeInfo.isZeroBit()) {
+                            try self.write(out, "typedef struct {s} {{\n", .{name});
+                            try self.write(out, "\t{s} {s};\n", .{
+                                try self.getCName(uni.fields[0].valueType, null, false),
+                                self.strings[uni.fields[0].name],
+                            });
+                            try self.write(out, "\tunion {s} {{\n", .{name});
+                            for (uni.fields[1..]) |field| {
+                                try self.write(out, "\t\t{s} {s};\n", .{
+                                    try self.getCName(field.valueType, null, false),
+                                    self.strings[field.name],
+                                });
+                            }
+                            try self.write(out, "\t}};\n", .{});
+                        }
+                        try self.write(out, "{s} {s};\n\n", .{
+                            if (typeInfo.isZeroBit()) "typedef void"
+                            else "}",
+                            name
+                        });
+                    }
+                    else {
+                        const name = self.strings[uni.name];
+                        _ = std.mem.replace(u8, name, ":", "_", @constCast(name));
+                        _ = std.mem.replace(u8, name, "$", "_", @constCast(name));
+                        if (!typeInfo.isZeroBit()) {
+                            try self.write(out, "typedef union {s} {{\n", .{name});
+                            for (uni.fields) |field| {
+                                try self.write(out, "\t{s} {s};\n", .{
+                                    try self.getCName(field.valueType, null, false),
+                                    self.strings[field.name],
+                                });
+                            }
+                        }
+                        try self.write(out, "{s} {s};\n\n", .{
+                            if (typeInfo.isZeroBit()) "typedef void"
+                            else "}",
+                            name
+                        });
                     }
                 },
 
@@ -362,14 +403,20 @@ fn discoverFunctionsAndTypes(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void 
                     const name = self.strings[enm.name];
                     _ = std.mem.replace(u8, name, ":", "_", @constCast(name));
                     _ = std.mem.replace(u8, name, "$", "_", @constCast(name));
-                    try self.write(out, "typedef enum {{\n", .{});
-                    for (enm.fields) |field| {
-                        try self.write(out, "\t{s}_{s},\n", .{
-                            name,
-                            field,
-                        });
+                    if (!typeInfo.isZeroBit()) {
+                        try self.write(out, "typedef enum __attribute__((aligned (sizeof(uint32_t)))) {s} {{\n", .{name});
+                        for (enm.fields) |field| {
+                            try self.write(out, "\t{s}_{s},\n", .{
+                                name,
+                                field,
+                            });
+                        }
                     }
-                    try self.write(out, "}} {s};\n\n", .{name});
+                    try self.write(out, "{s} {s};\n\n", .{
+                        if (typeInfo.isZeroBit()) "typedef void"
+                        else "}",
+                        name
+                    });
                 },
 
                 // @Note type constants are already folded
@@ -392,20 +439,7 @@ fn sourceGen(self: *JIR, out: *Writer) Error!void {
     }
     try self.write(out, "\n\n", .{});
 
-    try self.write(out, 
-    \\/*
-    \\ * This file has been automatically generated
-    \\ * by the JASL compiler.
-    \\ */
-    \\
-    \\#include "forward_decl.h"
-    \\
-    \\int main() {{
-    \\    return root__main();
-    \\}}
-    \\
-    \\
-    , .{});
+    try self.write(out, @embedFile("../../res/hidden_main.c"), .{});
     defer out.flush() catch {
         common.log.err("Failed to flush source file.", .{});
     };
@@ -589,6 +623,7 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
         .Construction => {
             const typeToCtor = self.data[node.value];
             const len = self.data[node.value + 1];
+
             try self.write(out, "({s}){{", .{
                 try self.getCName(typeToCtor, null, true),
             });
@@ -628,7 +663,7 @@ fn literal(self: *JIR, out: *Writer, ptr: Constant.Ptr) Error!void {
     const cst = self.constants.get(ptr);
 
     try switch (cst) {
-        .Undefined => self.write(out, "{{ }}", .{}),
+        .Undefined => |typeID| self.write(out, "({s}){{ }}", .{ try self.getCName(typeID, null, false) }),
         .Integer => |int| switch (int) {
             .i32 => |t| self.write(out, "{d}", .{t}),
             .u32 => |t| self.write(out, "{d}", .{t}),
@@ -650,19 +685,21 @@ fn literal(self: *JIR, out: *Writer, ptr: Constant.Ptr) Error!void {
             try self.write(out, "}}", .{});
         },
         .Array => |arr| {
-            try self.write(out, "{{ ", .{});
+            try self.write(out, "({s}){{", .{
+                try self.getCName(arr.type, null, true),
+            });
             for (arr.data.start..arr.data.end) |idx| {
                 try self.literal(out, @intCast(idx));
                 if (idx != arr.data.end - 1) {
                     try self.write(out, ", ", .{});
                 }
             }
-            try self.write(out, " }}", .{});
+            try self.write(out, "}}", .{ });
         },
         .String => |str| {
             const rstr = self.strings[str];
             try self.write(out, "({s}){{(uint8_t*)\"{s}\\0\", {d}}}", .{
-                try self.getCName(Comptime.Builtin.Type("string"), null, true),
+                try self.getCName(Comptime.Builtin.Type("[]u8"), null, true),
                 rstr,
                 rstr.len,
             });
@@ -686,7 +723,7 @@ fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool
         },
 
         .Void => return "void",
-        .Noreturn => return "void",
+        .Noreturn => return "void __attribute__((noreturn))",
 
         .Bool => |v| name = std.fmt.allocPrint(self.allocator, "jasl_bool{s}", .{
             if (v) "" else " const"
@@ -748,7 +785,8 @@ fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool
         },
 
         .Array => |arr| {
-            name = std.fmt.allocPrint(self.allocator, "Array_{s}_{d}_t{s}", .{
+            name = std.fmt.allocPrint(self.allocator, "{s}Array_{s}_{d}_t{s}", .{
+                if (arr.mutable) "" else "const_",
                 try self.getCName(arr.child, _name, true),
                 arr.len,
                 if (arr.mutable) "" else " const",
@@ -757,7 +795,8 @@ fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool
 
         .Pointer => |ptr| switch (ptr.size) {
             .Slice => {
-                name = std.fmt.allocPrint(self.allocator, "Slice_{s}{s}", .{
+                name = std.fmt.allocPrint(self.allocator, "{s}Slice_{s}{s}", .{
+                    if (ptr.mutable) "" else "const_",
                     try self.getCName(ptr.child, _name, true),
                     if (ptr.mutable) "" else " const",
                 }) catch return Error.AllocatorFailure;

@@ -6,6 +6,8 @@ out
 zig-out
 .vscode
 test
+tests/crashes/
+tests/corpus/
 
 *.out
 *.massif*

@@ -1,0 +1,32 @@
+/*
+    this file is a part of the jasl standard library,
+    and is licensed under mit license.
+
+    any user code that imports this module agrees that it
+    will satisfy the specifications stated further.
+
+    disclaimer:
+        the traits and conventions mentioned in this document
+        are to be obeyed, otherwise neither jasl stdlib nor the
+        compiler can guarantee a well defined program.
+
+    name:
+        std::io::console
+    public symbols:
+        println
+        print
+    description:
+        Console I/O utilities.
+*/
+
+code {
+    #include <stdio.h>
+}
+
+pub let println = fn (msg: []u8) -> void {
+    code { printf("%s\n", msg.ptr); }
+};
+
+pub let print = fn (msg: []u8) -> void {
+    code { printf("%s", msg.ptr); }
+};

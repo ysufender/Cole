@@ -1,0 +1,23 @@
+/*
+    This file is a part of the JASL Standard Library,
+    and is licensed under MIT License.
+
+    Any user code that imports this module agrees that it
+    will satisfy the specifications stated further.
+
+    DISCLAIMER:
+        The traits and conventions mentioned in this document
+        are to be obeyed, otherwise neither JASL STDLib nor the
+        compiler can guarantee a well defined program.
+
+    Name:
+        std::ascii
+    Public Symbols:
+        NULL
+        EOF
+    Description:
+        Input/Output utilities.
+*/
+
+pub let EOF = -1;
+pub let NULL = 0;

@@ -1,0 +1,48 @@
+/*
+    this file is a part of the jasl standard library,
+    and is licensed under mit license.
+
+    any user code that imports this module agrees that it
+    will satisfy the specifications stated further.
+
+    disclaimer:
+        the traits and conventions mentioned in this document
+        are to be obeyed, otherwise neither jasl stdlib nor the
+        compiler can guarantee a well defined program.
+
+    name:
+        std::memory::c
+    public symbols:
+        malloc,
+        free,
+        realloc,
+        calloc,
+    description:
+        File operation utilities.
+*/
+
+code {
+    #include <stdlib.h>
+}
+
+pub let malloc = fn (size: u32) -> *void {
+    let res: mut [@c]void = undefined;
+    code { res = malloc(size); }
+    return res;
+};
+
+pub let free = fn (ptr: [@c]void) -> void {
+    code { free(ptr); }
+};
+
+pub let realloc = fn (ptr: [@c]void, newSize: u32) -> [@c]void {
+    let res: mut [@c]void = undefined;
+    code { res = realloc(ptr, newSize); }
+    return res;
+};
+
+pub let calloc = fn (count: u32, sizeByteEach: u32) -> [@c]void {
+    let res: mut [@c]void = undefined;
+    code { res = calloc(count, sizeByteEach); }
+    return res;
+};

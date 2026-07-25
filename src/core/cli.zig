@@ -14,9 +14,11 @@ const Flags = enum {
     None,
     Include,
     Backend,
-    BackendOptions,
+    Link,
+    LinkPath,
     Flag,
     Output,
+    Optimize,
 };
 
 const flags = std.StaticStringMap(Flags).initComptime(&(.{
@@ -38,10 +40,15 @@ const flags = std.StaticStringMap(Flags).initComptime(&(.{
     .{ "--include", .Include },
     .{ "-I", .Include },
 
-    .{ "--backend", .Backend },
+    // .{ "--backend", .Backend },
+    .{ "--optimize", .Optimize },
+    .{ "-O", .Optimize },
 
-    .{ "--backend-options", .BackendOptions },
-    .{ "-B", .BackendOptions },
+    .{ "--link", .Link },
+    .{ "-l", .Link },
+    
+    .{ "--link-dir", .LinkPath },
+    .{ "-L", .LinkPath },
 
     .{ "--parse-only", .Flag },
 
@@ -64,7 +71,7 @@ const flags = std.StaticStringMap(Flags).initComptime(&(.{
     .{ "--dump-stats", .Flag },
 
     .{ "--dump-jir", .Flag },
-}));
+} else .{}));
 
 const helpText =
     @embedFile("../res/help.txt")
@@ -81,9 +88,11 @@ pub fn parseCLI(allocator: std.mem.Allocator, _args: std.process.Args, io: std.I
     var maybeOut: ?[]const u8 = null;
     var workingDir: []const u8 = std.Io.Dir.cwd().realPathFileAlloc(io, ".", allocator) catch return Error.AllocatorFailure;
     var includeDirs = NMap.empty;
+    var libraries = NMap.empty;
+    var linkDirs = NMap.empty;
     var maxErr: u32 = 5;
     var targetBackend = Backend.C;
-    var backendOptions: []const u8 = "";
+    var optimize: ?[]const u8 = null;
     var cliFlags = common.CompilerSettings.FlagSet.empty;
 
     cliFlags.ensureTotalCapacity(allocator, 128) catch return Error.AllocatorFailure;
@@ -94,16 +103,59 @@ pub fn parseCLI(allocator: std.mem.Allocator, _args: std.process.Args, io: std.I
         switch (hash(flag)) {
             .Help => return printHelp(),
             .Version => return printHeader(),
+            .Optimize => {
+                if (args.next()) |arg| {
+                    if (
+                        std.mem.eql(u8, arg, "g")
+                        or std.mem.eql(u8, arg, "0")
+                        or std.mem.eql(u8, arg, "1")
+                        or std.mem.eql(u8, arg, "2")
+                        or std.mem.eql(u8, arg, "3")
+                    ) {
+                        optimize = arg;
+                        continue;
+                    }
+
+                    common.log.err("Unknown optimization level '{s}'.", .{arg});
+                    return Error.UnknownFlag;
+                }
+                else {
+                    common.log.err("Expected an optimization level after optimize option.", .{});
+                    return Error.MissingFlag;
+                }
+            },
+            .Link => {
+                if (args.next()) |arg| {
+                    libraries.put(allocator, arg, {}) catch return Error.AllocatorFailure;
+                }
+                else {
+                    common.log.err("Expected a library after link flag.", .{});
+                    return Error.MissingFlag;
+                }
+            },
+            .LinkPath => {
+                if (args.next()) |arg| {
+                    const path = std.Io.Dir.cwd().realPathFileAlloc(io, arg, allocator) catch |err| switch (err) {
+                        error.OutOfMemory => return Error.AllocatorFailure,
+                        else => {
+                            common.log.info("Given path '{s}' couldn't be resolved.", .{arg});
+                            return Error.IOError;
+                        }
+                    };
+
+                    includeDirs.put(allocator, path, {}) catch return Error.AllocatorFailure;
+                }
+                else {
+                    common.log.err("Expected a path after link directory flag.", .{});
+                    return Error.MissingFlag;
+                }
+            },
             .Backend => {
                 const backend = args.next() orelse return Error.MissingFlag;
                 targetBackend = std.meta.stringToEnum(Backend, backend) orelse {
                     common.log.err("{s} is not a supported backend.", .{backend});
                     return Error.UnknownFlag;
                 };
-            },
-            .BackendOptions => {
-                const opts = args.next() orelse return Error.MissingFlag;
-                backendOptions = opts;
             },
             .Working => {
                 const dir = args.next() orelse return Error.MissingFlag;
@@ -187,10 +239,20 @@ pub fn parseCLI(allocator: std.mem.Allocator, _args: std.process.Args, io: std.I
                 includeDirs.keyIterator(),
                 allocator
             ),
+            .linkDirs = try collect(
+                linkDirs.count(),
+                linkDirs.keyIterator(),
+                allocator
+            ),
+            .libraries = try collect(
+                libraries.count(),
+                libraries.keyIterator(),
+                allocator
+            ),
+            .optimize = optimize orelse "0",
             .maxErr = maxErr,
             .flags = cliFlags,
             .backend = targetBackend,
-            .backendFlags = backendOptions,
         }
         else {
             common.log.err("jaslc expects an input file.", .{});

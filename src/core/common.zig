@@ -131,5 +131,7 @@ pub const CompilerError = error {
     BackendError,
     AssignationOfNonConcreteValue,
     ExportOfMainFunction,
+    CaptureOnElseProng,
+    CaptureOnSwitchExpression,
     Terminate,
 };
