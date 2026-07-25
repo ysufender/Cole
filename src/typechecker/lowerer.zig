@@ -4,6 +4,7 @@ const std = @import("std");
 const common = @import("../core/common.zig");
 const backend = @import("../codegen/backend.zig");
 const defines = @import("../core/defines.zig");
+const types = @import("../typechecker/type.zig");
 
 const Lexer = @import("../lexer/lexer.zig");
 const Parser = @import("../parser/parser.zig");
@@ -335,6 +336,10 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
 
     const enumOrUnionType = try typechecker.typecheckExpression(ast.extra[extraPtr], null);
     const enumOrUnion = try self.expression(ast.extra[extraPtr], enumOrUnionType);
+    const maybeComptimeEnumOrUnion =
+        if (typechecker.executer.attemptEval(ast.extra[extraPtr], enumOrUnionType))
+            |ptr| typechecker.executer.getValue(ptr)
+        else null;
     const typeInfo = typechecker.typeTable.get(enumOrUnionType);
     const tag: struct { type: TypeID, fields: []const []const u8 } = switch (typeInfo) {
         .Enum => |enm| .{ .type = enumOrUnionType, .fields = enm.fields },
@@ -358,11 +363,20 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
 
         if (caseIndex == Parser.AnyType) {
             const bodyPtr = ast.extra[caseRange.at(idx + 3)];
-            ptrs[@divFloor(idx, 4)] = try self.statement(bodyPtr);
-            continue;
+            const body = try self.statement(bodyPtr);
+
+            if (maybeComptimeEnumOrUnion) |_| {
+                return body;
+            }
+            else {
+                ptrs[@divFloor(idx, 4)] = body;
+                continue;
+            }
         }
 
         const caseValue = exec.getValue(try exec.eval(caseIndex, tag.type)).Enum.Value;
+        const caseField = typeInfo.Union.fields[caseValue + 1];
+
         const case = try self.expression(caseIndex, tag.type);
 
         const caseEnd = try exec.generateRandomName(.CaseEnd);
@@ -386,16 +400,42 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
                                 .lexeme(typechecker.context, ast.tokens);
 
                 const name = try typechecker.builder.internString(nameStr);
-                const capturedField = typeInfo.Union.fields[caseValue + 1];
                 const capture = try typechecker.builder.variableDef(
                     false,
-                    capturedField.valueType,
+                    caseField.valueType,
                     name,
                     false,
-                    try typechecker.builder.dot(enumOrUnion, capturedField.name),
+                    try typechecker.builder.dot(enumOrUnion, caseField.name),
                 );
 
                 const body = try self.statement(bodyPtr);
+
+                if (maybeComptimeEnumOrUnion) |val| {
+                    switch (val) {
+                        .Union => |uni|
+                            if (uni.Tag == caseValue) {
+                                return typechecker.builder.scope(
+                                    try exec.generateRandomName(.Case), &.{
+                                        capture,
+                                        body,
+                                    },
+                                );
+                            },
+
+                        .Enum => |enm|
+                            if (enm.Value == caseValue) {
+                                return typechecker.builder.scope(
+                                    try exec.generateRandomName(.Case), &.{
+                                        capture,
+                                        body,
+                                    },
+                                );
+                            },
+
+                        else => return common.debug.ShouldBeImpossible(undefined, @src()),
+                    }
+                }
+
                 const caseEndLbl = try typechecker.builder.label(caseEnd);
 
                 break :res try typechecker.builder.scope(
@@ -410,6 +450,23 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
             }
             else {
                 const body = try self.statement(bodyPtr);
+
+                if (maybeComptimeEnumOrUnion) |val| {
+                    switch (val) {
+                        .Union => |uni|
+                            if (uni.Tag == caseValue) {
+                                return body;
+                            },
+
+                        .Enum => |enm| {
+                            if (enm.Value == caseValue)
+                                return body;
+                        },
+
+                        else => return common.debug.ShouldBeImpossible(undefined, @src()),
+                    }
+                }
+
                 const caseEndLbl = try typechecker.builder.label(caseEnd);
 
                 break :res try typechecker.builder.scope(
@@ -773,11 +830,52 @@ pub fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID
 
         .Switch => self.switchExpr(expr.value, ofType),
 
-        .Slicing => |t| {
-            self.report("'{s}' lowering is not implemented.", .{@tagName(t)});
-            return common.debug.NotImplemented(self.typechecker.context.log, @src());
-        },
+        .Slicing => self.slicing(expr.value, ofType),
     };
+}
+
+fn slicing(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR.Ptr {
+    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+
+    const sliceable = try self.expression(ast.extra[extraPtr], try self.typechecker.typecheckExpression(ast.extra[extraPtr], null));
+    const sliceableInfo = self.typechecker.typeTable.get(try self.typechecker.typecheckExpression(ast.extra[extraPtr], null));
+
+    const data = switch (sliceableInfo) {
+        .Array => try self.typechecker.builder.dot(sliceable, try self.typechecker.builder.internString("data")),
+        .Pointer => |ptr| switch (ptr.size) {
+            .C => sliceable,
+            .Slice => try self.typechecker.builder.dot(sliceable, try self.typechecker.builder.internString("ptr")),
+            else => return common.debug.ShouldBeImpossible(undefined, @src()),
+        },
+        else => return common.debug.ShouldBeImpossible(undefined, @src()),
+    };
+
+    const start = try self.expression(ast.extra[extraPtr + 1], try self.typechecker.typecheckExpression(ast.extra[extraPtr + 1], null));
+    const end = try self.expression(ast.extra[extraPtr + 2], try self.typechecker.typecheckExpression(ast.extra[extraPtr + 2], null));
+
+    const length = try self.typechecker.builder.sub(
+        end,
+        start,
+    );
+    const index = try self.typechecker.builder.add(
+        data,
+        start,
+    );
+
+    const newType = try self.typechecker.registerType(.{ .Pointer =
+        if (sliceableInfo == .Array) .{
+            .size = .Slice,
+            .child = sliceableInfo.Array.child,
+            .mutable = self.typechecker.mutable(ofType),
+        }
+        else .{
+            .size = .Slice,
+            .child = sliceableInfo.Pointer.child,
+            .mutable = self.typechecker.mutable(ofType),
+        },
+    });
+
+    return self.typechecker.builder.construct(newType, &.{index, length});
 }
 
 fn switchExpr(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR.Ptr {
@@ -930,6 +1028,7 @@ fn builtinCall(
 
     return switch (declPtr) {
         BI("cast"), BI("unsafeCast") => {
+            // @TODO @Beware casting between slice types and such is not supported yet.
             const rtype = try self.typechecker.typecheckExpression(ast.extra[args.at(0)], null);
             const rexpr = try self.expression(ast.extra[args.at(0)], rtype);
             return self.typechecker.builder.construct(ofType, &.{rexpr});
@@ -960,6 +1059,13 @@ fn expressionList(self: *Lowerer, extraPtr: defines.OpaquePtr, expected: TypeID)
         catch return Error.AllocatorFailure;
 
     const eti = self.typechecker.typeTable.get(expected);
+
+    if (exprs.len() == 1 and switch (eti) { .Struct, .Union, .Enum, .Array => true, else => false }) {
+        const innerType = try self.typechecker.typecheckExpression(ast.extra[exprs.start], expected);
+        if (self.typechecker.suitable(expected, innerType)) {
+            return self.expression(ast.extra[exprs.start], expected);
+        }
+    }
 
     for (exprs.start..exprs.end, 0..) |exprPtr, i| {
         const t = try self.typechecker.typecheckExpression(ast.extra[@intCast(exprPtr)], switch (eti) {

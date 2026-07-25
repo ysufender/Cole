@@ -1001,10 +1001,18 @@ pub fn typecheckExpressionList(self: *Typechecker, extra: defines.OpaquePtr, _ma
     const expected =
         if (maybeExpected) |expected|
             if (range.len() == 1) switch (self.typeTable.get(expected)) {
-                .Struct, .Union, .Enum, .Array => expected,
+                .Struct, .Union, .Enum, .Array => blk: {
+                    const inner = try self.typecheckExpression(ast.extra[range.at(0)], expected);
+                    if (self.suitable(expected, inner)) {
+                        return expected;
+                    }
+
+                    break :blk expected;
+                },
                 else => return self.typecheckExpression(ast.extra[range.at(0)], expected),
             }
             else expected
+        else if (range.len() == 1) return self.typecheckExpression(ast.extra[range.at(0)], maybeExpected)
         else {
             self.report("Couldn't infer the type of expression list.", .{});
             return Error.InferenceError;
@@ -2377,9 +2385,9 @@ pub fn registerType(self: *Typechecker, newType: TypeInfo) Error!TypeID {
         isPresent.value_ptr.* = @intCast(typeID);
 
         self.typeTable.set(typeID, newType);
+        _ = try self.typeName(self.arena.allocator(), isPresent.value_ptr.*); // force intern type name
     }
 
-    _ = try self.typeName(self.arena.allocator(), isPresent.value_ptr.*); // force intern type name
     return isPresent.value_ptr.*;
 }
 
@@ -2480,10 +2488,9 @@ pub fn assertCastable(self: *Typechecker, from: TypeID, to: TypeID, unsafe: bool
             .Function => { },
             else => return Error.IncompatibleTypes,
         },
-        .EnumLiteral => return Error.CastOfIncastableValue,
         .Any, .Type,
         .Noreturn, .Array,
-        .Void => return Error.IncompatibleTypes,
+        .Void, .EnumLiteral => return Error.CastOfIncastableValue,
     }
 }
 
@@ -2828,14 +2835,26 @@ pub fn makeMutable(_: *const Typechecker, info: TypeInfo) TypeInfo {
 
 /// Assumes 'of' is an array type.
 pub fn sliceOf(self: *Typechecker, of: TypeID) Error!u32 {
-    const arr = self.typeTable.get(of).Array;
-    return self.registerType(.{
-        .Pointer = .{
-            .mutable = arr.mutable,
-            .size = .Slice,
-            .child = arr.child,
-        },
-    });
+    const info = self.typeTable.get(of);
+    return switch (info) {
+        .Array => |arr| self.registerType(.{
+            .Pointer = .{
+                .mutable = arr.mutable,
+                .size = .Slice,
+                .child = arr.child,
+            },
+        }),
+
+        .Pointer => |ptr| self.registerType(.{
+            .Pointer = .{
+                .mutable = ptr.mutable,
+                .size = .Slice,
+                .child = ptr.child,
+            },
+        }),
+
+        else => common.debug.ShouldBeImpossible(undefined, @src()),
+    };
 }
 
 /// In bytes

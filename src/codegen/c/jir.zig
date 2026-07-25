@@ -228,7 +228,8 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
 
         switch (typeInfo) {
             .Array => |arr| {
-                const name = std.fmt.allocPrint(self.allocator, "Array_{s}_{d}_t", .{
+                const name = std.fmt.allocPrint(self.allocator, "{s}Array_{s}_{d}_t", .{
+                    if (arr.mutable) "" else "const_",
                     try self.getCName(arr.child, null, true),
                     arr.len,
                 }) catch return Error.AllocatorFailure;
@@ -241,7 +242,8 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
             },
             .Pointer => |ptr| switch (ptr.size) {
                 .Slice => {
-                    const name = std.fmt.allocPrint(self.allocator, "Slice_{s}", .{
+                    const name = std.fmt.allocPrint(self.allocator, "{s}Slice_{s}", .{
+                        if (ptr.mutable) "" else "const_",
                         try self.getCName(ptr.child, null, true),
                     }) catch return Error.AllocatorFailure;
 
@@ -777,7 +779,8 @@ fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool
         },
 
         .Array => |arr| {
-            name = std.fmt.allocPrint(self.allocator, "Array_{s}_{d}_t{s}", .{
+            name = std.fmt.allocPrint(self.allocator, "{s}Array_{s}_{d}_t{s}", .{
+                if (arr.mutable) "" else "const_",
                 try self.getCName(arr.child, _name, true),
                 arr.len,
                 if (arr.mutable) "" else " const",
@@ -786,7 +789,8 @@ fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool
 
         .Pointer => |ptr| switch (ptr.size) {
             .Slice => {
-                name = std.fmt.allocPrint(self.allocator, "Slice_{s}{s}", .{
+                name = std.fmt.allocPrint(self.allocator, "{s}Slice_{s}{s}", .{
+                    if (ptr.mutable) "" else "const_",
                     try self.getCName(ptr.child, _name, true),
                     if (ptr.mutable) "" else " const",
                 }) catch return Error.AllocatorFailure;

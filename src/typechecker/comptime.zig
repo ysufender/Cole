@@ -502,10 +502,7 @@ pub fn evalMark(
             return Error.RedundantMark;
         }
     }
-    else if (
-        self.typechecker.hasMetadata(ast.extra[extraPtr + 2], "@noComptime")
-        and !self.typechecker.getFlag(.AttemptingEval)
-    ) {
+    else if (self.typechecker.hasMetadata(ast.extra[extraPtr + 2], "@noComptime")) {
         const exprType = try self.typechecker.typecheckExpression(ast.extra[extraPtr + 2], maybeExpected);
 
         // @Note force comptime eval when calling said function.
@@ -1902,26 +1899,40 @@ fn castValue(self: *Comptime, valuePtr: Value.Ptr, to: TypeID) Error!Value.Ptr {
                 .Value = fromUni.Value,
             },
         },
-        .Slice => |slice| switch (self.typechecker.typeTable.get(to).Pointer.size) {
-            .Single, .C => |size| .{
-                .Pointer = .{
-                    .Type = self.typechecker.typeMap.get(TypeInfo{
-                        .Pointer = .{
-                            .mutable = self.typechecker.mutable(slice.Type), 
-                            .size = size,
-                            .child = self.typechecker.typeTable.get(slice.Type).Pointer.child,
-                        },
-                    }).?,
-                    .To = slice.To,
+        .Slice => |slice| switch (self.typechecker.typeTable.get(to)) {
+            .Pointer => |ptr| switch (ptr.size) {
+                .Single, .C => |size| .{
+                    .Pointer = .{
+                        .Type = self.typechecker.typeMap.get(TypeInfo{
+                            .Pointer = .{
+                                .mutable = self.typechecker.mutable(slice.Type), 
+                                .size = size,
+                                .child = switch (self.typechecker.typeTable.get(slice.Type)) {
+                                    .Pointer => |slicePtr| slicePtr.child,
+                                    .Array => |arr| arr.child,
+                                    else => return common.debug.ShouldBeImpossible(undefined, @src()),
+                                },
+                            },
+                        }).?,
+                        .To = slice.To,
+                    },
+                },
+                .Slice => .{
+                    .Slice = .{
+                        .Size = slice.Size,
+                        .To = slice.To,
+                        .Type = to,
+                    },
                 },
             },
-            .Slice => .{
+            .Array => |arr| .{
                 .Slice = .{
-                    .Size = slice.Size,
-                    .To = slice.To,
                     .Type = to,
+                    .Size = arr.len,
+                    .To = slice.To,
                 },
             },
+            else => return common.debug.ShouldBeImpossible(undefined, @src()),
         },
         .Undefined => .{
             .Undefined = to, 
