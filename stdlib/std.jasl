@@ -189,7 +189,8 @@ pub let Pair = fn (T: type, P: type) -> type {
 
 pub let ErrorCode = enum {
     Ok,
-    Err,
+    ArgumentError,
+    RuntimeError,
 };
 
 /*

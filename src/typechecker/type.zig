@@ -2,6 +2,7 @@ const std = @import("std");
 const defines = @import("../core/defines.zig");
 
 const Typechecker = @import("typechecker.zig");
+const TypeTable = Typechecker.TypeTable.Slice;
 
 // @CompilerOnly 
 pub const TypeID = u32;
@@ -63,6 +64,23 @@ pub const TypeInfo = union(enum) {
             .Struct => |str| str.fields.len == 0,
             .Union => |uni| uni.fields.len == 0,
             .Enum => |enm| enm.fields.len == 0,
+            else => false,
+        };
+    }
+
+    pub fn isMutable(self: TypeInfo) bool {
+        return switch (self) {
+            .Any => |any| any,
+            .Bool => |b| b,
+            .Float => |fl| fl,
+            .Struct => |str| str.mutable,
+            .Union => |uni| uni.mutable,
+            .Enum => |enu| enu.mutable,
+            .Integer => |int| int.mutable,
+            .Pointer => |ptr| ptr.mutable,
+            .Array => |arr| arr.mutable,
+            .Function => |func| func.mutable,
+            .ComptimeFloat, .ComptimeInt => true,
             else => false,
         };
     }

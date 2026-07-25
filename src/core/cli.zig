@@ -18,6 +18,7 @@ const Flags = enum {
     LinkPath,
     Flag,
     Output,
+    Optimize,
 };
 
 const flags = std.StaticStringMap(Flags).initComptime(&(.{
@@ -40,6 +41,8 @@ const flags = std.StaticStringMap(Flags).initComptime(&(.{
     .{ "-I", .Include },
 
     // .{ "--backend", .Backend },
+    .{ "--optimize", .Optimize },
+    .{ "-O", .Optimize },
 
     .{ "--link", .Link },
     .{ "-l", .Link },
@@ -89,6 +92,7 @@ pub fn parseCLI(allocator: std.mem.Allocator, _args: std.process.Args, io: std.I
     var linkDirs = NMap.empty;
     var maxErr: u32 = 5;
     var targetBackend = Backend.C;
+    var optimize: ?[]const u8 = null;
     var cliFlags = common.CompilerSettings.FlagSet.empty;
 
     cliFlags.ensureTotalCapacity(allocator, 128) catch return Error.AllocatorFailure;
@@ -99,12 +103,34 @@ pub fn parseCLI(allocator: std.mem.Allocator, _args: std.process.Args, io: std.I
         switch (hash(flag)) {
             .Help => return printHelp(),
             .Version => return printHeader(),
+            .Optimize => {
+                if (args.next()) |arg| {
+                    if (
+                        std.mem.eql(u8, arg, "g")
+                        or std.mem.eql(u8, arg, "0")
+                        or std.mem.eql(u8, arg, "1")
+                        or std.mem.eql(u8, arg, "2")
+                        or std.mem.eql(u8, arg, "3")
+                    ) {
+                        optimize = arg;
+                        continue;
+                    }
+
+                    common.log.err("Unknown optimization level '{s}'.", .{arg});
+                    return Error.UnknownFlag;
+                }
+                else {
+                    common.log.err("Expected an optimization level after optimize option.", .{});
+                    return Error.MissingFlag;
+                }
+            },
             .Link => {
                 if (args.next()) |arg| {
                     libraries.put(allocator, arg, {}) catch return Error.AllocatorFailure;
                 }
                 else {
                     common.log.err("Expected a library after link flag.", .{});
+                    return Error.MissingFlag;
                 }
             },
             .LinkPath => {
@@ -121,6 +147,7 @@ pub fn parseCLI(allocator: std.mem.Allocator, _args: std.process.Args, io: std.I
                 }
                 else {
                     common.log.err("Expected a path after link directory flag.", .{});
+                    return Error.MissingFlag;
                 }
             },
             .Backend => {
@@ -222,6 +249,7 @@ pub fn parseCLI(allocator: std.mem.Allocator, _args: std.process.Args, io: std.I
                 libraries.keyIterator(),
                 allocator
             ),
+            .optimize = optimize orelse "0",
             .maxErr = maxErr,
             .flags = cliFlags,
             .backend = targetBackend,

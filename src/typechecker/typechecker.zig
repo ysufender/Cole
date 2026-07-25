@@ -110,7 +110,7 @@ pub fn init(
     var metadata = MetadataMap.empty;
     var lookup = LookupMap.empty;
 
-    typeMap.ensureTotalCapacity(allocator, typeCount + @as(u32, @intCast(Comptime.builtinTypes.len))) catch return Error.AllocatorFailure;
+    typeMap.ensureTotalCapacity(allocator, 2 + typeCount + @as(u32, @intCast(Comptime.builtinTypes.len))) catch return Error.AllocatorFailure;
     lookup.ensureTotalCapacity(allocator, symbolTable.declarations.len) catch return Error.AllocatorFailure;
     metadata.ensureTotalCapacity(allocator, counts.meta * 3) catch return Error.AllocatorFailure;
 
@@ -144,11 +144,29 @@ pub fn typecheck(self: *Typechecker, allocator: Allocator) Error!Resolution {
     inline for (Comptime.builtinTypes, 0..) |builtin, id| {
         self.typeTable.appendAssumeCapacity(builtin.info);
         self.typeMap.putAssumeCapacityNoClobber(builtin.info, @intCast(id));
-        const str = try self.builder.internString(builtin.name);
-        if (!std.mem.eql(u8, builtin.name, "entry_point")) {
-            self.typenameMap.putNoClobber(self.arena.allocator(), id, str)
-                catch return Error.AllocatorFailure;
-        }
+    }
+
+    const entryPointID = comptime Comptime.Builtin.Type("[]u8") + 1;
+    const complexBuiltinTypes = [_]TypeInfo{
+        // entry_point
+        .{ .Function = .{
+            .mutable = false,
+            .isComptime = false,
+            .argTypes = &.{ entryPointID + 1 },
+            .returnType = Comptime.Builtin.Type("i32"),
+        }},
+
+        // [][]u8
+        .{ .Pointer = .{
+            .size = .Slice,
+            .child = Comptime.Builtin.Type("[]u8"),
+            .mutable = false,
+        }}
+    };
+
+    inline for (complexBuiltinTypes, 0..) |builtin, id| {
+        self.typeTable.appendAssumeCapacity(builtin);
+        self.typeMap.putAssumeCapacityNoClobber(builtin, @intCast(id + entryPointID));
     }
 
     self.builder.allocator = self.arena.allocator();
@@ -189,13 +207,13 @@ pub fn typecheck(self: *Typechecker, allocator: Allocator) Error!Resolution {
         return Error.PublicEntryPoint;
     }
 
-    const mainType = try self.typecheckDecl(mainPtr, Comptime.Builtin.Type("entry_point"));
+    const mainType = try self.typecheckDecl(mainPtr, entryPointID);
     self.clearFlags();
-    if (mainType != Comptime.Builtin.Type("entry_point")) {
+    if (mainType != entryPointID) {
         const main = self.symbols.getDecl(mainPtr);
         self.lastToken = main.token;
         self.report("Unexpected type of entry point 'main'. Expected '{s}', received '{s}'", .{
-            try self.typeName(allocator, Comptime.Builtin.Type("entry_point")),
+            try self.typeName(allocator, entryPointID),
             try self.typeName(allocator, mainType),
         });
         return Error.TypeMismatch;
@@ -276,7 +294,7 @@ fn typecheckVariableDef(
                         else => return common.debug.ShouldBeImpossible(self.context.log, @src()),
                     });
                 }
-                else if (decl.topLevel) self.modules.modules.get(if (self.currentFile == 0) self.modules.modules.len - 1 else self.currentFile).name
+                else if (decl.topLevel) self.modules.modules.get(self.symbols.scopes.items(.module)[decl.scope]).name
                 else try self.executer.generateRandomNameString(.Type);
 
             const newName =
@@ -380,7 +398,7 @@ fn typecheckVariableDef(
                         else => return common.debug.ShouldBeImpossible(self.context.log, @src()),
                     });
                 }
-                else if (decl.topLevel) self.modules.modules.get(if (self.currentFile == 0) self.modules.modules.len - 1 else self.currentFile).name
+                else if (decl.topLevel) self.modules.modules.get(self.symbols.scopes.items(.module)[decl.scope]).name
                 else try self.executer.generateRandomNameString(.Type);
             const newName =
                 if (self.hasMetadata(decl.node, "@export")) symName
@@ -853,8 +871,12 @@ fn typecheckBlock(self: *Typechecker, extraPtr: defines.OpaquePtr, expected: Typ
     }
 }
 
+pub fn typecheckField(self: *Typechecker, decl: *const Resolver.Declaration) Error!TypeID {
+    return self.expectType(decl.type);
+}
+
 pub fn typecheckParameter(self: *Typechecker, decl: *const Resolver.Declaration) Error!TypeID {
-    return try self.expectType(decl.type);
+    return self.expectType(decl.type);
 }
 
 pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.ExpressionPtr, _maybeExpected: ?TypeID) Error!TypeID {
@@ -1445,6 +1467,7 @@ pub fn typecheckBuiltinCall(self: *Typechecker, extraPtr: defines.ExpressionPtr,
         BI("as") => self.typecheckTypeForwarding(extraPtr, maybeExpected),
         BI("typeOf") => self.executer.getValue(try self.executer.evalTypeOf(extraPtr)).Type,
         BI("compileError") => return self.executer.evalCompileError(extraPtr),
+        BI("sizeOf") => return Comptime.Builtin.Type("u32"),
         BI("compileLog") => {
             _ = try self.executer.evalCompileLog(extraPtr);
             return Comptime.Builtin.Type("void");
@@ -1691,7 +1714,35 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
         .topLevel = decl.topLevel,
         .public = decl.public,
         .parent = decl.parent,
-        .name = try self.builder.internString(tokens.get(decl.token).lexeme(self.context, self.currentFile)),
+        .name = res: {
+            const symName = tokens.get(decl.token).lexeme(self.context, self.currentFile);
+
+            const namespace =
+                if (decl.parent != null and self.typeTable.get(try self.typecheckDecl(decl.parent.?, null)) == .Type) hasParent: {
+                    const rtypePtr = try self.executer.eval(self.symbols.getDecl(decl.parent.?).node, null);
+                    const rtype = self.executer.getValue(rtypePtr).Type;
+
+                    break :hasParent self.builder.getInternedString(switch (self.typeTable.get(rtype)) {
+                        .Struct => |str| str.name,
+                        .Enum => |enm| enm.name,
+                        .Union => |uni| uni.name,
+                        else => return common.debug.ShouldBeImpossible(self.context.log, @src()),
+                    });
+                }
+                else if (decl.topLevel) self.modules.modules.get(self.symbols.scopes.items(.module)[decl.scope]).name
+                else null;
+
+            const newName =
+                if (self.hasMetadata(decl.node, "@extern")) symName
+                else std.fmt.allocPrint(self.arena.allocator(), "{s}{s}{s}", .{
+                    namespace orelse "",
+                    if (namespace) |_| "::" else "",
+                    symName,
+                }) catch return Error.AllocatorFailure;
+            const new = try self.builder.internString(newName);
+
+            break :res new;
+        },
     });
     decl = self.symbols.declarations.get(declPtr);
 
@@ -1709,10 +1760,7 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
         },
         .Builtin, .Capture => return common.debug.ShouldBeImpossible(self.context.log, @src()),
         .Parameter => self.typecheckParameter(&decl),
-        else => {
-            self.report("{s} is not implemented.", .{@tagName(decl.kind)});
-            return Error.NotImplemented;
-        },
+        .Field => self.typecheckField(&decl),
     };
 
     isPresent.value_ptr.* = .{
@@ -2457,11 +2505,11 @@ pub fn assertCastable(self: *Typechecker, from: TypeID, to: TypeID, unsafe: bool
             .Integer => |int| try functional.throwIf(int.size <= 0, Error.SizeMismatch),
             else => return Error.IncompatibleTypes,
         },
-        .ComptimeInt => try functional.throwIf(!self.isInt(to) and !self.isFloat(to), Error.IncompatibleTypes),
+        .ComptimeInt => try functional.throwIf(!self.isInt(to) and !self.isFloat(to) and (!unsafe or !self.isCPtr(to)), Error.IncompatibleTypes),
         .ComptimeFloat => try functional.throwIf(!self.isFloat(to) and !self.isInt(to), Error.IncompatibleTypes),
         .Integer => |fromInt| switch (toType) {
             .Integer => |toInt| try functional.throwIf(
-                if (unsafe) !self.isInt(to)
+                if (unsafe) !self.isInt(to) and !self.isCPtr(to)
                 else !toInt.canContain(fromInt),
                 Error.SizeMismatch
             ),
@@ -2479,8 +2527,8 @@ pub fn assertCastable(self: *Typechecker, from: TypeID, to: TypeID, unsafe: bool
         },
         .Pointer => |fromPtr| switch (toType) {
             .Pointer => |toPtr| {
-                try self.assertCastablePtr(fromPtr, toPtr);
-                try functional.throwIf(toPtr.mutable and !fromPtr.mutable and !unsafe, Error.MutabilityViolation);
+                try self.assertCastablePtr(fromPtr, toPtr, unsafe);
+                try functional.throwIf((toPtr.mutable and !fromPtr.mutable) and !unsafe, Error.MutabilityViolation);
             },
             else => return Error.IncompatibleTypes,
         },
@@ -2499,14 +2547,14 @@ pub fn castable(self: *Typechecker, from: TypeID, to: TypeID) bool {
     return true;
 }
 
-pub fn assertCastablePtr(self: *const Typechecker, this: Types.Pointer, that: Types.Pointer) Error!void {
+pub fn assertCastablePtr(self: *const Typechecker, this: Types.Pointer, that: Types.Pointer, unsafe: bool) Error!void {
     switch (this.size) {
         .Slice => try functional.throwIf(that.size == .Slice and self.sizeOf(this.child) != self.sizeOf(that.child), Error.MismatchingSliceChildType),
         .Single => try functional.throwIf(that.size == .Slice, Error.PointerSizeMismatch),
         .C => try functional.throwIf(that.size == .Slice, Error.PointerSizeMismatch),
     }
 
-    try functional.throwIf(!self.mutable(this.child) and self.mutable(that.child), Error.MutabilityViolation);
+    try functional.throwIf(!self.mutable(this.child) and self.mutable(that.child) and !unsafe, Error.MutabilityViolation);
 }
 
 /// Assert that 'this' is structurally identical to 'this'
@@ -2666,6 +2714,16 @@ pub fn isFloat(self: *const Typechecker, maybeFloat: TypeID) bool {
     };
 }
 
+pub fn isCPtr(self: *const Typechecker, maybeCPtr: TypeID) bool {
+    return switch (self.typeTable.get(maybeCPtr)) {
+        .Pointer => |ptr| switch (ptr.size) {
+            .C => true,
+            else => false,
+        },
+        else => false,
+    };
+}
+
 pub fn assignable(self: *const Typechecker, this: TypeID, that: TypeID) bool {
     return
         if (!self.mutable(this)) false
@@ -2734,20 +2792,7 @@ pub fn expectType(self: *Typechecker, exprPtr: defines.ExpressionPtr) Error!Type
 }
 
 pub fn mutable(self: *const Typechecker, typeID: TypeID) bool {
-    return switch (self.typeTable.get(typeID)) {
-        .Any => |any| any,
-        .Bool => |b| b,
-        .Float => |fl| fl,
-        .Struct => |str| str.mutable,
-        .Union => |uni| uni.mutable,
-        .Enum => |enu| enu.mutable,
-        .Integer => |int| int.mutable,
-        .Pointer => |ptr| ptr.mutable,
-        .Array => |arr| arr.mutable,
-        .Function => |func| func.mutable,
-        .ComptimeFloat, .ComptimeInt => true,
-        else => false,
-    };
+    return self.typeTable.get(typeID).isMutable();
 }
 
 pub fn canBeMutable(self: *const Typechecker, typeID: TypeID) bool {

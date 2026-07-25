@@ -11,10 +11,13 @@
         compiler can guarantee a well defined program.
 
     Name:
-        std::io
+        std::ascii
     Public Symbols:
+        NULL
+        EOF
     Description:
         Input/Output utilities.
 */
 
-
+pub let EOF = -1;
+pub let NULL = 0;

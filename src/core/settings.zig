@@ -10,11 +10,12 @@ pub const FlagSet = hashmap.HashMap([]const u8, void);
 const Self = @This();
 
 inputFile: []const u8,
-outputFile: ?[]const u8,
+outputFile: []const u8,
 workingDir: []const u8,
 includeDirs: []const []const u8,
 linkDirs: []const []const u8,
 libraries: []const []const u8,
+optimize: []const u8,
 maxErr: u32,
 backend: Backend,
 flags: FlagSet,

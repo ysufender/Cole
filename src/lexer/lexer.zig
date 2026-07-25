@@ -330,17 +330,17 @@ fn scanToken(self: *Lexer) common.CompilerError!void {
         '&' => self.addToken(.Ampersand),
         '\'' => {
             const ch = self.advance();
-
             if (ch == '\'') {
                 self.report("Empty character literals are not allowed.", .{});
                 break :blk Error.EmptyCharLiteral;
             }
-
             _ = try self.consume('\'', "Expected closing single quote (')");
-            self.start += 1;
-            self.current -= 1;
+
+            var buf: [3]u8 = undefined;
+            _ = std.fmt.bufPrint(&buf, "{d:0>3}", .{ch}) catch unreachable;
+            @memcpy(@constCast(self.source[self.start..self.current]), &buf);
+
             try self.addToken(.Integer);
-            self.current += 1;
         },
         '"' => {
             const index =

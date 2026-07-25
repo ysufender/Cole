@@ -1,0 +1,5 @@
+pub let CPU = struct {
+    memory: mut [1000]mut u32,
+    pc: u32,
+    mc: u32,
+};

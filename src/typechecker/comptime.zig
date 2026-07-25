@@ -268,6 +268,10 @@ fn evalFunction(self: *Comptime, exprPtr: defines.ExpressionPtr, extraPtr: defin
         return Error.IllegalGenericType;
     };
 
+    const lret = self.typechecker.lowerer.lastReturnType;
+    defer self.typechecker.lowerer.lastReturnType = lret;
+    self.typechecker.lowerer.lastReturnType = returnType;
+
     const functionType = try self.typechecker.registerType(.{
         .Function = .{
             .mutable = false,
@@ -2119,8 +2123,6 @@ pub const builtinTypes = [_]struct {
     .{ .name = "mut any", .info = .{ .Any = true } },
     // incomplete
     .{ .name = "incomplete", .info = .{ .Struct = .{ .mutable = false, .name = Resolver.BuiltinIndex("any") + 3, .fields = &.{}, .definitions = &.{}, .scope = 0 } } },
-    // entry_point
-    .{ .name = "entry_point", .info = .{ .Function = .{ .mutable = false, .isComptime = false, .argTypes = &.{}, .returnType = 1 } } },
     // builtin_metadata
     .{ .name = "builtin_metadata", .info = .{ .Enum = .{ .mutable = false, .name = Resolver.BuiltinIndex("any") + 5, .fields = &.{}, .definitions = &.{}, .scope = 0 } } },
     // []u8

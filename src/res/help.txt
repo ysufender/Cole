@@ -22,3 +22,6 @@
         --link, -l     <lib>        : Link <lib>, found from the searchpath, to the final
                                       output.
         --link-dir, -L <path>       : Add <path> to library searchpath.
+
+        --optimize, -O <level>      : Specify optimization level. Available levels are:
+                                          g, 0, 1, 2, 3

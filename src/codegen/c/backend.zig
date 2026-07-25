@@ -98,11 +98,18 @@ pub fn compile(outDir: Dir, allocator: std.mem.Allocator, context: *common.Compi
         }
     }
 
+    // Optimization Level
+    if (tcc.tcc_set_options(state, std.fmt.allocPrintSentinel(allocator, "-O{s}", .{context.settings.optimize}, 0)
+            catch return Error.AllocatorFailure) == -1) {
+            report("Failed to set optimization level.");
+            return Error.BackendError;
+    }
+
     // Finalize
-    const outFile = outDir.createFile(context.io, context.settings.outputFile orelse "out", .{})
+    const outFile = outDir.createFile(context.io, context.settings.outputFile, .{})
         catch return Error.IOError;
     outFile.close(context.io);
-    const output = outDir.realPathFileAlloc(context.io, context.settings.outputFile orelse "out", allocator)
+    const output = outDir.realPathFileAlloc(context.io, context.settings.outputFile, allocator)
         catch return Error.AllocatorFailure;
     if (tcc.tcc_output_file(state, output) == -1) {
         report("Failed to link sources.");

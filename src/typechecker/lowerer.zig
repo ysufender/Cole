@@ -26,6 +26,7 @@ const Lowerer = @This();
 typechecker: *Typechecker,
 lastLoop: []const u8 = "",
 lastLoopDepth: u32 = 0,
+lastReturnType: TypeID = Comptime.Builtin.Type("any"),
 scopes: Stack(Scope),
 defers: Stack(defines.StatementPtr),
 
@@ -308,7 +309,7 @@ pub fn statement(self: *Lowerer, statementPtr: defines.StatementPtr) Error!JIR.P
             else try self.call(true, stmt.value, ast.expressions.get(stmt.value).value, try self.typechecker.typecheckExpression(stmt.value, null)),
         .Conditional => try self.conditional(stmt.value, ast),
         .While => try self.loop(.While, stmt.value, ast),
-        .Return => try self.@"return"(try self.expression(stmt.value, try self.typechecker.typecheckExpression(stmt.value, null))),
+        .Return => try self.@"return"(try self.expression(stmt.value, self.lastReturnType)),
         .Break => try self.@"break"(),
         .Continue => try self.@"continue"(),
         .Discard => try self.expression(stmt.value, try self.typechecker.typecheckExpression(stmt.value, null)),
@@ -801,11 +802,16 @@ pub fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID
         .Mark => self.mark(expr.value, ofType),
         .Identifier => self.identifier(exprPtr),
 
+        .Scoping => self.scoping(expr.value),
+
         .EnumDefinition, .StructDefinition, .UnionDefinition,
         .FunctionType, .ArrayType,
         .CPointerType, .MutableType, .PointerType,
         .Lambda, .FunctionDefinition,
-        .SliceType, .Scoping => common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
+        .SliceType => |t| {
+            common.log.err("Impossible {s}", .{@tagName(t)});
+            return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
+        },
 
         .Assignment => {
             self.report(
@@ -832,6 +838,48 @@ pub fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID
 
         .Slicing => self.slicing(expr.value, ofType),
     };
+}
+
+fn scoping(self: *Lowerer, _extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
+    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+    const tokens = self.typechecker.context.getTokens(ast.tokens);
+
+    var extraPtr = _extraPtr;
+    var rightMost: u32 = 0;
+    var leftMost: u32 = 0;
+    var namespace: []const u8 = "";
+
+    while (true) {
+        const lhs = ast.extra[extraPtr];
+        const rhs = ast.extra[extraPtr + 1];
+        
+        const rtoken = tokens.get(rhs);
+        rightMost = rtoken.end;
+        leftMost = rtoken.start;
+
+        if (self.typechecker.symbols.resolutionMap.get(.{
+            .expr = lhs,
+            .file = ast.tokens,
+        })) |decl| {
+            const module = self.typechecker.symbols.scopes.get(self.typechecker.symbols.getDecl(decl).scope).module;
+            namespace = self.typechecker.context.moduleNameMap.items[module];
+            break;
+        }
+
+        extraPtr = ast.expressions.get(lhs).value;
+    }
+
+    const member = self.typechecker.context.getFile(ast.tokens)[leftMost..rightMost];
+    const qualified = std.fmt.allocPrint(self.typechecker.builder.allocator, "{s}__{s}", .{
+        namespace,
+        member,
+    }) catch return Error.AllocatorFailure;
+
+    _ = std.mem.replace(u8, qualified, "::", "__", qualified);
+    _ = std.mem.replace(u8, qualified, "$$", "__", qualified);
+
+    const id = try self.typechecker.builder.internString(qualified);
+    return self.typechecker.builder.identifier(id);
 }
 
 fn slicing(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR.Ptr {
@@ -1001,6 +1049,7 @@ fn call(
             break :blk self.typechecker.builder.construct(typeID, args);
         },
         .Function => |fnc|
+            // @TODO inline functions
             if (fnc.isComptime) self.literal(exprPtr, ofType)
             else self.typechecker.builder.call(
                 stmt,
@@ -1182,11 +1231,19 @@ fn unary(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR.
 
 fn binary(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR.Ptr {
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+    const op = @as(Lexer.TokenType, @enumFromInt(ast.extra[extraPtr + 1]));
 
-    const lhs = try self.expression(ast.extra[extraPtr], ofType);
-    const rhs = try self.expression(ast.extra[extraPtr + 2], ofType);
+    const operandType = switch (op) {
+        .BangEqual, .EqualEqual, .GreaterEqual, .LesserEqual, .Lesser, .Greater =>
+            try self.typechecker.typecheckExpression(ast.extra[extraPtr], null),
+        .And, .Or => Comptime.Builtin.Type("bool"),
+        else => ofType,
+    };
 
-    return switch (@as(Lexer.TokenType, @enumFromInt(ast.extra[extraPtr + 1]))) {
+    const lhs = try self.expression(ast.extra[extraPtr], operandType);
+    const rhs = try self.expression(ast.extra[extraPtr + 2], operandType);
+
+    return switch (op) {
         .Xor => self.typechecker.builder.xor(lhs, rhs),
         .Minus => self.typechecker.builder.sub(lhs, rhs),
         .Plus => self.typechecker.builder.add(lhs, rhs),
