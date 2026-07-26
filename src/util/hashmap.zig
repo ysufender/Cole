@@ -18,8 +18,46 @@ fn Context(comptime Key: type) type {
             }
 
             // TODO: A more performant equality function
-            pub fn eql(self: Self, a: Key, b: Key) bool {
-                return self.hash(a) == self.hash(b);
+            pub fn eql(_: Self, a: Key, b: Key) bool {
+                return deepEql(Key, a, b);
+            }
+
+            fn deepEql(comptime T: type, a: T, b: T) bool {
+                return switch (@typeInfo(T)) {
+                    .@"struct" => |s| blk: {
+                        inline for (s.fields) |f| {
+                            if (!deepEql(f.type, @field(a, f.name), @field(b, f.name))) break :blk false;
+                        }
+                        break :blk true;
+                    },
+                    .pointer => |p| switch (p.size) {
+                        .slice => blk: {
+                            if (a.len != b.len) break :blk false;
+                            for (a, b) |ea, eb| {
+                                if (!deepEql(p.child, ea, eb)) break :blk false;
+                            }
+                            break :blk true;
+                        },
+                        else => a == b,
+                    },
+                    .optional => |o| blk: {
+                        if ((a == null) != (b == null)) break :blk false;
+                        return if (a == null) true else deepEql(o.child, a.?, b.?);
+                    },
+                    .@"union" => |u| blk: {
+                        if (u.tag_type == null) break :blk std.mem.eql(u8, std.mem.asBytes(&a), std.mem.asBytes(&b)); // untagged, last resort
+                        const Tag = u.tag_type.?;
+                        const ta: Tag = a;
+                        if (ta != @as(Tag, b)) break :blk false;
+                        inline for (u.fields) |f| {
+                            if (ta == @field(Tag, f.name)) {
+                                break :blk deepEql(f.type, @field(a, f.name), @field(b, f.name));
+                            }
+                        }
+                        break :blk false;
+                    },
+                    else => a == b,
+                };
             }
         }
         else std.hash_map.AutoContext(Key);

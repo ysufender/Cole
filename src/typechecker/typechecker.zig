@@ -135,6 +135,10 @@ pub fn init(
     };
 }
 
+pub fn deinit(self: *Typechecker) void {
+    self.arena.deinit();
+}
+
 pub fn typecheck(self: *Typechecker, allocator: Allocator) Error!Resolution {
     if (!self.modules.getItem("root", .symbolPtrs).contains("main")) {
         self.report("Couldn't find an entry point in the root module.", .{});
@@ -744,7 +748,9 @@ fn typecheckReturn(self: *Typechecker, exprPtr: defines.ExpressionPtr, expected:
         return Error.DeferOutsideDeferrableScope;
     }
 
-    const returnType = try self.typecheckExpression(exprPtr, expected);
+    const returnType =
+        if (exprPtr != 0) try self.typecheckExpression(exprPtr, expected)
+        else Comptime.Builtin.Type("void");
 
     if (!self.suitable(expected, returnType)) {
         self.report("Unsuitable return type, expected '{s}', received '{s}'", .{
@@ -817,6 +823,21 @@ fn typecheckAssignment(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!vo
     if (!self.getFlag(.ConcreteValue)) {
         self.report("Expected a concrete value for assignment.", .{});
         return Error.AssignationOfNonConcreteValue;
+    }
+
+    if (ast.expressions.get(expr).type == .Indexing) {
+        const indexable = ast.extra[ast.expressions.get(expr).value];
+        const indexableType = try self.typecheckExpression(indexable, null);
+
+        if (
+            self.typeTable.get(indexableType) == .Array
+            and !self.mutable(indexableType)
+        ) {
+            self.report("Attempt to modify non-mutable value of type '{s}'.", .{
+                self.builder.getInternedString(self.typenameMap.get(indexableType).?), 
+            });
+            return Error.MutabilityViolation;
+        }
     }
 
     if (!self.mutable(vtype)) {
@@ -2020,12 +2041,12 @@ pub fn typecheckSlicing(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!T
     return resultType;
 }
 
-pub fn typecheckBinary(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID) Error!TypeID {
+pub fn typecheckBinary(self: *Typechecker, extraPtr: defines.OpaquePtr, _: ?TypeID) Error!TypeID {
     const ast = self.context.getAST(self.currentFile);
 
     const operator: Lexer.TokenType = @enumFromInt(ast.extra[extraPtr + 1]);
 
-    const lhs = try self.typecheckExpression(ast.extra[extraPtr], maybeExpected);
+    const lhs = try self.typecheckExpression(ast.extra[extraPtr], null);
     const rhs = try self.typecheckExpression(ast.extra[extraPtr + 2], lhs);
 
     return res: switch (operator) {

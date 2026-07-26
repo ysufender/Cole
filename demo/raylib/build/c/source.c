@@ -146,7 +146,7 @@ $$anon_Block_1707262033473486372: (void)(0);
     root__Player ply = (root__Player){20, 100, 20, 70, 0};
     root__Player cpu = (root__Player){(root__WIDTH - 35), 100, 20, 70, 0};
     root__Ball b = (root__Ball){((root__WIDTH / 2) - 10), 120, -5, -5, 10};
-    raylib__InitWindow(root__WIDTH, root__HEIGHT, (const_Slice_uint8_t){(uint8_t*)"Ping pong\0", 9});
+    raylib__InitWindow(root__WIDTH, root__HEIGHT, (const_Slice_uint8_t){(uint8_t*)"Ping pong", 9});
     raylib__SetTargetFPS(60);
     {
 $$anon_Block_10761808952921467351: (void)(0);
@@ -162,8 +162,8 @@ $$anon_Block_12490044124299982418: (void)(0);
             raylib__DrawRectangle(cpu.x, cpu.y, cpu.w, cpu.h, (Color){0, 0, 0, 255});
             const_Array_uint8_t_2_t const pscore = root__intToChar((uint8_t){ply.score});
             const_Array_uint8_t_2_t const cscore = root__intToChar((uint8_t){cpu.score});
-            raylib__DrawText((const_Slice_uint8_t){pscore.data, 2}, (((root__WIDTH / 2)) - 200), 30, 48, (Color){255, 255, 255, 255});
-            raylib__DrawText((const_Slice_uint8_t){cscore.data, 2}, (((root__WIDTH / 2)) + 200), 30, 48, (Color){0, 0, 0, 255});
+            raylib__DrawText((const_Slice_uint8_t){(pscore.data + 0), (2 - 0)}, (((root__WIDTH / 2)) - 200), 30, 48, (Color){255, 255, 255, 255});
+            raylib__DrawText((const_Slice_uint8_t){(cscore.data + 0), (2 - 0)}, (((root__WIDTH / 2)) + 200), 30, 48, (Color){0, 0, 0, 255});
             {
 $$anon_Block_4868289067183140247: (void)(0);
                 if ((!((root__checkCollision(ply.x, b.x, ply.y, b.y, ply.w, ply.h, b.r) || root__checkCollision(cpu.x, b.x, cpu.y, b.y, cpu.w, cpu.h, b.r))))) goto $$anon_Finally_13414203536031990682;
@@ -176,7 +176,7 @@ $$anon_Block_5408961738284701175: (void)(0);
                 $$anon_Finally_13414203536031990682: (void)(0);
             }
 
-            cpu.y = (int32_t){b.y};
+            cpu.y = (int32_t){(b.y * 0.8)};
             {
 $$anon_Block_16667537678397990474: (void)(0);
                 if ((!((b.x < ((root__WIDTH / 2)))))) goto $$anon_Else_11635425079708401102;

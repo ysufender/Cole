@@ -1,3 +1,5 @@
+// main.jasl
+
 import std::io::console as Console;
 import std::io::file as File;
 import std::memory::c as C;
@@ -61,17 +63,23 @@ let populateBytecode = fn (bytecode: []mut u8, path: []u8) -> bool {
     let idx: mut u32 = 0;
     let ch: mut i32 = File::read(source);
     while ch >= 0 {
-        let realCh: u8 = unsafeCast(ch);
+        let op: u8 = unsafeCast(ch);
 
-        if realCh == '[' or realCh == ']' {
-            Console::println("Loops are not yet supported.");
-            return false;
+        if 
+            op == '<'
+            or op == '['
+            or op == ']'
+            or op == '>'
+            or op == '+'
+            or op == '-'
+            or op == '.'
+            or op == ',' {
+
+            bytecode[idx] = op;
+            idx = idx + 1;
         }
 
-        bytecode[idx] = unsafeCast(ch);
         ch = File::read(source);
-        
-        idx = idx + 1;
     }
 
     File::close(source);
@@ -90,14 +98,17 @@ let countBytecodeSize = fn (path: []u8) -> i32 {
     let count: mut u32 = 0;
     let ch: mut i32 = File::read(source);
     while ch > 0 {
-        let realCh: u8 = unsafeCast(ch);
+        let op: u8 = unsafeCast(ch);
 
-        if realCh == '[' or realCh == ']' {
-            count = count + 2;
-            Console::println("Loops are not yet supported.");
-            return -1;
-        }
-        else {
+        if 
+            op == '<'
+            or op == '['
+            or op == ']'
+            or op == '>'
+            or op == '+'
+            or op == '-'
+            or op == '.'
+            or op == ',' {
             count = count + 1;
         }
 

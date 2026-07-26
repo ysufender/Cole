@@ -1,11 +1,13 @@
+// cpu.jasl
+
 import std::io::console as Console;
 import std::ascii as ASCII;
 
-pub let maxBytecode: u32 = 1000;
-pub let maxMemory: u32 = 1000;
+pub let maxBytecode: u32 = 2000;
+pub let maxMemory: u32 = 2000;
 
 pub let CPU = struct {
-    memory: [maxMemory]mut u8,
+    memory: mut [maxMemory]mut u8,
     bytecode: []u8,
     ip: mut u32,
     dp: mut u32,
@@ -46,7 +48,43 @@ pub let cycle = fn (cpu: *mut CPU) -> bool {
 
         cpu.memory.*[cpu.dp.*] = unsafeCast(input);
     }
+    else if op == '[' and cpu.memory.*[cpu.dp.*] == 0 {
+        skipForward(cpu);
+    }
+    else if op == ']' and cpu.memory.*[cpu.dp.*] != 0 {
+        skipBackward(cpu);
+    }
 
     cpu.ip.* = cpu.ip.* + 1;
     return true;
+};
+
+let skipForward = fn (cpu: *mut CPU) -> void {
+    let count: mut u32 = 1;
+    while count > 0 {
+        cpu.ip.* = cpu.ip.* + 1;
+
+        let ch = cpu.bytecode.*[cpu.ip.*];
+        if ch == '[' {
+            count = count + 1;
+        }
+        else if ch == ']' {
+            count = count - 1;
+        }
+    }
+};
+
+let skipBackward = fn (cpu: *mut CPU) -> void {
+    let count: mut u32 = 1;
+    while count > 0 {
+        cpu.ip.* = cpu.ip.* - 1;
+
+        let ch = cpu.bytecode.*[cpu.ip.*];
+        if ch == '[' {
+            count = count - 1;
+        }
+        else if ch == ']' {
+            count = count + 1;
+        }
+    }
 };

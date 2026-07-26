@@ -22,7 +22,9 @@ typedef struct const_Slice_const_Slice_uint8_t { const_Slice_uint8_t const* ptr;
 
 typedef struct const_Slice_void { void* ptr; uint32_t len; } const_Slice_void;
 
-typedef struct const_Array_uint8_t_1000_t { uint8_t data[1000]; } const_Array_uint8_t_1000_t;
+typedef struct const_Array_uint8_t_2000_t { uint8_t data[2000]; } const_Array_uint8_t_2000_t;
+
+typedef struct Array_uint8_t_2000_t { uint8_t data[2000]; } Array_uint8_t_2000_t;
 
 typedef struct const_Array_uint8_t_2_t { uint8_t data[2]; } const_Array_uint8_t_2_t;
 
@@ -63,7 +65,7 @@ jasl_bool const root__populateBytecode(const_Slice_uint8_t const, const_Slice_ui
 extern uint32_t const cpu__maxMemory;
 
 typedef struct cpu__CPU {
-	const_Array_uint8_t_1000_t const memory;
+	Array_uint8_t_2000_t memory;
 	const_Slice_uint8_t const bytecode;
 	uint32_t ip;
 	uint32_t dp;
@@ -76,6 +78,10 @@ extern int32_t const std__ascii__NULL;
 const_Array_uint8_t_2_t const std__ascii__charToStr(uint8_t);
 
 int32_t const std__io__console__read();
+
+void cpu__skipForward(cpu__CPU* const);
+
+void cpu__skipBackward(cpu__CPU* const);
 
 jasl_bool const cpu__cycle(cpu__CPU* const);
 

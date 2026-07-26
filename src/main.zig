@@ -18,12 +18,7 @@ pub fn main(init: std.process.Init) void {
     MainProcInit = init;
 
     innerMain(
-        if (common.debug.isDebug) init.arena.allocator()
-        else if (platform.isPosix) blk: {
-            var hugepage = perfAllc.HugePageAllocator.init(init.gpa);
-            common.log.debug("Using huge pages.", .{});
-            break :blk hugepage.allocator();
-        } else init.gpa,
+        init.arena.allocator(),
         init
     ) catch |err| blk: {
         switch (err) {
@@ -53,6 +48,7 @@ pub fn main(init: std.process.Init) void {
 }
 
 fn innerMain(allocator: std.mem.Allocator, init: std.process.Init) common.CompilerError!void {
+
     // Init Context
     var context = try common.CompilerContext.init(allocator, init);
     context.log.context = &context;

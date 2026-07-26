@@ -99,8 +99,7 @@ pub fn compile(outDir: Dir, allocator: std.mem.Allocator, context: *common.Compi
     }
 
     // Optimization Level
-    if (tcc.tcc_set_options(state, std.fmt.allocPrintSentinel(allocator, "-O{s}", .{context.settings.optimize}, 0)
-            catch return Error.AllocatorFailure) == -1) {
+    if (tcc.tcc_set_options(state, "-Wall -Wpedantic -Werror") == -1) {
             report("Failed to set optimization level.");
             return Error.BackendError;
     }

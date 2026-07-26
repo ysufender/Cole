@@ -803,7 +803,7 @@ fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool
             },
             .Single, .C => {
                 name = std.fmt.allocPrint(self.allocator, "{s}*{s}", .{
-                    try self.getCName(ptr.child, _name, true),
+                    try self.getCName(ptr.child, _name, false),
                     if (ptr.mutable) "" else " const",
                 }) catch return Error.AllocatorFailure;
             },

@@ -20,8 +20,8 @@ let main = fn (args: [][]u8) -> i32 {
 		rl::DrawRectangle(cpu.x, cpu.y, cpu.w, cpu.h, rl::Color::Black);
         let pscore = intToChar(unsafeCast(ply.score));
         let cscore = intToChar(unsafeCast(cpu.score));
-		rl::DrawText(pscore.&, (WIDTH/2) - 200, 30, 48, rl::Color::White);
-		rl::DrawText(cscore.&, (WIDTH/2) + 200, 30, 48, rl::Color::Black);
+		rl::DrawText(pscore[0..2], (WIDTH/2) - 200, 30, 48, rl::Color::White);
+		rl::DrawText(cscore[0..2], (WIDTH/2) + 200, 30, 48, rl::Color::Black);
 		
 		if
             checkCollision(ply.x, b.x, ply.y, b.y, ply.w, ply.h, b.r)
@@ -29,7 +29,7 @@ let main = fn (args: [][]u8) -> i32 {
 			b.bx = -1.0 * b.bx;
 		}
 
-		cpu.y = unsafeCast(b.y);
+		cpu.y = unsafeCast(b.y * 0.8);
 
 		if b.x < (WIDTH/2) { rl::DrawCircle(cast(b.x), cast(b.y), b.r, rl::Color::White); }
 		else { rl::DrawCircle(cast(b.x), cast(b.y), b.r, rl::Color::Black); }
@@ -40,14 +40,14 @@ let main = fn (args: [][]u8) -> i32 {
 
 		if b.x < 5 {
 			cpu.score = cpu.score + 1;
-			b.x = (cast(WIDTH)/2.0) - b.r;
+			b.x = (as(float, cast(WIDTH))/2.0) - b.r;
 			b.y = 120;
 			b.bx = -5;
 			
 		}
         else if b.x > WIDTH - 5 {
 			ply.score = ply.score + 1;
-			b.x = (cast(WIDTH)/2) - b.r;
+			b.x = (as(float, cast(WIDTH))/2.0) - b.r;
 			b.y = 120;
 			b.bx = 5;
 		}
