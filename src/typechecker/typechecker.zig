@@ -1775,6 +1775,84 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
     return declType;
 }
 
+pub fn typecheckFieldAccess(self: *Typechecker, on: TypeID, field: []const u8) Error!TypeID {
+    const objectType = self.typeTable.get(on);
+
+    switch (objectType) {
+        .Pointer => |ptr| if (ptr.size == .Slice) {
+            if (std.mem.eql(u8, field, "len")) {
+                return Comptime.Builtin.Type("u32");
+            }
+            else if (std.mem.eql(u8, field, "ptr")) {
+                return self.registerType(.{
+                    .Pointer = .{
+                        .size = .C,
+                        .mutable = ptr.mutable,
+                        .child = ptr.child,
+                    },
+                });
+            }
+        },
+        .Array => |arr| {
+            if (std.mem.eql(u8, field, "len")) {
+                return Comptime.Builtin.Type("u32");
+            }
+            else if (std.mem.eql(u8, field, "ptr")) {
+                return self.registerType(.{
+                    .Pointer = .{
+                        .size = .C,
+                        .mutable = arr.mutable,
+                        .child = arr.child,
+                    },
+                });
+            }
+        },
+        else => { },
+    }
+
+    const member = try self.builder.internString(field);
+
+    const fields = switch (objectType) {
+        .Union => |uni| uni.fields,
+        .Struct => |str| str.fields,
+        .Pointer => |ptr| switch (ptr.size) {
+            .Single, .C => switch (self.typeTable.get(ptr.child)) {
+                .Struct, .Union => return self.registerType(.{
+                    .Pointer = .{
+                        .size = ptr.size,
+                        .child = try self.typecheckFieldAccess(ptr.child, field),
+                        .mutable = true,
+                    },
+                }),
+                else => {
+                    self.report("Couldn't find field '{s}' in type '{s}'.", .{
+                        field,
+                        try self.typeName(self.arena.allocator(), on),
+                    });
+                    return Error.FieldNotFound;
+                },
+            },
+            else => {
+                self.report("Couldn't find field '{s}' in type '{s}'.", .{
+                    field,
+                    try self.typeName(self.arena.allocator(), on),
+                });
+                return Error.FieldNotFound;
+            },
+        },
+        else => {
+            self.report("Couldn't find field '{s}' in type '{s}'.", .{
+                field,
+                try self.typeName(self.arena.allocator(), on),
+            });
+            return Error.FieldNotFound;
+        },
+    };
+
+    const index = try self.fieldIndex(on, member);
+    return fields[index].valueType;
+}
+
 pub fn typecheckDot(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!TypeID {
     // @Important TODO: This doesn't allow member function calls yet! Add them!
 
@@ -1832,60 +1910,9 @@ pub fn typecheckDot(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!TypeI
         return Error.NotImplemented;
     }
 
-    const memberName = memberToken.lexeme(self.context, self.currentFile);
-    const objectType = self.typeTable.get(objectTypeID);
+    const memberName = memberToken.lexeme(self.context, ast.tokens);
 
-    switch (objectType) {
-        .Pointer => |ptr| if (ptr.size == .Slice) {
-            if (std.mem.eql(u8, memberName, "len")) {
-                return Comptime.Builtin.Type("u32");
-            }
-            else if (std.mem.eql(u8, memberName, "ptr")) {
-                return self.registerType(.{
-                    .Pointer = .{
-                        .size = .C,
-                        .mutable = ptr.mutable,
-                        .child = ptr.child,
-                    },
-                });
-            }
-        },
-        .Array => |arr| {
-            if (std.mem.eql(u8, memberName, "len")) {
-                return Comptime.Builtin.Type("u32");
-            }
-            else if (std.mem.eql(u8, memberName, "ptr")) {
-                return self.registerType(.{
-                    .Pointer = .{
-                        .size = .C,
-                        .mutable = arr.mutable,
-                        .child = arr.child,
-                    },
-                });
-            }
-        },
-        else => { },
-    }
-
-    const member = try self.builder.internString(memberName);
-    const index = try self.fieldIndex(objectTypeID, member);
-
-    const fields = switch (objectType) {
-        .Union => |uni| blk: { 
-            if (index == 0) {
-                self.report("No field named 'tag' in type '{s}'.", .{
-                    try self.typeName(self.arena.allocator(), objectTypeID),
-                });
-                return Error.FieldNotFound;
-            }
-
-            break :blk uni.fields;
-        },
-        .Struct => |str| str.fields,
-        else => return common.debug.ShouldBeImpossible(self.context.log, @src()),
-    };
-
-    return fields[index].valueType;
+    return self.typecheckFieldAccess(objectTypeID, memberName);
 }
 
 pub fn typecheckMark(
@@ -2530,7 +2557,7 @@ pub fn assertCastable(self: *Typechecker, from: TypeID, to: TypeID, unsafe: bool
                 try self.assertCastablePtr(fromPtr, toPtr, unsafe);
                 try functional.throwIf((toPtr.mutable and !fromPtr.mutable) and !unsafe, Error.MutabilityViolation);
             },
-            else => return Error.IncompatibleTypes,
+            else => try functional.throwIf(!unsafe or !self.isInt(to), Error.IncompatibleTypes),
         },
         .Function => switch (toType) {
             .Function => { },
@@ -2549,9 +2576,9 @@ pub fn castable(self: *Typechecker, from: TypeID, to: TypeID) bool {
 
 pub fn assertCastablePtr(self: *const Typechecker, this: Types.Pointer, that: Types.Pointer, unsafe: bool) Error!void {
     switch (this.size) {
-        .Slice => try functional.throwIf(that.size == .Slice and self.sizeOf(this.child) != self.sizeOf(that.child), Error.MismatchingSliceChildType),
-        .Single => try functional.throwIf(that.size == .Slice, Error.PointerSizeMismatch),
-        .C => try functional.throwIf(that.size == .Slice, Error.PointerSizeMismatch),
+        .Slice => try functional.throwIf(!unsafe and that.size == .Slice and self.sizeOf(this.child) != self.sizeOf(that.child), Error.MismatchingSliceChildType),
+        .Single => try functional.throwIf(!unsafe and that.size == .Slice, Error.PointerSizeMismatch),
+        .C => try functional.throwIf(!unsafe and that.size == .Slice, Error.PointerSizeMismatch),
     }
 
     try functional.throwIf(!self.mutable(this.child) and self.mutable(that.child) and !unsafe, Error.MutabilityViolation);
@@ -2762,7 +2789,10 @@ pub fn coerce(self: *Typechecker, this: TypeID, that: TypeID) Error!TypeID {
         return Error.InferenceError;
     }
     else if (thisType == .Any) {
-        return that;
+        if (thisType.Any) {
+            return self.registerType(self.makeMutable(thatType));
+        }
+        else return that;
     }
     else if (thatType == .Any) {
         return this;

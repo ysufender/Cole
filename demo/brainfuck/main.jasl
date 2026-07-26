@@ -1,7 +1,7 @@
 import std::io::console as Console;
 import std::io::file as File;
 import std::memory::c as C;
-import std::ascii as Ascii;
+import std::ascii as ACII;
 
 import cpu as CPU;
 
@@ -22,10 +22,60 @@ let main = fn (args: [][]u8) -> i32 {
 
     let count = countBytecodeSize(path);
     if count < 0 {
-        return 1;
+        return CompilationError;
+    }
+    else if count > CPU::maxBytecode {
+        Console::println("Given code is too big.");
+        return CompilationError;
     }
 
-    return 0;
+    let tmp = C::alloc(count, 1)[0..count];
+    let bytecode: []mut u8 = unsafeCast(tmp);
+    code { if (bytecode.ptr == NULL) } {
+        Console::println("Failed to allocate bytecode.");
+        code { return 2; }
+    }
+
+    if !populateBytecode(bytecode, path) {
+        Console::println("Failed to read bytecode.");
+        return CompilationError;
+    }
+
+    let cpu: mut any = CPU::init(bytecode);
+
+    while CPU::cycle(cpu.&) { }
+
+    C::free(bytecode.ptr);
+    return Ok;
+};
+
+let populateBytecode = fn (bytecode: []mut u8, path: []u8) -> bool {
+    let source = File::open(path, @Read);
+
+    if !File::ok(source) {
+        Console::print("Failed to read file at path: ");
+        Console::println(path);
+        return false;
+    }
+
+    let idx: mut u32 = 0;
+    let ch: mut i32 = File::read(source);
+    while ch >= 0 {
+        let realCh: u8 = unsafeCast(ch);
+
+        if realCh == '[' or realCh == ']' {
+            Console::println("Loops are not yet supported.");
+            return false;
+        }
+
+        bytecode[idx] = unsafeCast(ch);
+        ch = File::read(source);
+        
+        idx = idx + 1;
+    }
+
+    File::close(source);
+    return true;
 };
 
 let countBytecodeSize = fn (path: []u8) -> i32 {
@@ -39,11 +89,13 @@ let countBytecodeSize = fn (path: []u8) -> i32 {
 
     let count: mut u32 = 0;
     let ch: mut i32 = File::read(source);
-    while ch >= 0 {
+    while ch > 0 {
         let realCh: u8 = unsafeCast(ch);
 
         if realCh == '[' or realCh == ']' {
             count = count + 2;
+            Console::println("Loops are not yet supported.");
+            return -1;
         }
         else {
             count = count + 1;
@@ -52,5 +104,6 @@ let countBytecodeSize = fn (path: []u8) -> i32 {
         ch = File::read(source);
     }
 
-    return count - 1;
+    File::close(source);
+    return count;
 };

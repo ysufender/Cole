@@ -133,5 +133,6 @@ pub const CompilerError = error {
     ExportOfMainFunction,
     CaptureOnElseProng,
     CaptureOnSwitchExpression,
+    VoidPointer,
     Terminate,
 };

@@ -446,7 +446,51 @@ fn conditional(self: *Parser) StatementResult {
     return result;
 }
 
+fn forLoop(self: *Parser) StatementResult {
+    if (true) {
+        self.report("Unsupported", .{});
+        return Error.NotImplemented;
+    }
+
+    const loopVar = try self.statement();
+    if (self.statementMap.get(loopVar).type != .VariableDefinition) {
+        self.report("Expected a loop variable definition, received '{s}' instead.", .{
+            @tagName(self.statementMap.get(loopVar).type),
+        });
+        return Error.IllegalSyntax;
+    }
+    _ = try self.consume(.Comma, error.MissingSemicolon, "Expected comma after loop variable.");
+    const condition = try self.ifExpression();
+    _ = try self.consume(.Comma, error.MissingSemicolon, "Expected comma after loop condition.");
+    const end = try self.statement();
+
+    if (!self.check(.LBrace)) {
+        self.report("Expected loop body.", .{});
+        return error.MissingBrace;
+    }
+
+    const body = try self.statement();
+
+    const start: defines.OpaquePtr = @intCast(self.extra.items.len);
+    self.extra.append(self.allocator(), loopVar) catch return error.AllocatorFailure;
+    self.extra.append(self.allocator(), condition) catch return error.AllocatorFailure;
+    self.extra.append(self.allocator(), end) catch return error.AllocatorFailure;
+    self.extra.append(self.allocator(), body) catch return error.AllocatorFailure;
+
+    const result = try self.alloc(Statement);
+    self.statementMap.set(result, .{
+        .type = .For ,
+        .value = start,
+    });
+    
+    return result;
+}
+
 fn loopStatement(self: *Parser, loopToken: Lexer.TokenType) StatementResult {
+    if (loopToken == .For) {
+        return self.forLoop();
+    }
+
     const condition = try self.ifExpression();
 
     if (!self.check(.LBrace)) {
@@ -463,10 +507,6 @@ fn loopStatement(self: *Parser, loopToken: Lexer.TokenType) StatementResult {
     const result = try self.alloc(Statement);
     self.statementMap.set(result, .{
         .type = switch (loopToken) {
-            .For => {
-                self.report("For loop is not implemented.", .{});
-                return common.debug.NotImplemented(self.context.log, @src());
-            },
             .While => .While,
             else => unreachable,
         },

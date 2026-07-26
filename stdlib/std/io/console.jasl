@@ -23,10 +23,18 @@ code {
     #include <stdio.h>
 }
 
+/* Output */
 pub let println = fn (msg: []u8) -> void {
     code { printf("%s\n", msg.ptr); }
 };
 
 pub let print = fn (msg: []u8) -> void {
     code { printf("%s", msg.ptr); }
+};
+
+/* Input */
+pub let read = fn () -> i32 {
+    let res: mut i32 = 0;
+    code { res = fgetc(stdin); }
+    return res;
 };

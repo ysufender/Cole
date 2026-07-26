@@ -646,9 +646,9 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
 }
 
 fn commonSingle(self: *JIR, out: *Writer, ptr: Ptr, comptime op: []const u8) Error!void {
-    try self.write(out, op++"(", .{});
+    try self.write(out, "("++op++"(", .{});
     try self.operation(out, ptr);
-    try self.write(out, ")", .{});
+    try self.write(out, "))", .{});
 }
 
 fn commonBinary(self: *JIR, out: *Writer, ptr: Ptr, comptime op: []const u8) Error!void {
@@ -698,7 +698,7 @@ fn literal(self: *JIR, out: *Writer, ptr: Constant.Ptr) Error!void {
         },
         .String => |str| {
             const rstr = self.strings[str];
-            try self.write(out, "({s}){{(uint8_t*)\"{s}\\0\", {d}}}", .{
+            try self.write(out, "({s}){{(uint8_t*)\"{s}\", {d}}}", .{
                 try self.getCName(Comptime.Builtin.Type("[]u8"), null, true),
                 rstr,
                 rstr.len,

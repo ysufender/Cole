@@ -347,6 +347,30 @@ fn resolveStatement(self: *Resolver, stmt: defines.StatementPtr, topLevel: bool)
             }
         },
         .Switch => try self.resolveSwitch(.Statement, ast, tokens, statement.value),
+        .For => {
+            const forBlock = try self.scopes.addOne(allocator);
+            self.scopes.set(forBlock, .{
+                .module = self.scopes.items(.module)[self.currentScope],
+                .parent = self.currentScope,
+                .kind = .Block,
+            });
+
+            const previous = self.currentScope;
+            defer self.currentScope = previous;
+            self.currentScope = forBlock;
+
+            const signature = ast.extra[statement.value];
+            try self.resolveStatement(signature, false);
+
+            const condition = ast.extra[statement.value + 1];
+            try self.resolveExpression(condition);
+
+            const end = ast.extra[statement.value + 2];
+            try self.resolveStatement(end, false);
+
+            const body = ast.extra[statement.value + 3];
+            try self.resolveStatement(body, false);
+        },
         .While => {
             const condition = ast.extra[statement.value];
             try self.resolveExpression(condition);

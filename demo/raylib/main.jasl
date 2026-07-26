@@ -3,7 +3,7 @@ import raylib as rl;
 let WIDTH  = 640;
 let HEIGHT = 480;
 
-let main = fn () -> i32 {
+let main = fn (args: [][]u8) -> i32 {
 	let ply: mut Player = (20, 100, 20, 70, 0);
 	let cpu: mut Player = (WIDTH-35, 100, 20, 70, 0);
 	let b: mut Ball = (WIDTH/2.0 - 10.0, 120.0, -5.0, -5.0, 10.0);

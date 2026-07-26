@@ -376,7 +376,7 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
         }
 
         const caseValue = exec.getValue(try exec.eval(caseIndex, tag.type)).Enum.Value;
-        const caseField = typeInfo.Union.fields[caseValue + 1];
+
 
         const case = try self.expression(caseIndex, tag.type);
 
@@ -396,6 +396,8 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
 
         const switchFull = res: {
             if (captureCount == 1) {
+                const caseField = typeInfo.Union.fields[caseValue + 1];
+
                 const nameStr = tokens
                                 .get(ast.expressions.get(ast.extra[caseRange.at(idx + 2)]).value)
                                 .lexeme(typechecker.context, ast.tokens);
@@ -861,8 +863,7 @@ fn scoping(self: *Lowerer, _extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
             .expr = lhs,
             .file = ast.tokens,
         })) |decl| {
-            const module = self.typechecker.symbols.scopes.get(self.typechecker.symbols.getDecl(decl).scope).module;
-            namespace = self.typechecker.context.moduleNameMap.items[module];
+            namespace = self.typechecker.context.moduleNameMap.items[self.typechecker.symbols.getDecl(decl).node];
             break;
         }
 
@@ -1076,12 +1077,7 @@ fn builtinCall(
     };
 
     return switch (declPtr) {
-        BI("cast"), BI("unsafeCast") => {
-            // @TODO @Beware casting between slice types and such is not supported yet.
-            const rtype = try self.typechecker.typecheckExpression(ast.extra[args.at(0)], null);
-            const rexpr = try self.expression(ast.extra[args.at(0)], rtype);
-            return self.typechecker.builder.construct(ofType, &.{rexpr});
-        },
+        BI("cast"), BI("unsafeCast") => self.cast(extraPtr, ofType),
         BI("as") =>
             self.expression(ast.extra[args.at(1)], try self.typechecker.expectType(ast.extra[args.at(0)])),
         BI("typeOf") =>
@@ -1093,6 +1089,68 @@ fn builtinCall(
         BI("compileLog"), BI("compileError") => 0,
 
         else => common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
+    };
+}
+
+fn cast(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR.Ptr {
+    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+
+    const exprlst = ast.expressions.items(.value)[ast.extra[extraPtr + 1]];
+    const args = defines.Range{
+        .start = ast.extra[exprlst],
+        .end = ast.extra[exprlst + 1],
+    };
+
+    const rtype = try self.typechecker.typecheckExpression(ast.extra[args.at(0)], null);
+    const rexpr = try self.expression(ast.extra[args.at(0)], rtype);
+
+    const targetInfo = self.typechecker.typeTable.get(ofType);
+    const rtypeInfo = self.typechecker.typeTable.get(rtype);
+
+    return res: switch (targetInfo) {
+        .Pointer => |tptr| switch (rtypeInfo) {
+            .Pointer => |rptr|
+                if (tptr.size == .Slice and rptr.size == .Slice) {
+                    const ptr = try self.typechecker.builder.dot(
+                        rexpr,
+                        try self.typechecker.builder.internString("ptr"),
+                    );
+
+                    const len = try self.typechecker.builder.dot(
+                        rexpr,
+                        try self.typechecker.builder.internString("len"),
+                    );
+
+                    const itemSize = try self.typechecker.builder.literal(
+                        try self.typechecker.builder.addConstant(.{
+                            .Integer = .{ .u32 = blk: {
+                                const newLen = self.typechecker.sizeOf(rptr.child) / 8;
+                                break :blk if (newLen == 0) 1 else newLen;
+                            } },
+                        })
+                    );
+
+                    const newItemSize = try self.typechecker.builder.literal(
+                        try self.typechecker.builder.addConstant(.{
+                            .Integer = .{ .u32 = blk: {
+                                const newItemSize = self.typechecker.sizeOf(tptr.child) / 8;
+                                break :blk if (newItemSize == 0) 1 else newItemSize;
+                            } },
+                        })
+                    );
+
+                    const newSize = try self.typechecker.builder.div(
+                        try self.typechecker.builder.mul(len, itemSize),
+                        newItemSize,
+                    );
+
+                    break :res self.typechecker.builder.construct(ofType, &.{ptr, newSize});
+                }
+                else return common.debug.ShouldBeImpossible(undefined, @src()),
+
+                else => return common.debug.ShouldBeImpossible(undefined, @src()),
+        },
+        else => self.typechecker.builder.construct(ofType, &.{rexpr}),
     };
 }
 
@@ -1138,10 +1196,13 @@ fn indexing(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     const exprPtr = ast.extra[extraPtr];
     const typeID = try self.typechecker.typecheckExpression(exprPtr, null);
 
-    const indexable = switch (self.typechecker.typeTable.get(typeID)) {
-        .Array => try self.expression(exprPtr, typeID),
+    const indexable = blk: switch (self.typechecker.typeTable.get(typeID)) {
+        .Array => {
+            const arr = try self.expression(exprPtr, typeID);
+            break :blk try self.typechecker.builder.dot(arr, try self.typechecker.builder.internString("data"));
+        },
         .Pointer => |ptr| switch (ptr.size) {
-            .Slice => blk: {
+            .Slice => {
                 const slice = try self.expression(exprPtr, typeID);
                 break :blk try self.typechecker.builder.dot(slice, try self.typechecker.builder.internString("ptr"));
             },
@@ -1193,6 +1254,18 @@ fn dot(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
                 const data = try self.typechecker.builder.internString("data");
                 obj = try self.typechecker.builder.dot(obj, data);
             },
+        .Pointer => |ptr| switch (self.typechecker.typeTable.get(ptr.child)) {
+            .Struct, .Union => return
+                if (ref) self.typechecker.builder.reference(obj)
+                else if (deref) self.typechecker.builder.dereference(obj)
+                else self.typechecker.builder.reference(
+                    try self.typechecker.builder.dot(
+                        try self.typechecker.builder.dereference(obj),
+                        try self.typechecker.builder.internString(member)
+                    )
+                ),
+            else => { },
+        },
         else => { },
     }
 

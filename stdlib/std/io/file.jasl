@@ -45,14 +45,10 @@ pub let File = struct {
 pub let open = fn (path: []u8, mode: OpenMode) -> File {
     let file: mut *mut FILE = undefined;
 
-    if mode == @Read {
-        code { file = fopen(path.ptr, "r"); }
-    }
-    else if mode == @Write {
-        code { file = fopen(path.ptr, "w"); }
-    }
-    else {
-        code { file = fopen(path.ptr, "w+"); }
+    switch mode {
+        @Read -> code { file = fopen(path.ptr, "r"); }
+        @Write -> code { file = fopen(path.ptr, "w"); }
+        else -> code { file = fopen(path.ptr, "w+"); }
     }
 
     return File(file);

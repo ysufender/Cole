@@ -243,11 +243,11 @@ pub fn getAST(self: *const Context, ast: defines.ASTPtr) *const Parser.AST {
     return &self.astMap.items[ast];
 }
 
-pub fn registerModule(self: *Context, module: *const Prepass.Module) Error!void {
+pub fn registerModule(self: *Context, module: *const Prepass.Module, id: u32) Error!void {
     self.moduleNameMap.ensureTotalCapacity(self.arena.allocator(), module.dataIndex + 1)
         catch return Error.AllocatorFailure;
     self.moduleNameMap.expandToCapacity();
-    self.moduleNameMap.items[module.dataIndex] = module.name;
+    self.moduleNameMap.items[id] = module.name;
     self.counts.topLevels += module.symbols.len;
 }
 

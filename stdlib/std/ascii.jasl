@@ -21,3 +21,7 @@
 
 pub let EOF = -1;
 pub let NULL = 0;
+
+pub let charToStr = fn (ch: u8) -> [2]u8 {
+    return (ch, NULL);
+};

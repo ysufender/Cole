@@ -13,10 +13,10 @@
     name:
         std::memory::c
     public symbols:
-        malloc,
-        free,
-        realloc,
-        calloc,
+        create
+        destroy
+        alloc
+        free
     description:
         File operation utilities.
 */
@@ -25,24 +25,22 @@ code {
     #include <stdlib.h>
 }
 
-pub let malloc = fn (size: u32) -> *void {
+pub let create = fn (size: u32) -> *void {
     let res: mut [@c]void = undefined;
     code { res = malloc(size); }
     return res;
 };
 
-pub let free = fn (ptr: [@c]void) -> void {
+pub let destroy = fn (ptr: *void) -> void {
     code { free(ptr); }
 };
 
-pub let realloc = fn (ptr: [@c]void, newSize: u32) -> [@c]void {
-    let res: mut [@c]void = undefined;
-    code { res = realloc(ptr, newSize); }
-    return res;
-};
-
-pub let calloc = fn (count: u32, sizeByteEach: u32) -> [@c]void {
+pub let alloc = fn (count: u32, sizeByteEach: u32) -> [@c]void {
     let res: mut [@c]void = undefined;
     code { res = calloc(count, sizeByteEach); }
     return res;
+};
+
+pub let free = fn (ptr: [@c]void) -> void {
+    code { free(ptr); }
 };
