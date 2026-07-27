@@ -375,7 +375,17 @@ fn block(self: *Parser) StatementResult {
 
 fn inlineC(self: *Parser) StatementResult {
     const cstart = self.tokens.get(try self.consume(.LBrace, error.MissingBrace, "Expected a block after 'asm' statement.")).end;
-    while (!self.check(.RBrace)) {
+    var count: u32 = 1;
+    while (count != 0) {
+        if (self.check(.LBrace)) {
+            count += 1;
+        }
+        else if (self.check(.RBrace)) {
+            count -= 1;
+            if (count == 0) {
+                break;
+            }
+        }
         _ = self.advance();
     }
     const cend = self.tokens.get(try self.consume(.RBrace, error.MissingBrace, "Missing enclosing brace '}' after block.")).start;
@@ -773,9 +783,19 @@ fn term(self: *Parser) ExpressionResult {
 }
 
 fn factor(self: *Parser) ExpressionResult {
-    var expr = try self.unary();
+    var expr = try self.modulo();
 
     while (self.match(&.{.Slash, .Star})) {
+        expr = try self.commonBinary(expr, Parser.modulo);
+    }
+
+    return expr;
+}
+
+fn modulo(self: *Parser) ExpressionResult {
+    var expr = try self.unary();
+
+    while (self.match(&.{.Modulo})) {
         expr = try self.commonBinary(expr, Parser.unary);
     }
 

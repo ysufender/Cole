@@ -136,7 +136,7 @@ fn innerMain(allocator: std.mem.Allocator, init: std.process.Init) common.Compil
     try backend.C.compile(outDir, allocator, &context);
 }
 
-var MainProcInit: std.process.Init = undefined;
+pub var MainProcInit: std.process.Init = undefined;
 fn panicHandler(msg: []const u8, stack: ?usize) noreturn {
     const _stderr = std.Io.File.stderr().writer(MainProcInit.io, &common.log.wbuf);
     var stderr = _stderr.interface;

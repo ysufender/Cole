@@ -1,0 +1,13 @@
+code {
+    #include <stdio.h>
+}
+
+let main = fn (args: [][]u8) -> i32 {
+    code {
+        printf("ore wa, larper da");
+        getchar();
+        if (1) {
+        }
+    }
+    return 0;
+};

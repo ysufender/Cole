@@ -857,6 +857,16 @@ fn evalDecl(self: *Comptime, declPtr: defines.DeclPtr, maybeExpected: ?TypeID) E
                 return Error.ComptimeNotPossible;
             }
 
+            switch (self.typechecker.typeTable.get(expected)) {
+                .Function, .Pointer => {
+                    self.report("Comptime evaluation of variable of type '{s}' is not possible.", .{
+                        try self.typechecker.typeName(self.arena.allocator(), expected),
+                    });
+                    return Error.ComptimeNotPossible;
+                },
+                else => { },
+            }
+
             const valuePtr = try self.expectDefined(decl.node, maybeExpected);
             break :blk self.castValue(valuePtr, expected);
         },
@@ -900,15 +910,28 @@ fn evalBuiltin(self: *Comptime, decl: *const Resolver.Declaration, maybeExpected
         if (Builtin.isBuiltinType(decl.type)) self.appendValue( .{ .Type = decl.type })
         else switch (decl.type) {
             BI("undefined") =>
-                if (Typechecker.determineExpected(maybeExpected)) |expected|
-                    if (self.typechecker.suitable(expected, comptime Builtin.Type("any")))
-                        self.constructUndefined(expected)
+                if (Typechecker.determineExpected(maybeExpected)) |expected| {
+                    switch (self.typechecker.typeTable.get(expected)) {
+                        .Pointer, .Function => {
+                            self.report("Can't construct an undefned value of type '{s}'", .{
+                                try self.typechecker.typeName(self.arena.allocator(), expected),
+                            });
+                            return Error.UndefinedPointerType;
+                        },
+
+                        else => { },
+                    }
+
+                    if (self.typechecker.suitable(expected, comptime Builtin.Type("any"))) {
+                        return self.constructUndefined(expected);
+                    }
                     else  {
                         self.report("Given type '{s}' can't be undefined.", .{
                             try self.typechecker.typeName(self.arena.allocator(), expected),
                         });
                         return Error.MissingTypeSpecifier;
                     }
+                }
                 else {
                     self.report("Unable to infer the type of undefined value.", .{});
                     return Error.MissingTypeSpecifier;
@@ -1037,8 +1060,12 @@ fn evalFuncType(self: *Comptime, exprPtr: defines.ExpressionPtr, extraPtr: defin
 
             break :res self.appendValue(.{
                 .Slice = .{
-                    .Type = try self.typechecker.registerType(.{
-                        .Array = .{ .len = range.len(), .mutable = false, .child = Builtin.Type("type") },
+                    .Type = try self.typechecker.registerType(TypeInfo{
+                        .Pointer = .{
+                            .child = Builtin.Type("type"),
+                            .mutable = false,
+                            .size = .Slice,
+                        },
                     }),
                     .To = @intCast(address),
                     .Size = range.len(),
@@ -1369,10 +1396,6 @@ pub fn evalCompileLog(self: *Comptime, extraPtr: defines.OpaquePtr) Error!Value.
             return Error.TypeMismatch;
         },
     };
-
-    if (self.typechecker.getFlag(.AttemptingEval)) {
-        return @intFromEnum(Value.Implicit.Void);
-    }
 
     common.log.info("COMPILE LOG: {s}", .{message});
     const token = self.typechecker.context.getTokens(self.typechecker.currentFile).get(self.typechecker.lastToken);
@@ -1897,6 +1920,7 @@ fn handleScopeDecls(
 
 fn castValue(self: *Comptime, valuePtr: Value.Ptr, to: TypeID) Error!Value.Ptr {
     const value = self.getValue(valuePtr);
+
     const newValue: Value = switch (value) {
         .Pointer => |ptr| .{
             .Pointer = .{
@@ -1904,7 +1928,14 @@ fn castValue(self: *Comptime, valuePtr: Value.Ptr, to: TypeID) Error!Value.Ptr {
                 .To = ptr.To,
             },
         },
-        .Function => value,
+        .Function => |func| .{
+            .Function = .{
+                .args = func.args,
+                .body = func.body,
+                .name = func.name,
+                .signature = to,
+            },
+        },
         .Float => |fromFloat| switch (self.typechecker.typeTable.get(to)) {
             .Float, .ComptimeFloat => value,
             else => .{ .Int = @intFromFloat(fromFloat) },

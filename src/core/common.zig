@@ -134,5 +134,6 @@ pub const CompilerError = error {
     CaptureOnElseProng,
     CaptureOnSwitchExpression,
     VoidPointer,
+    UndefinedPointerType,
     Terminate,
 };

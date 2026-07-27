@@ -12,6 +12,8 @@ typedef uint8_t jasl_bool;
 
 /* Top-level inserted code */
 #include "raylib.h"
+#include <math.h>
+    #include <stdlib.h>
 
 
 typedef struct const_Slice_uint8_t { uint8_t* ptr; uint32_t len; } const_Slice_uint8_t;
@@ -61,6 +63,8 @@ const_Array_uint8_t_2_t const root__intToChar(uint8_t);
 void raylib__DrawText(const_Slice_uint8_t const, int32_t const, int32_t const, int32_t const, Color const);
 
 jasl_bool const root__checkCollision(int32_t const, float const, int32_t const, float const, int32_t const, int32_t const, float const);
+
+int32_t const std__math__random(uint32_t const);
 
 void raylib__DrawCircle(int32_t const, int32_t const, float const, Color const);
 

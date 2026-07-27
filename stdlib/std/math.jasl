@@ -24,6 +24,7 @@
 
 code {
     #include <math.h>
+    #include <stdlib.h>
 }
 
 pub let Epsilon = 0.000000119209;

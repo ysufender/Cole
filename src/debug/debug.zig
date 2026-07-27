@@ -47,4 +47,7 @@ pub fn stackTrace(stack: ?usize, stderr: *std.Io.Writer) void {
         }
         stderr.writeAll("\n") catch {};
     }
+    else {
+        _ = stderr.write("Stack trace is not available.");
+    }
 }

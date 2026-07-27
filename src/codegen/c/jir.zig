@@ -74,6 +74,7 @@ pub const Node = struct {
         Negation,
         Construction,
         Code,
+        Mod,
     };
 
     type: Type,
@@ -157,20 +158,13 @@ pub fn codegen(self: *JIR, context: *Context) Error!std.Io.Dir {
     const buildDir = std.Io.Dir.cwd().openDir(context.io, "build", .{})
         catch return Error.IOError;
 
-    while (true) {
-        buildDir.createDir(context.io, "c/", .default_dir) catch |err| switch (err) {
-            CreateDirError.PathAlreadyExists => {
-                buildDir.deleteTree(context.io, "c")
-                    catch return Error.IOError;
-                continue;
-            },
-            else => {
-                common.log.err("Failed to create output directory.", .{});
-                return Error.IOError;
-            },
-        };
-        break;
-    }
+    buildDir.createDir(context.io, "c/", .default_dir) catch |err| switch (err) {
+        CreateDirError.PathAlreadyExists => { },
+        else => {
+            common.log.err("Failed to create output directory.", .{});
+            return Error.IOError;
+        },
+    };
 
     const cOut = buildDir.openDir(context.io, "c", .{})
         catch return Error.IOError;
@@ -231,9 +225,14 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
 
         switch (typeInfo) {
             .Array => |arr| {
+                const childName = switch (self.types.get(arr.child)) {
+                    .Type, .Any, .EnumLiteral => continue,
+                    else => try self.getCName(arr.child, null, true),
+                };
+
                 const name = std.fmt.allocPrint(self.allocator, "{s}Array_{s}_{d}_t", .{
                     if (arr.mutable) "" else "const_",
-                    try self.getCName(arr.child, null, true),
+                    childName,
                     arr.len,
                 }) catch return Error.AllocatorFailure;
 
@@ -253,9 +252,14 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
             },
             .Pointer => |ptr| switch (ptr.size) {
                 .Slice => {
+                    const childName = switch (self.types.get(ptr.child)) {
+                        .Type, .Any, .EnumLiteral => continue,
+                        else => try self.getCName(ptr.child, null, true),
+                    };
+
                     const name = std.fmt.allocPrint(self.allocator, "{s}Slice_{s}", .{
                         if (ptr.mutable) "" else "const_",
-                        try self.getCName(ptr.child, null, true),
+                        childName,
                     }) catch return Error.AllocatorFailure;
 
                     const res = visited.getOrPut(self.allocator, name)
@@ -530,6 +534,7 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
         .Sub => try self.commonBinary(out, node.value, "-"),
         .And => try self.commonBinary(out, node.value, "&&"),
         .Div => try self.commonBinary(out, node.value, "/"),
+        .Mod => try self.commonBinary(out, node.value, "%"),
         .Mul => try self.commonBinary(out, node.value, "*"),
         .Or => try self.commonBinary(out, node.value, "||"),
         .Xor => try self.commonBinary(out, node.value, "^"),
@@ -669,7 +674,9 @@ fn literal(self: *JIR, out: *Writer, ptr: Constant.Ptr) Error!void {
             .u8 => |t| self.write(out, "{d}", .{t}),
         },
         .Float => |fl| self.write(out, "{}", .{fl}),
-        .Function => |func| self.write(out, "{s}", .{self.strings[func]}),
+        .Function => |func| {
+            try self.write(out, "&{s}", .{self.strings[func]});
+        },
         .Aggregate => |agg| {
             try self.write(out, "({s}){{", .{
                 try self.getCName(agg.type, null, true),
@@ -716,7 +723,6 @@ fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool
     var name: []const u8 = "";
     switch (typeInfo) {
         .Type, .Any, .EnumLiteral => {
-            @breakpoint();
             common.log.err("Unsupported {s}", .{@tagName(typeInfo)});
             return common.debug.ShouldBeImpossible(self.context.log, @src());
         },
@@ -777,7 +783,7 @@ fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool
             }
 
             name = std.fmt.allocPrint(self.allocator, "{s} (*{s})({s})", .{
-                try self.getCName(func.returnType, _name, true),
+                try self.getCName(func.returnType, _name, false),
                 if (_name) |n| self.strings[n] else "",
                 args
             }) catch return Error.AllocatorFailure;

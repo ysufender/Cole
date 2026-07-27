@@ -1,4 +1,5 @@
 import raylib as rl;
+import std::math as m;
 
 let WIDTH  = 640;
 let HEIGHT = 480;
@@ -6,7 +7,7 @@ let HEIGHT = 480;
 let main = fn (args: [][]u8) -> i32 {
 	let ply: mut Player = (20, 100, 20, 70, 0);
 	let cpu: mut Player = (WIDTH-35, 100, 20, 70, 0);
-	let b: mut Ball = (WIDTH/2.0 - 10.0, 120.0, -5.0, -5.0, 10.0);
+	let ball: mut Ball = (WIDTH/2.0 - 10.0, 120.0, -5.0, -5.0, 10.0);
 
 	rl::InitWindow(WIDTH, HEIGHT, "Ping pong");
 	rl::SetTargetFPS(60);
@@ -24,38 +25,39 @@ let main = fn (args: [][]u8) -> i32 {
 		rl::DrawText(cscore[0..2], (WIDTH/2) + 200, 30, 48, rl::Color::Black);
 		
 		if
-            checkCollision(ply.x, b.x, ply.y, b.y, ply.w, ply.h, b.r)
-            or checkCollision(cpu.x, b.x, cpu.y, b.y, cpu.w,cpu.h,b.r) {
-			b.bx = -1.0 * b.bx;
+            checkCollision(ply.x, ball.x, ply.y, ball.y, ply.w, ply.h, ball.r)
+            or checkCollision(cpu.x, ball.x, cpu.y, ball.y, cpu.w,cpu.h,ball.r) {
+			ball.bx = -1.0 * ball.bx;
 		}
 
-		cpu.y = unsafeCast(b.y * 0.8);
+		// cpu.y = unsafeCast(ball.y * 1.0/cast(m::random(100)));
+        cpu.y = cpu.y + (ball.y - cpu.y) * 1/cast(m::random(1000));
 
-		if b.x < (WIDTH/2) { rl::DrawCircle(cast(b.x), cast(b.y), b.r, rl::Color::White); }
-		else { rl::DrawCircle(cast(b.x), cast(b.y), b.r, rl::Color::Black); }
+		if ball.x < (WIDTH/2) { rl::DrawCircle(cast(ball.x), cast(ball.y), ball.r, rl::Color::White); }
+		else { rl::DrawCircle(cast(ball.x), cast(ball.y), ball.r, rl::Color::Black); }
 		rl::EndDrawing();
 
-		b.x = b.bx + b.x;
-		b.y = b.by + b.y;
+		ball.x = ball.bx + ball.x;
+		ball.y = ball.by + ball.y;
 
-		if b.x < 5 {
+		if ball.x < 5 {
 			cpu.score = cpu.score + 1;
-			b.x = (as(float, cast(WIDTH))/2.0) - b.r;
-			b.y = 120;
-			b.bx = -5;
+			ball.x = cast(m::random(as(u32, WIDTH) - cast(ball.r)));
+			ball.y = cast(m::random(as(u32, HEIGHT) - cast(ball.r)));
+			ball.bx = -5;
 			
 		}
-        else if b.x > WIDTH - 5 {
+        else if ball.x > WIDTH - 5 {
 			ply.score = ply.score + 1;
-			b.x = (as(float, cast(WIDTH))/2.0) - b.r;
-			b.y = 120;
-			b.bx = 5;
+			ball.x = cast(m::random(as(u32, WIDTH) - cast(ball.r)));
+			ball.y = cast(m::random(as(u32, HEIGHT)  - cast(ball.r)));
+			ball.bx = 5;
 		}
-		if b.y < 5 {
-			b.by = -b.by;
+		if ball.y < 5 {
+			ball.by = -ball.by;
 		}
-        else if b.y > HEIGHT - 5 {
-			b.by = -(b.by);
+        else if ball.y > HEIGHT - 5 {
+			ball.by = -(ball.by);
 		}
 		
 

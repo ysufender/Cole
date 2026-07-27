@@ -1181,6 +1181,7 @@ fn expressionList(self: *Lowerer, extraPtr: defines.OpaquePtr, expected: TypeID)
             .Array => |arr| arr.child,
             .Struct => |str| str.fields[i].valueType,
             .Union => |uni| uni.fields[i].valueType,
+            .Function => |func| func.argTypes[i],
             else => expected,
         });
         exs[i] = try self.expression(ast.extra[@intCast(exprPtr)], t);
@@ -1336,6 +1337,7 @@ fn binary(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR
         .Or => self.typechecker.builder.@"or"(lhs, rhs),
         .Pipe => self.typechecker.builder.bitwiseOr(lhs, rhs),
         .Ampersand => self.typechecker.builder.bitwiseAnd(lhs, rhs),
+        .Modulo => self.typechecker.builder.mod(lhs, rhs),
         else => common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
     };
 }

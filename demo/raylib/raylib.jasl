@@ -137,6 +137,12 @@ pub let IsKeyDown = fn (key: KeyboardKey) -> bool {
     return res;
 };
 
+pub let GetFrameTime = fn () -> float {
+    let res: mut float = 0;
+    code { res = GetFrameTime(); }
+    return res;
+};
+
 pub let DrawCircle = fn (
     centerX: i32,
     centerY: i32,

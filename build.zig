@@ -97,7 +97,8 @@ fn addTargets(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
                 .strip = true,
                 .code_model = .small,
                 .link_libc = true,
-                .error_tracing = false,
+                .error_tracing = optimize != .Debug,
+                .omit_frame_pointer = optimize != .Debug,
             }),
         });
 
@@ -177,7 +178,6 @@ fn addDebugTarget(b: *std.Build) void {
             .omit_frame_pointer = false,
         }),
         .use_llvm = true,
-        .use_lld = true,
     });
     exe.root_module.addEmbedPath(b.path(resourcePath));
     exe.root_module.addOptions("config", opts);

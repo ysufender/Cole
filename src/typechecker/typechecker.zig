@@ -884,7 +884,7 @@ fn typecheckBlock(self: *Typechecker, extraPtr: defines.OpaquePtr, expected: Typ
 
     for (innerRange.start..innerRange.end) |index| {
         if (self.getFlag(.CoveredAllPaths)) {
-            self.report("Unreachable code", .{});
+            self.report("Unreachable code detected.", .{});
             return Error.UnreachableCodePath;
         }
 
@@ -1567,7 +1567,7 @@ pub fn typecheckTypeForwarding(self: *Typechecker, extraPtr: defines.OpaquePtr, 
     }
 
     const res = try self.typecheckExpression(ast.extra[args.at(1)], typeToForward);
-    if (res != typeToForward) {
+    if (!self.suitable(typeToForward, res)) {
         self.report("Expected en expression of type '{s}' here.", .{
             try self.typeName(self.arena.allocator(), typeToForward),
         });
@@ -1668,12 +1668,25 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
     if (decl.kind == .Builtin) {
         return if (Comptime.Builtin.isBuiltinType(decl.type)) Comptime.Builtin.Type("type")
         else switch (decl.type) {
-            BuiltinIndex("undefined") =>
-                if (determineExpected(maybeExpected)) |expected| expected
-                else {
-                    self.report("Unable to resolve the type of undefined value.", .{});
-                    return Error.MissingTypeSpecifier;
-                },
+            BuiltinIndex("undefined") => blk: {
+                const expected =
+                    if (determineExpected(maybeExpected)) |expected| expected
+                    else {
+                        self.report("Unable to resolve the type of undefined value.", .{});
+                        return Error.MissingTypeSpecifier;
+                    };
+
+                switch (self.typeTable.get(expected)) {
+                    .Pointer, .Function => {
+                        self.report("Can't construct an undefned value of type '{s}'", .{
+                            try self.typeName(self.arena.allocator(), expected),
+                        });
+                        return Error.UndefinedPointerType;
+                    },
+
+                    else => break :blk expected,
+                }
+            },
             BuiltinIndex("unreachable") => return Comptime.Builtin.Type("noreturn"),
             else => {
                 self.report("Builtin '{s}' is not implemented.", .{Resolver.builtins[decl.type]});
@@ -2118,7 +2131,7 @@ pub fn typecheckBinary(self: *Typechecker, extraPtr: defines.OpaquePtr, _: ?Type
 
             break :res Comptime.Builtin.Type("bool");
         },
-        .Plus, .Minus, .Slash, .Star => {
+        .Plus, .Minus, .Slash, .Star, .Modulo => {
             // @Important TODO: allow pointer arithmetic on C style pointers.
 
             if (!(self.isInt(lhs) or self.isFloat(lhs))) {
@@ -2701,6 +2714,11 @@ pub fn assertCanCoerce(self: *const Typechecker, this: TypeID, that: TypeID) Err
                     else => return common.debug.ShouldBeImpossible(self.context.log, @src()),
                 };
                 try functional.throwIf(names.@"0" != names.@"1", Error.TypeMismatch);
+            },
+            .Function => |f1| {
+                try functional.throwIf(std.meta.activeTag(thisType) != std.meta.activeTag(thatType), Error.TypeMismatch);
+                try functional.throwIf(!std.mem.eql(u32, f1.argTypes, thatType.Function.argTypes), Error.IncompatibleTypes);
+                try functional.throwIf(f1.returnType != thatType.Function.returnType, Error.IncompatibleTypes);
             },
             else => functional.throwIf(std.meta.activeTag(thisType) != std.meta.activeTag(thatType), Error.TypeMismatch),
         },

@@ -31,6 +31,7 @@ pub const TokenType = enum(u8) {
     Pub, Mut,
     And, Or, Mark,
     Identifier,
+    Modulo,
     String, Integer, Float, False, True, EnumLiteral,
     Discard,
     Range,
@@ -256,6 +257,7 @@ fn scanToken(self: *Lexer) common.CompilerError!void {
     self.start = self.current;
 
     return blk: switch (self.advance()) {
+        '%' => self.addToken(.Modulo),
         '(' => self.addToken(.LParen),
         ')' => self.addToken(.RParen),
         '{' => self.addToken(.LBrace),
