@@ -101,6 +101,7 @@ pub const Constant = union(enum) {
     Array: ConstantArray,
     Undefined: TypeID,
     Function: defines.StringPtr,
+    Type: TypeID,
 };
 
 pub const Function = struct {
@@ -288,7 +289,7 @@ fn discoverFunctionsAndTypes(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void 
         .VariableDef => if (self.data[node.value] == 1) {
             const typeID = self.data[node.value + 1];
             const info = self.types.get(typeID);
-            if (info == .Pointer and self.types.get(info.Pointer.child) == .Function) {
+            if (info == .Function) {
                 _ = std.mem.replace(u8, self.strings[self.data[node.value + 2]], "::", "__", @constCast(self.strings[self.data[node.value + 2]]));
                 _ = std.mem.replace(u8, self.strings[self.data[node.value + 2]], "$", "_", @constCast(self.strings[self.data[node.value + 2]]));
                 try self.write(out, "extern {s};\n\n", .{
@@ -331,17 +332,20 @@ fn discoverFunctionsAndTypes(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void 
 
             const typeInfo = self.types.get(typeID);
 
+            const name = try self.getCName(typeID, null, true);
+
             switch (typeInfo) {
                 .Struct => |str| {
-                    const name = self.strings[str.name];
-                    _ = std.mem.replace(u8, name, ":", "_", @constCast(name));
-                    _ = std.mem.replace(u8, name, "$", "_", @constCast(name));
                     if (!typeInfo.isZeroBit()) {
                         try self.write(out, "typedef struct {s} {{\n", .{name});
                         for (str.fields) |field| {
+                            const info = self.types.get(field.valueType);
                             try self.write(out, "\t{s} {s};\n", .{
-                                try self.getCName(field.valueType, null, false),
-                                self.strings[field.name],
+                                try self.getCName(field.valueType, field.name, info == .Function),
+                                if (info == .Function)
+                                    ""
+                                else
+                                    self.strings[field.name],
                             });
                         }
                     }
@@ -354,53 +358,46 @@ fn discoverFunctionsAndTypes(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void 
 
                 .Union => |uni|{
                     if (uni.isTagged) {
-                        const name = self.strings[uni.name];
-                        _ = std.mem.replace(u8, name, ":", "_", @constCast(name));
-                        _ = std.mem.replace(u8, name, "$", "_", @constCast(name));
-                        if (!typeInfo.isZeroBit()) {
-                            try self.write(out, "typedef struct {s} {{\n", .{name});
-                            try self.write(out, "\t{s} {s};\n", .{
-                                try self.getCName(uni.fields[0].valueType, null, false),
-                                self.strings[uni.fields[0].name],
-                            });
-                            try self.write(out, "\tunion {s} {{\n", .{name});
-                            for (uni.fields[1..]) |field| {
-                                try self.write(out, "\t\t{s} {s};\n", .{
-                                    try self.getCName(field.valueType, null, false),
+                        try self.write(out, "typedef struct {s} {{\n", .{name});
+                        try self.write(out, "\t{s} {s};\n", .{
+                            try self.getCName(uni.fields[0].valueType, null, false),
+                            self.strings[uni.fields[0].name],
+                        });
+                        try self.write(out, "\tunion {s} {{\n", .{name});
+                        for (uni.fields[1..]) |field| {
+                            const info = self.types.get(field.valueType);
+                            try self.write(out, "\t\t{s} {s};\n", .{
+                                try self.getCName(field.valueType, field.name, false),
+                                if (info == .Function)
+                                    ""
+                                else
                                     self.strings[field.name],
-                                });
-                            }
-                            try self.write(out, "\t}};\n", .{});
+                            });
                         }
-                        try self.write(out, "{s} {s};\n\n", .{
-                            if (typeInfo.isZeroBit()) "typedef void"
-                            else "}",
+                        try self.write(out, "\t}};\n", .{});
+                        try self.write(out, "}} {s};\n\n", .{
                             name
                         });
                     }
                     else {
-                        const name = self.strings[uni.name];
-                        _ = std.mem.replace(u8, name, ":", "_", @constCast(name));
-                        _ = std.mem.replace(u8, name, "$", "_", @constCast(name));
-                        if (!typeInfo.isZeroBit()) {
-                            try self.write(out, "typedef union {s} {{\n", .{name});
-                            for (uni.fields) |field| {
-                                try self.write(out, "\t{s} {s};\n", .{
-                                    try self.getCName(field.valueType, null, false),
+                        try self.write(out, "typedef union {s} {{\n", .{name});
+                        for (uni.fields) |field| {
+                            const info = self.types.get(field.valueType);
+                            try self.write(out, "\t{s} {s};\n", .{
+                                try self.getCName(field.valueType, field.name, false),
+                                if (info == .Function)
+                                    ""
+                                else
                                     self.strings[field.name],
-                                });
-                            }
+                            });
                         }
-                        try self.write(out, "{s} {s};\n\n", .{
-                            if (typeInfo.isZeroBit()) "typedef void"
-                            else "}",
+                        try self.write(out, "}} {s};\n\n", .{
                             name
                         });
                     }
                 },
 
                 .Enum => |enm| {
-                    const name = self.strings[enm.name];
                     _ = std.mem.replace(u8, name, ":", "_", @constCast(name));
                     _ = std.mem.replace(u8, name, "$", "_", @constCast(name));
                     if (!typeInfo.isZeroBit()) {
@@ -663,6 +660,7 @@ fn literal(self: *JIR, out: *Writer, ptr: Constant.Ptr) Error!void {
     const cst = self.constants.get(ptr);
 
     try switch (cst) {
+        .Type => |id| try self.write(out, "{s}", .{try self.getCName(id, null, false)}),
         .Undefined => |typeID| self.write(out, "({s}){{ }}", .{ try self.getCName(typeID, null, false) }),
         .Integer => |int| switch (int) {
             .i32 => |t| self.write(out, "{d}", .{t}),
@@ -718,6 +716,7 @@ fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool
     var name: []const u8 = "";
     switch (typeInfo) {
         .Type, .Any, .EnumLiteral => {
+            @breakpoint();
             common.log.err("Unsupported {s}", .{@tagName(typeInfo)});
             return common.debug.ShouldBeImpossible(self.context.log, @src());
         },
@@ -752,8 +751,8 @@ fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool
                 else typeInfo.Enum.name
             ];
 
-            _ = std.mem.replace(u8, name, ":", "_", @constCast(name));
-            _ = std.mem.replace(u8, name, "$", "_", @constCast(name));
+            _ = std.mem.replace(u8, name, "::", "__", @constCast(name));
+            _ = std.mem.replace(u8, name, "$$", "__", @constCast(name));
 
             const mut =
                 if (typeInfo == .Struct) typeInfo.Struct.mutable

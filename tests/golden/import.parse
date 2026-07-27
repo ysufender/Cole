@@ -1,0 +1,30 @@
+info: Compilation settings:
+	Input File  : tests/fixtures/valid/import.jasl
+	Working Dir : /home/yusuf/proj/JASL
+	Link Dirs   : []
+	Libraries   : []
+	Include Dirs: [/home/yusuf/proj/JASL/stdlib]
+
+------------BEGIN  AST: /home/yusuf/proj/JASL/tests/fixtures/valid/import.jasl------------
+Import Scope(Scope(Ident(std), io), console) as Console;
+Let main: Ident() = FnDef (
+       args: [][]Ident(u8)    -> Ident(i32){
+    Block {
+     Let      test: Ident()      = Mark(Literal(@noComptime)        )Literal(12);
+     Block {
+      Let       idx: mut Ident(u32)       = Literal(0);
+      While        Binary(?op) Ident(idx)Dot(len) Ident(args)       do         Block {
+         ExprStmt Call Scope(Ident(Console), println)(Index Ident(args) at: Ident(idx));
+         ExprStmt Assign Ident(idx)Binary(^) Ident(idx)Literal(1);
+        }
+
+
+     }
+
+    }
+
+};
+------------END  AST: /home/yusuf/proj/JASL/tests/fixtures/valid/import.jasl------------
+
+info: Compiler exited successfully.
+EXIT:0

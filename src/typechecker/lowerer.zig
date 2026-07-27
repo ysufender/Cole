@@ -260,10 +260,12 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
 
             return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
         },
+
         .Function => |func| .{
             .Function = func.name,
         },
-        .Type => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
+
+        .Type => |id| .{ .Type = id },
     });
 }
 

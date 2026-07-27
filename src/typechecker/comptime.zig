@@ -1014,7 +1014,40 @@ fn evalPtrType(
 fn evalFuncType(self: *Comptime, exprPtr: defines.ExpressionPtr, extraPtr: defines.OpaquePtr) Error!Value.Ptr {
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
 
-    const args = self.getValue(try self.expectDefined(ast.extra[extraPtr], null));
+    const args = self.getValue(try res: {
+        const argsExpr = ast.expressions.get(ast.extra[extraPtr]);
+
+        if (argsExpr.type == .ExpressionList) {
+            const range = defines.Range{
+                .start = ast.extra[argsExpr.value],
+                .end = ast.extra[argsExpr.value + 1],
+            };
+
+            if (range.len() == 0) {
+                break :res @intFromEnum(Value.Implicit.Void);
+            } else if (range.len() == 1) {
+                break :res self.expectType(ast.extra[range.at(0)]);
+            }
+
+            var address: i64 = -1;
+            for (range.start..range.end) |ptr| {
+                const addr = try self.expectType(ast.extra[ptr]);
+                address = if (address == -1) addr else address;
+            }
+
+            break :res self.appendValue(.{
+                .Slice = .{
+                    .Type = try self.typechecker.registerType(.{
+                        .Array = .{ .len = range.len(), .mutable = false, .child = Builtin.Type("type") },
+                    }),
+                    .To = @intCast(address),
+                    .Size = range.len(),
+                },
+            });
+        } else {
+            break :res self.expectType(ast.extra[extraPtr]);
+        }
+    });
     const argSize: u32 = ret: switch (args) {
         .Slice => |slice| {
             var sub: u32 = 0;
@@ -1031,7 +1064,7 @@ fn evalFuncType(self: *Comptime, exprPtr: defines.ExpressionPtr, extraPtr: defin
                 }
             }
 
-            break :ret slice.Size;
+            break :ret slice.Size - sub;
         },
         .Type => |t| if (t == Builtin.Type("void")) 0 else 1,
         else => |t| {

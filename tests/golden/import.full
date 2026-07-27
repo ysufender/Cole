@@ -1,0 +1,86 @@
+info: Compilation settings:
+	Input File  : tests/fixtures/valid/import.jasl
+	Working Dir : /home/yusuf/proj/JASL
+	Link Dirs   : []
+	Libraries   : []
+	Include Dirs: [/home/yusuf/proj/JASL/stdlib]
+
+------------BEGIN  AST: /home/yusuf/proj/JASL/tests/fixtures/valid/import.jasl------------
+Import Scope(Scope(Ident(std), io), console) as Console;
+Let main: Ident() = FnDef (
+       args: [][]Ident(u8)    -> Ident(i32){
+    Block {
+     Let      test: Ident()      = Mark(Literal(@noComptime)        )Literal(12);
+     Block {
+      Let       idx: mut Ident(u32)       = Literal(0);
+      While        Binary(?op) Ident(idx)Dot(len) Ident(args)       do         Block {
+         ExprStmt Call Scope(Ident(Console), println)(Index Ident(args) at: Ident(idx));
+         ExprStmt Assign Ident(idx)Binary(^) Ident(idx)Literal(1);
+        }
+
+
+     }
+
+    }
+
+};
+------------END  AST: /home/yusuf/proj/JASL/tests/fixtures/valid/import.jasl------------
+
+error: COMPTIME: Comptime execution is not possible in this context.
+error: .... In /home/yusuf/proj/JASL/tests/fixtures/valid/import.jasl 4:9
+error:     let test = #(@noComptime) 12;
+error:         ^ Here.
+error: ........ Required from '/home/yusuf/proj/JASL/tests/fixtures/valid/import.jasl 3:5'
+error: let main = fn (args: [][]u8) -> i32 {
+error:     ^ Here.
+
+/home/yusuf/proj/JASL/src/typechecker/comptime.zig:157:9: 0x12e3a07 in eval (jaslc-debug)
+        return Error.ComptimeNotPossible;
+        ^
+/home/yusuf/proj/JASL/src/typechecker/typechecker.zig:937:41: 0x125ccde in typecheckExpression (jaslc-debug)
+        .Literal => self.typecheckValue(try self.executer.eval(expressionPtr, maybeExpected), maybeExpected),
+                                        ^
+/home/yusuf/proj/JASL/src/typechecker/typechecker.zig:1971:5: 0x126b2cd in typecheckMark (jaslc-debug)
+    return self.typecheckExpression(marked, maybeExpected);
+    ^
+/home/yusuf/proj/JASL/src/typechecker/typechecker.zig:926:5: 0x125cf65 in typecheckExpression (jaslc-debug)
+    return switch (expr.type) {
+    ^
+/home/yusuf/proj/JASL/src/typechecker/typechecker.zig:265:13: 0x12d7cf5 in typecheckVariableDef (jaslc-debug)
+            try self.typecheckExpression(decl.node, expected);
+            ^
+/home/yusuf/proj/JASL/src/typechecker/typechecker.zig:1776:22: 0x123fccc in typecheckDecl (jaslc-debug)
+    const declType = try switch (decl.kind) {
+                     ^
+/home/yusuf/proj/JASL/src/typechecker/typechecker.zig:447:9: 0x130531f in typecheckVarDefStatement (jaslc-debug)
+    _ = try self.typecheckDecl(decl, try self.expectType(signature.type));
+        ^
+/home/yusuf/proj/JASL/src/typechecker/typechecker.zig:244:32: 0x1302a73 in typecheckStatement (jaslc-debug)
+        .VariableDefinition => try self.typecheckVarDefStatement(stmt.value),
+                               ^
+/home/yusuf/proj/JASL/src/typechecker/typechecker.zig:891:9: 0x130e0b7 in typecheckBlock (jaslc-debug)
+        try self.typecheckStatement(ast.extra[index], expected);
+        ^
+/home/yusuf/proj/JASL/src/typechecker/typechecker.zig:233:5: 0x1302b61 in typecheckStatement (jaslc-debug)
+    return switch (stmt.type) {
+    ^
+/home/yusuf/proj/JASL/src/typechecker/comptime.zig:294:5: 0x12ecb5f in evalFunction (jaslc-debug)
+    try self.typechecker.typecheckStatement(bodyPtr, returnType);
+    ^
+/home/yusuf/proj/JASL/src/typechecker/comptime.zig:214:32: 0x12e4cd9 in eval (jaslc-debug)
+        .FunctionDefinition => try self.evalFunction(exprPtr, expr.value),
+                               ^
+/home/yusuf/proj/JASL/src/typechecker/typechecker.zig:263:37: 0x12d7c11 in typecheckVariableDef (jaslc-debug)
+            try self.typecheckValue(try self.executer.eval(decl.node, expected), expected)
+                                    ^
+/home/yusuf/proj/JASL/src/typechecker/typechecker.zig:1776:22: 0x123fccc in typecheckDecl (jaslc-debug)
+    const declType = try switch (decl.kind) {
+                     ^
+/home/yusuf/proj/JASL/src/typechecker/typechecker.zig:214:22: 0x122bec0 in typecheck (jaslc-debug)
+    const mainType = try self.typecheckDecl(mainPtr, entryPointID);
+                     ^
+/home/yusuf/proj/JASL/src/main.zig:120:21: 0x11e9ea9 in innerMain (jaslc-debug)
+    var loweredIR = try typechecker.typecheck(allocator);
+                    ^
+error: Compiler exited with code 209 <ComptimeNotPossible>
+EXIT:0

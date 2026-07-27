@@ -1044,14 +1044,7 @@ pub fn typecheckExpressionList(self: *Typechecker, extra: defines.OpaquePtr, _ma
     const expected =
         if (maybeExpected) |expected|
             if (range.len() == 1) switch (self.typeTable.get(expected)) {
-                .Struct, .Union, .Enum, .Array => blk: {
-                    const inner = try self.typecheckExpression(ast.extra[range.at(0)], expected);
-                    if (self.suitable(expected, inner)) {
-                        return expected;
-                    }
-
-                    break :blk expected;
-                },
+                .Struct, .Union, .Enum, .Array => return self.typecheckExpressionListRange(range, expected),
                 else => return self.typecheckExpression(ast.extra[range.at(0)], expected),
             }
             else expected
@@ -1162,7 +1155,7 @@ fn typecheckStructInitialization(self: *Typechecker, ast: *const Parser.AST, str
 
     for (str.fields, 0..) |field, index| {
         const initializerType =
-            if (false and field.isComptime) try self.typecheckValue(try self.executer.eval(
+            if (field.isComptime) try self.typecheckValue(try self.executer.eval(
                 ast.extra[range.at(@intCast(index))],
                 field.valueType,
             ), field.valueType)
@@ -1244,7 +1237,7 @@ fn typecheckUnionInitialization(self: *Typechecker, ast: *const Parser.AST, uni:
 
     const field = uni.fields[findex];
     _ = try self.typecheckExpressionListRange(range.subRange(1), field.valueType);
-    if (false and field.isComptime) {
+    if (field.isComptime) {
         _ = try self.executer.constructFromList(
             field.valueType,
             range.subRange(1),
@@ -1486,7 +1479,7 @@ pub fn typecheckBuiltinCall(self: *Typechecker, extraPtr: defines.ExpressionPtr,
         BI("cast") => self.typecheckCast(extraPtr, maybeExpected, false),
         BI("unsafeCast") => self.typecheckCast(extraPtr, maybeExpected, true),
         BI("as") => self.typecheckTypeForwarding(extraPtr, maybeExpected),
-        BI("typeOf") => self.executer.getValue(try self.executer.evalTypeOf(extraPtr)).Type,
+        BI("typeOf") => Comptime.Builtin.Type("type"), // self.executer.getValue(try self.executer.evalTypeOf(extraPtr)).Type,
         BI("compileError") => return self.executer.evalCompileError(extraPtr),
         BI("sizeOf") => return Comptime.Builtin.Type("u32"),
         BI("compileLog") => {
