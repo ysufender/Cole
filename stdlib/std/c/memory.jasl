@@ -25,9 +25,9 @@ code {
     #include <stdlib.h>
 }
 
-import std::memory::allocator as Allocator;
+import std::memory::allocator;
 
-pub let allocator = Allocator::RawAllocator(undefined, create, destroy, alloc, free);
+pub let Allocator = std::memory::allocator::RawAllocator(undefined, create, destroy, alloc, free);
 
 let create = fn (ctx: *void, size: u32) -> *void {
     let res: mut [@c]void = undefined;

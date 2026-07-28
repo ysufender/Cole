@@ -62,6 +62,8 @@ void raylib__DrawText(const_Slice_uint8_t const, int32_t const, int32_t const, i
 
 jasl_bool const root__checkCollision(int32_t const, float const, int32_t const, float const, int32_t const, int32_t const, float const);
 
+void std__debug__breakpoint();
+
 void raylib__DrawCircle(int32_t const, int32_t const, float const, Color const);
 
 void raylib__EndDrawing();

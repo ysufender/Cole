@@ -66,15 +66,17 @@ typedef struct std__memory__allocator__RawAllocator {
 	void (*free)(void* const, void* const) ;
 } std__memory__allocator__RawAllocator;
 
-void* const std__memory__c__create(void* const, uint32_t const);
+void* const std__c__memory__create(void* const, uint32_t const);
 
-void std__memory__c__destroy(void* const, void* const);
+void std__c__memory__destroy(void* const, void* const);
 
-void* const std__memory__c__alloc(void* const, uint32_t const, uint32_t const);
+void* const std__c__memory__alloc(void* const, uint32_t const, uint32_t const);
 
-void std__memory__c__free(void* const, void* const);
+void std__c__memory__free(void* const, void* const);
 
-extern std__memory__allocator__RawAllocator const std__memory__c__allocator;
+extern std__memory__allocator__RawAllocator const std__c__memory__Allocator;
+
+extern std__memory__allocator__RawAllocator const std__c__Allocator;
 
 void* const std__memory__allocator__alloc(std__memory__allocator__RawAllocator const, uint32_t const, uint32_t const);
 

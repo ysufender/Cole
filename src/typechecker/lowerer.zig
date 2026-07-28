@@ -72,7 +72,9 @@ pub fn topLevelDeclaration(self: *Lowerer, ptr: defines.DeclPtr, decl: *const De
                 decl.topLevel,
                 typeID,
                 decl.name,
-                if (self.typechecker.executer.attemptEval(decl.node, typeID)) |i| self.typechecker.executer.getValue(i) == .Undefined
+                if (self.typechecker.context.settings.canFold())
+                    if (self.typechecker.executer.attemptEval(decl.node, typeID)) |i| self.typechecker.executer.getValue(i) == .Undefined
+                    else false
                 else false,
                 node
             );
@@ -340,8 +342,10 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     const enumOrUnionType = try typechecker.typecheckExpression(ast.extra[extraPtr], null);
     const enumOrUnion = try self.expression(ast.extra[extraPtr], enumOrUnionType);
     const maybeComptimeEnumOrUnion =
-        if (typechecker.executer.attemptEval(ast.extra[extraPtr], enumOrUnionType))
-            |ptr| typechecker.executer.getValue(ptr)
+        if (self.typechecker.context.settings.canFold())
+            if (typechecker.executer.attemptEval(ast.extra[extraPtr], enumOrUnionType))
+                |ptr| typechecker.executer.getValue(ptr)
+            else null
         else null;
     const typeInfo = typechecker.typeTable.get(enumOrUnionType);
     const tag: struct { type: TypeID, fields: []const []const u8 } = switch (typeInfo) {
@@ -547,8 +551,10 @@ fn variableDef(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     }
 
     const node =
-        if (self.typechecker.executer.attemptEval(decl.node, typeID)) |someVal|
-            try self.typechecker.builder.literal(try self.addConstant(someVal, typeID))
+        if (self.typechecker.context.settings.canFold())
+            if (self.typechecker.executer.attemptEval(decl.node, typeID)) |someVal|
+                try self.typechecker.builder.literal(try self.addConstant(someVal, typeID))
+            else try self.expression(decl.node, typeID)
         else
             try self.expression(decl.node, typeID);
 
@@ -556,7 +562,9 @@ fn variableDef(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
         decl.topLevel,
         typeID,
         decl.name,
-        if (self.typechecker.executer.attemptEval(decl.node, typeID)) |i| self.typechecker.executer.getValue(i) == .Undefined
+        if (self.typechecker.context.settings.canFold())
+            if (self.typechecker.executer.attemptEval(decl.node, typeID)) |i| self.typechecker.executer.getValue(i) == .Undefined
+            else false
         else false,
         node,
     );
@@ -642,21 +650,26 @@ fn loop(
 
     const conditionPtr = ast.extra[extraPtr];
 
-    if (self.typechecker.executer.attemptEval(conditionPtr, Comptime.Builtin.Type("bool"))) |res| {
-        if (self.typechecker.executer.getValue(res).Bool) {
-            var loopData: [3]JIR.Ptr = undefined;
+    if (self.typechecker.context.settings.canFold()) {
+        if (self.typechecker.executer.attemptEval(conditionPtr, Comptime.Builtin.Type("bool"))) |res| {
+            if (self.typechecker.executer.getValue(res).Bool) {
+                var loopData: [3]JIR.Ptr = undefined;
 
-            const bodyPtr = ast.extra[extraPtr + 1];
-            self.lastLoopDepth = self.scopes.index;
-            const start = try self.typechecker.builder.label(startLabel);
-            loopData[0] = start;
-            loopData[1] = try self.statement(bodyPtr);
-            loopData[2] = try self.typechecker.builder.jump(startLabel);
+                const bodyPtr = ast.extra[extraPtr + 1];
+                self.lastLoopDepth = self.scopes.index;
+                const start = try self.typechecker.builder.label(startLabel);
+                loopData[0] = start;
+                loopData[1] = try self.statement(bodyPtr);
+                loopData[2] = try self.typechecker.builder.jump(startLabel);
 
-            return self.typechecker.builder.scope(
-                try self.typechecker.executer.generateRandomName(.Block),
-                &loopData,
-            );
+                return self.typechecker.builder.scope(
+                    try self.typechecker.executer.generateRandomName(.Block),
+                    &loopData,
+                );
+            }
+            else {
+                return self.typechecker.builder.label(try self.typechecker.executer.generateRandomName(.OptimizedLoop));
+            }
         }
         else {
             return self.typechecker.builder.label(try self.typechecker.executer.generateRandomName(.OptimizedLoop));
@@ -685,18 +698,20 @@ fn loop(
 fn conditional(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.AST) Error!JIR.Ptr {
     const conditionExpr = ast.extra[extraPtr];
 
-    if (self.typechecker.executer.attemptEval(conditionExpr, null)) |comptimeConditionPtr| {
-        const comptimeCondition = self.typechecker.executer.getValue(comptimeConditionPtr).Bool;
+    if (self.typechecker.context.settings.canFold()) {
+        if (self.typechecker.executer.attemptEval(conditionExpr, null)) |comptimeConditionPtr| {
+            const comptimeCondition = self.typechecker.executer.getValue(comptimeConditionPtr).Bool;
 
-        if (comptimeCondition) {
-            return self.statement(ast.extra[extraPtr + 1]);
+            if (comptimeCondition) {
+                return self.statement(ast.extra[extraPtr + 1]);
+            }
+
+            if (ast.extra[extraPtr + 2] == 1) {
+                return self.statement(ast.extra[extraPtr + 3]);
+            }
+
+            return self.typechecker.builder.label(try self.typechecker.executer.generateRandomName(.OptimizedConditional));
         }
-
-        if (ast.extra[extraPtr + 2] == 1) {
-            return self.statement(ast.extra[extraPtr + 3]);
-        }
-
-        return self.typechecker.builder.label(try self.typechecker.executer.generateRandomName(.OptimizedConditional));
     }
 
     const elseLabel = try self.typechecker.executer.generateRandomName(.Else);

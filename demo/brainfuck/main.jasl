@@ -2,9 +2,10 @@
 
 import std::io::console as Console;
 import std::io::file as File;
-import std::memory::c as C;
+import std::c as C;
 import std::ascii as ACII;
 import std::memory::allocator as Allocator;
+import std::debug;
 
 import cpu as CPU;
 
@@ -32,7 +33,7 @@ let main = fn (args: [][]u8) -> i32 {
         return CompilationError;
     }
 
-    let allocator = C::allocator;
+    let allocator = C::Allocator;
 
     let tmp = Allocator::alloc(allocator, count, 1)[0..count];
     let bytecode: []mut u8 = unsafeCast(tmp);

@@ -9,7 +9,7 @@
         --output, -o   <path>       : Output file name.
 
         --working, -w  <path>       : Set working directory
-        --max-err, -m  <count>      : Set max error count before terminating the compilation. Defaults to 10
+        --max-err, -m  <count>      : Set max error count before terminating the compilation. Defaults to 5
         --include, -I  <path>       : Add <path> to the searchpath of the compiler. Can be relative or absolute.
                                       Included path will also be used by the backend.
 
@@ -25,3 +25,6 @@
 
         --optimize, -O <level>      : Specify optimization level. Available levels are:
                                           g, 0, 1, 2, 3
+
+        --debug, -D                 : Build in debug mode, may result in larger binaries. Locks the
+                                      optimization at Og.

@@ -126,10 +126,11 @@ pub fn init(typechecker: *Typechecker, gpa: Allocator) Error!Comptime {
 
 pub fn attemptEval(self: *Comptime, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeID) ?Value.Ptr {
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+    const expr = ast.expressions.get(exprPtr);
     if (
         self.getFlag(.ComptimeBanned)
         or (
-            ast.expressions.get(exprPtr).type != .FunctionDefinition
+            expr.type != .FunctionDefinition
             and self.typechecker.hasMetadata(exprPtr, "@noComptime")
         )
     ) {
@@ -858,6 +859,14 @@ fn evalDecl(self: *Comptime, declPtr: defines.DeclPtr, maybeExpected: ?TypeID) E
     return switch (decl.kind) {
         .Builtin => try self.evalBuiltin(&decl, maybeExpected),
         .Variable => blk: {
+            if (
+                !decl.topLevel
+                and !self.typechecker.context.settings.canFold()
+            ) {
+                self.report("Can't fold comptime expression in Og optimization mode.", .{});
+                return Error.ComptimeNotPossible;
+            }
+
             const expected = try self.typechecker.typecheckDecl(declPtr, maybeExpected);
 
             if (self.typechecker.mutable(expected)) {

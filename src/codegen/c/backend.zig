@@ -38,6 +38,10 @@ pub fn compile(outDir: Dir, allocator: std.mem.Allocator, context: *common.Compi
     // Set error callback
     tcc.tcc_set_error_func(state, null, tccErrCallback);
 
+    if (context.settings.hasFlag("--debug")) {
+        tcc.tcc_define_symbol(state, "DEBUG", "");
+    }
+
     // Set output type
     if (tcc.tcc_set_output_type(state, tcc.TCC_OUTPUT_EXE) == -1) {
         report("Failed to set output type.");
@@ -98,11 +102,15 @@ pub fn compile(outDir: Dir, allocator: std.mem.Allocator, context: *common.Compi
         }
     }
 
-    // Optimization Level
-    if (tcc.tcc_set_options(state, "-Wall -Wpedantic -Werror") == -1) {
+    var flags = std.mem.zeroes([512]u8);
+    const res = std.fmt.bufPrint(&flags, "-Wall -Werror -{s} {s}", .{
+        @tagName(context.settings.optimize),
+        if (context.settings.hasFlag("--debug")) " -g" else "",
+    }) catch unreachable;
+    if (tcc.tcc_set_options(state, res.ptr) == -1) {
             report("Failed to set optimization level.");
             return Error.BackendError;
-    }
+    } 
 
     // Finalize
     const outFile = outDir.createFile(context.io, context.settings.outputFile, .{})

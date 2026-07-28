@@ -25,6 +25,9 @@ const flags = std.StaticStringMap(Flags).initComptime(&(.{
     .{ "--help", .Help },
     .{ "-h", .Help },
 
+    .{ "--debug", .Flag },
+    .{ "-D", .Flag },
+
     .{ "--output", .Output },
     .{ "-o", .Output },
 
@@ -249,7 +252,11 @@ pub fn parseCLI(allocator: std.mem.Allocator, _args: std.process.Args, io: std.I
                 libraries.keyIterator(),
                 allocator
             ),
-            .optimize = optimize orelse "0",
+            .optimize = @enumFromInt(
+                if (cliFlags.contains("--debug")) 0
+                else if (std.mem.eql(u8, optimize orelse "0", "g")) 0
+                else std.fmt.parseInt(u3, optimize orelse "0", 10) catch unreachable,
+            ),
             .maxErr = maxErr,
             .flags = cliFlags,
             .backend = targetBackend,

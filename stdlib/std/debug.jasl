@@ -1,8 +1,14 @@
 code {
+#ifdef DEBUG
 #if defined(WIN32)
-#define BREAKPOINT exit(3)
+#include <intrin.h>
+#define BREAKPOINT __debugbreak()
 #else
-#define BREAKPOINT raise(3)
+#include <signal.h>
+#define BREAKPOINT raise(SIGTRAP)
+#endif
+#else
+#define BREAKPOINT
 #endif
 }
 

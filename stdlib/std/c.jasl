@@ -1,0 +1,3 @@
+import std::c::memory as Memory;
+
+pub let Allocator = Memory::Allocator;

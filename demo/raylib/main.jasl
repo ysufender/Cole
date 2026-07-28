@@ -1,3 +1,5 @@
+import std::debug;
+
 import raylib as rl;
 
 let WIDTH  = 640;
@@ -26,6 +28,7 @@ let main = fn (args: [][]u8) -> i32 {
 		if
             checkCollision(ply.x, b.x, ply.y, b.y, ply.w, ply.h, b.r)
             or checkCollision(cpu.x, b.x, cpu.y, b.y, cpu.w,cpu.h,b.r) {
+            std::debug::breakpoint();
 			b.bx = -1.0 * b.bx;
 		}
 
