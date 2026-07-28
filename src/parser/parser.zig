@@ -1319,6 +1319,12 @@ fn typeExpression(self: *Parser) ExpressionResult {
             if (self.match(&.{.Fn})) {
                 const args = try self.ifExpression();
 
+                if (self.expressionMap.get(args).type != .ExpressionList) {
+                    self.report("Expected an argument list, received '{s}' instead.", .{
+                        @tagName(self.expressionMap.get(args).type),
+                    });
+                }
+
                 _ = try self.consume(.Arrow, error.MissingArrow, "Expected arrow '->' to denote return type.");
                 const returnType = try self.ifExpression();
 

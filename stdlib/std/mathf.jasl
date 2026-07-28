@@ -29,16 +29,31 @@ code {
 
 pub let Epsilon = 0.000000119209;
 
+/*
 pub let isApprox = fn (lhs: float, rhs: float) -> bool {
     return abs(float)(lhs - rhs) <= Epsilon;
+};*/
+
+/*pub let abs = fn (T: type, number: N::Signed::Trait(T)) -> N::Numeric::Trait(T) {
+    return bitSet(number, bitSizeOf(T), 0);
+};*/
+
+pub let sign = fn (val: float) -> float {
+    return if (val > 0) 1 else -1;
 };
 
-pub let abs = fn (T: type, number: N::Signed::Trait(T)) -> N::Numeric::Trait(T) {
-    return bitSet(number, bitSizeOf(T), 0);
+pub let abs = fn (val: float) -> float {
+    return if (val > 0) val else -val;
 };
 
 pub let sin = fn (angle: float) -> float {
     let res: mut float = 0.0;
     code { res = sinf(180 * angle); }
+    return res;
+};
+
+pub let random = fn (max: float) -> float {
+    let res: mut float = 0;
+    code { res = (float)((float)rand() + (((float)rand() / 1000))); }
     return res;
 };

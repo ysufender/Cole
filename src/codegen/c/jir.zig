@@ -666,7 +666,9 @@ fn literal(self: *JIR, out: *Writer, ptr: Constant.Ptr) Error!void {
 
     try switch (cst) {
         .Type => |id| try self.write(out, "{s}", .{try self.getCName(id, null, false)}),
-        .Undefined => |typeID| self.write(out, "({s}){{ }}", .{ try self.getCName(typeID, null, false) }),
+        .Undefined => |typeID|
+            if (self.types.get(typeID) == .Pointer) self.write(out, "(({s})NULL)", .{ try self.getCName(typeID, null, false) })
+            else self.write(out, "({s}){{ }}", .{ try self.getCName(typeID, null, false) }),
         .Integer => |int| switch (int) {
             .i32 => |t| self.write(out, "{d}", .{t}),
             .u32 => |t| self.write(out, "{d}", .{t}),
@@ -674,9 +676,7 @@ fn literal(self: *JIR, out: *Writer, ptr: Constant.Ptr) Error!void {
             .u8 => |t| self.write(out, "{d}", .{t}),
         },
         .Float => |fl| self.write(out, "{}", .{fl}),
-        .Function => |func| {
-            try self.write(out, "&{s}", .{self.strings[func]});
-        },
+        .Function => |func| try self.write(out, "{s}", .{self.strings[func]}),
         .Aggregate => |agg| {
             try self.write(out, "({s}){{", .{
                 try self.getCName(agg.type, null, true),

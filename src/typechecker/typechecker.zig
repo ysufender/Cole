@@ -1034,8 +1034,7 @@ pub fn typecheckExpressionList(self: *Typechecker, extra: defines.OpaquePtr, _ma
     if (
         range.len() == 0
         and (
-            maybeExpected == null
-            or maybeExpected.? == Comptime.Builtin.Type("void")
+            maybeExpected orelse Comptime.Builtin.Type("void") == Comptime.Builtin.Type("void")
         )
     ) {
         return Comptime.Builtin.Type("void");
@@ -1510,12 +1509,16 @@ pub fn typecheckCast(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpec
         .end = ast.extra[expressionList + 1],
     };
 
-    if (thingToCastRange.len() != 1) {
+    if (thingToCastRange.len() > 1) {
         self.report("Multi-value type casting is not supported.", .{});
         return Error.NotImplemented;
     }
+    else if (thingToCastRange.len() == 0) {
+        self.report("Can't cast void.", .{});
+        return Error.CastOfIncastableValue;
+    }
 
-    const thingToCastType = try self.typecheckExpression(ast.extra[thingToCastRange.at(0)], targetType);
+    const thingToCastType = try self.typecheckExpression(ast.extra[thingToCastRange.at(0)], null);
 
     self.assertCastable(thingToCastType, targetType, unsafe) catch |err| {
         const rargs = .{
@@ -1574,7 +1577,7 @@ pub fn typecheckTypeForwarding(self: *Typechecker, extraPtr: defines.OpaquePtr, 
         return Error.TypeMismatch;
     }
 
-    return res;
+    return typeToForward;
 }
 
 pub fn typecheckIndexing(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!TypeID {
@@ -1677,8 +1680,8 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
                     };
 
                 switch (self.typeTable.get(expected)) {
-                    .Pointer, .Function => {
-                        self.report("Can't construct an undefned value of type '{s}'", .{
+                    .Function => {
+                        self.report("Can't construct an undefined value of type '{s}'", .{
                             try self.typeName(self.arena.allocator(), expected),
                         });
                         return Error.UndefinedPointerType;
@@ -2529,9 +2532,6 @@ pub fn dumpCallStack(self: *Typechecker) void {
 }
 
 pub fn assertCastable(self: *Typechecker, from: TypeID, to: TypeID, unsafe: bool) Error!void {
-    const fmax = std.math.floatMax;
-    const fmin = struct{fn fmin(comptime T: type) T { return -fmax(T); }}.fmin;
-
     const fromType = self.typeTable.get(from);
     const toType = self.typeTable.get(to);
 
@@ -2559,7 +2559,7 @@ pub fn assertCastable(self: *Typechecker, from: TypeID, to: TypeID, unsafe: bool
             .Integer => |int| try functional.throwIf(int.size <= 0, Error.SizeMismatch),
             else => return Error.IncompatibleTypes,
         },
-        .ComptimeInt => try functional.throwIf(!self.isInt(to) and !self.isFloat(to) and (!unsafe or !self.isCPtr(to)), Error.IncompatibleTypes),
+        .ComptimeInt => try functional.throwIf(!self.isInt(to) and !self.isFloat(to) and !(unsafe and self.isCPtr(to)), Error.IncompatibleTypes),
         .ComptimeFloat => try functional.throwIf(!self.isFloat(to) and !self.isInt(to), Error.IncompatibleTypes),
         .Integer => |fromInt| switch (toType) {
             .Integer => |toInt| try functional.throwIf(
@@ -2568,11 +2568,7 @@ pub fn assertCastable(self: *Typechecker, from: TypeID, to: TypeID, unsafe: bool
                 Error.SizeMismatch
             ),
             .ComptimeInt => {},
-            .Float => try functional.throwIf(
-                fmax(f32) < @as(f32, @floatFromInt(fromInt.range().max))
-                or fmin(f32) > @as(f32, @floatFromInt(fromInt.range().min)),
-                Error.SizeMismatch,
-            ),
+            .Float => {},
             else => return Error.IncompatibleTypes,
         },
         .Float => switch (toType) {

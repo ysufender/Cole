@@ -4,6 +4,7 @@ import std::io::console as Console;
 import std::io::file as File;
 import std::memory::c as C;
 import std::ascii as ACII;
+import std::memory::allocator as Allocator;
 
 import cpu as CPU;
 
@@ -31,7 +32,9 @@ let main = fn (args: [][]u8) -> i32 {
         return CompilationError;
     }
 
-    let tmp = C::alloc(count, 1)[0..count];
+    let allocator = C::allocator;
+
+    let tmp = Allocator::alloc(allocator, count, 1)[0..count];
     let bytecode: []mut u8 = unsafeCast(tmp);
     code { if (bytecode.ptr == NULL) } {
         Console::println("Failed to allocate bytecode.");
@@ -47,7 +50,7 @@ let main = fn (args: [][]u8) -> i32 {
 
     while CPU::cycle(cpu.&) { }
 
-    C::free(bytecode.ptr);
+    Allocator::free(allocator, bytecode.ptr);
     return Ok;
 };
 

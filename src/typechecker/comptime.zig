@@ -256,6 +256,14 @@ fn evalFunction(self: *Comptime, exprPtr: defines.ExpressionPtr, extraPtr: defin
         const name = tokens.get(param.name).lexeme(self.typechecker.context, self.typechecker.currentFile);
         argNames[paramPtrPtr - paramsRange.start] = try self.typechecker.builder.internString(name);
 
+
+        if (self.typechecker.typeTable.get(argType).isZeroBit()) {
+            self.report("Zero bit-sized parameter '{s}' is not allowed.", .{
+                name
+            });
+            return Error.OperationOnZeroBitSize;
+        }
+
         if (self.typechecker.typeTable.get(argType).isComptime(&self.typechecker.typeTable)) {
             isComptime = true;
         }
@@ -858,7 +866,7 @@ fn evalDecl(self: *Comptime, declPtr: defines.DeclPtr, maybeExpected: ?TypeID) E
             }
 
             switch (self.typechecker.typeTable.get(expected)) {
-                .Function, .Pointer => {
+                .Pointer => {
                     self.report("Comptime evaluation of variable of type '{s}' is not possible.", .{
                         try self.typechecker.typeName(self.arena.allocator(), expected),
                     });
@@ -912,8 +920,8 @@ fn evalBuiltin(self: *Comptime, decl: *const Resolver.Declaration, maybeExpected
             BI("undefined") =>
                 if (Typechecker.determineExpected(maybeExpected)) |expected| {
                     switch (self.typechecker.typeTable.get(expected)) {
-                        .Pointer, .Function => {
-                            self.report("Can't construct an undefned value of type '{s}'", .{
+                        .Function => {
+                            self.report("Can't construct an undefined value of type '{s}'", .{
                                 try self.typechecker.typeName(self.arena.allocator(), expected),
                             });
                             return Error.UndefinedPointerType;
@@ -1037,97 +1045,33 @@ fn evalPtrType(
 fn evalFuncType(self: *Comptime, exprPtr: defines.ExpressionPtr, extraPtr: defines.OpaquePtr) Error!Value.Ptr {
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
 
-    const args = self.getValue(try res: {
-        const argsExpr = ast.expressions.get(ast.extra[extraPtr]);
+    // @Must be an expression list
+    const argsExpr = ast.expressions.get(ast.extra[extraPtr]);
 
-        if (argsExpr.type == .ExpressionList) {
-            const range = defines.Range{
-                .start = ast.extra[argsExpr.value],
-                .end = ast.extra[argsExpr.value + 1],
-            };
-
-            if (range.len() == 0) {
-                break :res @intFromEnum(Value.Implicit.Void);
-            } else if (range.len() == 1) {
-                break :res self.expectType(ast.extra[range.at(0)]);
-            }
-
-            var address: i64 = -1;
-            for (range.start..range.end) |ptr| {
-                const addr = try self.expectType(ast.extra[ptr]);
-                address = if (address == -1) addr else address;
-            }
-
-            break :res self.appendValue(.{
-                .Slice = .{
-                    .Type = try self.typechecker.registerType(TypeInfo{
-                        .Pointer = .{
-                            .child = Builtin.Type("type"),
-                            .mutable = false,
-                            .size = .Slice,
-                        },
-                    }),
-                    .To = @intCast(address),
-                    .Size = range.len(),
-                },
-            });
-        } else {
-            break :res self.expectType(ast.extra[extraPtr]);
-        }
-    });
-    const argSize: u32 = ret: switch (args) {
-        .Slice => |slice| {
-            var sub: u32 = 0;
-
-            for (0..slice.Size) |index| {
-                switch (self.memory.items[slice.at(@intCast(index))]) {
-                    .Type => |t| sub += if (t == Builtin.Type("void")) 1 else 0,
-                    else => |t|{
-                        self.report("Expected a type expression, got '{s}' instead.", .{
-                            @tagName(std.meta.activeTag(t)),
-                        });
-                        return Error.TypeMismatch;
-                    },
-                }
-            }
-
-            break :ret slice.Size - sub;
-        },
-        .Type => |t| if (t == Builtin.Type("void")) 0 else 1,
-        else => |t| {
-            self.report(
-                "Expected an argument type list in function type expression,"
-                ++ " got '{s}' instead.", .{@tagName(std.meta.activeTag(t))});
-            return Error.TypeMismatch;
-        },
+    const range = defines.Range{
+        .start = ast.extra[argsExpr.value],
+        .end = ast.extra[argsExpr.value + 1],
     };
 
-    var argTypes = self.arena.allocator().alloc(TypeID, argSize) catch return Error.AllocatorFailure;
+    var argTypes = self.arena.allocator().alloc(TypeID, range.len()) catch return Error.AllocatorFailure;
     var isComptime = self.typechecker.hasMetadata(exprPtr, "@comptime");
 
-    switch (args) {
-        .Type => |argType| if (argSize != 0) {
-            argTypes[0] = argType;
+    var realIndex: u32 = 0;
+    for (range.start..range.end) |index| {
+        const argType = self.getValue(try self.expectType(ast.extra[@intCast(index)])).Type;
 
-            if (self.typechecker.typeTable.get(argType).isComptime(&self.typechecker.typeTable)) {
-                isComptime = true;
-            }
-        },
-        .Slice => |slice| {
-            var realIndex: u32 = 0;
-            for (0..slice.Size) |index| {
-                if (self.memory.items[slice.at(@intCast(index))].Type != Builtin.Type("void")) {
-                    const argType = self.memory.items[slice.at(@intCast(index))].Type;
-                    argTypes[realIndex] = argType;
-                    realIndex += 1;
+        if (self.typechecker.typeTable.get(argType).isZeroBit()) {
+            self.report("Zero bit sized function parameter '{s}' is not allowed.", .{
+                try self.typechecker.typeName(self.arena.allocator(), argType),
+            });
+        }
 
-                    if (self.typechecker.typeTable.get(argType).isComptime(&self.typechecker.typeTable)) {
-                        isComptime = true;
-                    }
-                }
-            }
-        },
-        else => unreachable,
+        argTypes[realIndex] = argType;
+        realIndex += 1;
+
+        if (self.typechecker.typeTable.get(argType).isComptime(&self.typechecker.typeTable)) {
+            isComptime = true;
+        }
     }
 
     const returnType = self.getValue(try self.expectType(ast.extra[extraPtr + 1]));
@@ -1363,9 +1307,13 @@ fn evalCast(self: *Comptime, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID
         .end = ast.extra[expressionList + 1],
     };
 
-    if (thingToCastRange.len() != 1) {
+    if (thingToCastRange.len() > 1) {
         self.report("Multi-value type casting is not supported.", .{});
         return Error.MultivalueCast;
+    }
+    else if (thingToCastRange.len() == 0) {
+        self.report("Can't cast void.", .{});
+        return Error.CastOfIncastableValue;
     }
 
     const thingToCast = try self.expectDefined(ast.extra[thingToCastRange.at(0)], null);
@@ -1538,14 +1486,15 @@ fn constructStruct(
     str: *const types.Struct,
     range: defines.Range,
 ) Error!Value.Ptr {
-    var start: isize = -1;
+    const start = self.memory.items.len;
+
     for (0..range.len()) |idx| {
         const addr = try self.eval(
             ast.extra[range.at(@intCast(idx))],
             str.fields[idx].valueType
         );
 
-        start = if (start == -1) addr else start;
+        _ = try self.appendValue(self.getValue(addr));
     }
 
     return self.appendValue(.{
@@ -1553,7 +1502,7 @@ fn constructStruct(
             .Type = typeID,
             .Fields = defines.Range{
                 .start = @intCast(start),
-                .end = @intCast(start + range.len()),
+                .end = @intCast(self.memory.items.len),
             },
         },
     });
@@ -1582,12 +1531,12 @@ fn constructUnion(
 fn constructArrayFromList(self: *Comptime, arr: TypeID, child: TypeID, range: defines.Range) Error!Value.Ptr {
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
 
-    var address: i64 = -1;
+    const address = self.memory.items.len;
 
     for (range.start..range.end) |ptr| {
         const addr = try self.eval(ast.extra[ptr], child);
 
-        address = if (address == -1) addr else address;
+        _ = try self.appendValue(self.getValue(addr));
     }
 
     return self.appendValue(.{
@@ -1830,7 +1779,7 @@ fn evalArrType(self: *Comptime, extraPtr: defines.OpaquePtr) Error!Value.Ptr {
 }
 
 pub fn expectType(self: *Comptime, exprPtr: defines.ExpressionPtr) Error!Value.Ptr {
-    const valuePtr = try self.expectDefined(exprPtr, Builtin.Type("type"));
+    const valuePtr = try self.eval(exprPtr, Builtin.Type("type"));
     const value = self.getValue(valuePtr);
     return switch (value) {
         .Type => valuePtr,
@@ -1942,6 +1891,12 @@ fn castValue(self: *Comptime, valuePtr: Value.Ptr, to: TypeID) Error!Value.Ptr {
         },
         .Int => |fromInt| switch (self.typechecker.typeTable.get(to)) {
             .Integer, .ComptimeInt => value,
+            .Pointer => .{
+                .Pointer = .{
+                    .Type = to,
+                    .To = @intCast(fromInt),
+                },
+            },
             else => .{ .Float = @floatFromInt(fromInt) },
         },
         .Bool => |fromBool| switch (self.typechecker.typeTable.get(to)) {

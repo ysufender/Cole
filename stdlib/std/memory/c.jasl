@@ -27,24 +27,24 @@ code {
 
 import std::memory::allocator as Allocator;
 
-pub let allocator = Allocator::Allocator(undefined, create, destroy, alloc, free);
+pub let allocator = Allocator::RawAllocator(undefined, create, destroy, alloc, free);
 
-pub let create = fn (size: u32) -> *void {
+let create = fn (ctx: *void, size: u32) -> *void {
     let res: mut [@c]void = undefined;
     code { res = malloc(size); }
     return res;
 };
 
-pub let destroy = fn (ptr: *void) -> void {
+let destroy = fn (ctx: *void, ptr: *void) -> void {
     code { free(ptr); }
 };
 
-pub let alloc = fn (count: u32, sizeByteEach: u32) -> [@c]void {
+let alloc = fn (ctx: *void, count: u32, sizeByteEach: u32) -> [@c]void {
     let res: mut [@c]void = undefined;
     code { res = calloc(count, sizeByteEach); }
     return res;
 };
 
-pub let free = fn (ptr: [@c]void) -> void {
+let free = fn (ctx: *void, ptr: [@c]void) -> void {
     code { free(ptr); }
 };

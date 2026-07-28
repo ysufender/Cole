@@ -31,7 +31,7 @@ pub const TypeInfo = union(enum) {
 
     /// Like type, comptime_int, comptime_float, enum_literal
     // @CompilerOnly
-    pub fn isComptime(self: TypeInfo, typeTable: *const Typechecker.TypeTable) bool {
+    pub fn isComptime(self: TypeInfo, _: *const Typechecker.TypeTable) bool {
         return switch (self) {
             .Array, .Type, .ComptimeInt, .ComptimeFloat, .EnumLiteral => true,
             .Struct, .Union => blk: {
@@ -49,7 +49,6 @@ pub const TypeInfo = union(enum) {
 
                 break :blk true;
             },
-            .Pointer => |ptr| typeTable.get(ptr.child).isComptime(typeTable),
             else => false,
         };
     }

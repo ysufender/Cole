@@ -28,7 +28,8 @@ code {
     #include <stdio.h>
 }
 
-import std::ascii as ascii;
+import std::ascii as ASCII;
+import std::debug as Debug;
 
 let FILE = #(@extern) struct { };
 

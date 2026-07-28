@@ -58,7 +58,25 @@ extern int32_t const root__CompilationError;
 
 extern uint32_t const cpu__maxBytecode;
 
-void* const std__memory__c__alloc(uint32_t const, uint32_t const);
+typedef struct std__memory__allocator__RawAllocator {
+	void* const context;
+	void* const (*create)(void* const, uint32_t const) ;
+	void (*destroy)(void* const, void* const) ;
+	void* const (*alloc)(void* const, uint32_t const, uint32_t const) ;
+	void (*free)(void* const, void* const) ;
+} std__memory__allocator__RawAllocator;
+
+void* const std__memory__c__create(void* const, uint32_t const);
+
+void std__memory__c__destroy(void* const, void* const);
+
+void* const std__memory__c__alloc(void* const, uint32_t const, uint32_t const);
+
+void std__memory__c__free(void* const, void* const);
+
+extern std__memory__allocator__RawAllocator const std__memory__c__allocator;
+
+void* const std__memory__allocator__alloc(std__memory__allocator__RawAllocator const, uint32_t const, uint32_t const);
 
 jasl_bool const root__populateBytecode(const_Slice_uint8_t const, const_Slice_uint8_t const);
 
@@ -85,7 +103,7 @@ void cpu__skipBackward(cpu__CPU* const);
 
 jasl_bool const cpu__cycle(cpu__CPU* const);
 
-void std__memory__c__free(void* const);
+void std__memory__allocator__free(std__memory__allocator__RawAllocator const, void* const);
 
 extern int32_t const root__Ok;
 
