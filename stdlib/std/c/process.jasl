@@ -1,0 +1,43 @@
+code {
+    #include <stdlib.h>
+    #include <unistd.h>
+    #include <errno.h>
+}
+
+import std::c::memory as Memory;
+import std::memory::allocator as Allocator;
+
+pub let SpawnError = enum {
+    Ok,
+    Execv,
+    Fork,
+    Alloc,
+};
+
+pub let exit = fn (exc: i32) -> noreturn {
+    code { exit(exc); }
+};
+
+pub let spawn = fn (path: []u8, argv: [][]u8) -> SpawnError {
+    code {
+        pid_t pid = fork();
+        if (pid == 0) {
+            char** _argv = (char**)calloc(argv.len, sizeof(char const*));
+            if (_argv == NULL) {
+                return std__c__process__SpawnError_Alloc;
+            }
+
+            for (uint32_t i = 0; i < argv.len; i++) {
+                _argv[i] = (argv.ptr[i]).ptr;
+            }
+
+            if (execv(path.ptr, _argv) == -1) {
+                return std__c__process__SpawnError_Execv;
+            }
+        }
+        else if (pid == -1) {
+            return std__c__process__SpawnError_Fork;
+        }
+    }
+    return @Ok;
+};

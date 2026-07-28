@@ -1,6 +1,23 @@
-import std::debug;
-
 import raylib as rl;
+
+/*
+ * Types
+ */
+let Player = struct {
+	x    : mut i32,
+    y    : mut i32,
+	w    : i32,
+	h    : i32,
+	score: mut i32,
+};
+
+let Ball = struct {
+	x: mut float,
+    y: mut float,
+    bx: mut float,
+    by: mut float,
+	r: float,
+}; 
 
 let WIDTH  = 640;
 let HEIGHT = 480;
@@ -28,7 +45,6 @@ let main = fn (args: [][]u8) -> i32 {
 		if
             checkCollision(ply.x, b.x, ply.y, b.y, ply.w, ply.h, b.r)
             or checkCollision(cpu.x, b.x, cpu.y, b.y, cpu.w,cpu.h,b.r) {
-            std::debug::breakpoint();
 			b.bx = -1.0 * b.bx;
 		}
 
@@ -104,22 +120,3 @@ let checkCollision = fn (
 
     return false;
 };
-
-/*
- * Types
- */
-let Player = struct {
-	x    : mut i32,
-    y    : mut i32,
-	w    : i32,
-	h    : i32,
-	score: mut i32,
-};
-
-let Ball = struct {
-	x: mut float,
-    y: mut float,
-    bx: mut float,
-    by: mut float,
-	r: float,
-}; 

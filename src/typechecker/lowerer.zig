@@ -26,7 +26,7 @@ const Lowerer = @This();
 typechecker: *Typechecker,
 lastLoop: []const u8 = "",
 lastLoopDepth: u32 = 0,
-lastReturnType: TypeID = Comptime.Builtin.Type("any"),
+lastReturnType: TypeID = Comptime.Folder.Builtin.Type("any"),
 scopes: Stack(Scope),
 defers: Stack(defines.StatementPtr),
 
@@ -56,9 +56,9 @@ pub fn topLevelDeclaration(self: *Lowerer, ptr: defines.DeclPtr, decl: *const De
                 return;
             }
 
-            const typeDefPtr = self.typechecker.executer.expectType(decl.node)
+            const typeDefPtr = self.typechecker.folder.expectType(decl.node)
                 catch return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
-            const typeDef = self.typechecker.executer.getValue(typeDefPtr).Type;
+            const typeDef = self.typechecker.folder.getValue(typeDefPtr).Type;
             const info = self.typechecker.typeTable.get(typeDef);
             if (info == .Union and info.Union.isTagged) {
                 _ = try self.typechecker.builder.typeDef(info.Union.tag);
@@ -73,7 +73,7 @@ pub fn topLevelDeclaration(self: *Lowerer, ptr: defines.DeclPtr, decl: *const De
                 typeID,
                 decl.name,
                 if (self.typechecker.context.settings.canFold())
-                    if (self.typechecker.executer.attemptEval(decl.node, typeID)) |i| self.typechecker.executer.getValue(i) == .Undefined
+                    if (self.typechecker.folder.attemptEval(decl.node, typeID)) |i| self.typechecker.folder.getValue(i) == .Undefined
                     else false
                 else false,
                 node
@@ -83,7 +83,7 @@ pub fn topLevelDeclaration(self: *Lowerer, ptr: defines.DeclPtr, decl: *const De
 }
 
 pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: TypeID) Error!JIR.Constant.Ptr {
-    const value = self.typechecker.executer.getValue(valuePtr);
+    const value = self.typechecker.folder.getValue(valuePtr);
     const ofType = self.typechecker.typeTable.get(ofTypePtr);
     return self.typechecker.builder.addConstant(switch (value) {
         .Int => |val| switch (ofType) {
@@ -233,7 +233,7 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
         },
 
         .Pointer => |ptr| blk: {
-            const val = self.typechecker.executer.getValue(ptr.To);
+            const val = self.typechecker.folder.getValue(ptr.To);
             switch (val) {
                 .Function => |func| break :blk JIR.Constant{
                     .Function = func.name,
@@ -334,7 +334,7 @@ pub fn statement(self: *Lowerer, statementPtr: defines.StatementPtr) Error!JIR.P
 
 fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     var typechecker = self.typechecker;
-    var exec = typechecker.executer;
+    var exec = typechecker.folder;
 
     const ast = typechecker.context.getAST(self.typechecker.currentFile);
     const tokens = typechecker.context.getTokens(ast.tokens);
@@ -343,8 +343,8 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     const enumOrUnion = try self.expression(ast.extra[extraPtr], enumOrUnionType);
     const maybeComptimeEnumOrUnion =
         if (self.typechecker.context.settings.canFold())
-            if (typechecker.executer.attemptEval(ast.extra[extraPtr], enumOrUnionType))
-                |ptr| typechecker.executer.getValue(ptr)
+            if (typechecker.folder.attemptEval(ast.extra[extraPtr], enumOrUnionType))
+                |ptr| typechecker.folder.getValue(ptr)
             else null
         else null;
     const typeInfo = typechecker.typeTable.get(enumOrUnionType);
@@ -354,7 +354,7 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
         else => return common.debug.ShouldBeImpossible(undefined, @src()),
     };
 
-    const switchEnd = try exec.generateRandomName(.SwitchEnd);
+    const switchEnd = try exec.generateRandomNameSanitized(.SwitchEnd);
 
     const caseRange = defines.Range{
         .start = ast.extra[extraPtr + 1],
@@ -386,7 +386,7 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
 
         const case = try self.expression(caseIndex, tag.type);
 
-        const caseEnd = try exec.generateRandomName(.CaseEnd);
+        const caseEnd = try exec.generateRandomNameSanitized(.CaseEnd);
         const cnd =
             if (typeInfo == .Union) res: {
                 const tagFieldName = try typechecker.builder.internString("tag");
@@ -424,7 +424,7 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
                         .Union => |uni|
                             if (uni.Tag == caseValue) {
                                 return typechecker.builder.scope(
-                                    try exec.generateRandomName(.Case), &.{
+                                    try exec.generateRandomNameSanitized(.Case), &.{
                                         capture,
                                         body,
                                     },
@@ -434,7 +434,7 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
                         .Enum => |enm|
                             if (enm.Value == caseValue) {
                                 return typechecker.builder.scope(
-                                    try exec.generateRandomName(.Case), &.{
+                                    try exec.generateRandomNameSanitized(.Case), &.{
                                         capture,
                                         body,
                                     },
@@ -448,7 +448,7 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
                 const caseEndLbl = try typechecker.builder.label(caseEnd);
 
                 break :res try typechecker.builder.scope(
-                    try exec.generateRandomName(.Case), &.{
+                    try exec.generateRandomNameSanitized(.Case), &.{
                         caseJump,
                         capture,
                         body,
@@ -479,7 +479,7 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
                 const caseEndLbl = try typechecker.builder.label(caseEnd);
 
                 break :res try typechecker.builder.scope(
-                    try exec.generateRandomName(.Case), &.{
+                    try exec.generateRandomNameSanitized(.Case), &.{
                         caseJump,
                         body,
                         try typechecker.builder.jump(switchEnd),
@@ -496,7 +496,7 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     ptrs[@divFloor(caseRange.len(), 4)] = switchEndLabel;
 
     return typechecker.builder.scope(
-        try exec.generateRandomName(.Switch),
+        try exec.generateRandomNameSanitized(.Switch),
         ptrs,
     );
 }
@@ -521,9 +521,9 @@ fn assignment(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     const rexpr = ast.extra[extraPtr + 1];
     const vt = try self.typechecker.typecheckExpression(vexpr, null);
 
-    const prev = self.typechecker.executer.setFlag(.ComptimeBanned, true);
+    const prev = self.typechecker.folder.setFlag(.ComptimeBanned, true);
     const expr = try self.expression(vexpr, vt);
-    _ = self.typechecker.executer.setFlag(.ComptimeBanned, prev);
+    _ = self.typechecker.folder.setFlag(.ComptimeBanned, prev);
 
     const rhs = try self.expression(rexpr, vt);
 
@@ -541,10 +541,10 @@ fn variableDef(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     const typeID = try self.typechecker.typecheckDecl(declPtr, null);
     const decl = self.typechecker.symbols.getDecl(declPtr);
 
-    if (typeID == Comptime.Builtin.Type("type")) {
+    if (typeID == Comptime.Folder.Builtin.Type("type")) {
         const vdef = try self.typechecker.builder.typeDef(
-            self.typechecker.executer.getValue(
-                try self.typechecker.executer.eval(decl.node, null),
+            self.typechecker.folder.getValue(
+                try self.typechecker.folder.eval(decl.node, null),
             ).Type,
         );
         return vdef;
@@ -552,7 +552,7 @@ fn variableDef(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
 
     const node =
         if (self.typechecker.context.settings.canFold())
-            if (self.typechecker.executer.attemptEval(decl.node, typeID)) |someVal|
+            if (self.typechecker.folder.attemptEval(decl.node, typeID)) |someVal|
                 try self.typechecker.builder.literal(try self.addConstant(someVal, typeID))
             else try self.expression(decl.node, typeID)
         else
@@ -563,7 +563,7 @@ fn variableDef(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
         typeID,
         decl.name,
         if (self.typechecker.context.settings.canFold())
-            if (self.typechecker.executer.attemptEval(decl.node, typeID)) |i| self.typechecker.executer.getValue(i) == .Undefined
+            if (self.typechecker.folder.attemptEval(decl.node, typeID)) |i| self.typechecker.folder.getValue(i) == .Undefined
             else false
         else false,
         node,
@@ -626,7 +626,7 @@ fn loop(
 ) Error!JIR.Ptr {
     if (loopType == .For) return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
 
-    const loopLabel = try self.typechecker.executer.generateRandomNameString(.Loop);
+    const loopLabel = try self.typechecker.folder.generateRandomNameString(.Loop);
     self.lastLoop = loopLabel;
 
     const startLabel = try self.typechecker.builder.internString(
@@ -651,8 +651,8 @@ fn loop(
     const conditionPtr = ast.extra[extraPtr];
 
     if (self.typechecker.context.settings.canFold()) {
-        if (self.typechecker.executer.attemptEval(conditionPtr, Comptime.Builtin.Type("bool"))) |res| {
-            if (self.typechecker.executer.getValue(res).Bool) {
+        if (self.typechecker.folder.attemptEval(conditionPtr, Comptime.Folder.Builtin.Type("bool"))) |res| {
+            if (self.typechecker.folder.getValue(res).Bool) {
                 var loopData: [3]JIR.Ptr = undefined;
 
                 const bodyPtr = ast.extra[extraPtr + 1];
@@ -663,20 +663,20 @@ fn loop(
                 loopData[2] = try self.typechecker.builder.jump(startLabel);
 
                 return self.typechecker.builder.scope(
-                    try self.typechecker.executer.generateRandomName(.Block),
+                    try self.typechecker.folder.generateRandomNameSanitized(.Block),
                     &loopData,
                 );
             }
             else {
-                return self.typechecker.builder.label(try self.typechecker.executer.generateRandomName(.OptimizedLoop));
+                return self.typechecker.builder.label(try self.typechecker.folder.generateRandomNameSanitized(.OptimizedLoop));
             }
         }
         else {
-            return self.typechecker.builder.label(try self.typechecker.executer.generateRandomName(.OptimizedLoop));
+            return self.typechecker.builder.label(try self.typechecker.folder.generateRandomNameSanitized(.OptimizedLoop));
         }
     }
 
-    const cnd = try self.expression(conditionPtr, Comptime.Builtin.Type("bool"));
+    const cnd = try self.expression(conditionPtr, Comptime.Folder.Builtin.Type("bool"));
 
     var loopData: [5]JIR.Ptr = undefined;
 
@@ -690,7 +690,7 @@ fn loop(
     loopData[4] = try self.typechecker.builder.cjump(startLabel, cnd);
 
     return self.typechecker.builder.scope(
-        try self.typechecker.executer.generateRandomName(.Block),
+        try self.typechecker.folder.generateRandomNameSanitized(.Block),
         &loopData,
     );
 }
@@ -699,8 +699,8 @@ fn conditional(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.A
     const conditionExpr = ast.extra[extraPtr];
 
     if (self.typechecker.context.settings.canFold()) {
-        if (self.typechecker.executer.attemptEval(conditionExpr, null)) |comptimeConditionPtr| {
-            const comptimeCondition = self.typechecker.executer.getValue(comptimeConditionPtr).Bool;
+        if (self.typechecker.folder.attemptEval(conditionExpr, null)) |comptimeConditionPtr| {
+            const comptimeCondition = self.typechecker.folder.getValue(comptimeConditionPtr).Bool;
 
             if (comptimeCondition) {
                 return self.statement(ast.extra[extraPtr + 1]);
@@ -710,14 +710,14 @@ fn conditional(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.A
                 return self.statement(ast.extra[extraPtr + 3]);
             }
 
-            return self.typechecker.builder.label(try self.typechecker.executer.generateRandomName(.OptimizedConditional));
+            return self.typechecker.builder.label(try self.typechecker.folder.generateRandomNameSanitized(.OptimizedConditional));
         }
     }
 
-    const elseLabel = try self.typechecker.executer.generateRandomName(.Else);
-    const finallyLabel = try self.typechecker.executer.generateRandomName(.Finally);
+    const elseLabel = try self.typechecker.folder.generateRandomNameSanitized(.Else);
+    const finallyLabel = try self.typechecker.folder.generateRandomNameSanitized(.Finally);
 
-    const cnd = try self.typechecker.builder.not(try self.expression(conditionExpr, Comptime.Builtin.Type("bool")));
+    const cnd = try self.typechecker.builder.not(try self.expression(conditionExpr, Comptime.Folder.Builtin.Type("bool")));
 
     const maybeElse =
         if (ast.extra[extraPtr + 2] == 1) ast.extra[extraPtr + 3]
@@ -746,7 +746,7 @@ fn conditional(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.A
     }
 
     return self.typechecker.builder.scope(
-        try self.typechecker.executer.generateRandomName(.Block),
+        try self.typechecker.folder.generateRandomNameSanitized(.Block),
         if (maybeElse) |_| data[0..6] else data[0..4]
     );
 }
@@ -777,7 +777,7 @@ fn block(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
         catch return Error.AllocatorFailure;
 
     // const start = try self.typechecker.builder.scope(
-    //    try self.typechecker.executer.generateRandomName(.Block),
+    //    try self.typechecker.executer.generateRandomNameSanitized(.Block),
     // );
 
     const stmts = self.typechecker.builder.allocator.alloc(JIR.Ptr, statements.len())
@@ -798,7 +798,7 @@ fn block(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     }
 
     return self.typechecker.builder.scope(
-        try self.typechecker.executer.generateRandomName(.Block),
+        try self.typechecker.folder.generateRandomNameSanitized(.Block),
         stmts,
     );
 }
@@ -809,7 +809,7 @@ fn block(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
 //
 
 pub fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID) Error!JIR.Ptr {
-    if (self.typechecker.executer.attemptEval(exprPtr, ofType)) |_| {
+    if (self.typechecker.folder.attemptEval(exprPtr, ofType)) |_| {
         return self.literal(exprPtr, ofType);
     }
 
@@ -1038,7 +1038,7 @@ fn call(
             if (decl.kind != .Builtin) {
                 break :blk;
             }
-            if (Comptime.Builtin.isBuiltinType(decl.type)) {
+            if (Comptime.Folder.Builtin.isBuiltinType(decl.type)) {
                 break :blk;
             }
 
@@ -1061,8 +1061,8 @@ fn call(
 
     return switch (self.typechecker.typeTable.get(funcType)) {
         .Type => blk: {
-            const typeID = self.typechecker.executer.getValue(
-                try self.typechecker.executer.expectType(func),
+            const typeID = self.typechecker.folder.getValue(
+                try self.typechecker.folder.expectType(func),
             ).Type;
             break :blk self.typechecker.builder.construct(typeID, args);
         },
@@ -1300,7 +1300,7 @@ fn conditionalExpr(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) 
     const thenPtr = ast.extra[extraPtr + 1];
     const otherPtr = ast.extra[extraPtr + 2];
 
-    const cnd = try self.expression(cndPtr, Comptime.Builtin.Type("bool"));
+    const cnd = try self.expression(cndPtr, Comptime.Folder.Builtin.Type("bool"));
     const then = try self.expression(thenPtr, ofType);
     const otherwise = try self.expression(otherPtr, ofType);
 
@@ -1327,7 +1327,7 @@ fn binary(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR
     const operandType = switch (op) {
         .BangEqual, .EqualEqual, .GreaterEqual, .LesserEqual, .Lesser, .Greater =>
             try self.typechecker.typecheckExpression(ast.extra[extraPtr], null),
-        .And, .Or => Comptime.Builtin.Type("bool"),
+        .And, .Or => Comptime.Folder.Builtin.Type("bool"),
         else => ofType,
     };
 
@@ -1373,7 +1373,7 @@ fn mark(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR.P
 
 fn literal(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID) Error!JIR.Ptr {
     // @Note should already been evaluated before.
-    const valuePtr = try self.typechecker.executer.eval(exprPtr, null);
+    const valuePtr = try self.typechecker.folder.eval(exprPtr, null);
     const constant = try self.addConstant(valuePtr, ofType);
     return self.typechecker.builder.literal(constant);
 }

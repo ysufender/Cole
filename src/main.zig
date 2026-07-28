@@ -18,7 +18,8 @@ pub fn main(init: std.process.Init) void {
     MainProcInit = init;
 
     innerMain(
-        init.arena.allocator(),
+        // init.arena.allocator(),
+        std.heap.c_allocator,
         init
     ) catch |err| blk: {
         switch (err) {
@@ -48,7 +49,6 @@ pub fn main(init: std.process.Init) void {
 }
 
 fn innerMain(allocator: std.mem.Allocator, init: std.process.Init) common.CompilerError!void {
-
     // Init Context
     var context = try common.CompilerContext.init(allocator, init);
     context.log.context = &context;

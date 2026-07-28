@@ -11,7 +11,7 @@ const collections = @import("../../util/collections.zig");
 const Types = @import("../../typechecker/type.zig");
 
 const Typechecker = @import("../../typechecker/typechecker.zig");
-const Comptime = @import("../../typechecker/comptime.zig");
+const Comptime= @import("../../typechecker/comptime.zig");
 const MultiArrayList = @import("../../util/collections.zig").MultiArrayList;
 const TypeID = Types.TypeID;
 const Allocator = std.mem.Allocator;
@@ -227,7 +227,7 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
             .Array => |arr| {
                 const childName = switch (self.types.get(arr.child)) {
                     .Type, .Any, .EnumLiteral => continue,
-                    else => try self.getCName(arr.child, null, true),
+                    else => try self.getCName(arr.child, null, true, true),
                 };
 
                 const name = std.fmt.allocPrint(self.allocator, "{s}Array_{s}_{d}_t", .{
@@ -245,7 +245,7 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
 
                 try self.write(out, "typedef struct {s} {{ {s} data[{d}]; }} {s};\n\n", .{
                     name,
-                    try self.getCName(arr.child, null, false),
+                    try self.getCName(arr.child, null, false, false),
                     arr.len,
                     name
                 });
@@ -254,7 +254,7 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
                 .Slice => {
                     const childName = switch (self.types.get(ptr.child)) {
                         .Type, .Any, .EnumLiteral => continue,
-                        else => try self.getCName(ptr.child, null, true),
+                        else => try self.getCName(ptr.child, null, true, true),
                     };
 
                     const name = std.fmt.allocPrint(self.allocator, "{s}Slice_{s}", .{
@@ -271,7 +271,7 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
 
                     try self.write(out, "typedef struct {s} {{ {s}* ptr; uint32_t len; }} {s};\n\n", .{
                         name,
-                        try self.getCName(ptr.child, null, false),
+                        try self.getCName(ptr.child, null, false, false),
                         name,
                     });
                 },
@@ -297,14 +297,14 @@ fn discoverFunctionsAndTypes(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void 
                 _ = std.mem.replace(u8, self.strings[self.data[node.value + 2]], "::", "__", @constCast(self.strings[self.data[node.value + 2]]));
                 _ = std.mem.replace(u8, self.strings[self.data[node.value + 2]], "$", "_", @constCast(self.strings[self.data[node.value + 2]]));
                 try self.write(out, "extern {s};\n\n", .{
-                    try self.getCName(info.Pointer.child, self.data[node.value + 2], false),
+                    try self.getCName(info.Pointer.child, self.data[node.value + 2], false, false),
                 });
             }
             else {
                 _ = std.mem.replace(u8, self.strings[self.data[node.value + 2]], "::", "__", @constCast(self.strings[self.data[node.value + 2]]));
                 _ = std.mem.replace(u8, self.strings[self.data[node.value + 2]], "$", "_", @constCast(self.strings[self.data[node.value + 2]]));
                 try self.write(out, "extern {s} {s};\n\n", .{
-                    try self.getCName(typeID, null, false),
+                    try self.getCName(typeID, null, false, false),
                     self.strings[self.data[node.value + 2]],
                 });
             }
@@ -317,7 +317,7 @@ fn discoverFunctionsAndTypes(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void 
             for (0.., typeInfo.argTypes) |i, typePtr| {
                 args = std.fmt.allocPrint(self.allocator, "{s}{s}{s}{s}", .{
                     args,
-                    try self.getCName(typePtr, null, false),
+                    try self.getCName(typePtr, null, false, false),
                     if (i == typeInfo.argTypes.len - 1) "" else ",",
                     if (i == typeInfo.argTypes.len - 1) "" else " ",
                 }) catch return Error.AllocatorFailure;
@@ -326,7 +326,7 @@ fn discoverFunctionsAndTypes(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void 
             _ = std.mem.replace(u8, self.strings[self.data[node.value]], "::", "__", @constCast(self.strings[self.data[node.value]]));
             _ = std.mem.replace(u8, self.strings[self.data[node.value]], "$", "_", @constCast(self.strings[self.data[node.value]]));
             try self.write(out, "{s} {s}({s});\n\n", .{
-                try self.getCName(typeInfo.returnType, null, false),
+                try self.getCName(typeInfo.returnType, null, false, false),
                 self.strings[func.name],
                 args
             });
@@ -336,7 +336,7 @@ fn discoverFunctionsAndTypes(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void 
 
             const typeInfo = self.types.get(typeID);
 
-            const name = try self.getCName(typeID, null, true);
+            const name = try self.getCName(typeID, null, true, false);
 
             switch (typeInfo) {
                 .Struct => |str| {
@@ -345,7 +345,7 @@ fn discoverFunctionsAndTypes(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void 
                         for (str.fields) |field| {
                             const info = self.types.get(field.valueType);
                             try self.write(out, "\t{s} {s};\n", .{
-                                try self.getCName(field.valueType, field.name, info == .Function),
+                                try self.getCName(field.valueType, field.name, info == .Function, false),
                                 if (info == .Function)
                                     ""
                                 else
@@ -364,14 +364,14 @@ fn discoverFunctionsAndTypes(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void 
                     if (uni.isTagged) {
                         try self.write(out, "typedef struct {s} {{\n", .{name});
                         try self.write(out, "\t{s} {s};\n", .{
-                            try self.getCName(uni.fields[0].valueType, null, false),
+                            try self.getCName(uni.fields[0].valueType, null, false, false),
                             self.strings[uni.fields[0].name],
                         });
                         try self.write(out, "\tunion {s} {{\n", .{name});
                         for (uni.fields[1..]) |field| {
                             const info = self.types.get(field.valueType);
                             try self.write(out, "\t\t{s} {s};\n", .{
-                                try self.getCName(field.valueType, field.name, false),
+                                try self.getCName(field.valueType, field.name, false, false),
                                 if (info == .Function)
                                     ""
                                 else
@@ -388,7 +388,7 @@ fn discoverFunctionsAndTypes(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void 
                         for (uni.fields) |field| {
                             const info = self.types.get(field.valueType);
                             try self.write(out, "\t{s} {s};\n", .{
-                                try self.getCName(field.valueType, field.name, false),
+                                try self.getCName(field.valueType, field.name, false, false),
                                 if (info == .Function)
                                     ""
                                 else
@@ -472,7 +472,7 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
                 // @Important TODO: Function parameter names WHY AREN'T THEY HERE???
                 args = std.fmt.allocPrint(self.allocator, "{s}{s} {s}{s}{s}", .{
                     args,
-                    try self.getCName(typePtr, null, false),
+                    try self.getCName(typePtr, null, false, false),
                     self.strings[func.args[i]],
                     if (i == typeInfo.argTypes.len - 1) "" else ",",
                     if (i == typeInfo.argTypes.len - 1) "" else " ",
@@ -480,7 +480,7 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
             }
 
             try self.writeln(out, "{s} {s}({s})\n", .{
-                try self.getCName(typeInfo.returnType, null, false),
+                try self.getCName(typeInfo.returnType, null, false, false),
                 name,
                 args
             });
@@ -494,13 +494,13 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
                 _ = std.mem.replace(u8, self.strings[self.data[node.value + 2]], "::", "__", @constCast(self.strings[self.data[node.value + 2]]));
                 _ = std.mem.replace(u8, self.strings[self.data[node.value + 2]], "$", "_", @constCast(self.strings[self.data[node.value + 2]]));
                 try self.write(out, "{s}{s}", .{
-                    try self.getCName(info.Pointer.child, self.data[node.value + 2], false),
+                    try self.getCName(info.Pointer.child, self.data[node.value + 2], false, false),
                     if (self.data[node.value + 3] == 1) ";\n" else " = ",
                 });
             }
             else {
                 try self.writeln(out, "{s} {s}{s}", .{
-                    try self.getCName(typeID, null, false),
+                    try self.getCName(typeID, null, false, false),
                     self.strings[self.data[node.value + 2]],
                     if (self.data[node.value + 3] == 1) ";\n" else " = ",
                 });
@@ -627,7 +627,7 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
             const len = self.data[node.value + 1];
 
             try self.write(out, "({s}){{", .{
-                try self.getCName(typeToCtor, null, true),
+                try self.getCName(typeToCtor, null, true, false),
             });
             for (0..len) |idx| {
                 try self.operation(out, self.data[@intCast(node.value + 2 + idx)]);
@@ -665,10 +665,10 @@ fn literal(self: *JIR, out: *Writer, ptr: Constant.Ptr) Error!void {
     const cst = self.constants.get(ptr);
 
     try switch (cst) {
-        .Type => |id| try self.write(out, "{s}", .{try self.getCName(id, null, false)}),
+        .Type => |id| try self.write(out, "{s}", .{try self.getCName(id, null, false, false)}),
         .Undefined => |typeID|
-            if (self.types.get(typeID) == .Pointer) self.write(out, "(({s})NULL)", .{ try self.getCName(typeID, null, false) })
-            else self.write(out, "({s}){{ }}", .{ try self.getCName(typeID, null, false) }),
+            if (self.types.get(typeID) == .Pointer) self.write(out, "(({s})NULL)", .{ try self.getCName(typeID, null, false, false)})
+            else self.write(out, "({s}){{ }}", .{ try self.getCName(typeID, null, false, false) }),
         .Integer => |int| switch (int) {
             .i32 => |t| self.write(out, "{d}", .{t}),
             .u32 => |t| self.write(out, "{d}", .{t}),
@@ -679,7 +679,7 @@ fn literal(self: *JIR, out: *Writer, ptr: Constant.Ptr) Error!void {
         .Function => |func| try self.write(out, "{s}", .{self.strings[func]}),
         .Aggregate => |agg| {
             try self.write(out, "({s}){{", .{
-                try self.getCName(agg.type, null, true),
+                try self.getCName(agg.type, null, true, false),
             });
             for (agg.data.start..agg.data.end) |idx| {
                 try self.literal(out, @intCast(idx));
@@ -691,7 +691,7 @@ fn literal(self: *JIR, out: *Writer, ptr: Constant.Ptr) Error!void {
         },
         .Array => |arr| {
             try self.write(out, "({s}){{", .{
-                try self.getCName(arr.type, null, true),
+                try self.getCName(arr.type, null, true, false),
             });
             for (arr.data.start..arr.data.end) |idx| {
                 try self.literal(out, @intCast(idx));
@@ -704,7 +704,7 @@ fn literal(self: *JIR, out: *Writer, ptr: Constant.Ptr) Error!void {
         .String => |str| {
             const rstr = self.strings[str];
             try self.write(out, "({s}){{(uint8_t*)\"{s}\", {d}}}", .{
-                try self.getCName(Comptime.Builtin.Type("[]u8"), null, true),
+                try self.getCName(Comptime.Folder.Builtin.Type("[]u8"), null, true, false),
                 rstr,
                 rstr.len,
             });
@@ -712,11 +712,13 @@ fn literal(self: *JIR, out: *Writer, ptr: Constant.Ptr) Error!void {
     };
 }
 
-fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool) Error![]const u8 {
-    if (self.cstrings.get(typeID)) |name| {
-        return
-            if (mutable and std.mem.endsWith(u8, name, "const")) name[0..name.len - 6]
-            else name;
+fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool, noSymbol: bool) Error![]const u8 {
+    if (!noSymbol) {
+        if (self.cstrings.get(typeID)) |name| {
+            return
+                if (mutable and std.mem.endsWith(u8, name, "const")) name[0..name.len - 6]
+                else name;
+        }
     }
 
     const typeInfo = self.types.get(typeID);
@@ -728,26 +730,38 @@ fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool
         },
 
         .Void => return "void",
-        .Noreturn => return "void __attribute__((noreturn))",
+        .Noreturn => return
+            if (noSymbol) "noreturn"
+            else "void __attribute__((noreturn))",
 
         .Bool => |v| name = std.fmt.allocPrint(self.allocator, "jasl_bool{s}", .{
-            if (v) "" else " const"
+            if (v) ""
+            else if (noSymbol) "_const"
+            else " const"
         }) catch return Error.AllocatorFailure,
         .Float => |v| name = std.fmt.allocPrint(self.allocator, "float{s}", .{
-            if (v) "" else " const"
+            if (v) ""
+            else if (noSymbol) "_const"
+            else" const"
         }) catch return Error.AllocatorFailure,
         .ComptimeFloat => name = std.fmt.allocPrint(self.allocator,
             "float{s}", .{
-            if (mutable) "" else " const"
+            if (mutable) ""
+            else if (noSymbol) "_const"
+            else " const"
         }) catch return Error.AllocatorFailure,
         .ComptimeInt => name = std.fmt.allocPrint(self.allocator,
             "int32_t{s}", .{
-            if (mutable) "" else " const"
+            if (mutable) ""
+            else if (noSymbol) "_const"
+            else " const"
         }) catch return Error.AllocatorFailure,
         .Integer => |i| name = std.fmt.allocPrint(self.allocator, "{s}int{d}_t{s}", .{
             if (i.signed) "" else "u",
             i.size,
-            if (mutable or i.mutable) "" else " const",
+            if (mutable or i.mutable) ""
+            else if (noSymbol) "_const"
+            else " const",
         }) catch return Error.AllocatorFailure,
 
         .Union, .Struct, .Enum => {
@@ -767,7 +781,9 @@ fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool
 
             name = std.fmt.allocPrint(self.allocator, "{s}{s}", .{
                 name,
-                if (mut) "" else " const",
+                if (mut) ""
+                else if (noSymbol) "_const"
+                else " const",
             }) catch return Error.AllocatorFailure;
         },
 
@@ -776,23 +792,36 @@ fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool
             for (0.., func.argTypes) |i, typePtr| {
                 args = std.fmt.allocPrint(self.allocator, "{s}{s}{s}{s}", .{
                     args,
-                    try self.getCName(typePtr, _name, false),
-                    if (i == func.argTypes.len - 1) "" else ",",
-                    if (i == func.argTypes.len - 1) "" else " ",
+                    try self.getCName(typePtr, _name, false, noSymbol),
+                    if (i == func.argTypes.len - 1) ""
+                    else if (noSymbol) "_"
+                    else ",",
+                    if (i == func.argTypes.len - 1) ""
+                    else if (noSymbol) "_"
+                    else " ",
                 }) catch return Error.AllocatorFailure;
             }
 
-            name = std.fmt.allocPrint(self.allocator, "{s} (*{s})({s})", .{
-                try self.getCName(func.returnType, _name, false),
-                if (_name) |n| self.strings[n] else "",
-                args
-            }) catch return Error.AllocatorFailure;
+            if (noSymbol) {
+                name = std.fmt.allocPrint(self.allocator, "{s}__func_{s}____{s}__", .{
+                    try self.getCName(func.returnType, _name, false, true),
+                    if (_name) |n| self.strings[n] else "",
+                    args,
+                }) catch return Error.AllocatorFailure;
+            }
+            else {
+                name = std.fmt.allocPrint(self.allocator, "{s} (*{s})({s})", .{
+                    try self.getCName(func.returnType, _name, false, false),
+                    if (_name) |n| self.strings[n] else "",
+                    args
+                }) catch return Error.AllocatorFailure;
+            }
         },
 
         .Array => |arr| {
             name = std.fmt.allocPrint(self.allocator, "{s}Array_{s}_{d}_t{s}", .{
                 if (arr.mutable) "" else "const_",
-                try self.getCName(arr.child, _name, true),
+                try self.getCName(arr.child, _name, true, true),
                 arr.len,
                 if (arr.mutable) "" else " const",
             }) catch return Error.AllocatorFailure;
@@ -802,21 +831,24 @@ fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool
             .Slice => {
                 name = std.fmt.allocPrint(self.allocator, "{s}Slice_{s}{s}", .{
                     if (ptr.mutable) "" else "const_",
-                    try self.getCName(ptr.child, _name, true),
+                    try self.getCName(ptr.child, _name, true, true),
                     if (ptr.mutable) "" else " const",
                 }) catch return Error.AllocatorFailure;
             },
             .Single, .C => {
-                name = std.fmt.allocPrint(self.allocator, "{s}*{s}", .{
-                    try self.getCName(ptr.child, _name, false),
+                name = std.fmt.allocPrint(self.allocator, "{s}{s}{s}", .{
+                    try self.getCName(ptr.child, _name, false, noSymbol),
+                    if (noSymbol) "_ptr" else "*",
                     if (ptr.mutable) "" else " const",
                 }) catch return Error.AllocatorFailure;
             },
         },
     }
 
-    self.cstrings.putNoClobber(self.allocator, typeID, name)
-        catch return Error.AllocatorFailure;
+    if (!noSymbol) {
+        self.cstrings.putNoClobber(self.allocator, typeID, name)
+            catch return Error.AllocatorFailure;
+    }
 
     return
         if (mutable and std.mem.endsWith(u8, name, "const")) name[0..name.len - 6]

@@ -147,6 +147,11 @@ pub fn Stack(comptime T: type) type {
             std.debug.assert(self.index > 0);
             return &self.items[self.index - 1];
         }
+
+        pub fn revert(self: *Self, index: u32) void {
+            std.debug.assert(self.index > index);
+            self.index = index;
+        }
     };
 }
 

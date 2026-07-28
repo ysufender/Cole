@@ -9,6 +9,7 @@ pub const MultiArrayList = arraylist.MultiArrayList;
 pub const ReverseStackArray = arraylist.ReverseStackArray;
 pub const StaticStack = stack.StaticStack;
 pub const StaticRingStack = stack.StaticRingStack;
+pub const Stack = stack.Stack;
 pub const HashMap = @import("hashmap.zig").HashMap;
 
 fn determine(comptime ptr: type) struct {
