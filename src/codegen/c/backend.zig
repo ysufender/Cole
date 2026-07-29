@@ -13,13 +13,12 @@ const tcc = @cImport({
 });
 
 const files = [_]struct{ []const u8, []const u8 }{
-    .{ "stdnoreturn.h", @import("vendor").stdnoreturn },
-    .{ "stdalign.h", @import("vendor").stdalign },
-    .{ "stdarg.h", @import("vendor").stdarg },
-    .{ "stdatomic.h", @import("vendor").stdatomic },
-    .{ "stdbool.h", @import("vendor").stdbool },
-    .{ "stddef.h", @import("vendor").stddef },
-    .{ "libtcc1.a", @import("vendor").libtcc1 },
+    .{ "stdnoreturn.h", @embedFile("../../res/vendor/tinycc/stdnoreturn.h") },
+    .{ "stdalign.h", @embedFile("../../res/vendor/tinycc/stdalign.h") },
+    .{ "stdarg.h",  @embedFile("../../res/vendor/tinycc/stdarg.h") },
+    .{ "stdatomic.h",  @embedFile("../../res/vendor/tinycc/stdatomic.h") },
+    .{ "stdbool.h",  @embedFile("../../res/vendor/tinycc/stdbool.h") },
+    .{ "stddef.h",  @embedFile("../../res/vendor/tinycc/stddef.h") },
 };
 
 pub fn compile(outDir: Dir, allocator: std.mem.Allocator, context: *common.CompilerContext) Error!void {

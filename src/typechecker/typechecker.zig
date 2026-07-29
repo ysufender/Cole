@@ -80,6 +80,7 @@ lookup: LookupMap,
 metadata: MetadataMap,
 
 folder: Comptime.Folder,
+executer: Comptime.Executer,
 
 currentFile: defines.FilePtr,
 currentScope: defines.ScopePtr,
@@ -123,6 +124,7 @@ pub fn init(
         .lookup = lookup,
         .flags = FlagMap.initEmpty(),
         .folder = undefined,
+        .executer = undefined,
         .builder = try backend.C.JIR.Builder.init(allocator, counts),
         .lowerer = undefined,
         .symbols = symbolTable,
@@ -175,10 +177,11 @@ pub fn typecheck(self: *Typechecker, allocator: Allocator) Error!Resolution {
 
     self.builder.allocator = self.arena.allocator();
     self.folder = try Comptime.Folder.init(self, allocator);
+    self.executer = try Comptime.Executer.init(self, allocator);
     self.lowerer = try Lowerer.init(self);
 
-    defer self.arena.deinit();
     defer self.folder.deinit();
+    defer self.arena.deinit();
 
     // @Note detect all top-level asms, they are not like imports.
     {

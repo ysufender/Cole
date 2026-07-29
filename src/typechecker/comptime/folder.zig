@@ -1576,20 +1576,41 @@ fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID) 
     }
 
     _ = try self.typechecker.typecheckCall(extraPtr, maybeExpected);
+    const args: defines.OpaquePtr = ast.expressions.items(.value)[ast.extra[extraPtr + 1]];
 
     const maybeFunction = self.getValue(try self.expectDefined(ast.extra[extraPtr], null));
     const function = switch (maybeFunction) {
         .Type => |id| return self.evalExpressionList(
-            ast.expressions.items(.value)[ast.extra[extraPtr + 1]],
+            args,
             id,
         ),
         .Function => |func| func,
         else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
     };
 
-    _ = function;
-    self.report("Comptime function calls are not (yet) supported.", .{});
-    return common.debug.NotImplemented(self.typechecker.context.log, @src());
+    const signature = self.typechecker.typeTable.get(function.signature).Function;
+
+    const argsRange = defines.Range{
+        .start = ast.extra[args],
+        .end = ast.extra[args + 1],
+    };
+
+    const argsList = self.arena.allocator().alloc(JIR.Ptr, argsRange.len())
+        catch return Error.AllocatorFailure;
+
+    for (0..argsRange.len()) |idx| {
+        const arg = try self.typechecker.lowerer.expression(
+            ast.extra[argsRange.at(@intCast(idx))],
+            signature.argTypes[idx],
+        );
+        argsList[idx] = arg;
+    }
+    
+    const res = try self.typechecker.executer.executeCall(&function, argsList);
+    return switch (res) {
+        .Void => @intFromEnum(Comptime.Value.Implicit.Void),
+        else => self.appendValue(res),
+    };
 }
 
 fn evalIndexing(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {
@@ -1973,7 +1994,7 @@ fn comptimeEq(self: *const Folder, lhs: Comptime.Value, rhs: Comptime.Value) boo
 }
 
 fn report(self: *Folder, comptime fmt: []const u8, args: anytype) void {
-    return self.typechecker.report("COMPTIME: " ++ fmt, args);
+    return self.typechecker.report("COMPTIME: FOLDER: " ++ fmt, args);
 }
 
 pub fn getValue(self: *const Folder, address: defines.Offset) Comptime.Value {

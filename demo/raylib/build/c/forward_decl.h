@@ -14,11 +14,11 @@ typedef uint8_t jasl_bool;
 #include "raylib.h"
 
 
-typedef struct const_Slice_uint8_t { uint8_t* ptr; uint32_t len; } const_Slice_uint8_t;
+typedef struct const_Slice_uint8_t { uint8_t const* ptr; uint32_t len; } const_Slice_uint8_t;
 
 typedef struct const_Slice_const_Slice_uint8_t { const_Slice_uint8_t const* ptr; uint32_t len; } const_Slice_const_Slice_uint8_t;
 
-typedef struct const_Array_uint8_t_2_t { uint8_t data[2]; } const_Array_uint8_t_2_t;
+typedef struct const_Array_uint8_t_2_t { uint8_t const data[2]; } const_Array_uint8_t_2_t;
 
 typedef struct root__Player {
 	int32_t x;
@@ -56,7 +56,7 @@ void raylib__DrawRectangle(int32_t const, int32_t const, int32_t const, int32_t 
 
 extern Color const Color__White;
 
-const_Array_uint8_t_2_t const root__intToChar(uint8_t);
+const_Array_uint8_t_2_t const root__intToChar(uint8_t const);
 
 void raylib__DrawText(const_Slice_uint8_t const, int32_t const, int32_t const, int32_t const, Color const);
 

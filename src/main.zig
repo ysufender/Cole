@@ -1,6 +1,6 @@
 const std = @import("std");
 const common = @import("core/common.zig");
-const perfAllc = @import("util/allocator.zig");
+// const perfAllc = @import("util/allocator.zig");
 const collections = @import("util/collections.zig");
 const defines = @import("core/defines.zig");
 const debug = @import("debug/debug.zig");
@@ -18,8 +18,10 @@ pub fn main(init: std.process.Init) void {
     MainProcInit = init;
 
     innerMain(
-        // init.arena.allocator(),
-        std.heap.c_allocator,
+        // perfAllc.init(),
+        // std.heap.c_allocator,
+        // init.gpa,
+        init.arena.allocator(),
         init
     ) catch |err| blk: {
         switch (err) {
@@ -130,7 +132,6 @@ fn innerMain(allocator: std.mem.Allocator, init: std.process.Init) common.Compil
     // @Note codegen shouldn't depend on anything but the typechecker
     // output from now on. Also it shouldn't error too. Validation
     // has ended.
-    _ = context.arena.reset(.retain_capacity);
 
     const outDir = try loweredIR.codegen(&context);
     try backend.C.compile(outDir, allocator, &context);

@@ -47,7 +47,6 @@ fn addTestStep(b: *std.Build) void {
 
     const run = b.addRunArtifact(tests);
     const step = b.step("test", "Run unit tests reachable from src/main.zig");
-    step.dependOn(&addTCC(b, tests.root_module).step);
     step.dependOn(&run.step);
 }
 
@@ -102,10 +101,15 @@ fn addTargets(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
             }),
         });
 
-        const tcc = addTCC(b, exe.root_module);
-
         exe.root_module.addEmbedPath(b.path(resourcePath));
         exe.root_module.addOptions("config", opts);
+
+        if (target.result.os.tag == .linux) {
+            exe.root_module.addSystemIncludePath(.{ .cwd_relative = "/usr/lib/" });
+            exe.root_module.addEmbedPath(.{ .cwd_relative = "/usr/include/" });
+            exe.root_module.linkSystemLibrary("tcc", .{ .preferred_link_mode = .static });
+            // exe.root_module.linkSystemLibrary("mimalloc", .{ .preferred_link_mode = .static });
+        }
 
         const install = b.addInstallArtifact(exe, .{
             .dest_dir = .{ .override = .{ .custom = b.pathJoin(&.{
@@ -120,43 +124,9 @@ fn addTargets(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
             .{targetName},
         ) catch unreachable);
 
-        step.dependOn(&tcc.step);
         step.dependOn(&install.step);
         step.dependOn(b.getInstallStep());
     }
-}
-
-fn addTCC(b: *std.Build, module: *std.Build.Module) *std.Build.Step.Run {
-    module.addIncludePath(b.path("vendor/tinycc/"));
-    module.addObjectFile(b.path("vendor/tinycc/libtcc.a"));
-
-    var vendor = std.Io.Dir.cwd().createFile(b.graph.io, "vendor/vendor.zig", .{ })
-        catch unreachable;
-
-    vendor.writePositionalAll(b.graph.io,
-        \\pub const stdnoreturn = @embedFile("tinycc/include/stdnoreturn.h");
-        \\pub const stdalign = @embedFile("tinycc/include/stdalign.h");
-        \\pub const stdarg = @embedFile("tinycc/include/stdarg.h");
-        \\pub const stdatomic = @embedFile("tinycc/include/stdatomic.h");
-        \\pub const stdbool = @embedFile("tinycc/include/stdbool.h");
-        \\pub const stddef = @embedFile("tinycc/include/stddef.h");
-        \\pub const libtcc1 = @embedFile("tinycc/libtcc1.a");
-        ,0
-    ) catch unreachable;
-    vendor.close(b.graph.io);
-
-    module.addAnonymousImport("vendor", .{
-        .root_source_file = b.path("vendor/vendor.zig"),
-    });
-
-    const configure = b.addSystemCommand(&.{"./configure"});
-    configure.setCwd(b.path("vendor/tinycc"));
-
-    const make = b.addSystemCommand(&.{"make"});
-    make.setCwd(b.path("vendor/tinycc"));
-    make.step.dependOn(&configure.step);
-    
-    return make;
 }
 
 fn addDebugTarget(b: *std.Build) void {
@@ -184,7 +154,6 @@ fn addDebugTarget(b: *std.Build) void {
     const install = b.addInstallArtifact(exe, .{});
 
     const step = b.step(targetName, "Build for debug on native platform");
-    step.dependOn(&addTCC(b, exe.root_module).step);
     step.dependOn(&install.step);
     step.dependOn(b.getInstallStep());
 }
