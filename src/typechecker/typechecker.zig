@@ -49,7 +49,6 @@ pub const Flags = enum(u8) {
     CoveredAllPaths = 4,
     InLoop = 5,
     InDefer = 6,
-    InComptimeFunc = 7,
 
     pub fn flag(flagToGet: Flags) u8 {
         return @intFromEnum(flagToGet);
@@ -81,7 +80,6 @@ lookup: LookupMap,
 metadata: MetadataMap,
 
 folder: Comptime.Folder,
-executer: Comptime.Executer,
 
 currentFile: defines.FilePtr,
 currentScope: defines.ScopePtr,
@@ -125,7 +123,6 @@ pub fn init(
         .lookup = lookup,
         .flags = FlagMap.initEmpty(),
         .folder = undefined,
-        .executer = undefined,
         .builder = try backend.C.JIR.Builder.init(allocator, counts),
         .lowerer = undefined,
         .symbols = symbolTable,
@@ -178,11 +175,10 @@ pub fn typecheck(self: *Typechecker, allocator: Allocator) Error!Resolution {
 
     self.builder.allocator = self.arena.allocator();
     self.folder = try Comptime.Folder.init(self, allocator);
-    self.executer = try Comptime.Executer.init(self, allocator);
     self.lowerer = try Lowerer.init(self);
 
-    defer self.folder.deinit();
     defer self.arena.deinit();
+    defer self.folder.deinit();
 
     // @Note detect all top-level asms, they are not like imports.
     {
@@ -940,14 +936,7 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
         .ExpressionList => self.typecheckExpressionList(expr.value, maybeExpected),
         .Literal => self.typecheckValue(try self.folder.eval(expressionPtr, maybeExpected), maybeExpected),
 
-        .EnumDefinition, .UnionDefinition, .StructDefinition, =>
-            if (!self.getFlag(.InComptimeFunc))
-                self.typecheckValue(
-                    try self.folder.eval(expressionPtr, maybeExpected),
-                    maybeExpected,
-                )
-            else Comptime.Folder.Builtin.Type("type"),
-
+        .EnumDefinition, .UnionDefinition, .StructDefinition,
         .ArrayType, .CPointerType, .FunctionType,
         .MutableType, .PointerType, .SliceType,
         .FunctionDefinition, .Lambda => self.typecheckValue(
