@@ -35,6 +35,7 @@ pub const TypeInfo = union(enum) {
         return switch (self) {
             .Array, .Type, .ComptimeInt, .ComptimeFloat, .EnumLiteral => true,
             .Struct, .Union => blk: {
+                if (true) return false;
                 const fields = if (std.meta.activeTag(self) == .Struct) self.Struct.fields else self.Union.fields;
 
                 if (self.isZeroBit()) {

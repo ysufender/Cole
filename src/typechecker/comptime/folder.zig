@@ -110,11 +110,20 @@ pub fn eval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeI
         .expr = exprPtr,
     };
 
-    if (self.cache.get(key)) |cached| {
-        return cached;
-    }
-
     const expr = ast.expressions.get(exprPtr);
+
+    if (
+        !self.typechecker.getFlag(.InComptimeFunc)
+        or (
+            expr.type != .UnionDefinition
+            and expr.type != .StructDefinition
+            and expr.type != .EnumDefinition
+        )
+    ) {
+        if (self.cache.get(key)) |cached| {
+            return cached;
+        }
+    }
 
     const addr = switch (expr.type) {
         .Identifier =>
@@ -166,8 +175,17 @@ pub fn eval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeI
     };
 
     defer self.dumpMem();
-    self.cache.putNoClobber(self.arena.allocator(), key, @intCast(addr))
-        catch return Error.AllocatorFailure;
+    if (
+        !self.typechecker.getFlag(.InComptimeFunc)
+        or (
+            expr.type != .UnionDefinition
+            and expr.type != .StructDefinition
+            and expr.type != .EnumDefinition
+        )
+    ) {
+        self.cache.putNoClobber(self.arena.allocator(), key, @intCast(addr))
+            catch return Error.AllocatorFailure;
+    }
     return addr;
 }
 
@@ -190,6 +208,13 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
 
     var isComptime = self.typechecker.hasMetadata(exprPtr, "@comptime");
 
+    const prev = self.typechecker.currentScope;
+    self.typechecker.currentScope = self.typechecker.symbols.tryGetDecl(.{
+        .file = self.typechecker.currentFile,
+        .expr = exprPtr
+    }) orelse return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
+    defer self.typechecker.currentScope = prev;
+
     for (paramsRange.start..paramsRange.end) |paramPtrPtr| {
         const param = ast.signatures.get(ast.extra[paramPtrPtr]);
         const argType = Typechecker.determineExpected(
@@ -202,19 +227,30 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
         argTypes[paramPtrPtr - paramsRange.start] = argType;
 
         const name = tokens.get(param.name).lexeme(self.typechecker.context, self.typechecker.currentFile);
-        argNames[paramPtrPtr - paramsRange.start] = try self.typechecker.builder.internString(name);
-
-
-        if (self.typechecker.typeTable.get(argType).isZeroBit()) {
-            self.report("Zero bit-sized parameter '{s}' is not allowed.", .{
-                name
-            });
-            return Error.OperationOnZeroBitSize;
-        }
+        const interned = try self.typechecker.builder.internString(name);
+        argNames[paramPtrPtr - paramsRange.start] = interned;
 
         if (self.typechecker.typeTable.get(argType).isComptime(&self.typechecker.typeTable)) {
             isComptime = true;
         }
+
+        const declPtr = self.typechecker.symbols.lookup.get(.{
+            .name = name,
+            .scope = self.typechecker.currentScope
+        }) orelse return common.debug.ShouldBeImpossible(undefined, @src());
+        const decl = self.typechecker.symbols.getDecl(declPtr);
+
+        self.typechecker.symbols.declarations.set(declPtr, .{
+            .name = interned,
+            .token = decl.token,
+            .public = decl.public,
+            .scope = decl.scope,
+            .parent = decl.parent,
+            .type = decl.type,
+            .topLevel = decl.topLevel,
+            .node = decl.node,
+            .kind = decl.kind,
+        });
     }
 
     const returnType = Typechecker.determineExpected(
@@ -223,6 +259,10 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
         self.report("Unknown return type in function signatures is not allowed.", .{});
         return Error.IllegalGenericType;
     };
+
+    if (self.typechecker.typeTable.get(returnType).isComptime(undefined)) {
+        isComptime = true;
+    }
 
     const lret = self.typechecker.lowerer.lastReturnType;
     defer self.typechecker.lowerer.lastReturnType = lret;
@@ -237,17 +277,12 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
         },
     });
 
-    const prev = self.typechecker.currentScope;
-    self.typechecker.currentScope = self.typechecker.symbols.tryGetDecl(.{
-        .file = self.typechecker.currentFile,
-        .expr = exprPtr
-    }) orelse return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
-    defer self.typechecker.currentScope = prev;
-
     const pc = self.typechecker.setFlag(.CoveredAllPaths, false);
     defer _ = self.typechecker.setFlag(.CoveredAllPaths, pc);
 
+    const cfnp = self.typechecker.setFlag(.InComptimeFunc, true);
     try self.typechecker.typecheckStatement(bodyPtr, returnType);
+    _ = self.typechecker.setFlag(.InComptimeFunc, cfnp);
 
     if (!(
         self.typechecker.typeTable.get(returnType).isZeroBit()
@@ -332,12 +367,25 @@ fn evalLambda(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines.O
 
     for (paramsRange.start..paramsRange.end) |index| {
         const paramName = tokens.get(ast.extra[index]).lexeme(self.typechecker.context, self.typechecker.currentFile);
-        argNames[index - paramsRange.start] = try self.typechecker.builder.internString(paramName);
+        const name = try self.typechecker.builder.internString(paramName);
+        argNames[index - paramsRange.start] = name;
         if (self.typechecker.symbols.lookup.get(.{ .scope = self.typechecker.currentScope, .name = paramName })) |param| {
             self.typechecker.lookup.put(self.typechecker.arena.allocator(), param, .{
                 .status = .Checked,
                 .result = expected.argTypes[index - paramsRange.start],
             }) catch return Error.AllocatorFailure;
+            const decl = self.typechecker.symbols.getDecl(param);
+            self.typechecker.symbols.declarations.set(param, .{
+                .name = name,
+                .parent = decl.parent,
+                .scope = self.typechecker.currentScope,
+                .type = decl.type,
+                .kind = decl.kind,
+                .node = decl.node,
+                .public = decl.public,
+                .token = decl.token,
+                .topLevel = decl.topLevel,
+            });
         }
         else return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
     }
@@ -788,7 +836,8 @@ fn evalIfExpression(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?
         else self.expectDefined(conditional.otherwise, maybeExpected);
 }
 
-fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID) Error!Comptime.Value.Ptr {    const decls = self.typechecker.symbols.declarations;
+fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID) Error!Comptime.Value.Ptr {
+    const decls = self.typechecker.symbols.declarations;
     const decl  = decls.get(declPtr);
 
     const prevToken = self.typechecker.lastToken;
@@ -839,6 +888,9 @@ fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID) Err
             .expr = decl.node,
         })) |capture| capture
         else Error.ComptimeNotPossible,
+        .Parameter => {
+            return self.appendValue(try self.typechecker.executer.scope.getVar(decl.name));
+        },
         else => |t| {
             self.report("{s} declaration is not implemented.", .{@tagName(t)});
             return common.debug.NotImplemented(self.typechecker.context.log, @src());
@@ -1015,12 +1067,6 @@ fn evalFuncType(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
     var realIndex: u32 = 0;
     for (range.start..range.end) |index| {
         const argType = self.getValue(try self.expectType(ast.extra[@intCast(index)])).Type;
-
-        if (self.typechecker.typeTable.get(argType).isZeroBit()) {
-            self.report("Zero bit sized function parameter '{s}' is not allowed.", .{
-                try self.typechecker.typeName(self.arena.allocator(), argType),
-            });
-        }
 
         argTypes[realIndex] = argType;
         realIndex += 1;

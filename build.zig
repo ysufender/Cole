@@ -96,7 +96,7 @@ fn addTargets(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
                 .strip = true,
                 .code_model = .small,
                 .link_libc = true,
-                .error_tracing = optimize != .Debug,
+                .error_tracing = optimize == .Debug,
                 .omit_frame_pointer = optimize != .Debug,
             }),
         });
@@ -151,6 +151,14 @@ fn addDebugTarget(b: *std.Build) void {
     });
     exe.root_module.addEmbedPath(b.path(resourcePath));
     exe.root_module.addOptions("config", opts);
+
+    if (config.native.result.os.tag == .linux) {
+        exe.root_module.addSystemIncludePath(.{ .cwd_relative = "/usr/lib/" });
+        exe.root_module.addEmbedPath(.{ .cwd_relative = "/usr/include/" });
+        exe.root_module.linkSystemLibrary("tcc", .{ .preferred_link_mode = .static });
+        // exe.root_module.linkSystemLibrary("mimalloc", .{ .preferred_link_mode = .static });
+    }
+
     const install = b.addInstallArtifact(exe, .{});
 
     const step = b.step(targetName, "Build for debug on native platform");

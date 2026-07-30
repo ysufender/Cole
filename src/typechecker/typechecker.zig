@@ -49,6 +49,7 @@ pub const Flags = enum(u8) {
     CoveredAllPaths = 4,
     InLoop = 5,
     InDefer = 6,
+    InComptimeFunc = 7,
 
     pub fn flag(flagToGet: Flags) u8 {
         return @intFromEnum(flagToGet);
@@ -939,7 +940,14 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
         .ExpressionList => self.typecheckExpressionList(expr.value, maybeExpected),
         .Literal => self.typecheckValue(try self.folder.eval(expressionPtr, maybeExpected), maybeExpected),
 
-        .EnumDefinition, .UnionDefinition, .StructDefinition,
+        .EnumDefinition, .UnionDefinition, .StructDefinition, =>
+            if (!self.getFlag(.InComptimeFunc))
+                self.typecheckValue(
+                    try self.folder.eval(expressionPtr, maybeExpected),
+                    maybeExpected,
+                )
+            else Comptime.Folder.Builtin.Type("type"),
+
         .ArrayType, .CPointerType, .FunctionType,
         .MutableType, .PointerType, .SliceType,
         .FunctionDefinition, .Lambda => self.typecheckValue(

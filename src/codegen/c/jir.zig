@@ -34,6 +34,7 @@ pub const Node = struct {
     pub const List = MultiArrayList(Node);
 
     pub const Type = enum {
+        ComptimeDef,
         TypeDef,
         FunctionDef,
         VariableDef,
@@ -313,6 +314,10 @@ fn discoverFunctionsAndTypes(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void 
             const func = self.functions.get(self.data[node.value + 1]);
             const typeInfo = self.types.get(func.signature).Function;
 
+            if (typeInfo.isComptime) {
+                return;
+            }
+
             var args: []const u8 = "";
             for (0.., typeInfo.argTypes) |i, typePtr| {
                 args = std.fmt.allocPrint(self.allocator, "{s}{s}{s}{s}", .{
@@ -461,11 +466,16 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
     const node = self.nodes.get(nodePtr);
 
     try switch (node.type) {
+        .ComptimeDef => { },
         .TypeDef => { },
         .FunctionDef => {
             const name = self.strings[self.data[node.value]];
             const func = self.functions.get(self.data[node.value + 1]);
             const typeInfo = self.types.get(func.signature).Function;
+
+            if (typeInfo.isComptime) {
+                return;
+            }
 
             var args: []const u8 = "";
             for (0.., typeInfo.argTypes) |i, typePtr| {

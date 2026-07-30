@@ -827,10 +827,7 @@ pub fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID
         .FunctionType, .ArrayType,
         .CPointerType, .MutableType, .PointerType,
         .Lambda, .FunctionDefinition,
-        .SliceType => |t| {
-            common.log.err("Impossible {s}", .{@tagName(t)});
-            return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
-        },
+        .SliceType => self.typechecker.builder.comptimeDef(exprPtr),
 
         .Assignment => {
             self.report(

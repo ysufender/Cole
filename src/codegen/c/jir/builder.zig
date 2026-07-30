@@ -124,6 +124,8 @@ pub inline fn typeDef(self: *Builder, typeID: TypeID) Error!JIR.Ptr {
     return res;
 }
 
+pub inline fn comptimeDef(self: *Builder, exprPtr: defines.ExpressionPtr) Error!JIR.Ptr { return self.commonSingle(.ComptimeDef, exprPtr); }
+
 pub inline fn @"return"(self: *Builder, expr: JIR.Ptr) Error!JIR.Ptr {
     const res = try self.commonSingle(.Return, expr);
     return res;

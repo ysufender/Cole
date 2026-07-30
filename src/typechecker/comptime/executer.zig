@@ -26,15 +26,13 @@ const TypeInfo = types.TypeInfo;
 const JIR = backend.C.JIR;
 
 const FlagMap = std.bit_set.IntegerBitSet(8);
-const Stack = collections.Stack(Comptime.Value);
 
 /// Since strings are interned, each StringPtr is unique.
 const VariableMap = collections.HashMap(defines.StringPtr, Comptime.Value);
 const SymbolMap = collections.HashMap(defines.StringPtr, defines.Offset);
 
 const Scope = struct {
-    parent: ?*Scope,
-    stackPointer: u32,
+    parent: ?*const Scope,
     symbols: SymbolMap,
     variables: VariableMap,
 
@@ -42,6 +40,24 @@ const Scope = struct {
         Return,
         Jump: defines.StringPtr,
     };
+
+    pub fn getVar(self: *const Scope, name: defines.StringPtr) Error!Comptime.Value {
+        return
+            if (self.variables.get(name)) |v| v
+            else if (self.parent) |parent| parent.getVar(name)
+            else Error.ShouldBeImpossible;
+    }
+
+    pub fn dump(self: *const Scope, builder: *const JIR.Builder) void {
+        if (self.parent) |parent| {
+            parent.dump(builder);
+        }
+
+        var iter = self.variables.keyIterator();
+        while (iter.next()) |k| {
+            common.log.debug("{s}", .{builder.getInternedString(k.*)});
+        }
+    }
 };
 
 const InLoop = 0;
@@ -50,10 +66,13 @@ const Return = 1;
 const Executer = @This();
 
 typechecker: *Typechecker,
-stack: Stack,
 flags: FlagMap,
 arena: Arena,
-scope: ?Scope = null,
+scope: Scope = .{
+    .parent = null,
+    .symbols = .empty,
+    .variables = .empty,
+},
 
 pub fn init(folder: *Typechecker, allocator: Allocator) Error!Executer {
     var arena = Arena.init(allocator);
@@ -65,41 +84,38 @@ pub fn init(folder: *Typechecker, allocator: Allocator) Error!Executer {
     return .{
         .flags = FlagMap.initEmpty(),
         .typechecker = folder,
-        .stack = try Stack.init(folder.arena.allocator(), 512),
         .arena = arena,
     };
 }
 
 pub fn executeCall(self: *Executer, func: *const JIR.Function, args: []JIR.Ptr) Error!Comptime.Value {
-    for (args) |value| {
-        try self.stack.push(try self.expression(value));
-    }
+    const prev = self.typechecker.setFlag(.InComptimeFunc, true);
+    defer _ = self.typechecker.setFlag(.InComptimeFunc, prev);
 
     var vars = VariableMap.empty;
     vars.ensureTotalCapacity(self.arena.allocator(), @intCast(func.args.len))
         catch return Error.AllocatorFailure;
 
-    var prevScope = self.scope;
-    self.scope = .{
-        .parent = if (prevScope) |*bod| bod else null,
-        .stackPointer = self.stack.index,
-        .symbols = .empty,
-        .variables = vars,
-    };
-    defer self.scope = prevScope;
-
     for (func.args, 0..) |argn, idx| {
-        self.scope.?.variables.putAssumeCapacityNoClobber(
+        vars.putAssumeCapacityNoClobber(
             argn,
             try self.expression(args[idx]),
         );
     }
 
+    const prevScope = self.scope;
+    self.scope = .{
+        .parent = &prevScope,
+        .symbols = .empty,
+        .variables = vars,
+    };
+    defer self.scope = prevScope;
+
     return self.executeBlock(func.body);
 }
 
 fn executeBlock(self: *Executer, bodyPtr: JIR.Ptr) Error!Comptime.Value {
-    const builder = self.typechecker.builder;
+    const builder = &self.typechecker.builder;
 
     const scopePtr = builder.nodes.get(bodyPtr).value;
     const body = builder.data.items[scopePtr + 2..scopePtr + 2 + builder.data.items[scopePtr + 1]];
@@ -138,41 +154,38 @@ fn executeBlock(self: *Executer, bodyPtr: JIR.Ptr) Error!Comptime.Value {
             catch return Error.AllocatorFailure;
     } 
 
-    var prevScope = self.scope;
+    const prevScope = self.scope;
     self.scope = .{
-        .parent = if (prevScope) |*bod| bod else null,
-        .stackPointer = self.stack.index,
+        .parent = &prevScope,
         .symbols = syms,
         .variables = vars,
     };
     defer self.scope = prevScope;
-
-    const scope = self.scope.?;
 
     var pc: u32 = 0;
     while (pc < body.len) : (pc += 1) {
         const stmt = builder.nodes.get(body[pc]);
 
         switch (stmt.type) {
-            .Jump => pc = scope.symbols.get(stmt.value).?,
+            .Jump => pc = self.scope.symbols.get(stmt.value).?,
             .JumpIf => {
                 const lbl = builder.nodes.get(builder.data.items[stmt.value]);
                 const cndPtr = builder.data.items[stmt.value + 1];
 
                 const cnd = (try self.expression(cndPtr)).Bool;
                 if (cnd) {
-                    pc = scope.symbols.get(lbl.value).?;
+                    pc = self.scope.symbols.get(lbl.value).?;
                 }
             },
             .VariableDef => {
                 const name = builder.data.items[stmt.value + 2];
                 if (builder.data.items[stmt.value + 3] == 1) {
-                    self.scope.?.variables.putAssumeCapacityNoClobber(name, .{
+                    self.scope.variables.putAssumeCapacityNoClobber(name, .{
                         .Undefined = builder.data.items[stmt.value + 1],
                     });
                 }
                 else {
-                    self.scope.?.variables.putAssumeCapacityNoClobber(
+                    self.scope.variables.putAssumeCapacityNoClobber(
                         name,
                         try self.expression(builder.data.items[stmt.value + 4]),
                     );
@@ -203,11 +216,17 @@ fn executeBlock(self: *Executer, bodyPtr: JIR.Ptr) Error!Comptime.Value {
 }
 
 fn expression(self: *Executer, _node: JIR.Ptr) Error!Comptime.Value {
-    const builder = self.typechecker.builder;
+    const builder = &self.typechecker.builder;
 
     const node = builder.nodes.get(_node);
     return switch (node.type) {
         .Literal => self.literal(node.value),
+        .ComptimeDef => {
+            const resPtr = try self.typechecker.folder.eval(node.value, Comptime.Folder.Builtin.Type("type"));
+            const res = self.typechecker.folder.getValue(resPtr);
+            self.typechecker.folder.memory.shrinkRetainingCapacity(self.typechecker.folder.memory.items.len - 1);
+            return res;
+        },
         else => {
             self.report("'{s}' is not implemented.", .{@tagName(node.type)});
             return common.debug.NotImplemented(self.typechecker.context.log, @src());
@@ -216,7 +235,7 @@ fn expression(self: *Executer, _node: JIR.Ptr) Error!Comptime.Value {
 }
 
 fn literal(self: *Executer, constPtr: JIR.Constant.Ptr) Error!Comptime.Value {
-    const builder = self.typechecker.builder;
+    const builder = &self.typechecker.builder;
     return switch (builder.constants.get(constPtr)) {
         .Undefined => |typeID| .{ .Undefined = typeID },
         .Float => |fl| .{ .Float = fl },

@@ -23,152 +23,23 @@
         Defines core utilities for error handling, value generation etc.
 */
 
-import std::math as M;
-import std::iterator as I;
-import builtin::type as R;
-import std::comptime as CT;
-import std::collections as C;
-
 pub let Option = fn (T: type) -> type {
     return union(enum) {
-        let Self = this();
-
         Some: T,
-        None: void,
-
-        pub let some = #(@inline) fn (self: *Self) -> bool {
-            return switch self {
-                @Some -> true,
-                @None -> false,
-            };
-        };
-
-        pub let none = #(@inline) fn (self: *Self) -> bool {
-            return !self.some();
-        };
-
-        pub let unwrap = #(@inline) fn (self: *Self) -> T {
-            return switch self {
-                @Some -> |s| s,
-                @None -> unreachable(),
-            };
-        };
-
-        pub let orelse = #(@inline) fn (self: *Self, val: T) -> T {
-            return switch self {
-                @Some -> |s| s,
-                @None -> val,
-            };
-        };
-
-        pub let orelseWith = #(@inline) fn (self: *Self, val: *fn () -> T) -> T {
-            return switch self {
-                @Some -> |s| s,
-                @None -> val(),
-            };
-        };
-
-        pub let default = #(@inline) fn () -> Self {
-            return Self(@None);
-        };
-
-        pub let map = #(@inline) fn (self: *Self, U: type, mapFn: *fn T -> U) -> Option(U) {
-            return switch self {
-                @Some -> |s| Option(U)(@Some, mapFn(s)),
-                @None -> Option(U)(@None),
-            };
-        };
-
-        pub let andThen = #(@inline) fn (self: *Self, U: type, next: *fn T -> Option(U)) -> Option(U) {
-            return switch self {
-                @Some -> |s| next(s),
-                @None -> Option(U)(@None),
-            };
-        };
-
-        pub let orElseThen = #(@inline) fn (self: *Self, next: *fn () -> Option(T)) -> Option(T) {
-            return switch self {
-                @Some -> |s| Option(T)(@Some, s),
-                @None -> next(),
-            };
-        };
+        None: u8,
     };
 };
 
 pub let Result = fn (T: type, E: type) -> type {
     return union(enum) {
-        let Self = this();
-
         Ok: T,
         Err: E,
-
-        pub let ok = #(@inline) fn (self: *Self) -> bool {
-            return switch self {
-                @Ok -> true,
-                @Err -> false,
-            };
-        };
-
-        pub let err = #(@inline) fn (self: *Self) -> bool {
-            return !self.ok();
-        };
-
-        pub let unwrap = #(@inline) fn (self: *Self) -> T {
-            return switch self {
-                @Ok -> |o| o,
-                @Err -> unreachable(),
-            };
-        };
-
-        pub let orelse = #(@inline) fn (self: *Self, val: T) -> T {
-            return switch self {
-                @Ok -> |o| o,
-                @Err -> val,
-            };
-        };
-
-        pub let orelseWith = #(@inline) fn (self: *Self, val: *fn () -> T) -> T {
-            return switch self {
-                @Ok -> |o| o,
-                @Err -> val(),
-            };
-        };
-
-        pub let map = #(@inline) fn (self: *Self, U: type, mapFn: *fn T -> U) -> Result(U, E) {
-            return switch self {
-                @Ok -> |o| Result(U, E)(@Ok, mapFn(o)),
-                @Err -> |e| Result(U, E)(@Err, e),
-            };
-        };
-
-        pub let mapErr = #(@inline) fn (self: *Self, U: type, mapFn: *fn E -> U) -> Result(T, U) {
-            return switch self {
-                @Ok -> |o| Result(T, U)(@Ok, o),
-                @Err -> |e| Result(T, U)(@Err, mapFn(e)),
-            };
-        };
-
-        pub let andThen = #(@inline) fn (self: *Self, U: type, next: *fn T -> Result(U, E)) -> Result(U, E) {
-            return switch self {
-                @Ok -> |o| next(o),
-                @Err -> |e| Result(U, E)(@Err, e),
-            };
-        };
-
-        pub let orElseThen = #(@inline) fn (self: *Self, U: type, next: *fn E -> Result(T, U)) -> Result(T, U) {
-            return switch self {
-                @Ok -> |o| Result(T, U)(@Ok, o),
-                @Err -> |e| next(e),
-            };
-        };
     };
 };
 
 // TODO: Improve
 pub let Either = fn (T: type, P: type) -> type {
     return union(enum) {
-        let Self = this();
-
         This: T,
         That: P,
     };
@@ -176,14 +47,8 @@ pub let Either = fn (T: type, P: type) -> type {
 
 pub let Pair = fn (T: type, P: type) -> type {
     return struct {
-        let Self = this();
-
-        pub first: T,
-        pub second: P,
-
-        pub let swap = #(@inline) fn (self: *mut Self) -> void {
-            self.* = Self(self.second, self.first);
-        };
+        first: T,
+        second: P,
     };
 };
 
@@ -191,182 +56,4 @@ pub let ErrorCode = enum {
     Ok,
     ArgumentError,
     RuntimeError,
-};
-
-/*
-    Expected from DefaultConstructible:
-        If "T" is a primitive and deterministic type, trait is fulfilled.
-
-        If not, the type must implement a "default" function, which will return
-        a default initialized instance.
-    
-    Following types are nondeterministic:
-        Pointer -> There is no "null pointer", hence all addresses must be valid.
-        Function -> Which is a form of pointer.
-        Noreturn -> It is a no-type type.
-        Type -> It is a comptime type.
-        Any -> It is an unknown type, so it can't be constructed.
-        Union and Enum -> Defaulting to any field may cause unexpected behaviour.
-*/
-pub let DefaultConstructible = struct {
-    let Self = this();
-
-    pub let Trait = fn (T: type) -> type {
-        let baseTypeInfo = typeInfo(T);
-        let tag = baseTypeInfo.tag;
-
-        if C::contains(R::TypeInfo::Tag)(tag, (@Integer, @Void, @Float)) {
-            return T;
-        }
-
-        let trait = CT::TraitInfo(
-            typeInfo(Self).Struct.name, (
-                CT::MemberInfo(@Definition, (true, "default", *fn void -> T)),
-            )
-        );
-
-        if CT::CheckTrait(trait, T) {
-            return T;
-        }
-
-        if C::contains(R::TypeInfo::Tag)(tag, (@Pointer, @Function, @Noreturn, @Type, @Any, @Union, @Enum)) {
-            compileError("Type '{any}' is not default constructible.", (T));
-        }
-
-        let typeInfo = baseTypeInfo.Struct;
-
-
-        _ = I::Slice(R::TypeInfo)(typeInfo.fields)
-            .terminate(I::Fold(type)).with(fn |_, f| Trait(f.valueType));
-
-        return T;
-    };
-
-    pub let Check = fn (T: type) -> type {
-        let baseTypeInfo = typeInfo(T);
-        let tag = baseTypeInfo.tag;
-
-        let trait = CT::TraitInfo(
-            typeInfo(Self).Struct.name, (
-                CT::MemberInfo(@Definition, (true, "default", *fn void -> T)),
-            )
-        );
-
-        if
-            C::contains(R::TypeInfo::Tag)(tag, (@Integer, @Void, @Float))
-            or CT::CheckTrait(trait, T) {
-            return true;
-        }
-
-        if C::contains(R::TypeInfo::Tag)(tag, (@Pointer, @Function, @Noreturn, @Type, @Any, @Union, @Enum)) {
-            return false;
-        }
-
-        let typeInfo = baseTypeInfo.Struct;
-
-        return I::Slice(R::TypeInfo)(typeInfo.fields)
-            .terminate(I::All).with(fn |f| Check(f.valueType));
-    };
-
-    pub let Construct = fn (T: type) -> Trait(T) {
-        let typeInfo = typeInfo(T);
-
-        let trait = CT::TraitInfo(
-            typeInfo(Self).Struct.name, (
-                CT::MemberInfo(@Definition, (true, "default", *fn void -> T)),
-            )
-        );
-
-        if CT::CheckTrait(trait, T) {
-            return T::default();
-        }
-
-        let constructStruct = fn (typeInfo: R::Struct) -> T {
-            let ret: mut T = undefined;
-
-            let i: mut u32 = 0;
-            #(@inline) while i < typeInfo.fields.len {
-                defer i = i + 1;
-                let field = typeInfo.fields[i];
-                field(ret, field.name) = Construct(field.valueType);
-            }
-
-            return ret;
-        };
-
-        return switch typeInfo {
-            @Struct -> |strct| constructStruct(strct),
-            @Int -> 0,
-            @Void -> (),
-            @Float -> 0.0,
-            @Bool -> false,
-            else -> unreachable(),
-        };
-    };
-};
-
-pub let Equible = struct {
-    let Self = this();
-
-    pub let Trait = fn (T: type) -> type {
-        let trait = CT::TraitInfo(
-            typeInfo(Self).Struct.name, (
-                CT::MemberInfo(@Definition, (true, "equals", *fn (T, T) -> bool)),
-            ),
-        );
-
-        let typeInfo = typeInfo(T);
-
-        return switch typeInfo(T) {
-            @Integer -> T,
-            @Void -> T,
-            @Float -> T,
-            @Type -> T,
-            @Enum -> T,
-            @Bool -> T,
-            @Pointer -> compileError("Type '{any}' is not default comparable because it can either be a shallow comparison or a deep one.", (T)),
-            @Struct ->
-                if (CT::CheckTrait(trait, T)) T
-                else if (
-                    I::Slice(R::FieldInfo)(typeInfo.fields)
-                    .terminate(I::All).with(fn |f| Trait(f.valueType) == f.valueType)
-                ) T
-                else unreachable(),
-            @Union ->
-                if (I::Slice(R::FieldInfo)(typeInfo.fields)
-                    .terminate(I::All).with(fn |f| Trait(f.valueType) == f.valueType)
-                ) T
-                else unreachable(),
-            else -> compileError("Type '{s}' is not default comparable because it is not comparable at all.", (T)),
-        };
-    };
-
-    pub let Generic = fn (T: type, lhs: Trait(T), rhs: Trait(T)) -> bool {
-        let trait = CT::TraitInfo(
-            typeInfo(Self).Struct.name, (
-                CT::MemberInfo(@Definition, (true, "equals", *fn (T, T) -> bool)),
-            ),
-        );
-
-        let baseTypeInfo = typeInfo(T);
-        let tag = baseTypeInfo.tag;
-
-        return switch baseTypeInfo {
-            @Integer -> lhs == rhs,
-            @Void -> lhs == rhs,
-            @Float -> lhs == rhs,
-            @Type -> lhs == rhs,
-            @Enum -> lhs == rhs,
-            @Bool -> lhs == rhs,
-            @Struct -> |s|
-                if (CT::CheckTrait(trait, T)) lhs.equals(rhs)
-                else I::Slice(R::FieldInfo)(s.fields)
-                    .terminate(I::All).with(fn |f| Generic(f.valueType, field(lhs, f.name), field(rhs, f.name))),
-            @Union -> |u|
-                lhs.tag == rhs.tag
-                and
-                Generic(typeOf(field(lhs, enumStr(lhs.tag))), field(lhs, enumStr(lhs.tag)), field(rhs, enumStr(rhs.tag))),
-            else -> unreachable(),
-        };
-    };
 };
