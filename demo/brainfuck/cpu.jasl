@@ -3,8 +3,8 @@
 import std::io::console as Console;
 import std::ascii as ASCII;
 
-pub let maxBytecode: u32 = 2000;
-pub let maxMemory: u32 = 2000;
+pub let maxBytecode: u32 = 15000;
+pub let maxMemory: u32 = 15000;
 
 pub let CPU = struct {
     memory: mut [maxMemory]mut u8,

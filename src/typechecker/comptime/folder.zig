@@ -1973,7 +1973,7 @@ fn comptimeEq(self: *const Folder, lhs: Comptime.Value, rhs: Comptime.Value) boo
 }
 
 fn report(self: *Folder, comptime fmt: []const u8, args: anytype) void {
-    return self.typechecker.report("COMPTIME: " ++ fmt, args);
+    return self.typechecker.report("COMPTIME FOLDER: " ++ fmt, args);
 }
 
 pub fn getValue(self: *const Folder, address: defines.Offset) Comptime.Value {
