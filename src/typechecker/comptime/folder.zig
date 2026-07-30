@@ -190,6 +190,17 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
 
     var isComptime = self.typechecker.hasMetadata(exprPtr, "@comptime");
 
+    const returnType = Typechecker.determineExpected(
+        self.getValue(try self.expectType(returnTypeExpr)).Type
+    ) orelse {
+        self.report("Unknown return type in function signatures is not allowed.", .{});
+        return Error.IllegalGenericType;
+    };
+
+    if (self.typechecker.typeTable.get(returnType).isComptime(undefined)) {
+        isComptime = true;
+    }
+
     for (paramsRange.start..paramsRange.end) |paramPtrPtr| {
         const param = ast.signatures.get(ast.extra[paramPtrPtr]);
         const argType = Typechecker.determineExpected(
@@ -205,24 +216,18 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
         argNames[paramPtrPtr - paramsRange.start] = try self.typechecker.builder.internString(name);
 
 
-        if (self.typechecker.typeTable.get(argType).isZeroBit()) {
+        if (self.typechecker.typeTable.get(argType).isComptime(&self.typechecker.typeTable)) {
+            isComptime = true;
+        }
+
+
+        if (self.typechecker.typeTable.get(argType).isZeroBit() and !isComptime) {
             self.report("Zero bit-sized parameter '{s}' is not allowed.", .{
                 name
             });
             return Error.OperationOnZeroBitSize;
         }
-
-        if (self.typechecker.typeTable.get(argType).isComptime(&self.typechecker.typeTable)) {
-            isComptime = true;
-        }
     }
-
-    const returnType = Typechecker.determineExpected(
-        self.getValue(try self.expectType(returnTypeExpr)).Type
-    ) orelse {
-        self.report("Unknown return type in function signatures is not allowed.", .{});
-        return Error.IllegalGenericType;
-    };
 
     const lret = self.typechecker.lowerer.lastReturnType;
     defer self.typechecker.lowerer.lastReturnType = lret;

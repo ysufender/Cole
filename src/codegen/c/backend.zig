@@ -19,6 +19,7 @@ const files = [_]struct{ []const u8, []const u8 }{
     .{ "stdatomic.h",  @embedFile("../../res/vendor/tinycc/stdatomic.h") },
     .{ "stdbool.h",  @embedFile("../../res/vendor/tinycc/stdbool.h") },
     .{ "stddef.h",  @embedFile("../../res/vendor/tinycc/stddef.h") },
+    .{ "libtcc1.a",  @embedFile("../../res/vendor/tinycc/libtcc1.a") },
 };
 
 pub fn compile(outDir: Dir, allocator: std.mem.Allocator, context: *common.CompilerContext) Error!void {
