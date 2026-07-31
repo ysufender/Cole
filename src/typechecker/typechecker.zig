@@ -104,13 +104,15 @@ pub fn init(
     const typeCount = counts.types * 3 + @as(u32, @intCast(Comptime.Folder.builtinTypes.len));
 
     var typeTable = TypeTable{};
-    typeTable.ensureTotalCapacity(allocator, typeCount + @as(u32, @intCast(Comptime.Folder.builtinTypes.len)))
+    typeTable.ensureTotalCapacity(allocator, 50 + typeCount + @as(u32, @intCast(Comptime.Folder.builtinTypes.len)))
         catch return Error.AllocatorFailure;
     var typeMap = TypeMap.empty;
     var metadata = MetadataMap.empty;
     var lookup = LookupMap.empty;
+    var typenameMap = TypeNameMap.empty;
 
-    typeMap.ensureTotalCapacity(allocator, 2 + typeCount + @as(u32, @intCast(Comptime.Folder.builtinTypes.len))) catch return Error.AllocatorFailure;
+    typenameMap.ensureTotalCapacity(allocator, 50 + typeCount + @as(u32, @intCast(Comptime.Folder.builtinTypes.len))) catch return Error.AllocatorFailure;
+    typeMap.ensureTotalCapacity(allocator, 50 + typeCount + @as(u32, @intCast(Comptime.Folder.builtinTypes.len))) catch return Error.AllocatorFailure;
     lookup.ensureTotalCapacity(allocator, symbolTable.declarations.len) catch return Error.AllocatorFailure;
     metadata.ensureTotalCapacity(allocator, counts.meta * 3) catch return Error.AllocatorFailure;
 
@@ -130,7 +132,7 @@ pub fn init(
         .currentScope = 0,
         .lastToken = 0,
         .callstack = .{},
-        .typenameMap = .empty,
+        .typenameMap = typenameMap,
         .arena = arena,
     };
 }
@@ -145,9 +147,17 @@ pub fn typecheck(self: *Typechecker, allocator: Allocator) Error!Resolution {
         return Error.MissingDefinition;
     }
 
+    self.builder.allocator = self.arena.allocator();
+    self.folder = try Comptime.Folder.init(self, allocator);
+    self.lowerer = try Lowerer.init(self);
+
     inline for (Comptime.Folder.builtinTypes, 0..) |builtin, id| {
         self.typeTable.appendAssumeCapacity(builtin.info);
         self.typeMap.putAssumeCapacityNoClobber(builtin.info, @intCast(id));
+        self.typenameMap.putAssumeCapacityNoClobber(
+            id,
+            try self.builder.internString(builtin.name),
+        );
     }
 
     const entryPointID = comptime Comptime.Folder.Builtin.Type("[]u8") + 1;
@@ -172,10 +182,6 @@ pub fn typecheck(self: *Typechecker, allocator: Allocator) Error!Resolution {
         self.typeTable.appendAssumeCapacity(builtin);
         self.typeMap.putAssumeCapacityNoClobber(builtin, @intCast(id + entryPointID));
     }
-
-    self.builder.allocator = self.arena.allocator();
-    self.folder = try Comptime.Folder.init(self, allocator);
-    self.lowerer = try Lowerer.init(self);
 
     defer self.arena.deinit();
     defer self.folder.deinit();

@@ -55,7 +55,7 @@ let main = fn (args: [][]u8) -> i32 {
     return Ok;
 };
 
-let populateBytecode = fn (bytecode: []mut u8, path: []u8) -> bool {
+let populateBytecode = fn (bytecode: mut []mut u8, path: []u8) -> bool {
     let source = File::open(path, @Read);
 
     if !File::ok(source) {

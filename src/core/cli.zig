@@ -6,7 +6,7 @@ const collections = @import("../util/collections.zig");
 const Backend = @import("../codegen/backend.zig").Backend;
 const Error = common.CompilerError;
 
-const Flags = enum {
+const Flag = enum {
     Help,
     Version,
     Working,
@@ -21,7 +21,7 @@ const Flags = enum {
     Optimize,
 };
 
-const flags = std.StaticStringMap(Flags).initComptime(&(.{
+const flags = std.StaticStringMap(Flag).initComptime(&(.{
     .{ "--help", .Help },
     .{ "-h", .Help },
 
@@ -284,7 +284,7 @@ fn printHelp() common.CompilerError {
     return Error.Terminate; 
 }  
 
-fn hash(str: []const u8) Flags {
+fn hash(str: []const u8) Flag {
     if (flags.get(str)) |flag| {
         return flag;
     }

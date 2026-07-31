@@ -33,23 +33,7 @@ pub const TypeInfo = union(enum) {
     // @CompilerOnly
     pub fn isComptime(self: TypeInfo, _: *const Typechecker.TypeTable) bool {
         return switch (self) {
-            .Array, .Type, .ComptimeInt, .ComptimeFloat, .EnumLiteral => true,
-            .Struct, .Union => blk: {
-                if (true) return false;
-                const fields = if (std.meta.activeTag(self) == .Struct) self.Struct.fields else self.Union.fields;
-
-                if (self.isZeroBit()) {
-                    return false;
-                }
-
-                for (fields) |field| {
-                    if (!field.isComptime) {
-                        break :blk false;
-                    }
-                }
-
-                break :blk true;
-            },
+            .Type, .ComptimeInt, .ComptimeFloat, .EnumLiteral => true,
             else => false,
         };
     }
@@ -80,7 +64,6 @@ pub const TypeInfo = union(enum) {
             .Pointer => |ptr| ptr.mutable,
             .Array => |arr| arr.mutable,
             .Function => |func| func.mutable,
-            .ComptimeFloat, .ComptimeInt => true,
             else => false,
         };
     }

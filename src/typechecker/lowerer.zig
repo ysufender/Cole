@@ -354,7 +354,7 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
         else => return common.debug.ShouldBeImpossible(undefined, @src()),
     };
 
-    const switchEnd = try exec.generateRandomNameSanitized(.SwitchEnd);
+    const switchEnd = try exec.generateRandomName(.SwitchEnd);
 
     const caseRange = defines.Range{
         .start = ast.extra[extraPtr + 1],
@@ -386,7 +386,7 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
 
         const case = try self.expression(caseIndex, tag.type);
 
-        const caseEnd = try exec.generateRandomNameSanitized(.CaseEnd);
+        const caseEnd = try exec.generateRandomName(.CaseEnd);
         const cnd =
             if (typeInfo == .Union) res: {
                 const tagFieldName = try typechecker.builder.internString("tag");
@@ -424,7 +424,7 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
                         .Union => |uni|
                             if (uni.Tag == caseValue) {
                                 return typechecker.builder.scope(
-                                    try exec.generateRandomNameSanitized(.Case), &.{
+                                    try exec.generateRandomName(.Case), &.{
                                         capture,
                                         body,
                                     },
@@ -434,7 +434,7 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
                         .Enum => |enm|
                             if (enm.Value == caseValue) {
                                 return typechecker.builder.scope(
-                                    try exec.generateRandomNameSanitized(.Case), &.{
+                                    try exec.generateRandomName(.Case), &.{
                                         capture,
                                         body,
                                     },
@@ -448,7 +448,7 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
                 const caseEndLbl = try typechecker.builder.label(caseEnd);
 
                 break :res try typechecker.builder.scope(
-                    try exec.generateRandomNameSanitized(.Case), &.{
+                    try exec.generateRandomName(.Case), &.{
                         caseJump,
                         capture,
                         body,
@@ -479,7 +479,7 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
                 const caseEndLbl = try typechecker.builder.label(caseEnd);
 
                 break :res try typechecker.builder.scope(
-                    try exec.generateRandomNameSanitized(.Case), &.{
+                    try exec.generateRandomName(.Case), &.{
                         caseJump,
                         body,
                         try typechecker.builder.jump(switchEnd),
@@ -496,7 +496,7 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     ptrs[@divFloor(caseRange.len(), 4)] = switchEndLabel;
 
     return typechecker.builder.scope(
-        try exec.generateRandomNameSanitized(.Switch),
+        try exec.generateRandomName(.Switch),
         ptrs,
     );
 }
@@ -663,16 +663,16 @@ fn loop(
                 loopData[2] = try self.typechecker.builder.jump(startLabel);
 
                 return self.typechecker.builder.scope(
-                    try self.typechecker.folder.generateRandomNameSanitized(.Block),
+                    try self.typechecker.folder.generateRandomName(.Block),
                     &loopData,
                 );
             }
             else {
-                return self.typechecker.builder.label(try self.typechecker.folder.generateRandomNameSanitized(.OptimizedLoop));
+                return self.typechecker.builder.label(try self.typechecker.folder.generateRandomName(.OptimizedLoop));
             }
         }
         else {
-            return self.typechecker.builder.label(try self.typechecker.folder.generateRandomNameSanitized(.OptimizedLoop));
+            return self.typechecker.builder.label(try self.typechecker.folder.generateRandomName(.OptimizedLoop));
         }
     }
 
@@ -690,7 +690,7 @@ fn loop(
     loopData[4] = try self.typechecker.builder.cjump(startLabel, cnd);
 
     return self.typechecker.builder.scope(
-        try self.typechecker.folder.generateRandomNameSanitized(.Block),
+        try self.typechecker.folder.generateRandomName(.Block),
         &loopData,
     );
 }
@@ -710,12 +710,12 @@ fn conditional(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.A
                 return self.statement(ast.extra[extraPtr + 3]);
             }
 
-            return self.typechecker.builder.label(try self.typechecker.folder.generateRandomNameSanitized(.OptimizedConditional));
+            return self.typechecker.builder.label(try self.typechecker.folder.generateRandomName(.OptimizedConditional));
         }
     }
 
-    const elseLabel = try self.typechecker.folder.generateRandomNameSanitized(.Else);
-    const finallyLabel = try self.typechecker.folder.generateRandomNameSanitized(.Finally);
+    const elseLabel = try self.typechecker.folder.generateRandomName(.Else);
+    const finallyLabel = try self.typechecker.folder.generateRandomName(.Finally);
 
     const cnd = try self.typechecker.builder.not(try self.expression(conditionExpr, Comptime.Folder.Builtin.Type("bool")));
 
@@ -746,7 +746,7 @@ fn conditional(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.A
     }
 
     return self.typechecker.builder.scope(
-        try self.typechecker.folder.generateRandomNameSanitized(.Block),
+        try self.typechecker.folder.generateRandomName(.Block),
         if (maybeElse) |_| data[0..6] else data[0..4]
     );
 }
@@ -798,7 +798,7 @@ fn block(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     }
 
     return self.typechecker.builder.scope(
-        try self.typechecker.folder.generateRandomNameSanitized(.Block),
+        try self.typechecker.folder.generateRandomName(.Block),
         stmts,
     );
 }

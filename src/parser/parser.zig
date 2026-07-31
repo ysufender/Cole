@@ -1662,6 +1662,11 @@ fn variableSignature(self: *Parser, public: bool, enforceType: bool) common.Comp
             return error.MissingIdentifier;
         };
 
+    if (std.mem.startsWith(u8, self.context.getTokens(self.file).get(name).lexeme(self.context, self.file), "__")) {
+        self.report("The double underscore '__' prefix is not allowed.", .{});
+        return Error.IllegalSyntax;
+    }
+
     const varType = 
         if (!enforceType and !self.check(.Colon)) AnyType
         else res: {

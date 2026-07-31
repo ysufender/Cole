@@ -222,6 +222,10 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
     var visited = std.StringHashMapUnmanaged(void).empty;
 
     for (0..self.types.len) |typeID| {
+        if (Comptime.Folder.Builtin.isBuiltinType(@intCast(typeID))) {
+            continue;
+        }
+
         const typeInfo = self.types.get(@intCast(typeID));
 
         switch (typeInfo) {
@@ -231,8 +235,9 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
                     else => try self.getCName(arr.child, null, true, true),
                 };
 
-                const name = std.fmt.allocPrint(self.allocator, "{s}Array_{s}_{d}_t", .{
-                    if (arr.mutable) "" else "const_",
+                const name = std.fmt.allocPrint(self.allocator, "{s}Array_{s}_{d}", .{
+                    "",
+                    // if (arr.mutable) "" else "const_",
                     childName,
                     arr.len,
                 }) catch return Error.AllocatorFailure;
@@ -259,7 +264,8 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
                     };
 
                     const name = std.fmt.allocPrint(self.allocator, "{s}Slice_{s}", .{
-                        if (ptr.mutable) "" else "const_",
+                        "",
+                        // if (ptr.mutable) "" else "const_",
                         childName,
                     }) catch return Error.AllocatorFailure;
 
@@ -272,12 +278,111 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
 
                     try self.write(out, "typedef struct {s} {{ {s}* ptr; uint32_t len; }} {s};\n\n", .{
                         name,
-                        try self.getCName(ptr.child, null, false, false),
+                        try self.getCName(ptr.child, null, true, false),
                         name,
                     });
                 },
                 else => { },
             },
+
+            .Struct => |str| {
+                const name = try self.getCName(@intCast(typeID), null, true, false);
+                const res = visited.getOrPut(self.allocator, name)
+                    catch return Error.AllocatorFailure;
+                if (res.found_existing) {
+                    continue;
+                }
+                res.key_ptr.* = name;
+                try self.write(out, "typedef struct {s} {{\n", .{name});
+                for (str.fields) |field| {
+                    const info = self.types.get(field.valueType);
+                    try self.write(out, "\t{s} {s};\n", .{
+                        try self.getCName(field.valueType, field.name, info == .Function, false),
+                        if (info == .Function)
+                            ""
+                        else
+                            self.strings[field.name],
+                    });
+                }
+                try self.write(out, "}} {s};\n\n", .{
+                    name
+                });
+            },
+
+            .Union => |uni| {
+                const name = try self.getCName(@intCast(typeID), null, true, false);
+                const res = visited.getOrPut(self.allocator, name)
+                    catch return Error.AllocatorFailure;
+                if (res.found_existing) {
+                    continue;
+                }
+                res.key_ptr.* = name;
+
+
+                if (uni.isTagged) {
+                    try self.write(out, "typedef struct {s} {{\n", .{name});
+                    try self.write(out, "\t{s} {s};\n", .{
+                        try self.getCName(uni.fields[0].valueType, null, false, false),
+                        self.strings[uni.fields[0].name],
+                    });
+                    try self.write(out, "\tunion {s} {{\n", .{name});
+                    for (uni.fields[1..]) |field| {
+                        const info = self.types.get(field.valueType);
+                        try self.write(out, "\t\t{s} {s};\n", .{
+                            try self.getCName(field.valueType, field.name, false, false),
+                            if (info == .Function)
+                                ""
+                            else
+                                self.strings[field.name],
+                        });
+                    }
+                    try self.write(out, "\t}};\n", .{});
+                    try self.write(out, "}} {s};\n\n", .{
+                        name
+                    });
+                }
+                else {
+                    try self.write(out, "typedef union {s} {{\n", .{name});
+                    for (uni.fields) |field| {
+                        const info = self.types.get(field.valueType);
+                        try self.write(out, "\t{s} {s};\n", .{
+                            try self.getCName(field.valueType, field.name, false, false),
+                            if (info == .Function)
+                                ""
+                            else
+                                self.strings[field.name],
+                        });
+                    }
+                    try self.write(out, "}} {s};\n\n", .{
+                        name
+                    });
+                }
+            },
+
+            .Enum => |enm| {
+                const name = try self.getCName(@intCast(typeID), null, true, false);
+                const res = visited.getOrPut(self.allocator, name)
+                    catch return Error.AllocatorFailure;
+                if (res.found_existing) {
+                    continue;
+                }
+                res.key_ptr.* = name;
+
+
+                _ = std.mem.replace(u8, name, ":", "_", @constCast(name));
+                try self.write(out, "typedef enum __attribute__((aligned (sizeof(uint32_t)))) {s} {{\n", .{name});
+                for (enm.fields) |field| {
+                    try self.write(out, "\t{s}_{s},\n", .{
+                        name,
+                        field,
+                    });
+                }
+                try self.write(out, "}} {s};\n\n", .{
+                    name
+                });
+            },
+
+
             else => {},
         }
     }
@@ -296,14 +401,12 @@ fn discoverFunctionsAndTypes(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void 
             const info = self.types.get(typeID);
             if (info == .Function) {
                 _ = std.mem.replace(u8, self.strings[self.data[node.value + 2]], "::", "__", @constCast(self.strings[self.data[node.value + 2]]));
-                _ = std.mem.replace(u8, self.strings[self.data[node.value + 2]], "$", "_", @constCast(self.strings[self.data[node.value + 2]]));
                 try self.write(out, "extern {s};\n\n", .{
                     try self.getCName(info.Pointer.child, self.data[node.value + 2], false, false),
                 });
             }
             else {
                 _ = std.mem.replace(u8, self.strings[self.data[node.value + 2]], "::", "__", @constCast(self.strings[self.data[node.value + 2]]));
-                _ = std.mem.replace(u8, self.strings[self.data[node.value + 2]], "$", "_", @constCast(self.strings[self.data[node.value + 2]]));
                 try self.write(out, "extern {s} {s};\n\n", .{
                     try self.getCName(typeID, null, false, false),
                     self.strings[self.data[node.value + 2]],
@@ -329,105 +432,11 @@ fn discoverFunctionsAndTypes(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void 
             }
 
             _ = std.mem.replace(u8, self.strings[self.data[node.value]], "::", "__", @constCast(self.strings[self.data[node.value]]));
-            _ = std.mem.replace(u8, self.strings[self.data[node.value]], "$", "_", @constCast(self.strings[self.data[node.value]]));
             try self.write(out, "{s} {s}({s});\n\n", .{
                 try self.getCName(typeInfo.returnType, null, false, false),
                 self.strings[func.name],
                 args
             });
-        },
-        .TypeDef => {
-            const typeID = node.value;
-
-            const typeInfo = self.types.get(typeID);
-
-            const name = try self.getCName(typeID, null, true, false);
-
-            switch (typeInfo) {
-                .Struct => |str| {
-                    if (!typeInfo.isZeroBit()) {
-                        try self.write(out, "typedef struct {s} {{\n", .{name});
-                        for (str.fields) |field| {
-                            const info = self.types.get(field.valueType);
-                            try self.write(out, "\t{s} {s};\n", .{
-                                try self.getCName(field.valueType, field.name, info == .Function, false),
-                                if (info == .Function)
-                                    ""
-                                else
-                                    self.strings[field.name],
-                            });
-                        }
-                    }
-                    try self.write(out, "{s} {s};\n\n", .{
-                        if (typeInfo.isZeroBit()) "typedef void"
-                        else "}",
-                        name
-                    });
-                },
-
-                .Union => |uni|{
-                    if (uni.isTagged) {
-                        try self.write(out, "typedef struct {s} {{\n", .{name});
-                        try self.write(out, "\t{s} {s};\n", .{
-                            try self.getCName(uni.fields[0].valueType, null, false, false),
-                            self.strings[uni.fields[0].name],
-                        });
-                        try self.write(out, "\tunion {s} {{\n", .{name});
-                        for (uni.fields[1..]) |field| {
-                            const info = self.types.get(field.valueType);
-                            try self.write(out, "\t\t{s} {s};\n", .{
-                                try self.getCName(field.valueType, field.name, false, false),
-                                if (info == .Function)
-                                    ""
-                                else
-                                    self.strings[field.name],
-                            });
-                        }
-                        try self.write(out, "\t}};\n", .{});
-                        try self.write(out, "}} {s};\n\n", .{
-                            name
-                        });
-                    }
-                    else {
-                        try self.write(out, "typedef union {s} {{\n", .{name});
-                        for (uni.fields) |field| {
-                            const info = self.types.get(field.valueType);
-                            try self.write(out, "\t{s} {s};\n", .{
-                                try self.getCName(field.valueType, field.name, false, false),
-                                if (info == .Function)
-                                    ""
-                                else
-                                    self.strings[field.name],
-                            });
-                        }
-                        try self.write(out, "}} {s};\n\n", .{
-                            name
-                        });
-                    }
-                },
-
-                .Enum => |enm| {
-                    _ = std.mem.replace(u8, name, ":", "_", @constCast(name));
-                    _ = std.mem.replace(u8, name, "$", "_", @constCast(name));
-                    if (!typeInfo.isZeroBit()) {
-                        try self.write(out, "typedef enum __attribute__((aligned (sizeof(uint32_t)))) {s} {{\n", .{name});
-                        for (enm.fields) |field| {
-                            try self.write(out, "\t{s}_{s},\n", .{
-                                name,
-                                field,
-                            });
-                        }
-                    }
-                    try self.write(out, "{s} {s};\n\n", .{
-                        if (typeInfo.isZeroBit()) "typedef void"
-                        else "}",
-                        name
-                    });
-                },
-
-                // @Note type constants are already folded
-                else => { },
-            }
         },
 
         else => { },
@@ -502,7 +511,6 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
             const info = self.types.get(typeID);
             if (info == .Pointer and self.types.get(info.Pointer.child) == .Function) {
                 _ = std.mem.replace(u8, self.strings[self.data[node.value + 2]], "::", "__", @constCast(self.strings[self.data[node.value + 2]]));
-                _ = std.mem.replace(u8, self.strings[self.data[node.value + 2]], "$", "_", @constCast(self.strings[self.data[node.value + 2]]));
                 try self.write(out, "{s}{s}", .{
                     try self.getCName(info.Pointer.child, self.data[node.value + 2], false, false),
                     if (self.data[node.value + 3] == 1) ";\n" else " = ",
@@ -775,14 +783,14 @@ fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool
         }) catch return Error.AllocatorFailure,
 
         .Union, .Struct, .Enum => {
-            name = self.strings[
+            const namePtr =
                 if (typeInfo == .Struct) typeInfo.Struct.name
                 else if (typeInfo == .Union) typeInfo.Union.name
-                else typeInfo.Enum.name
-            ];
+                else typeInfo.Enum.name;
+
+            name = self.strings[namePtr];
 
             _ = std.mem.replace(u8, name, "::", "__", @constCast(name));
-            _ = std.mem.replace(u8, name, "$$", "__", @constCast(name));
 
             const mut =
                 if (typeInfo == .Struct) typeInfo.Struct.mutable
@@ -829,8 +837,9 @@ fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool
         },
 
         .Array => |arr| {
-            name = std.fmt.allocPrint(self.allocator, "{s}Array_{s}_{d}_t{s}", .{
-                if (arr.mutable) "" else "const_",
+            name = std.fmt.allocPrint(self.allocator, "{s}Array_{s}_{d}{s}", .{
+                "",
+                // if (arr.mutable) "" else "const_",
                 try self.getCName(arr.child, _name, true, true),
                 arr.len,
                 if (arr.mutable) "" else " const",
@@ -840,7 +849,8 @@ fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool
         .Pointer => |ptr| switch (ptr.size) {
             .Slice => {
                 name = std.fmt.allocPrint(self.allocator, "{s}Slice_{s}{s}", .{
-                    if (ptr.mutable) "" else "const_",
+                    "",
+                    // if (ptr.mutable) "" else "const_",
                     try self.getCName(ptr.child, _name, true, true),
                     if (ptr.mutable) "" else " const",
                 }) catch return Error.AllocatorFailure;

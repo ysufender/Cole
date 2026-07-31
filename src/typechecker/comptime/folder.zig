@@ -1779,23 +1779,15 @@ pub fn constructUndefined(self: *Folder, valueType: TypeID) Error!Comptime.Value
     };
 }
 
-pub fn generateRandomNameSanitized(self: *Folder, comptime mode: @TypeOf(.EnumLiteral)) Error!u32 {
-    const str = try self.generateRandomNameString(mode);
-    _ = std.mem.replace(u8, str, "$", "_", str);
-    _ = std.mem.replace(u8, str, ":", "_", str);
-    return self.typechecker.builder.internString(str);
-}
-
 pub fn generateRandomName(self: *Folder, comptime mode: @TypeOf(.EnumLiteral)) Error!u32 {
-    return self.typechecker.builder.internString(
-        try self.generateRandomNameString(mode)
-    );
+    const str = try self.generateRandomNameString(mode);
+    return self.typechecker.builder.internString(str);
 }
 
 pub fn generateRandomNameString(self: *Folder, comptime mode: @TypeOf(.EnumLiteral)) Error![]u8 {
     const randint = self.rng.next();
 
-    return std.fmt.allocPrint(self.arena.allocator(), "$$anon_"++@tagName(mode)++"_{d}", .{
+    return std.fmt.allocPrint(self.arena.allocator(), "__anon_"++@tagName(mode)++"_{d}", .{
         randint
     }) catch Error.AllocatorFailure;
 }
@@ -2026,7 +2018,7 @@ pub fn dumpMem(self: *const Folder) void {
 
 pub const Builtin = struct {
     pub fn isBuiltinType(typeID: TypeID) bool {
-        return typeID <= Builtin.Type("any");
+        return typeID <= Builtin.Type("any") + 3;
     }
 
     pub fn TypeName(btype: TypeID) []const u8 {

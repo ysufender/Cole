@@ -39,10 +39,10 @@ let destroy = fn (ctx: *void, ptr: *void) -> void {
     code { free(ptr); }
 };
 
-let alloc = fn (ctx: *void, count: u32, sizeByteEach: u32) -> [@c]void {
+let alloc = fn (ctx: *void, count: u32, sizeByteEach: u32) -> []void {
     let res: mut [@c]void = undefined;
     code { res = calloc(count, sizeByteEach); }
-    return res;
+    return res[0..count];
 };
 
 let free = fn (ctx: *void, ptr: [@c]void) -> void {
