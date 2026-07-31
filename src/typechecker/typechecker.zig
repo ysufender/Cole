@@ -308,7 +308,8 @@ fn typecheckVariableDef(
                 else try self.folder.generateRandomNameString(.Type);
 
             const newName =
-                if (self.hasMetadata(decl.node, "@extern")) symName
+                if (self.hasMetadata(decl.node, "@extern") and decl.topLevel) symName
+                else if (!decl.topLevel) namespace
                 else std.fmt.allocPrint(self.arena.allocator(), "{s}::{s}", .{
                     namespace,
                     symName,
@@ -409,9 +410,11 @@ fn typecheckVariableDef(
                     });
                 }
                 else if (decl.topLevel) self.modules.modules.get(self.symbols.scopes.items(.module)[decl.scope]).name
-                else try self.folder.generateRandomNameString(.Type);
+                else try self.folder.generateRandomNameString(.Function);
+
             const newName =
-                if (self.hasMetadata(decl.node, "@export")) symName
+                if (self.hasMetadata(decl.node, "@export") and decl.topLevel) symName
+                else if (!decl.topLevel) namespace
                 else std.fmt.allocPrint(self.arena.allocator(), "{s}::{s}", .{
                     namespace,
                     symName,

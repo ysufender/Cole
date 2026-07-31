@@ -509,10 +509,10 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
         .VariableDef => {
             const typeID = self.data[node.value + 1];
             const info = self.types.get(typeID);
-            if (info == .Pointer and self.types.get(info.Pointer.child) == .Function) {
+            if (info == .Function) {
                 _ = std.mem.replace(u8, self.strings[self.data[node.value + 2]], "::", "__", @constCast(self.strings[self.data[node.value + 2]]));
-                try self.write(out, "{s}{s}", .{
-                    try self.getCName(info.Pointer.child, self.data[node.value + 2], false, false),
+                try self.writeln(out, "{s}{s}", .{
+                    try self.getCName(typeID, self.data[node.value + 2], false, false),
                     if (self.data[node.value + 3] == 1) ";\n" else " = ",
                 });
             }
