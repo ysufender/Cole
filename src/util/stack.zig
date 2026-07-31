@@ -143,9 +143,13 @@ pub fn Stack(comptime T: type) type {
             return self.index == 0;
         }
 
-        pub fn peek(self: *const Self) *T {
-            std.debug.assert(self.index > 0);
-            return &self.items[self.index - 1];
+        pub fn peek(self: *const Self) ?*T {
+            if (self.index == 0) {
+                return null;
+            }
+            else {
+                return &self.items[self.index - 1];
+            }
         }
 
         pub fn revert(self: *Self, index: u32) void {

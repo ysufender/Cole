@@ -509,6 +509,11 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
         .VariableDef => {
             const typeID = self.data[node.value + 1];
             const info = self.types.get(typeID);
+
+            if (info.isComptime(undefined)) {
+                return;
+            }
+
             if (info == .Function) {
                 _ = std.mem.replace(u8, self.strings[self.data[node.value + 2]], "::", "__", @constCast(self.strings[self.data[node.value + 2]]));
                 try self.writeln(out, "{s}{s}", .{

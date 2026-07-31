@@ -33,7 +33,7 @@ pub const TypeInfo = union(enum) {
     // @CompilerOnly
     pub fn isComptime(self: TypeInfo, _: *const Typechecker.TypeTable) bool {
         return switch (self) {
-            .Type, .ComptimeInt, .ComptimeFloat, .EnumLiteral => true,
+            .Function, .Type, .ComptimeInt, .ComptimeFloat, .EnumLiteral => true,
             else => false,
         };
     }

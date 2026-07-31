@@ -165,6 +165,14 @@ pub fn eval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeI
         .Assignment => try self.typechecker.typecheckExpression(exprPtr, maybeExpected),
     };
 
+    if (
+        self.typechecker.hasMetadata(exprPtr, "@comptime")
+        and self.memory.items[addr] != .Function
+    ) {
+        self.report("Redundant comptime marking in already comptime scope.", .{});
+        return Error.RedundantMark;
+    }
+
     defer self.dumpMem();
     self.cache.putNoClobber(self.arena.allocator(), key, @intCast(addr))
         catch return Error.AllocatorFailure;
@@ -1592,9 +1600,30 @@ fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID) 
         else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
     };
 
-    _ = function;
-    self.report("Comptime function calls are not (yet) supported.", .{});
-    return common.debug.NotImplemented(self.typechecker.context.log, @src());
+    const sign = self.typechecker.typeTable.get(function.signature).Function;
+
+    var args = self.arena.allocator().alloc(JIR.Ptr, function.args.len)
+        catch return Error.AllocatorFailure;
+
+    const argsListPtr = ast.extra[extraPtr + 1];
+    const argsList = ast.expressions.get(argsListPtr);
+    const argsRange = defines.Range{
+        .start = ast.extra[argsList.value],
+        .end = ast.extra[argsList.value + 1],
+    };
+
+    for (argsRange.start..argsRange.end, 0..) |argPtr, idx| {
+        const value = try self.eval(ast.extra[argPtr], sign.argTypes[idx]);
+        const constant = try self.typechecker.lowerer.addConstant(value, sign.argTypes[idx]);
+        const literal = try self.typechecker.builder.literal(constant);
+        args[idx] = literal;
+    }
+
+    return
+        if (try self.typechecker.executer.executeCall(&function, args)) |res|
+            self.appendValue(res)
+        else
+            @intFromEnum(Comptime.Value.Implicit.Void);
 }
 
 fn evalIndexing(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {

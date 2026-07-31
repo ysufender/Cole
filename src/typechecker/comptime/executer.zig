@@ -24,49 +24,38 @@ const TypeInfo = types.TypeInfo;
 const JIR = backend.C.JIR;
 
 const VariableMap = collections.HashMap(defines.StringPtr, Comptime.Value);
-const SymbolMap = collections.HashMap(defines.StringPtr, defines.Offset);
+const SymbolMap = collections.HashMap(defines.StringPtr, Symbol);
+const Stack = collections.Stack(Scope);
+
+const Symbol = struct {
+    pc: defines.Offset,
+    scope: defines.ScopePtr,
+};
 
 const Scope = struct {
-    parent: ?*Scope,
+    node: JIR.Ptr,
     variables: VariableMap,
     symbols: SymbolMap,
 
-    pub fn getVar(self: *const Scope, varname: defines.StringPtr) Comptime.Value {
-        return
-            if (self.variables.get(varname)) |v| v
-            else self.parent.?.getVar(varname);
-    }
-
-    pub fn setVar(self: *Scope, varname: defines.StringPtr, new: *const Comptime.Value) void {
-        if (self.variables.getEntry(varname)) |entry| {
-            entry.value_ptr.* = new.*;
-        }
-        else {
-            self.parent.?.setVar(varname, new);
-        }
-    }
-
-    pub fn getSym(self: *const Scope, sym: defines.StringPtr) defines.Offset {
-        return
-            if (self.symbols.get(sym)) |v| v
-            else self.parent.?.getSym(sym);
-    }
+    pub const Result = union(enum) {
+        Return: ?Comptime.Value,
+        Void,
+    };
 };
 
 const Executer = @This();
 
 typechecker: *Typechecker,
 arena: Arena,
-scope: Scope = .{
-    .parent = null,
-    .variables = .empty,
-    .symbols = .empty,
-},
+stack: Stack,
 
-pub fn init(allocator: Allocator, typechecker: *Typechecker) Executer {
+pub fn init(typechecker: *Typechecker, allocator: Allocator) Error!Executer {
+    var arena = Arena.init(allocator);
+
     return .{
-        .arena = Arena.init(allocator),
+        .arena = arena,
         .typechecker = typechecker,
+        .stack = try Stack.init(arena.allocator(), 512),
     };
 }
 
@@ -74,28 +63,33 @@ pub fn executeCall(
     self: *Executer,
     func: *const JIR.Function,
     args: []JIR.Ptr
-) Error!Comptime.Value {
+) Error!?Comptime.Value {
     var variables = VariableMap.empty;
-    variables.ensureTotalCapacity(self.arena.allocator(), args.len)
+    variables.ensureTotalCapacity(self.arena.allocator(), @intCast(args.len))
         catch return Error.AllocatorFailure;
 
     for (args, 0..) |arg, i| {
         variables.putAssumeCapacityNoClobber(func.args[i], try self.expression(arg));
     }
 
-    var parent = self.scope;
-    self.scope = .{
-        .parent = &parent,
+    try self.stack.push(.{
+        .node = 0,
         .symbols = .empty,
-    };
-    defer self.scope = parent;
+        .variables = variables,
+    });
+    defer _ = self.stack.pop();
 
-    return self.executeBlock(func.body);
+    return switch (try self.executeBlock(func.body)) {
+        .Return => |r| r,
+        else => null,
+    };
 }
 
-pub fn executeBlock(self: *Executer, nodePtr: JIR.Ptr) Error!Comptime.Value {
-    const stmtsLen = self.typechecker.builder.data.items[nodePtr];
-    const stmtsStart = nodePtr + 2;
+pub fn executeBlock(self: *Executer, nodePtr: JIR.Ptr) Error!Scope.Result {
+    const block = self.typechecker.builder.nodes.get(nodePtr);
+
+    const stmtsLen = self.typechecker.builder.data.items[block.value + 1];
+    const stmtsStart = block.value + 2;
     const stmts = self.typechecker.builder.data.items[stmtsStart..stmtsStart + stmtsLen];
 
     var varCount: u32 = 0;
@@ -117,7 +111,10 @@ pub fn executeBlock(self: *Executer, nodePtr: JIR.Ptr) Error!Comptime.Value {
     for (stmts, 0..) |stmtPtr, i| {
         const stmt = self.typechecker.builder.nodes.get(stmtPtr);
         if (stmt.type == .Label) {
-            labels.putAssumeCapacityNoClobber(stmt.value, @intCast(i));
+            labels.putAssumeCapacityNoClobber(stmt.value, .{
+                .pc = @intCast(i),
+                .scope = self.stack.index,
+            });
         }
     }
 
@@ -125,15 +122,28 @@ pub fn executeBlock(self: *Executer, nodePtr: JIR.Ptr) Error!Comptime.Value {
     variables.ensureTotalCapacity(self.arena.allocator(), varCount)
         catch return Error.AllocatorFailure;
 
-    var parent = self.scope;
-    self.scope = .{
-        .parent = &parent,
-        .variables = variables,
+    try self.stack.push(.{
+        .node = nodePtr,
         .symbols = labels,
-    };
+        .variables = variables,
+    });
+    defer _ = self.stack.pop();
 
+    return self.executeBlockLoop();
+}
+
+fn executeBlockLoop(self: *Executer) Error!Scope.Result {
     var pc: u32 = 0;
-    while (pc < stmts.len) : (pc += 1) {
+    while (true) : (pc += 1) {
+        const nodePtr = self.typechecker.builder.nodes.get(self.stack.peek().?.node).value;
+        const stmtsLen = self.typechecker.builder.data.items[nodePtr + 1];
+        const stmtsStart = nodePtr + 2;
+        const stmts = self.typechecker.builder.data.items[stmtsStart..stmtsStart + stmtsLen];
+        
+        if (pc >= stmts.len) {
+            return .{ .Return = null, };
+        }
+
         const stmtPtr = stmts[pc];
         const stmt = self.typechecker.builder.nodes.get(stmtPtr);
 
@@ -142,25 +152,132 @@ pub fn executeBlock(self: *Executer, nodePtr: JIR.Ptr) Error!Comptime.Value {
                 const typeID = self.typechecker.builder.data.items[stmt.value + 1];
                 const name = self.typechecker.builder.data.items[stmt.value + 2];
                 const undef = self.typechecker.builder.data.items[stmt.value + 3];
+                const value =
+                    if (undef == 1) Comptime.Value{.Undefined = typeID}
+                    else try self.expression(self.typechecker.builder.data.items[stmt.value + 4]);
 
-                self.scope.setVar(name,
-                    if (undef == 1) .{
-                        .Undefined = typeID,
-                    }
-                    else try self.expression(
-                        self.typechecker.builder.data.items[stmt.value + 3],
-                    )
-                );
+                const frame = self.stack.peek().?;
+                frame.variables.putAssumeCapacityNoClobber(name, value);
             },
-            .Scope => self.executeBlock(stmtPtr),
+            .Scope => switch (try self.executeBlock(stmtPtr)) {
+                .Return => |r| return .{ .Return = r }, 
+                else => { },
+            },
+            .Jump => {
+                const label = self.getSym(stmt.value);
+                pc = label.pc;
+                self.stack.revert(label.scope);
+            },
+            .JumpIf => {
+                const label = self.getSym(self.typechecker.builder.data.items[stmt.value]);
+                const cnd = self.typechecker.builder.data.items[stmt.value + 1];
+
+                if (!(try self.expression(cnd)).Bool) {
+                    continue;
+                }
+
+                pc = label.pc;
+                self.stack.revert(label.scope);
+            },
+            .Return => {
+                return .{ .Return = try self.expression(stmt.value) };
+            },
+            .Code => {
+                self.report("Comptime execution of embedded C code is not permitted.", .{});
+                return Error.ComptimeNotPossible;
+            },
+            .Exit => return .{ .Void = { } },
+            .TypeDef, .FunctionDef => { },
             .Assignment => {
                 self.report("Assignments are not yet allowed at comptime.", .{});
                 return Error.NotImplemented;
             },
+            else => return common.debug.NotImplemented(self.typechecker.context.log, @src()),
         }
     }
-    
-    return self.typechecker.folder.memory.items[Comptime.Value.Implicit.Void];
+
+    return .{ .Void = { } };
+}
+
+fn expression(self: *Executer, nodePtr: JIR.Ptr) Error!Comptime.Value {
+    const node = self.typechecker.builder.nodes.get(nodePtr);
+    return switch (node.type) {
+        .Literal => self.literal(nodePtr),
+        .Return, .FunctionDef, .TypeDef,
+        .Code, .JumpIf, .Scope, .Jump,
+        .Assignment, .VariableDef, .Exit => {
+            return common.debug.ShouldBeImpossible(undefined, @src());
+        },
+        .Grouping => self.expression(self.typechecker.builder.data.items[node.value + 1]),
+        .Identifier => self.getVar(node.value),
+        else => common.debug.NotImplemented(self.typechecker.context.log, @src()),
+    };
+}
+
+fn literal(self: *Executer, nodePtr: JIR.Ptr) Error!Comptime.Value {
+    return switch (self.typechecker.builder.constants.get(self.typechecker.builder.nodes.get(nodePtr).value)) {
+        .Function => |f| .{ .Function = self.typechecker.builder.functions.get(f) },
+        .Undefined => |t| .{ .Undefined = t },
+        .Float => |f| .{ .Float = f },
+        .Integer => |i| switch (i) {
+            .i32 => |ii32| .{ .Int = ii32 },
+            .u32 => |iu32| .{ .Int = iu32 },
+            .i8 => |ii8| .{ .Int = ii8 },
+            .u8 => |iu8| .{ .Int = iu8 },
+        },
+        .String => |s| .{ .String = self.typechecker.builder.getInternedString(s) },
+        .Type => |t| .{ .Type = t },
+        else => {
+            self.report("Aggregates and arrays are not comptime executable.", .{});
+            return Error.ComptimeNotPossible;
+        },
+    };
+}
+
+fn getVar(self: *const Executer, varname: defines.StringPtr) Comptime.Value {
+    var stack = self.stack;
+    while (true) {
+        if (stack.pop()) |st| {
+            if (st.variables.get(varname)) |v| {
+                return v;
+            }
+        }
+        else {
+            break;
+        }
+    }
+
+    unreachable;
+}
+
+fn setVar(self: *Executer, varname: defines.StringPtr, new: Comptime.Value) void {
+    var i = self.stack.index;
+    while (i > 0) {
+        i -= 1;
+        const frame = &self.stack.items[i];
+        if (frame.variables.getPtr(varname)) |ptr| {
+            ptr.* = new;
+            return;
+        }
+    }
+
+    unreachable;
+}
+
+fn getSym(self: *const Executer, sym: defines.StringPtr) Symbol {
+    var stack = self.stack;
+    while (true) {
+        if (stack.pop()) |st| {
+            if (st.symbols.get(sym)) |s| {
+                return s;
+            }
+        }
+        else {
+            break;
+        }
+    }
+
+    unreachable;
 }
 
 fn report(self: *Executer, comptime fmt: []const u8, args: anytype) void {

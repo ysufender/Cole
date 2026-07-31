@@ -80,6 +80,7 @@ lookup: LookupMap,
 metadata: MetadataMap,
 
 folder: Comptime.Folder,
+executer: Comptime.Executer,
 
 currentFile: defines.FilePtr,
 currentScope: defines.ScopePtr,
@@ -125,6 +126,7 @@ pub fn init(
         .lookup = lookup,
         .flags = FlagMap.initEmpty(),
         .folder = undefined,
+        .executer = undefined,
         .builder = try backend.C.JIR.Builder.init(allocator, counts),
         .lowerer = undefined,
         .symbols = symbolTable,
@@ -150,6 +152,7 @@ pub fn typecheck(self: *Typechecker, allocator: Allocator) Error!Resolution {
     self.builder.allocator = self.arena.allocator();
     self.folder = try Comptime.Folder.init(self, allocator);
     self.lowerer = try Lowerer.init(self);
+    self.executer = try Comptime.Executer.init(self, allocator);
 
     inline for (Comptime.Folder.builtinTypes, 0..) |builtin, id| {
         self.typeTable.appendAssumeCapacity(builtin.info);
@@ -264,6 +267,7 @@ fn typecheckVariableDef(
 ) Error!TypeID {
     const expected = try self.expectType(decl.type);
 
+    // @TODO Statements always fall to comptime path. Fix it.
     const initializer =
         if (decl.topLevel or expected == Comptime.Folder.Builtin.Type("type"))
             try self.typecheckValue(try self.folder.eval(decl.node, expected), expected)
