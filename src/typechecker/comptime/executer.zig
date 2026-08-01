@@ -210,6 +210,19 @@ fn expression(self: *Executer, nodePtr: JIR.Ptr) Error!Comptime.Value {
         },
         .Grouping => self.expression(self.typechecker.builder.data.items[node.value + 1]),
         .Identifier => self.getVar(node.value),
+        .ComptimeDef => self.typechecker.folder.getValue(
+            try self.typechecker.folder.eval(
+                node.value, 
+                Comptime.Folder.Builtin.Type("type")
+            )
+        ),
+        .Call => {
+            const func = (try self.expression(self.typechecker.builder.data.items[node.value + 1])).Function;
+            const argsLen = self.typechecker.builder.data.items[node.value + 2];
+            const argsStart = node.value + 3;
+            const args = self.typechecker.builder.data.items[argsStart..argsStart + argsLen];
+            return (try self.executeCall(&func, args)) orelse .{ .Void = { } };
+        },
         else => common.debug.NotImplemented(self.typechecker.context.log, @src()),
     };
 }
@@ -274,6 +287,22 @@ fn getSym(self: *const Executer, sym: defines.StringPtr) Symbol {
         }
         else {
             break;
+        }
+    }
+
+    unreachable;
+}
+
+pub fn paramType(self: *Executer, name: defines.StringPtr) Error!Comptime.Value {
+    var stack = self.stack;
+    while (true) {
+        if (stack.pop()) |st| {
+            if (st.variables.get(name)) |v| {
+                return v;
+            }
+        }
+        else {
+            return Error.EarlyTypecheck;
         }
     }
 
