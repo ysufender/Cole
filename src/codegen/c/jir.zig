@@ -228,6 +228,11 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
 
         const typeInfo = self.types.get(@intCast(typeID));
 
+        // @Beware I don't like this.
+        if (typeInfo.isZeroBit()) {
+            continue;
+        }
+
         switch (typeInfo) {
             .Array => |arr| {
                 const childName = switch (self.types.get(arr.child)) {
@@ -296,6 +301,11 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
                 try self.write(out, "typedef struct {s} {{\n", .{name});
                 for (str.fields) |field| {
                     const info = self.types.get(field.valueType);
+
+                    if (info.isZeroBit()) {
+                        continue;
+                    }
+
                     try self.write(out, "\t{s} {s};\n", .{
                         try self.getCName(field.valueType, field.name, info == .Function, false),
                         if (info == .Function)
@@ -325,9 +335,14 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
                         try self.getCName(uni.fields[0].valueType, null, false, false),
                         self.strings[uni.fields[0].name],
                     });
-                    try self.write(out, "\tunion {s} {{\n", .{name});
+                    try self.write(out, "\tunion {{\n", .{});
                     for (uni.fields[1..]) |field| {
                         const info = self.types.get(field.valueType);
+
+                        if (info.isZeroBit()) {
+                            continue;
+                        }
+
                         try self.write(out, "\t\t{s} {s};\n", .{
                             try self.getCName(field.valueType, field.name, false, false),
                             if (info == .Function)
@@ -345,6 +360,11 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
                     try self.write(out, "typedef union {s} {{\n", .{name});
                     for (uni.fields) |field| {
                         const info = self.types.get(field.valueType);
+
+                        if (info.isZeroBit()) {
+                            continue;
+                        }
+
                         try self.write(out, "\t{s} {s};\n", .{
                             try self.getCName(field.valueType, field.name, false, false),
                             if (info == .Function)

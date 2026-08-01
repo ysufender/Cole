@@ -33,61 +33,74 @@ import std::debug as Debug;
 
 let FILE = #(@extern) struct { };
 
-pub let OpenMode = enum {
-    Read,
-    Write,
-    ReadWrite,
-};
-
-pub let File = struct {
+let InFile = struct {
     handle: *mut FILE,
 };
 
-pub let open = fn (path: []u8, mode: OpenMode) -> File {
+let OutFile = struct {
+    handle: *mut FILE,
+};
+
+pub let File = union(enum) {
+    In: InFile,
+    Out: OutFile,
+    Inout: union {
+        in: InFile,
+        out: OutFile,
+    },
+};
+
+pub let openIn = fn (path: []u8) -> File {
     let file: mut *mut FILE = undefined;
+    code { file = fopen(path.ptr, "r"); }
+    return File(@In, file);
+};
 
-    switch mode {
-        @Read -> code { file = fopen(path.ptr, "r"); }
-        @Write -> code { file = fopen(path.ptr, "w"); }
-        else -> code { file = fopen(path.ptr, "w+"); }
-    }
+pub let openOut = fn (path: []u8) -> File {
+    let file: mut *mut FILE = undefined;
+    code { file = fopen(path.ptr, "w"); }
+    return File(@Out, file);
+};
 
-    return File(file);
+pub let openInout = fn (path: []u8) -> File {
+    let file: mut *mut FILE = undefined;
+    code { file = fopen(path.ptr, "w+"); }
+    return File(@Inout, file);
 };
 
 /* Status and File Actions */
 pub let close = fn (file: File) -> void {
-    code { fclose(file.handle); }
+    code { fclose(file.In.handle); }
 };
 
 pub let ok = fn (file: File) -> bool {
     let status: mut bool = false;
-    code { status = file.handle == NULL; }
+    code { status = file.In.handle == NULL; }
     return !status;
 };
 
 /* Writing */
-pub let println = fn (file: File, line: []u8) -> void {
+let writeln = fn (file: *OutFile, line: []u8) -> void {
     code { fprintf(file.handle, "%s\n", line.ptr); }
 };
 
-pub let print = fn (file: File, line: []u8) -> void {
+let writebuffer = fn (file: *OutFile, line: []u8) -> void {
     code { fprintf(file.handle, "%s", line.ptr); }
 };
 
-pub let writeByte = fn (file: File, byte: u8) -> void {
+let write = fn (file: *OutFile, byte: u8) -> void {
     code { fwrite(&byte, 1, 1, file.handle); }
 };
 
 /* Reading */
-pub let read = fn (file: File) -> i32 {
+let read = fn (file: *InFile) -> i32 {
     let res: mut i32 = -1;
     code { res = fgetc(file.handle); }
     return res;
 };
 
 /* Positioning */
-pub let seek = fn (file: File, pos: u32) -> bool {
+let seek = fn (file: File, pos: u32) -> bool {
     let res: mut bool = false;
     code { res = fseek(file.handle, pos, SEEK_SET) == 0; }
     return res;

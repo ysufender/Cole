@@ -28,6 +28,7 @@ const Memory = std.ArrayList(Comptime.Value);
 pub const Flags = enum(u3) {
     ComptimeBanned = 0,
     LValue = 1,
+    NoCache = 2,
 
     pub fn flag(flagToGet: Flags) u3 {
         return @intFromEnum(flagToGet);
@@ -72,18 +73,6 @@ pub fn init(typechecker: *Typechecker, gpa: Allocator) Error!Folder {
 }
 
 pub fn attemptEval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeID) ?Comptime.Value.Ptr {
-    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
-    const expr = ast.expressions.get(exprPtr);
-    if (
-        self.getFlag(.ComptimeBanned)
-        or (
-            expr.type != .FunctionDefinition
-            and self.typechecker.hasMetadata(exprPtr, "@noComptime")
-        )
-    ) {
-        return null;
-    }
-
     const prev = self.typechecker.setFlag(.AttemptingEval, true);
     defer _ = self.typechecker.setFlag(.AttemptingEval, prev);
     return self.eval(exprPtr, maybeExpected) catch null;
@@ -110,8 +99,10 @@ pub fn eval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeI
         .expr = exprPtr,
     };
 
-    if (self.cache.get(key)) |cached| {
-        return cached;
+    if (!self.getFlag(.NoCache)) {
+        if (self.cache.get(key)) |cached| {
+            return cached;
+        }
     }
 
     const expr = ast.expressions.get(exprPtr);
@@ -174,8 +165,12 @@ pub fn eval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeI
     }
 
     defer self.dumpMem();
-    self.cache.putNoClobber(self.arena.allocator(), key, @intCast(addr))
-        catch return Error.AllocatorFailure;
+
+    if (!self.getFlag(.NoCache)) {
+        self.cache.putNoClobber(self.arena.allocator(), key, @intCast(addr))
+            catch return Error.AllocatorFailure;
+    }
+
     return addr;
 }
 
@@ -223,11 +218,31 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
         const name = tokens.get(param.name).lexeme(self.typechecker.context, self.typechecker.currentFile);
         argNames[paramPtrPtr - paramsRange.start] = try self.typechecker.builder.internString(name);
 
-
         if (self.typechecker.typeTable.get(argType).isComptime(&self.typechecker.typeTable)) {
             isComptime = true;
         }
 
+        const scope = self.typechecker.symbols.resolutionMap.get(.{
+            .expr = exprPtr,
+            .file = self.typechecker.currentFile,
+        }).?;
+
+        const declPtr = self.typechecker.symbols.lookup.get(.{
+            .name = name,
+            .scope = scope,
+        }).?;
+        const decl = self.typechecker.symbols.getDecl(declPtr);
+        self.typechecker.symbols.declarations.set(declPtr, .{
+            .scope = decl.scope,
+            .name = try self.typechecker.builder.internString(name),
+            .kind = decl.kind,
+            .node = decl.node,
+            .public = decl.public,
+            .token = decl.token,
+            .topLevel = decl.topLevel,
+            .type = decl.type,
+            .parent = decl.parent,
+        });
 
         if (self.typechecker.typeTable.get(argType).isZeroBit() and !isComptime) {
             self.report("Zero bit-sized parameter '{s}' is not allowed.", .{
@@ -260,7 +275,12 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
     const pc = self.typechecker.setFlag(.CoveredAllPaths, false);
     defer _ = self.typechecker.setFlag(.CoveredAllPaths, pc);
 
+    const prevComp = self.typechecker.getFlag(.InComptimeCall);
+    if (isComptime) {
+        _ = self.typechecker.setFlag(.InComptimeCall, true);
+    }
     try self.typechecker.typecheckStatement(bodyPtr, returnType);
+    _ = self.typechecker.setFlag(.InComptimeCall, prevComp);
 
     if (!(
         self.typechecker.typeTable.get(returnType).isZeroBit()
@@ -852,6 +872,7 @@ fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID) Err
             .expr = decl.node,
         })) |capture| capture
         else Error.ComptimeNotPossible,
+        .Parameter => self.appendValue(try self.typechecker.executer.paramType(decl.name)),
         else => |t| {
             self.report("{s} declaration is not implemented.", .{@tagName(t)});
             return common.debug.NotImplemented(self.typechecker.context.log, @src());
@@ -950,7 +971,8 @@ fn evalLiteral(self: *Folder, tokenPtr: defines.TokenPtr, maybeExpected: ?TypeID
                     },
                 }
                 else switch (self.typechecker.typeTable.get(expected)) {
-                    .Enum => |enm| ret: for (enm.fields, 0..) |field, index| {
+                    .Enum => |enm|
+                    ret: for (enm.fields, 0..) |field, index| {
                         if (std.mem.eql(u8, field, lexeme[1..])) {
                             break :ret Comptime.Value{
                                 .Enum = .{
@@ -1619,6 +1641,8 @@ fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID) 
         args[idx] = literal;
     }
 
+    const prev = self.setFlag(.NoCache, true);
+    defer _ = self.setFlag(.NoCache, prev);
     return
         if (try self.typechecker.executer.executeCall(&function, args)) |res|
             self.appendValue(res)
@@ -1967,7 +1991,7 @@ fn castValue(self: *Folder, valuePtr: Comptime.Value.Ptr, to: TypeID) Error!Comp
     return valuePtr;
 }
 
-fn comptimeEq(self: *const Folder, lhs: Comptime.Value, rhs: Comptime.Value) bool {
+pub fn comptimeEq(self: *const Folder, lhs: Comptime.Value, rhs: Comptime.Value) bool {
     assert(std.meta.activeTag(lhs) == std.meta.activeTag(rhs));
 
     return switch (lhs) {

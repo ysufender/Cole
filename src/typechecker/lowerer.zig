@@ -542,6 +542,11 @@ fn variableDef(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     const decl = self.typechecker.symbols.getDecl(declPtr);
 
     if (typeID == Comptime.Folder.Builtin.Type("type")) {
+        if (self.typechecker.hasMetadata(decl.node, "@extern")) {
+            common.debug.hello(1);
+            return self.typechecker.builder.scope(0, &.{});
+        }
+
         const vdef = try self.typechecker.builder.typeDef(
             self.typechecker.folder.getValue(
                 try self.typechecker.folder.eval(decl.node, null),

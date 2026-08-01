@@ -11,6 +11,7 @@ pub const StaticStack = stack.StaticStack;
 pub const StaticRingStack = stack.StaticRingStack;
 pub const Stack = stack.Stack;
 pub const HashMap = @import("hashmap.zig").HashMap;
+pub const HashMapCustom = @import("hashmap.zig").HashMapCustom;
 
 fn determine(comptime ptr: type) struct {
     PtrType: std.builtin.Type.Pointer.Size,

@@ -49,6 +49,7 @@ pub const Flags = enum(u8) {
     CoveredAllPaths = 4,
     InLoop = 5,
     InDefer = 6,
+    InComptimeCall = 7,
 
     pub fn flag(flagToGet: Flags) u8 {
         return @intFromEnum(flagToGet);
@@ -949,7 +950,16 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
         .ExpressionList => self.typecheckExpressionList(expr.value, maybeExpected),
         .Literal => self.typecheckValue(try self.folder.eval(expressionPtr, maybeExpected), maybeExpected),
 
-        .EnumDefinition, .UnionDefinition, .StructDefinition,
+        .EnumDefinition, .UnionDefinition, .StructDefinition => {
+            const val = self.folder.eval(expressionPtr, maybeExpected) catch |err| switch (err) {
+                Error.EarlyTypecheck =>
+                    if (self.getFlag(.InComptimeCall)) return Comptime.Folder.Builtin.Type("type")
+                    else return err,
+                else => return err,
+            };
+            return self.typecheckValue(val, maybeExpected);
+        },
+
         .ArrayType, .CPointerType, .FunctionType,
         .MutableType, .PointerType, .SliceType,
         .FunctionDefinition, .Lambda => self.typecheckValue(
@@ -1011,6 +1021,10 @@ pub fn typecheckIfExpression(self: *Typechecker, extraPtr: defines.OpaquePtr, ma
 }
 
 pub fn typecheckValue(self: *Typechecker, val: Comptime.Value.Ptr, maybeExpected: ?TypeID) Error!TypeID {
+    return self.typecheckValueDirect(self.folder.getValue(val), maybeExpected);
+}
+
+pub fn typecheckValueDirect(self: *Typechecker, val: Comptime.Value, maybeExpected: ?TypeID) Error!TypeID {
     const expected = determineExpected(maybeExpected) orelse
         if (false) {
             self.report("Expected a known target type for comptime typechecking.", .{});
@@ -1018,7 +1032,7 @@ pub fn typecheckValue(self: *Typechecker, val: Comptime.Value.Ptr, maybeExpected
         }
         else Comptime.Folder.Builtin.Type("any");
 
-    return self.coerce(expected, switch (self.folder.getValue(val)) {
+    return self.coerce(expected, switch (val) {
         .Int => Comptime.Folder.Builtin.Type("comptime_int"),
         .Float => Comptime.Folder.Builtin.Type("comptime_float"),
         .Bool => Comptime.Folder.Builtin.Type("bool"),
@@ -2494,13 +2508,45 @@ fn typecheckSwitchOnEnum(
     return expected orelse common.debug.ShouldBeImpossible(self.context.log, @src());
 }
 
-pub fn registerType(self: *Typechecker, newType: TypeInfo) Error!TypeID {
+pub fn registerType(self: *Typechecker, _newType: TypeInfo) Error!TypeID {
+    var newType = _newType;
+
+    // @Beware trying to cache-esque
+    const name = res: switch (newType) {
+        .Struct => |str| {
+            newType.Struct.name = 0;
+            break :res str.name;
+        },
+        .Union => |uni| {
+            newType.Union.name = 0;
+            break :res uni.name;
+        },
+        .Enum => |enm| {
+            newType.Enum.name = 0;
+            break :res enm.name;
+        },
+        else => null,
+    };
+
     const isPresent = self.typeMap.getOrPut(self.arena.allocator(), newType)
         catch return Error.AllocatorFailure;
 
     if (!isPresent.found_existing) {
         const typeID = try self.typeTable.addOne(self.arena.allocator());
         isPresent.value_ptr.* = @intCast(typeID);
+
+        switch (newType) {
+            .Struct => {
+                newType.Struct.name = name orelse newType.Struct.name;
+            },
+            .Union => {
+                newType.Union.name = name orelse newType.Union.name;
+            },
+            .Enum => {
+                newType.Enum.name = name orelse newType.Enum.name;
+            },
+            else => { },
+        }
 
         self.typeTable.set(typeID, newType);
         _ = try self.typeName(self.arena.allocator(), isPresent.value_ptr.*); // force intern type name
