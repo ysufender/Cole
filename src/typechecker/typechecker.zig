@@ -445,7 +445,7 @@ fn typecheckVariableDef(
                     .signature = func.signature,
                     .body = func.body,
                     .args = func.args,
-                    .sourceFile = func.sourceFile,
+                    .source = func.source,
                 },
             };
 
@@ -3310,3 +3310,4 @@ fn unwrapMark(self: *Typechecker, exprPtr: defines.ExpressionPtr) defines.Expres
     }
     return e;
 }
+

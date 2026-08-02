@@ -61,11 +61,9 @@ pub fn init(typechecker: *Typechecker, allocator: Allocator) Error!Executer {
 
 pub fn executeCall(
     self: *Executer,
-    _func: *const JIR.Function,
+    func: *const JIR.Function,
     args: []JIR.Ptr
 ) Error!?Comptime.Value {
-    var func = _func.*;
-
     var variables = VariableMap.empty;
     variables.ensureTotalCapacity(self.arena.allocator(), @intCast(args.len))
         catch return Error.AllocatorFailure;
@@ -81,32 +79,34 @@ pub fn executeCall(
     });
     defer _ = self.stack.pop();
 
-    const sig = self.typechecker.typeTable.get(func.signature).Function;
+    const sign = self.typechecker.typeTable.get(func.signature).Function;
+    if (sign.isComptime) {
+        const prev = self.typechecker.currentFile;
+        defer self.typechecker.currentFile = prev;
+        self.typechecker.currentFile = func.source;
+        try self.typechecker.typecheckStatement(func.body, sign.returnType);
 
-    // @TODO Fix
-    const prevf = self.typechecker.currentFile;
-    self.typechecker.currentFile = func.sourceFile orelse self.typechecker.currentFile;
-    defer self.typechecker.currentFile = prevf;
-
-    if (sig.isComptime) {
-        try self.typechecker.typecheckStatement(func.body, sig.returnType);
         if (!(
-            self.typechecker.typeTable.get(sig.returnType).isZeroBit()
+            self.typechecker.typeTable.get(sign.returnType).isZeroBit()
             or self.typechecker.getFlag(.CoveredAllPaths)
         )) {
             self.typechecker.report("Function with return type '{s}' does not return a value in all code paths.", .{
-                try self.typechecker.typeName(self.arena.allocator(), sig.returnType),
+                try self.typechecker.typeName(self.arena.allocator(), sign.returnType),
             });
             return Error.UncoveredCodePath;
         }
 
-        func.body = try self.typechecker.lowerer.statement(func.body);
+        return switch (try self.executeBlock(try self.typechecker.lowerer.statement(func.body))) {
+            .Return => |r| r,
+            else => null,
+        };
     }
-
-    return switch (try self.executeBlock(func.body)) {
-        .Return => |r| r,
-        else => null,
-    };
+    else {
+        return switch (try self.executeBlock(func.body)) {
+            .Return => |r| r,
+            else => null,
+        };
+    }
 }
 
 pub fn executeBlock(self: *Executer, nodePtr: JIR.Ptr) Error!Scope.Result {
