@@ -292,6 +292,8 @@ fn typecheckVariableDef(
         .Type => {
             const newType = self.folder.getValue(try self.folder.eval(decl.node, expected)).Type;
 
+            const typeInfo = self.typeTable.get(newType);
+
             const ast = self.context.getAST(self.currentFile);
             const tokens = self.context.getTokens(ast.tokens);
 
@@ -321,7 +323,7 @@ fn typecheckVariableDef(
                 }) catch return Error.AllocatorFailure;
             const new = try self.builder.internString(newName);
 
-            self.typeTable.set(newType, switch (self.typeTable.get(newType)) {
+            self.typeTable.set(newType, switch (typeInfo) {
                 .Struct => |str| .{
                     .Struct = .{
                         .mutable = str.mutable,
@@ -367,6 +369,13 @@ fn typecheckVariableDef(
                 else => return common.debug.ShouldBeImpossible(self.context.log, @src()),
             });
 
+            const scope = switch (typeInfo) {
+                .Struct => |str| str.scope,
+                .Union => |str| str.scope,
+                .Enum => |str| str.scope,
+                else => return common.debug.ShouldBeImpossible(undefined, @src()),
+            };
+
             for (defs, 0..) |def, idx| {
                 const nname = std.fmt.allocPrint(self.arena.allocator(),
                     "{s}::{s}", .{
@@ -380,11 +389,6 @@ fn typecheckVariableDef(
                     .public = def.public,
                     .isComptime = def.isComptime,
                 };
-
-                const scope = self.symbols.resolutionMap.get(.{
-                    .file = self.currentFile,
-                    .expr = self.unwrapMark(decl.node),
-                }) orelse return common.debug.ShouldBeImpossible(self.context.log, @src());
 
                 const rres = self.symbols.lookup.fetchRemove(.{
                     .scope = scope,
@@ -441,6 +445,7 @@ fn typecheckVariableDef(
                     .signature = func.signature,
                     .body = func.body,
                     .args = func.args,
+                    .sourceFile = func.sourceFile,
                 },
             };
 
@@ -950,18 +955,9 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
         .ExpressionList => self.typecheckExpressionList(expr.value, maybeExpected),
         .Literal => self.typecheckValue(try self.folder.eval(expressionPtr, maybeExpected), maybeExpected),
 
-        .EnumDefinition, .UnionDefinition, .StructDefinition => {
-            const val = self.folder.eval(expressionPtr, maybeExpected) catch |err| switch (err) {
-                Error.EarlyTypecheck =>
-                    if (self.getFlag(.InComptimeCall)) return Comptime.Folder.Builtin.Type("type")
-                    else return err,
-                else => return err,
-            };
-            return self.typecheckValue(val, maybeExpected);
-        },
-
         .ArrayType, .CPointerType, .FunctionType,
-        .MutableType, .PointerType, .SliceType,
+        .MutableType, .PointerType, .SliceType, 
+        .EnumDefinition, .UnionDefinition, .StructDefinition,
         .FunctionDefinition, .Lambda => self.typecheckValue(
             try self.folder.eval(expressionPtr, maybeExpected),
             maybeExpected,
@@ -1070,7 +1066,7 @@ pub fn typecheckExpressionList(self: *Typechecker, extra: defines.OpaquePtr, _ma
     const expected =
         if (maybeExpected) |expected|
             if (range.len() == 1) switch (self.typeTable.get(expected)) {
-                .Type, .Array => return self.typecheckExpressionListRange(range, expected),
+                .Type, .Struct, .Enum, .Union, .Array => return self.typecheckExpressionListRange(range, expected),
                 else => return self.typecheckExpression(ast.extra[range.at(0)], expected),
             }
             else expected
@@ -2750,7 +2746,7 @@ pub fn assertCanCoerce(self: *const Typechecker, this: TypeID, that: TypeID) Err
     return switch (thatType) {
         .Noreturn => { },
         .ComptimeInt => functional.throwIf(!self.isInt(this) and !self.isFloat(this), Error.TypeMismatch),
-        .ComptimeFloat => functional.throwIf(!self.isFloat(this) and !self.isInt(this), Error.TypeMismatch),
+        .ComptimeFloat => functional.throwIf(!self.isFloat(this), Error.TypeMismatch),
         .Float => functional.throwIf(!self.isFloat(this), Error.TypeMismatch),
         .Integer => |itype| switch (thisType) {
             .Integer => |i2type| functional.throwIf(itype.size > i2type.size, Error.TypeMismatch),

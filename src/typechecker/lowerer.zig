@@ -317,7 +317,7 @@ pub fn statement(self: *Lowerer, statementPtr: defines.StatementPtr) Error!JIR.P
         .Return => try self.@"return"(try self.expression(stmt.value, self.lastReturnType)),
         .Break => try self.@"break"(),
         .Continue => try self.@"continue"(),
-        .Discard => try self.expression(stmt.value, try self.typechecker.typecheckExpression(stmt.value, null)),
+        .Discard => try self.expressionStmt(stmt.value),
         .VariableDefinition => try self.variableDef(stmt.value),
         .Import => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
 

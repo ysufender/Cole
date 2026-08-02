@@ -28,7 +28,7 @@ const Memory = std.ArrayList(Comptime.Value);
 pub const Flags = enum(u3) {
     ComptimeBanned = 0,
     LValue = 1,
-    NoCache = 2,
+    InComptimeCall = 2,
 
     pub fn flag(flagToGet: Flags) u3 {
         return @intFromEnum(flagToGet);
@@ -98,7 +98,7 @@ pub fn eval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeI
         .expr = exprPtr,
     };
 
-    if (!self.getFlag(.NoCache)) {
+    if (!self.typechecker.getFlag(.InComptimeCall)) {
         if (self.cache.get(key)) |cached| {
             return cached;
         }
@@ -165,8 +165,16 @@ pub fn eval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeI
 
     defer self.dumpMem();
 
-    if (!self.getFlag(.NoCache)) {
-        self.cache.putNoClobber(self.arena.allocator(), key, @intCast(addr))
+    if (self.memory.items[addr] == .Function) {
+        var f = self.memory.items[addr].Function;
+        if (f.sourceFile == null) {
+            f.sourceFile = file;
+            self.memory.items[addr] = .{ .Function = f };
+        }
+    }
+
+    if (!self.typechecker.getFlag(.InComptimeCall)) {
+        self.cache.put(self.arena.allocator(), key, @intCast(addr))
             catch return Error.AllocatorFailure;
     }
 
@@ -274,13 +282,17 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
     const pc = self.typechecker.setFlag(.CoveredAllPaths, false);
     defer _ = self.typechecker.setFlag(.CoveredAllPaths, pc);
 
-    const prevComp = self.typechecker.getFlag(.InComptimeCall);
-    if (isComptime) {
-        _ = self.typechecker.setFlag(.InComptimeCall, true);
+    if (isComptime and !self.typechecker.getFlag(.InComptimeCall)) {
+        return self.appendValue(.{ .Function = .{
+            .signature = functionType,
+            .body = bodyPtr,
+            .name = try self.generateRandomName(.Function),
+            .args = argNames,
+            .sourceFile = self.typechecker.currentFile,
+        }});
     }
-    try self.typechecker.typecheckStatement(bodyPtr, returnType);
-    _ = self.typechecker.setFlag(.InComptimeCall, prevComp);
 
+    try self.typechecker.typecheckStatement(bodyPtr, returnType);
     if (!(
         self.typechecker.typeTable.get(returnType).isZeroBit()
         or self.typechecker.getFlag(.CoveredAllPaths)
@@ -296,6 +308,7 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
         .body = try self.typechecker.lowerer.statement(bodyPtr),
         .name = try self.generateRandomName(.Function),
         .args = argNames,
+        .sourceFile = self.typechecker.currentFile,
     };
 
     return self.appendValue(.{
@@ -1668,8 +1681,9 @@ fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID) 
         args[idx] = literal;
     }
 
-    const prev = self.setFlag(.NoCache, true);
-    defer _ = self.setFlag(.NoCache, prev);
+    const prev = self.typechecker.setFlag(.InComptimeCall, true);
+    defer _ = self.typechecker.setFlag(.InComptimeCall, prev);
+
     return
         if (try self.typechecker.executer.executeCall(&function, args)) |res|
             self.appendValue(res)
@@ -1923,6 +1937,7 @@ fn castValue(self: *Folder, valuePtr: Comptime.Value.Ptr, to: TypeID) Error!Comp
                 .body = func.body,
                 .name = func.name,
                 .signature = to,
+                .sourceFile = func.sourceFile,
             },
         },
         .Float => |fromFloat| switch (self.typechecker.typeTable.get(to)) {

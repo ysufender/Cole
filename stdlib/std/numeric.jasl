@@ -22,12 +22,12 @@
         Contains definitions for mathematical operations. For more
         "theoric" side of the numbers, see std::numeric.
 */
-import std::math as M;
-import std::comptime as CT;
 
 pub let Integer = struct {
     pub let Check = fn (T: type) -> bool {
-        return typeInfo(T).tag == @Integer;
+        return
+            T == i32 or T == i8 or T == u8 or T == u32
+            or T == mut i32 or T == mut i8 or T == mut u8 or T == mut u32;
     };
     
     pub let Trait = fn (T: type) -> type {
@@ -55,11 +55,11 @@ pub let Numeric = struct {
 
 pub let Signed = struct {
     pub let Check = fn (T: type) -> bool {
-        return switch typeInfo(T) {
-            @Integer -> |i| i.signed,
-            @Float -> true,
-            else -> false,
-        };
+        switch typeInfo(T) {
+            @Integer -> |i| return i.signed;
+            @Float -> return true;
+            else -> return false;
+        }
     }; 
 
     pub let Trait = fn (T: type) -> type {
@@ -82,150 +82,5 @@ pub let Unsigned = struct {
         }
 
         return T;
-    };
-};
-
-pub let Limits = fn (T: type) -> type {
-    return struct {
-        pub let Max = switch typeInfo(Numeric::Trait(T)) {
-            @Integer -> |i|
-                if (i.signed) M::pow(2, i.size - 1) - 1
-                else M::pow(2, i.size) - 1,
-            @Float -> 340282350000000000000000000000000000000.0,
-            else -> unreachable(),
-        };
-
-        pub let Min = switch typeInfo(Numeric::Trait(T)) {
-            @Integer -> |i|
-                if (i.signed) -M::pow(2, i.size - 1)
-                else 0,
-            @Float -> -Max(T),
-            else -> unreachable(),
-        };
-    };
-};
-
-pub let Addable = struct {
-    let Self = this();
-
-    pub let Check = fn (T: type) -> bool {
-        let trait = CT::TraitInfo(
-            typeInfo(Self).Struct.name, (
-                CT::MemberInfo(@Definition, (true, "add", *fn (T, T) -> T)),
-            ),
-        );
-
-        return switch typeInfo(T) {
-            @Integer -> true,
-            @Float -> true,
-            @Struct -> CT::CheckTrait(trait, T),
-            else -> false,
-        };
-    };
-
-    pub let Trait = fn (T: type) -> type {
-        let trait = CT::TraitInfo(
-            typeInfo(Self).Struct.name, (
-                CT::MemberInfo(@Definition, (true, "add", *fn (T, T) -> T)),
-            ),
-        );
-
-        return switch typeInfo(T) {
-            @Integer -> T,
-            @Float -> T,
-            @Struct -> CT::VerifyTrait(trait, T),
-            else -> compileError("Given type '{any}' is not addable.", (T)),
-        };
-    };
-
-    pub let Generic = fn (T: type, lhs: Trait(T), rhs: Trait(T)) -> T {
-        return switch typeInfo(T) {
-            @Struct -> lhs.add(rhs),
-            else -> lhs + rhs,
-        };
-    };
-};
-
-pub let Negatable = struct {
-    let Self = this();
-
-    pub let Check = fn (T: type) -> bool {
-        let trait = CT::TraitInfo(
-            typeInfo(Self).Struct.name, (
-                CT::MemberInfo(@Definition, (true, "neg", *fn (T) -> T)),
-            ),
-        );
-
-        return switch typeInfo(T) {
-            @Integer -> |i| i.signed,
-            @Float -> true,
-            @Struct -> CT::CheckTrait(trait, T),
-            else -> false,
-        };
-    };
-
-    pub let Trait = fn (T: type) -> type {
-        let trait = CT::TraitInfo(
-            typeInfo(Self).Struct.name, (
-                CT::MemberInfo(@Definition, (true, "neg", *fn (T) -> T)),
-            ),
-        );
-
-        return switch typeInfo(T) {
-            @Integer -> |i|
-                if (i.signed) T
-                else compileError("Negation on unsigned integers is not allowed.", ()),
-            @Float -> T,
-            @Struct -> CT::VerifyTrait(trait, T),
-            else -> compileError("Given type '{any}' is not negatable.", (T)),
-        };
-    };
-
-    pub let Generic = fn (T: type, n: Trait(T)) -> T {
-        return switch typeInfo(T) {
-            @Struct -> n.neg(),
-            else -> -n,
-        };
-    };
-};
-
-pub let Subtractable = struct {
-    let Self = this();
-
-    pub let Check = fn (T: type) -> bool {
-        return Negatable::Check(T) and Addable::Check(T);
-    };
-
-    pub let Trait = fn (T: type) -> type {
-        let trait = CT::TraitInfo(
-            typeInfo(Self).Struct.name, (
-                CT::MemberInfo(@Definition, (true, "sub", *fn (T, T) -> T)),
-            ),
-        );
-
-        if CT::CheckTrait(trait, T) {
-            return T;
-        }
-
-        if Check(T) {
-            return T;
-        }
-
-        compileError("A subtractable type must either be both negatable and addable, or implement 'sub' method.", ());
-    };
-
-    pub let Generic = fn (T: type, lhs: Trait(T), rhs: Trait(T)) -> T {
-        let trait = CT::TraitInfo(
-            typeInfo(Self).Struct.name, (
-                CT::MemberInfo(@Definition, (true, "sub", *fn (T, T) -> T)),
-            ),
-        );
-
-        return switch typeInfo(T) {
-            @Struct ->
-                if (CT::CheckTrait(T)) lhs.sub(rhs)
-                else lhs.add(rhs.neg()),
-            else -> lhs - rhs,
-        };
     };
 };
