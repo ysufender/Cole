@@ -25,8 +25,9 @@ allocator: Allocator,
 keyNodes: std.ArrayList(JIR.Ptr),
 strings: InternTable,
 topLevelAsms: std.ArrayList(defines.StringPtr),
+typechecker: *Typechecker,
 
-pub fn init(allocator: Allocator, counts: common.CompilerContext.Counts) Error!Builder {
+pub fn init(allocator: Allocator, counts: common.CompilerContext.Counts, typechecker: *Typechecker) Error!Builder {
     var strings = InternTable.empty;
     strings.ensureTotalCapacity(allocator, counts.string + counts.types * 4 + counts.functions)
         catch return Error.AllocatorFailure;
@@ -43,13 +44,14 @@ pub fn init(allocator: Allocator, counts: common.CompilerContext.Counts) Error!B
         .topLevelAsms = try std.ArrayList(defines.StringPtr).initCapacity(allocator, 128),
         .strings = strings,
         .allocator = allocator,
+        .typechecker = typechecker,
     };
 }
 
-pub fn build(self: *const Builder, allocator: Allocator, typechecker: *const Typechecker) Error!JIR {
+pub fn build(self: *const Builder, allocator: Allocator) Error!JIR {
     return .{
-        .types = try collections.deepCopy(typechecker.typeTable.slice(), allocator),
-        .typeNames = try collections.deepCopy(typechecker.typenameMap, allocator),
+        .types = try collections.deepCopy(self.typechecker.typeTable.slice(), allocator),
+        .typeNames = try collections.deepCopy(self.typechecker.typenameMap, allocator),
         .strings = try collections.deepCopy(self.strings.keys(), allocator),
         .constants = try collections.deepCopy(self.constants.slice(), allocator),
         .functions = try collections.deepCopy(self.functions.slice(), allocator),
@@ -57,7 +59,7 @@ pub fn build(self: *const Builder, allocator: Allocator, typechecker: *const Typ
         .keyNodes = try collections.deepCopy(self.keyNodes.items, allocator),
         .data = try collections.deepCopy(self.data.items, allocator),
         .topLevelAsms = try collections.deepCopy(self.topLevelAsms.items, allocator),
-        .context = typechecker.context,
+        .context = self.typechecker.context,
     };
 }
 
@@ -124,7 +126,9 @@ pub inline fn typeDef(self: *Builder, typeID: TypeID) Error!JIR.Ptr {
     return res;
 }
 
-pub inline fn comptimeDef(self: *Builder, exprPtr: defines.ExpressionPtr) Error!JIR.Ptr { return self.commonSingle(.ComptimeDef, exprPtr); }
+pub inline fn comptimeDef(self: *Builder, exprPtr: defines.ExpressionPtr) Error!JIR.Ptr {
+    return self.commonBinary(.ComptimeDef, exprPtr, self.typechecker.currentFile);
+}
 
 pub inline fn @"return"(self: *Builder, expr: JIR.Ptr) Error!JIR.Ptr {
     const res = try self.commonSingle(.Return, expr);

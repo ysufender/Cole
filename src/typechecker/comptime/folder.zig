@@ -78,8 +78,7 @@ pub fn attemptEval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected:
     return self.eval(exprPtr, maybeExpected) catch null;
 }
 
-pub fn eval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeID) Error!Comptime.Value.Ptr {
-    const typechecker = self.typechecker;
+pub fn eval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeID) Error!Comptime.Value.Ptr {    const typechecker = self.typechecker;
     const file = typechecker.currentFile;
     const ast = typechecker.context.getAST(file);
 
@@ -889,6 +888,7 @@ fn evalBuiltinCall(self: *Folder, extraPtr: defines.OpaquePtr, declPtr: defines.
         BI("as") => self.evalTypeForwarding(extraPtr, maybeExpected),
         BI("typeOf") => self.evalTypeOf(extraPtr),
         BI("compileError") => self.evalCompileError(extraPtr),
+        BI("typeName") => self.evalTypeName(extraPtr),
         BI("unreachable") => {
             self.report("Reached unreachable code.", .{});
             return Error.UnreachableCodePath;
@@ -1345,8 +1345,35 @@ pub fn evalCompileLog(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime
         position.line,
         position.column,
     });
-    token.printLocation(self.arena.allocator(), self.typechecker.context, self.typechecker.currentFile, position, self.typechecker.callstack.size == 1);
+    token.printLocationInfo(self.arena.allocator(), self.typechecker.context, self.typechecker.currentFile, position, self.typechecker.callstack.size == 1);
     return @intFromEnum(Comptime.Value.Implicit.Void);
+}
+
+pub fn evalTypeName(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {
+    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+
+    const expressionList = ast.expressions.items(.value)[ast.extra[extraPtr + 1]];
+    const args = defines.Range{
+        .start = ast.extra[expressionList],
+        .end = ast.extra[expressionList + 1],
+    };
+
+    if (args.len() != 1) {
+        self.report("'typeName' expects a single expression argument, received {d}.", .{
+            args.len(),
+        });
+        return Error.ArgumentCountMismatch;
+    }
+
+    return self.appendValue(switch (self.getValue(try self.eval(ast.extra[args.at(0)], null))) {
+        .Type => |t| .{ .String = self.typechecker.builder.getInternedString(
+            self.typechecker.typenameMap.get(t) orelse return common.debug.ShouldBeImpossible(undefined, @src()),
+        )},
+        else => {
+            self.report("Expected a string message in compile error.", .{});
+            return Error.TypeMismatch;
+        },
+    });
 }
 
 pub fn evalCompileError(self: *Folder, extraPtr: defines.OpaquePtr) Error {

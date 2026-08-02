@@ -245,7 +245,7 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
             }
         },
         .Bool => |boolValue| .{ .Integer = .{ .u8 = @intFromBool(boolValue), }, },
-        .Void => {
+        .Void => if (false) {
             self.report(
                 "I don't even know what happened, but somehow you tried to "
                 ++ "create a constant value of type 'void'. I don't think that is "
@@ -261,7 +261,8 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
             common.debug.stackTrace(@frameAddress(), &stderr);
 
             return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
-        },
+        }
+        else .{ .Void = { } },
 
         .Function => |func| .{
             .Function = func.name,
@@ -828,11 +829,14 @@ pub fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID
 
         .Scoping => self.scoping(expr.value),
 
-        .EnumDefinition, .StructDefinition, .UnionDefinition,
+        .Lambda, .FunctionDefinition,
+        .EnumDefinition, .StructDefinition, .UnionDefinition => {
+            return self.typechecker.builder.comptimeDef(exprPtr);
+        },
+
         .FunctionType, .ArrayType,
         .CPointerType, .MutableType, .PointerType,
-        .Lambda, .FunctionDefinition,
-        .SliceType => self.typechecker.builder.comptimeDef(exprPtr),
+        .SliceType => common.debug.ShouldBeImpossible(undefined, @src()),
 
         .Assignment => {
             self.report(

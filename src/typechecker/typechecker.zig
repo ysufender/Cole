@@ -128,7 +128,7 @@ pub fn init(
         .flags = FlagMap.initEmpty(),
         .folder = undefined,
         .executer = undefined,
-        .builder = try backend.C.JIR.Builder.init(allocator, counts),
+        .builder = undefined,
         .lowerer = undefined,
         .symbols = symbolTable,
         .currentFile = 0,
@@ -150,7 +150,7 @@ pub fn typecheck(self: *Typechecker, allocator: Allocator) Error!Resolution {
         return Error.MissingDefinition;
     }
 
-    self.builder.allocator = self.arena.allocator();
+    self.builder = try backend.C.JIR.Builder.init(self.arena.child_allocator, self.context.counts, self);
     self.folder = try Comptime.Folder.init(self, allocator);
     self.lowerer = try Lowerer.init(self);
     self.executer = try Comptime.Executer.init(self, allocator);
@@ -233,7 +233,7 @@ pub fn typecheck(self: *Typechecker, allocator: Allocator) Error!Resolution {
         return Error.TypeMismatch;
     }
 
-    return self.builder.build(allocator, self);
+    return self.builder.build(allocator);
 }
 
 pub fn typecheckStatement(self: *Typechecker, statementPtr: defines.StatementPtr, expected: TypeID) Error!void {
@@ -1070,7 +1070,7 @@ pub fn typecheckExpressionList(self: *Typechecker, extra: defines.OpaquePtr, _ma
     const expected =
         if (maybeExpected) |expected|
             if (range.len() == 1) switch (self.typeTable.get(expected)) {
-                .Struct, .Union, .Enum, .Array => return self.typecheckExpressionListRange(range, expected),
+                .Type, .Array => return self.typecheckExpressionListRange(range, expected),
                 else => return self.typecheckExpression(ast.extra[range.at(0)], expected),
             }
             else expected
@@ -1429,9 +1429,7 @@ pub fn typecheckCall(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpec
     const maybeFunction = self.typeTable.get(lhsType);
     const func = switch (maybeFunction) {
         .Type => {
-            const typeToInit =
-                if (determineExpected(maybeExpected)) |exp| exp
-                else self.folder.getValue(try self.folder.eval(ast.extra[extraPtr], null)).Type;
+            const typeToInit = self.folder.getValue(try self.folder.eval(ast.extra[extraPtr], null)).Type;
 
             return self.typecheckExpressionList(
                 ast.expressions.items(.value)[ast.extra[extraPtr + 1]],
@@ -1508,6 +1506,7 @@ pub fn typecheckBuiltinCall(self: *Typechecker, extraPtr: defines.ExpressionPtr,
         BI("typeOf") => Comptime.Folder.Builtin.Type("type"), // self.executer.getValue(try self.executer.evalTypeOf(extraPtr)).Type,
         BI("compileError") => return self.folder.evalCompileError(extraPtr),
         BI("sizeOf") => return Comptime.Folder.Builtin.Type("u32"),
+        BI("typeName") => return Comptime.Folder.Builtin.Type("[]u8"),
         BI("compileLog") => {
             _ = try self.folder.evalCompileLog(extraPtr);
             return Comptime.Folder.Builtin.Type("void");
@@ -2783,6 +2782,10 @@ pub fn assertCanCoerce(self: *const Typechecker, this: TypeID, that: TypeID) Err
 pub fn assertComparable(self: *const Typechecker, this: TypeID, that: TypeID) Error!void {
     const thisType = self.typeTable.get(this);
     const thatType = self.typeTable.get(that);
+
+    if (thisType == .Type and thatType == .Type) {
+        return;
+    }
 
     if (thisType.isZeroBit() or thatType.isZeroBit()) {
         return Error.OperationOnZeroBitSize;

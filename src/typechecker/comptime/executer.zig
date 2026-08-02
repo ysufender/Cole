@@ -210,12 +210,18 @@ fn expression(self: *Executer, nodePtr: JIR.Ptr) Error!Comptime.Value {
         },
         .Grouping => self.expression(self.typechecker.builder.data.items[node.value + 1]),
         .Identifier => self.getVar(node.value),
-        .ComptimeDef => self.typechecker.folder.getValue(
-            try self.typechecker.folder.eval(
-                node.value, 
-                Comptime.Folder.Builtin.Type("type")
-            )
-        ),
+        .ComptimeDef => {
+            const prev = self.typechecker.currentFile;
+            self.typechecker.currentFile = self.typechecker.builder.data.items[node.value + 1];
+            defer self.typechecker.currentFile = prev;
+
+            const valID = try self.typechecker.folder.eval(
+                    self.typechecker.builder.data.items[node.value],
+                    Comptime.Folder.Builtin.Type("type"),
+            );
+            const val = self.typechecker.folder.getValue(valID);
+            return val;
+        },
         .Call => {
             const func = (try self.expression(self.typechecker.builder.data.items[node.value + 1])).Function;
             const argsLen = self.typechecker.builder.data.items[node.value + 2];
@@ -249,14 +255,9 @@ fn literal(self: *Executer, nodePtr: JIR.Ptr) Error!Comptime.Value {
 
 fn getVar(self: *const Executer, varname: defines.StringPtr) Comptime.Value {
     var stack = self.stack;
-    while (true) {
-        if (stack.pop()) |st| {
-            if (st.variables.get(varname)) |v| {
-                return v;
-            }
-        }
-        else {
-            break;
+    while (stack.pop()) |st| {
+        if (st.variables.get(varname)) |v| {
+            return v;
         }
     }
 
@@ -279,14 +280,9 @@ fn setVar(self: *Executer, varname: defines.StringPtr, new: Comptime.Value) void
 
 fn getSym(self: *const Executer, sym: defines.StringPtr) Symbol {
     var stack = self.stack;
-    while (true) {
-        if (stack.pop()) |st| {
-            if (st.symbols.get(sym)) |s| {
-                return s;
-            }
-        }
-        else {
-            break;
+    while (stack.pop()) |st| {
+        if (st.symbols.get(sym)) |s| {
+            return s;
         }
     }
 
@@ -295,18 +291,13 @@ fn getSym(self: *const Executer, sym: defines.StringPtr) Symbol {
 
 pub fn paramType(self: *Executer, name: defines.StringPtr) Error!Comptime.Value {
     var stack = self.stack;
-    while (true) {
-        if (stack.pop()) |st| {
+    while (stack.pop()) |st| {
             if (st.variables.get(name)) |v| {
                 return v;
             }
-        }
-        else {
-            return Error.EarlyTypecheck;
-        }
     }
 
-    unreachable;
+    return Error.EarlyTypecheck;
 }
 
 fn report(self: *Executer, comptime fmt: []const u8, args: anytype) void {

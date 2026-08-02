@@ -26,7 +26,7 @@
 pub let Option = fn (T: type) -> type {
     return union(enum) {
         Some: T,
-        None: u8,
+        None: void,
     };
 };
 

@@ -14,7 +14,10 @@ const Prepass = @import("parser/prepass.zig");
 const Resolver = @import("typechecker/resolver.zig");
 const Typechecker = @import("typechecker/typechecker.zig");
 
+pub var start: std.Io.Timestamp = undefined;
+
 pub fn main(init: std.process.Init) void {
+    start = std.Io.Clock.now(.real, init.io);
     MainProcInit = init;
 
     innerMain(
@@ -47,7 +50,10 @@ pub fn main(init: std.process.Init) void {
         });
     };
 
-    common.log.info("Compiler exited successfully.", .{});
+    common.log.info("Compilation took {d} miliseconds.", .{
+        start.durationTo(std.Io.Clock.now(.real, init.io)).toMilliseconds(),
+    });
+    common.log.info("Exited successfully.", .{});
 }
 
 fn innerMain(allocator: std.mem.Allocator, init: std.process.Init) common.CompilerError!void {

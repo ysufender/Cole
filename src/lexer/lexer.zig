@@ -134,6 +134,33 @@ pub const Token = struct {
         ) catch "AllocatorFailure";
         common.log.err("{s}{s}", .{locationIdentifier, if (last) "\n" else ""});
     }
+
+    pub fn printLocationInfo(
+        token: Token,
+        gpa: std.mem.Allocator,
+        context: *const common.CompilerContext,
+        file: defines.FilePtr,
+        pos: Position,
+        last: bool
+    ) void {
+        // TODO: Optimize
+        const errLine = token.errIdentifier(context, file);
+        common.log.info("{s}", .{errLine});
+        var locationIdentifier: []const u8 = "";
+        for (0..pos.column - 1) |_| {
+            locationIdentifier = std.fmt.allocPrint(
+                gpa,
+                "{s} ",
+                .{locationIdentifier}
+            ) catch "AllocatorFailure";
+        }
+        locationIdentifier = std.fmt.allocPrint(
+            gpa,
+            "{s}^ Here.",
+            .{locationIdentifier}
+        ) catch "AllocatorFailure";
+        common.log.info("{s}{s}", .{locationIdentifier, if (last) "\n" else ""});
+    }
 };
 
 const Lexer = @This();

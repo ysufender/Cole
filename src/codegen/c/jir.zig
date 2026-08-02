@@ -104,6 +104,7 @@ pub const Constant = union(enum) {
     Undefined: TypeID,
     Function: defines.StringPtr,
     Type: TypeID,
+    Void: void,
 };
 
 pub const Function = struct {
@@ -419,6 +420,11 @@ fn discoverFunctionsAndTypes(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void 
         .VariableDef => if (self.data[node.value] == 1) {
             const typeID = self.data[node.value + 1];
             const info = self.types.get(typeID);
+
+            if (info == .Void) {
+                return;
+            }
+ 
             if (info == .Function) {
                 _ = std.mem.replace(u8, self.strings[self.data[node.value + 2]], "::", "__", @constCast(self.strings[self.data[node.value + 2]]));
                 try self.write(out, "extern {s};\n\n", .{
@@ -529,6 +535,10 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
         .VariableDef => {
             const typeID = self.data[node.value + 1];
             const info = self.types.get(typeID);
+
+            if (info == .Void) {
+                return;
+            }
 
             if (info.isComptime(undefined)) {
                 return;
@@ -708,6 +718,7 @@ fn literal(self: *JIR, out: *Writer, ptr: Constant.Ptr) Error!void {
     const cst = self.constants.get(ptr);
 
     try switch (cst) {
+        .Void => try self.write(out, "((void)0)", .{}),
         .Type => |id| try self.write(out, "{s}", .{try self.getCName(id, null, false, false)}),
         .Undefined => |typeID|
             if (self.types.get(typeID) == .Pointer) self.write(out, "(({s})NULL)", .{ try self.getCName(typeID, null, false, false)})
