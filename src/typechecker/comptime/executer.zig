@@ -84,22 +84,83 @@ pub fn executeCall(
         const prev = self.typechecker.currentFile;
         defer self.typechecker.currentFile = prev;
         self.typechecker.currentFile = func.source;
+
         try self.typechecker.typecheckStatement(func.body, sign.returnType);
 
-        if (!(
-            self.typechecker.typeTable.get(sign.returnType).isZeroBit()
-            or self.typechecker.getFlag(.CoveredAllPaths)
-        )) {
-            self.typechecker.report("Function with return type '{s}' does not return a value in all code paths.", .{
-                try self.typechecker.typeName(self.arena.allocator(), sign.returnType),
-            });
-            return Error.UncoveredCodePath;
-        }
-
-        return switch (try self.executeBlock(try self.typechecker.lowerer.statement(func.body))) {
+        const val = switch (try self.executeBlock(try self.typechecker.lowerer.statement(func.body))) {
             .Return => |r| r,
             else => null,
         };
+
+        if (val == null or val.? != .Type) {
+            return val;
+        }
+
+        const rv = self.typechecker.typeTable.get(val.?.Type);
+        switch (rv) {
+            .Struct, .Union, .Enum => {
+                const scope = switch (rv) {
+                    .Struct => |str| str.scope,
+                    .Enum => |str| str.scope,
+                    .Union => |str| str.scope,
+                    else => unreachable,
+                };
+
+                const defs: []types.FieldInfo = @constCast(switch (rv) {
+                    .Struct => |str| str.definitions,
+                    .Enum => |str| str.definitions,
+                    .Union => |str| str.definitions,
+                    else => unreachable,
+                });
+
+                for (defs) |*member| {
+                    const declPtr = self.typechecker.symbols.lookup.get(.{
+                        .scope = scope,
+                        .name = self.typechecker.builder.getInternedString(member.name),
+                    }) orelse return common.debug.ShouldBeImpossible(undefined, @src());
+
+                    const discoveredType = try self.typechecker.typecheckDecl(declPtr, null);
+                    _ = try self.typechecker.folder.evalDecl(declPtr, discoveredType);
+                    member.valueType = discoveredType;
+                }
+
+                self.typechecker.typeTable.set(val.?.Type, switch (rv) {
+                    .Enum => |enm| .{
+                        .Enum = .{
+                            .name = enm.name,
+                            .definitions = defs,
+                            .scope = enm.scope,
+                            .fields = enm.fields,
+                            .mutable = enm.mutable,
+                        },
+                    },
+                    .Struct => |str| .{
+                        .Struct = .{
+                            .name = str.name,
+                            .definitions = defs,
+                            .scope = str.scope,
+                            .fields = str.fields,
+                            .mutable = str.mutable,
+                        },
+                    },
+                    .Union => |uni| .{
+                        .Union = .{
+                            .isTagged = uni.isTagged,
+                            .tag = uni.tag,
+                            .name = uni.name,
+                            .definitions = defs,
+                            .scope = uni.scope,
+                            .fields = uni.fields,
+                            .mutable = uni.mutable,
+                        },
+                    },
+                    else => return common.debug.ShouldBeImpossible(undefined, @src()),
+                });
+            },
+            else => { },
+        }
+
+        return val;
     }
     else {
         return switch (try self.executeBlock(func.body)) {
@@ -316,12 +377,13 @@ fn getSym(self: *const Executer, sym: defines.StringPtr) Symbol {
 pub fn paramType(self: *Executer, name: defines.StringPtr) Error!Comptime.Value {
     var stack = self.stack;
     while (stack.pop()) |st| {
-            if (st.variables.get(name)) |v| {
-                return v;
-            }
+        if (st.variables.get(name)) |v| {
+            return v;
+        }
     }
 
-    return Error.EarlyTypecheck;
+    self.report("Failed to find '{s}' in the current scope.", .{self.typechecker.builder.getInternedString(name)});
+    return Error.MissingDefinition;
 }
 
 fn report(self: *Executer, comptime fmt: []const u8, args: anytype) void {

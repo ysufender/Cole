@@ -35,23 +35,6 @@ pub let Create = fn (T: type) -> type {
         pub let abs = fn (val: T) -> T {
             return if (val > 0) val else -val;
         };
-<<<<<<< HEAD
-||||||| parent of 8f831d1 (trying to fix generic definitions)
-pub let abs = fn (val: float) -> float {
-    return if (val > 0) val else -val;
-};
-
-pub let sin = fn (angle: float) -> float {
-    let res: mut float = 0.0;
-    code { res = sinf(180 * angle); }
-    return res;
-};
-
-pub let random = fn (max: float) -> float {
-    let res: mut float = 0;
-    code { res = (float)((float)rand() + (((float)rand() / (float)rande()))); }
-    return res;
-=======
 
         pub let sin = fn (angle: T) -> T {
             let res: mut T = 0.0;
@@ -61,9 +44,8 @@ pub let random = fn (max: float) -> float {
 
         pub let random = fn (max: T) -> T {
             let res: mut T = 0;
-            code { res = (T)((T)rand() + (((T)rand() / (T)rande()))); }
+            code { res = (T)((T)rand() + (((T)rand() / (T)rand()))); }
             return res;
         };
->>>>>>> 8f831d1 (trying to fix generic definitions)
     };
 };

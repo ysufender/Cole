@@ -377,10 +377,13 @@ fn typecheckVariableDef(
             };
 
             for (defs, 0..) |def, idx| {
+                var defName = self.builder.getInternedString(def.name);
+                defName = defName[std.mem.findScalarLast(u8, defName, ':') orelse 0..];
+
                 const nname = std.fmt.allocPrint(self.arena.allocator(),
                     "{s}::{s}", .{
                         newName,
-                        self.builder.getInternedString(def.name),
+                        defName,
                 }) catch return Error.AllocatorFailure;
 
                 defs[idx] = Types.FieldInfo{
@@ -1739,10 +1742,11 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
 
     if (isPresent.found_existing) {
         switch (isPresent.value_ptr.status) {
-            .Checked =>
+            .Checked => {
                 if (isPresent.value_ptr.result != Comptime.Folder.Builtin.Type("incomplete")) {
                     return isPresent.value_ptr.result;
-                } else {},
+                }
+            },
             .InProgress => {
                 if (!self.getFlag(.CanCycle)) {
                     self.report("Dependency cycle detected. '{s}' depends on itself.", .{
@@ -1768,6 +1772,10 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
         .parent = decl.parent,
         .name = res: {
             const symName = tokens.get(decl.token).lexeme(self.context, self.currentFile);
+
+            if (decl.kind != .Variable) {
+                break :res try self.builder.internString(symName);
+            }
 
             const namespace =
                 if (decl.parent != null and self.typeTable.get(try self.typecheckDecl(decl.parent.?, null)) == .Type) hasParent: {
@@ -1815,10 +1823,18 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
         .Field => self.typecheckField(&decl),
     };
 
-    isPresent.value_ptr.* = .{
-        .status = .Checked,
-        .result = declType,
-    };
+    if (self.getFlag(.InComptimeCall) and !decl.topLevel) {
+        isPresent.value_ptr.* = .{
+            .status = .NotChecked,
+            .result = declType,
+        };
+    }
+    else {
+        isPresent.value_ptr.* = .{
+            .status = .Checked,
+            .result = declType,
+        };
+    }
 
     if (decl.topLevel) {
         try self.lowerer.topLevelDeclaration(isPresent.key_ptr.*, &decl);
