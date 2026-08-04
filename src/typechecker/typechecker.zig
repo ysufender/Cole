@@ -378,7 +378,8 @@ fn typecheckVariableDef(
 
             for (defs, 0..) |def, idx| {
                 var defName = self.builder.getInternedString(def.name);
-                defName = defName[std.mem.findScalarLast(u8, defName, ':') orelse 0..];
+                const i = std.mem.findScalarLast(u8, defName, ':') orelse 0;
+                defName = defName[if (i == 0) 0 else i + 1..];
 
                 const nname = std.fmt.allocPrint(self.arena.allocator(),
                     "{s}::{s}", .{
@@ -393,10 +394,25 @@ fn typecheckVariableDef(
                     .isComptime = def.isComptime,
                 };
 
+                common.log.debug("Def get {d} {s}", .{scope, self.builder.getInternedString(def.name)});
+
                 const rres = self.symbols.lookup.fetchRemove(.{
                     .scope = scope,
                     .name = self.builder.getInternedString(def.name),
                 }) orelse return common.debug.ShouldBeImpossible(self.context.log, @src());
+
+                const d = self.symbols.getDecl(rres.value);
+                self.symbols.declarations.set(rres.value, .{
+                    .name = def.name,
+                    .scope = scope,
+                    .public = d.public,
+                    .type = d.type,
+                    .kind = d.kind,
+                    .node = d.node,
+                    .token = d.token,
+                    .topLevel = d.topLevel,
+                    .parent = d.parent,
+                });
 
                 self.symbols.lookup.putAssumeCapacityNoClobber(.{
                     .scope = scope,
