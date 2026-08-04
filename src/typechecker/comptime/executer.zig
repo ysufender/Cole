@@ -85,7 +85,18 @@ pub fn executeCall(
         defer self.typechecker.currentFile = prev;
         self.typechecker.currentFile = func.source;
 
+        const prevc = self.typechecker.setFlag(.CoveredAllPaths, false);
         try self.typechecker.typecheckStatement(func.body, sign.returnType);
+        if (!(
+            self.typechecker.typeTable.get(sign.returnType).isZeroBit()
+            or self.typechecker.getFlag(.CoveredAllPaths)
+        )) {
+            self.typechecker.report("Function with return type '{s}' does not return a value in all code paths.", .{
+                try self.typechecker.typeName(self.arena.allocator(), sign.returnType),
+            });
+            return Error.UncoveredCodePath;
+        }
+        _ = self.typechecker.setFlag(.CoveredAllPaths, prevc);
 
         const val = switch (try self.executeBlock(try self.typechecker.lowerer.statement(func.body))) {
             .Return => |r| r,

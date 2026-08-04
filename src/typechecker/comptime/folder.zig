@@ -890,7 +890,7 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
         },
     };
 
-    if (!self.typechecker.getFlag(.InComptimeCall) or !decl.topLevel) {
+    if (!self.typechecker.getFlag(.InComptimeCall)) {
         self.cache.putNoClobber(self.arena.allocator(), declPtr, res)
             catch return Error.AllocatorFailure;
     }
@@ -1910,7 +1910,8 @@ fn handleScopeDecls(
     tokens: *const Lexer.TokenList.Slice,
     defRange: defines.Range,
 ) Error![]types.FieldInfo {
-    const of = self.typechecker.builder.getInternedString(_of);
+    _ = _of;
+    _ = scope;
     const allocator = self.arena.allocator();
 
     const defsBuffer = allocator.alloc(types.FieldInfo, defRange.len()) catch return Error.AllocatorFailure;
@@ -1919,47 +1920,16 @@ fn handleScopeDecls(
     for (0..defRange.len()) |defIndex| {
         const defPtr = ast.extra[defRange.at(@intCast(defIndex))];
         const valPtr: defines.OpaquePtr = ast.statements.items(.value)[defPtr];
-
         const signature = ast.extra[valPtr];
-
         const sig = ast.signatures.get(signature);
         const symbolToken = tokens.get(sig.name);
         const symbolName = symbolToken.lexeme(self.typechecker.context, self.typechecker.currentFile);
 
-        const name = std.fmt.allocPrint(self.arena.allocator(), "{s}::{s}", .{of, symbolName})
-            catch return Error.AllocatorFailure;
-
-        const def = self.typechecker.symbols.lookup.fetchRemove(.{
-            .scope = scope,
-            .name = symbolName,
-        }).?.value;
-
-        const decl = self.typechecker.symbols.getDecl(def);
-        self.typechecker.symbols.declarations.set(def, .{
-            .name = try self.typechecker.builder.internString(name),
-            .scope = scope,
-            .public = decl.public,
-            .type = decl.type,
-            .kind = decl.kind,
-            .node = decl.node,
-            .token = decl.token,
-            .topLevel = decl.topLevel,
-            .parent = decl.parent,
-        });
-
-        common.log.debug("Def set {d} {s}", .{scope, name});
-
-        self.typechecker.symbols.lookup.putAssumeCapacityNoClobber(.{
-            .scope = scope,
-            .name = name,
-        }, def);
-
         defs.appendAssumeCapacity(.{
             .public = sig.public,
-            .name = try self.typechecker.builder.internString(name),
+            .name = try self.typechecker.builder.internString(symbolName),
             .valueType = Builtin.Type("incomplete"),
             .isComptime = false,
-            // .valueType = (try self.typechecker.expectType(sig.type)),
         });
     }
 
