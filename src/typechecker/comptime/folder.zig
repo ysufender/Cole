@@ -22,7 +22,8 @@ const JIR = backend.C.JIR;
 const Comptime = @import("../comptime.zig");
 
 const FlagMap = std.bit_set.IntegerBitSet(8);
-const Cache = collections.HashMap(defines.DeclPtr, Comptime.Value.Ptr);
+const Cache = collections.HashMap(Resolver.ResolutionKey, Comptime.Value.Ptr);
+const DeclCache = collections.HashMap(defines.DeclPtr, Comptime.Value.Ptr);
 const Memory = std.ArrayList(Comptime.Value);
 
 pub const Flags = enum(u3) {
@@ -37,6 +38,10 @@ pub const Flags = enum(u3) {
 const Folder = @This();
 
 cache: Cache,
+
+/// @Readonly in this file. Intended for use in executer.zig
+declCache: DeclCache,
+
 typechecker: *Typechecker,
 
 arena: Arena,
@@ -55,6 +60,9 @@ pub fn init(typechecker: *Typechecker, gpa: Allocator) Error!Folder {
     var cache = Cache.empty;
     cache.ensureTotalCapacity(allocator, typechecker.symbols.resolutionMap.count()) catch return Error.AllocatorFailure;
 
+    var declCache = DeclCache.empty;
+    declCache.ensureTotalCapacity(allocator, typechecker.symbols.declarations.len) catch return Error.AllocatorFailure;
+
     var memory = Memory.initCapacity(allocator, 512) catch return Error.AllocatorFailure;
     memory.appendAssumeCapacity(.{ .Type = Builtin.Type("any") });
     memory.appendAssumeCapacity(.{ .Type = Builtin.Type("incomplete") });
@@ -64,6 +72,7 @@ pub fn init(typechecker: *Typechecker, gpa: Allocator) Error!Folder {
         .typechecker = typechecker,
         .gpa = gpa,
         .cache = cache,
+        .declCache = declCache,
         .memory = memory,
         .flags = FlagMap.initEmpty(),
         .rng = std.Random.DefaultPrng.init(5315),
@@ -77,8 +86,19 @@ pub fn attemptEval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected:
     return self.eval(exprPtr, maybeExpected) catch null;
 }
 
-pub fn eval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeID) Error!Comptime.Value.Ptr {    const typechecker = self.typechecker;
+pub fn eval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeID) Error!Comptime.Value.Ptr {
+    const typechecker = self.typechecker;
     const file = typechecker.currentFile;
+
+    const key = Resolver.ResolutionKey{
+        .file = file,
+        .expr = exprPtr,
+    };
+
+    if (self.cache.get(key)) |cached| {
+        return cached;
+    }
+
     const ast = typechecker.context.getAST(file);
 
     if (
@@ -150,6 +170,8 @@ pub fn eval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeI
         self.report("Redundant comptime marking in already comptime scope.", .{});
         return Error.RedundantMark;
     }
+
+    self.cache.putNoClobber(self.arena.allocator(), key, addr) catch return Error.AllocatorFailure;
 
     defer self.dumpMem();
     return addr;
@@ -261,16 +283,6 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
 
     const pc = self.typechecker.setFlag(.CoveredAllPaths, false);
     defer _ = self.typechecker.setFlag(.CoveredAllPaths, pc);
-
-    if (isComptime and !self.typechecker.getFlag(.InComptimeCall)) {
-        return self.appendValue(.{ .Function = .{
-            .signature = functionType,
-            .body = bodyPtr,
-            .name = try self.generateRandomName(.Function),
-            .args = argNames,
-            .source = self.typechecker.currentFile,
-        }});
-    }
 
     try self.typechecker.typecheckStatement(bodyPtr, returnType);
     if (!(
@@ -746,7 +758,10 @@ fn evalSwitchExpression(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpecte
                         .file = self.typechecker.currentFile,
                         .expr = firstCapture,
                     });
-                    self.cache.putNoClobber(self.arena.allocator(), capture, varToSwitchOn) catch return Error.AllocatorFailure;
+                    self.cache.putNoClobber(self.arena.allocator(), .{
+                        .file = self.typechecker.currentFile,
+                        .expr = capture,
+                    }, varToSwitchOn) catch return Error.AllocatorFailure;
                 }
 
                 return self.expectDefined(ast.extra[case + 3], resultType);
@@ -786,7 +801,10 @@ fn evalSwitchExpression(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpecte
                         .file = self.typechecker.currentFile,
                         .expr = firstCapture,
                     });
-                    self.cache.putNoClobber(self.arena.allocator(), capture, varToSwitchOn) catch return Error.AllocatorFailure;
+                    self.cache.putNoClobber(self.arena.allocator(), .{
+                        .file = self.typechecker.currentFile,
+                        .expr = capture,
+                    }, varToSwitchOn) catch return Error.AllocatorFailure;
                 }
 
                 return self.expectDefined(ast.extra[case + 3], resultType);
@@ -817,8 +835,9 @@ fn evalIfExpression(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?
 }
 
 pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID) Error!Comptime.Value.Ptr {    const decls = self.typechecker.symbols.declarations;
-    if (self.cache.get(declPtr)) |res| {
-        return res;
+    // @Readonly never write, only read here.
+    if (self.declCache.get(declPtr)) |val| {
+        return val;
     }
 
     const decl  = decls.get(declPtr);
@@ -866,26 +885,15 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
             const valuePtr = try self.expectDefined(decl.node, maybeExpected);
             break :blk self.castValue(valuePtr, expected);
         },
-        // @Beware I'm not sure if this works anymore.
         .Capture =>
-            if (self.cache.get(declPtr)) |capture| capture
+            if (self.cache.get(.{ .file = self.typechecker.currentFile, .expr = decl.node })) |capture| capture
             else Error.ComptimeNotPossible,
-        .Parameter =>
-            if (self.typechecker.getFlag(.InComptimeCall)) self.appendValue(try self.typechecker.executer.paramType(decl.name))
-            else {
-                self.report("Attempt to typecheck incomplete value '{s}'.", .{self.typechecker.builder.getInternedString(decl.name)});
-                return Error.EarlyTypecheck;
-            },
+        .Parameter => common.debug.NotImplemented(self.typechecker.context.log, @src()),
         else => |t| {
             self.report("{s} declaration is not implemented.", .{@tagName(t)});
             return common.debug.NotImplemented(self.typechecker.context.log, @src());
         },
     };
-
-    if (!self.typechecker.getFlag(.InComptimeCall)) {
-        self.cache.putNoClobber(self.arena.allocator(), declPtr, res)
-            catch return Error.AllocatorFailure;
-    }
 
     return res;
 }
@@ -1661,34 +1669,9 @@ fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID) 
         else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
     };
 
-    const prev = self.typechecker.setFlag(.InComptimeCall, true);
-    defer _ = self.typechecker.setFlag(.InComptimeCall, prev);
-    _ = try self.typechecker.typecheckCall(extraPtr, maybeExpected);
-
-    const sign = self.typechecker.typeTable.get(function.signature).Function;
-
-    var args = self.arena.allocator().alloc(JIR.Ptr, function.args.len)
-        catch return Error.AllocatorFailure;
-
-    const argsListPtr = ast.extra[extraPtr + 1];
-    const argsList = ast.expressions.get(argsListPtr);
-    const argsRange = defines.Range{
-        .start = ast.extra[argsList.value],
-        .end = ast.extra[argsList.value + 1],
-    };
-
-    for (argsRange.start..argsRange.end, 0..) |argPtr, idx| {
-        const value = try self.eval(ast.extra[argPtr], sign.argTypes[idx]);
-        const constant = try self.typechecker.lowerer.addConstant(value, sign.argTypes[idx]);
-        const literal = try self.typechecker.builder.literal(constant);
-        args[idx] = literal;
-    }
-
-    return
-        if (try self.typechecker.executer.executeCall(&function, args)) |res|
-            self.appendValue(res)
-        else
-            @intFromEnum(Comptime.Value.Implicit.Void);
+    _ = function;
+    self.report("Comptime function calls are not yet supported.", .{});
+    return common.debug.NotImplemented(self.typechecker.context.log, @src());
 }
 
 fn evalIndexing(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {

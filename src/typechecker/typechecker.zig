@@ -27,7 +27,7 @@ const Error = common.CompilerError;
 const Context = common.CompilerContext;
 const Arena = std.heap.ArenaAllocator;
 const Allocator = std.mem.Allocator;
-const Callstack = collections.StaticRingStack(defines.DeclPtr, defines.stackLimit);
+const Callstack = collections.StaticRingStack(defines.DeclPtr, defines.callstackLimit);
 const FlagMap = std.bit_set.IntegerBitSet(8);
 
 const BuiltinIndex = Resolver.BuiltinIndex;
@@ -49,7 +49,6 @@ pub const Flags = enum(u8) {
     CoveredAllPaths = 4,
     InLoop = 5,
     InDefer = 6,
-    InComptimeCall = 7,
 
     pub fn flag(flagToGet: Flags) u8 {
         return @intFromEnum(flagToGet);
@@ -152,8 +151,9 @@ pub fn typecheck(self: *Typechecker, allocator: Allocator) Error!Resolution {
 
     self.builder = try backend.C.JIR.Builder.init(self.arena.child_allocator, self.context.counts, self);
     self.folder = try Comptime.Folder.init(self, allocator);
-    self.lowerer = try Lowerer.init(self);
+    self.folder = try Comptime.Folder.init(self, allocator);
     self.executer = try Comptime.Executer.init(self, allocator);
+    self.lowerer = try Lowerer.init(self);
 
     inline for (Comptime.Folder.builtinTypes, 0..) |builtin, id| {
         self.typeTable.appendAssumeCapacity(builtin.info);
@@ -1502,7 +1502,7 @@ pub fn typecheckBuiltinCall(self: *Typechecker, extraPtr: defines.ExpressionPtr,
         BI("cast") => self.typecheckCast(extraPtr, maybeExpected, false),
         BI("unsafeCast") => self.typecheckCast(extraPtr, maybeExpected, true),
         BI("as") => self.typecheckTypeForwarding(extraPtr, maybeExpected),
-        BI("typeOf") => Comptime.Folder.Builtin.Type("type"), // self.executer.getValue(try self.executer.evalTypeOf(extraPtr)).Type,
+        BI("typeOf") => Comptime.Folder.Builtin.Type("type"),
         BI("compileError") => return self.folder.evalCompileError(extraPtr),
         BI("sizeOf") => return Comptime.Folder.Builtin.Type("u32"),
         BI("typeName") => return Comptime.Folder.Builtin.Type("[]u8"),
@@ -1823,18 +1823,10 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
         .Field => self.typecheckField(&decl),
     };
 
-    if (self.getFlag(.InComptimeCall) and !decl.topLevel) {
-        isPresent.value_ptr.* = .{
-            .status = .NotChecked,
-            .result = declType,
-        };
-    }
-    else {
-        isPresent.value_ptr.* = .{
-            .status = .Checked,
-            .result = declType,
-        };
-    }
+    isPresent.value_ptr.* = .{
+        .status = .Checked,
+        .result = declType,
+    };
 
     if (decl.topLevel) {
         try self.lowerer.topLevelDeclaration(isPresent.key_ptr.*, &decl);

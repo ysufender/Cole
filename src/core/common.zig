@@ -137,5 +137,7 @@ pub const CompilerError = error {
     UndefinedPointerType,
     EmptyNonExternalType,
     EarlyTypecheck,
+    StackOverflow,
+    StackUnderflow,
     Terminate,
 };

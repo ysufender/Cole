@@ -19,7 +19,6 @@ fn Context(comptime Key: type) type {
                 return hasher.final();
             }
 
-            // TODO: A more performant equality function
             pub fn eql(_: Self, a: Key, b: Key) bool {
                 return deepEql(Key, a, b);
             }
@@ -47,8 +46,7 @@ fn Context(comptime Key: type) type {
                         return if (a == null) true else deepEql(o.child, a.?, b.?);
                     },
                     .@"union" => |u| blk: {
-                        if (u.tag_type == null) break :blk std.mem.eql(u8, std.mem.asBytes(&a), std.mem.asBytes(&b)); // untagged, last resort
-                        const Tag = u.tag_type.?;
+                        if (u.tag_type == null) break :blk std.mem.eql(u8, std.mem.asBytes(&a), std.mem.asBytes(&b)); const Tag = u.tag_type.?;
                         const ta: Tag = a;
                         if (ta != @as(Tag, b)) break :blk false;
                         inline for (u.fields) |f| {
@@ -69,7 +67,7 @@ pub fn HashMap(comptime Key: type, comptime Value: type) type {
     return std.hash_map.HashMapUnmanaged(Key, Value, Context(Key), std.hash_map.default_max_load_percentage);
 }
 
-pub fn HashMapCustom(comptime Key: type, comptime Value: type, comptime _eql: *fn (*anyopaque, Key, Key) bool) type {
+pub fn HashMapCustom(comptime Key: type, comptime Value: type, comptime _eql: *const fn (*anyopaque, Key, Key) bool) type {
     const Ctx = struct {
         context: *anyopaque,
 
@@ -92,9 +90,9 @@ pub fn HashMapCustom(comptime Key: type, comptime Value: type, comptime _eql: *f
         hm: HM,
         allocator: std.mem.Allocator,
 
-        pub fn init(context: *anyopaque, allocator: std.mem.ALlocator, cap: u32) Error!Self {
+        pub fn init(context: *anyopaque, allocator: std.mem.Allocator, cap: u32) Error!Self {
             var hm = HM.empty;
-            hm.ensureTotalCapacity(allocator, cap) catch return Error.AllocatorFailure;
+            hm.ensureTotalCapacityContext(allocator, cap, .{ .context = context }) catch return Error.AllocatorFailure;
 
             return .{
                 .ctx = .{ .context = context },
@@ -113,9 +111,6 @@ pub fn HashMapCustom(comptime Key: type, comptime Value: type, comptime _eql: *f
     };
 }
 
-//
-// Tests
-//
 const testing = std.testing;
 
 test "HashMap: struct key hashes by content, not identity" {
@@ -125,9 +120,6 @@ test "HashMap: struct key hashes by content, not identity" {
 
     try map.put(testing.allocator, .{ .a = 1, .b = 2 }, "first");
 
-    // A separate struct instance with identical field values must hit
-    // the same bucket — this is the whole point of the custom
-    // DeepRecursive Context over AutoContext.
     const lookup = Key{ .a = 1, .b = 2 };
     try testing.expectEqualStrings("first", map.get(lookup).?);
 
@@ -140,7 +132,6 @@ test "HashMap: []const u8 key hashes by content" {
 
     try map.put(testing.allocator, "hello", 1);
 
-    // Same bytes, different slice/allocation.
     var buf: [5]u8 = undefined;
     @memcpy(&buf, "hello");
     try testing.expectEqual(@as(i32, 1), map.get(buf[0..]).?);
