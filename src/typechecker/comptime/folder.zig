@@ -29,6 +29,7 @@ const Memory = std.ArrayList(Comptime.Value);
 pub const Flags = enum(u3) {
     ComptimeBanned = 0,
     LValue = 1,
+    InComptimeCall = 2,
 
     pub fn flag(flagToGet: Flags) u3 {
         return @intFromEnum(flagToGet);
@@ -171,7 +172,7 @@ pub fn eval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeI
         return Error.RedundantMark;
     }
 
-    self.cache.putNoClobber(self.arena.allocator(), key, addr) catch return Error.AllocatorFailure;
+    try self.cacheValue(key, addr);
 
     defer self.dumpMem();
     return addr;
@@ -195,12 +196,6 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
     const bodyPtr = ast.extra[extraPtr + 3];
 
     var isComptime = self.typechecker.hasMetadata(exprPtr, "@comptime");
-
-    // @TODO since comptime functions prevent caching, the returned type is not cached, alongside
-    // all the definitions it has. So the second time (after creation) someone tries to access
-    // some of the defs, compiler will try to resolve them without having the callstack to resolve
-    // parameter declarations. We need to loop through the definitions of the anonymous type
-    // created and create declarations for each definition. Then enable caching by declaration.
 
     const returnType = Typechecker.determineExpected(
         self.getValue(try self.expectType(returnTypeExpr)).Type
@@ -273,6 +268,21 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
             .returnType = returnType,
         },
     });
+
+    // @Note the complete typechecking and evaluation part is handled in the Executer.
+    if (isComptime) {
+        const functionDef = JIR.Function{
+            .signature = functionType,
+            .body = bodyPtr,
+            .name = try self.generateRandomName(.Comptime_Function),
+            .args = argNames,
+            .source = self.typechecker.currentFile,
+        };
+
+        return self.appendValue(.{
+            .Function = functionDef,
+        });
+    }
 
     const prev = self.typechecker.currentScope;
     self.typechecker.currentScope = self.typechecker.symbols.tryGetDecl(.{
@@ -758,10 +768,10 @@ fn evalSwitchExpression(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpecte
                         .file = self.typechecker.currentFile,
                         .expr = firstCapture,
                     });
-                    self.cache.putNoClobber(self.arena.allocator(), .{
+                    try self.cacheValue(.{
                         .file = self.typechecker.currentFile,
                         .expr = capture,
-                    }, varToSwitchOn) catch return Error.AllocatorFailure;
+                    }, varToSwitchOn);
                 }
 
                 return self.expectDefined(ast.extra[case + 3], resultType);
@@ -801,10 +811,11 @@ fn evalSwitchExpression(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpecte
                         .file = self.typechecker.currentFile,
                         .expr = firstCapture,
                     });
-                    self.cache.putNoClobber(self.arena.allocator(), .{
+
+                    try self.cacheValue(.{
                         .file = self.typechecker.currentFile,
                         .expr = capture,
-                    }, varToSwitchOn) catch return Error.AllocatorFailure;
+                    }, varToSwitchOn);
                 }
 
                 return self.expectDefined(ast.extra[case + 3], resultType);
@@ -1877,6 +1888,9 @@ fn handleScopeDecls(
     tokens: *const Lexer.TokenList.Slice,
     defRange: defines.Range,
 ) Error![]types.FieldInfo {
+    // @TODO if InComptimeCall is set, typecheck, evaluate and cache
+    // definitions.
+
     const allocator = self.arena.allocator();
 
     const defsBuffer = allocator.alloc(types.FieldInfo, defRange.len()) catch return Error.AllocatorFailure;
@@ -2056,6 +2070,13 @@ pub fn getValue(self: *const Folder, address: defines.Offset) Comptime.Value {
 fn setValue(self: *const Folder, address: defines.Offset, new: Comptime.Value) void {
     assert(address <= self.memory.items.len);
     self.memory.items[address] = new;
+}
+
+fn cacheValue(self: *Folder, ptr: Resolver.ResolutionKey, val: Comptime.Value.Ptr) Error!void {
+    if (!self.getFlag(.InComptimeCall)) {
+        self.cache.put(self.arena.allocator(), ptr, val)
+            catch return Error.AllocatorFailure;
+    }
 }
 
 fn appendValue(self: *Folder, value: Comptime.Value) Error!Comptime.Value.Ptr {

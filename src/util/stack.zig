@@ -37,6 +37,11 @@ fn InnerStaticStack(comptime T: type, comptime Size: usize) type {
         pub fn peek(stack: *const Self) *T {
             return &stack.items[stack.items.len - 1];
         }
+
+        pub fn revert(self: *Self, index: u32) void {
+            std.debug.assert(self.index > index);
+            self.index = index;
+        }
     };
 }
 

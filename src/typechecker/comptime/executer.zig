@@ -62,11 +62,18 @@ const Cache = struct {
 };
 
 const Scope = struct {
-    const VariableMap = collections.HashMap(defines.StringPtr, Comptime.Value.Ptr);
-    const LabelMap = collections.HashMap(defines.StringPtr, defines.Offset);
+    pub const Symbol = struct {
+        sp: defines.Offset,
+        off: defines.Offset,
+    };
+
+    pub const VariableMap = collections.HashMap(defines.StringPtr, Comptime.Value);
+    pub const LabelMap = collections.HashMap(defines.StringPtr, Symbol);
 
     variables: VariableMap,
     labels: LabelMap,
+    bp: defines.Offset,
+    len: u32,
 };
 
 const Executer = @This();
@@ -89,7 +96,166 @@ pub fn init(typechecker: *Typechecker, allocator: Allocator) Error!Executer {
     };
 }
 
-pub fn executeCall()
+pub fn executeCall(self: *Executer, funcPtr: JIR.Function.Ptr, args: []const Comptime.Value.Ptr) Error!Comptime.Value.Ptr {
+    const func = self.typechecker.builder.functions.get(funcPtr);
+
+    if (self.cache.get(.{
+        .func = funcPtr,
+        .args = args,
+    })) |res| {
+        if (res.status == .InProgress) {
+            self.report("Infinite recursion detected in function call. Call to '{s}' recurses on itself with the same parameters.", .{
+                func.name,
+            });
+            return Error.DependencyCycle;
+        }
+
+        return res.result;
+    }
+
+    self.cache.put(.{
+        .func = funcPtr,
+        .args = args,
+    }, .{
+        .status = .InProgress,
+        .result = 0,
+    });
+
+    var variables = Scope.VariableMap.empty;
+    variables.ensureTotalCapacity(self.arena.allocator(), args.len)
+        catch return Error.AllocatorFailure;
+
+    for (args, 0..) |arg, idx| {
+        variables.putAssumeCapacityNoClobber(func.args[idx], arg);
+    }
+
+    const scope = Scope{
+        .variables = variables,
+        .labels = Scope.LabelMap.empty,
+        .bp = 0,
+        .len = 0,
+    };
+    try self.stack.push(scope);
+
+    const signature = self.typechecker.typeTable.get(func.signature).Function;
+
+    const res =
+        try if (signature.isComptime) res: {
+            // @TODO
+            //  Typecheck body
+            //  Codepath check
+            //  Execute
+
+            // const prev = self.typechecker.currentScope;
+            // self.typechecker.currentScope = self.typechecker.symbols.tryGetDecl(.{
+            //    .file = self.typechecker.currentFile,
+            //    .expr = func.name 
+            // }) orelse return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
+            // defer self.typechecker.currentScope = prev;
+
+            const pc = self.typechecker.setFlag(.CoveredAllPaths, false);
+            defer _ = self.typechecker.setFlag(.CoveredAllPaths, pc);
+
+            try self.typechecker.typecheckStatement(func.body, signature.returnType);
+            if (!(
+                self.typechecker.typeTable.get(signature.returnType).isZeroBit()
+                or self.typechecker.getFlag(.CoveredAllPaths)
+            )) {
+                self.typechecker.report("Function with return type '{s}' does not return a value in all code paths.", .{
+                    try self.typechecker.typeName(self.arena.allocator(), signature.returnType),
+                });
+                return Error.UncoveredCodePath;
+            }
+
+            const stmt = try self.typechecker.lowerer.statement(func.body);
+            break :res self.executeBlock(stmt);
+        }
+        else {
+            return common.debug.NotImplemented(self.typechecker.context.log, @src());
+        };
+
+    try self.cache.put(.{
+        .func = funcPtr,
+        .args = args,
+    }, .{
+        .status = .Evaluated,
+        .result = res,
+    });
+}
+
+fn executeBlock(self: *Executer, blockPtr: JIR.Ptr) Error!Comptime.Value.Ptr {
+    const blockValue = self.typechecker.builder.nodes.items(.value)[blockPtr];
+
+    const stmtLen = self.typechecker.builder.data.items[blockValue + 1];
+    const stmtStart = blockValue + 2;
+    const stmts = self.typechecker.builder.data.items[stmtStart..stmtStart + stmtLen];
+
+    var variableCount: u32 = 0;
+    var labelCount: u32 = 0;
+    for (stmts) |stmtPtr| {
+        const stmtType = self.typechecker.builder.nodes.items(.type)[stmtPtr];
+
+        if (stmtType == .Label) {
+            labelCount += 1;
+        }
+        else if (stmtType == .VariableDef) {
+            variableCount += 1;
+        }
+    }
+
+    var variables = Scope.VariableMap.empty;
+    variables.ensureTotalCapacity(self.arena.allocator(), variableCount)
+        catch return Error.AllocatorFailure;
+
+    var labels = Scope.LabelMap.empty;
+    labels.ensureTotalCapacity(self.arena.allocator(), labelCount)
+        catch return Error.AllocatorFailure;
+
+    for (stmts) |stmtPtr| {
+        const stmtType = self.typechecker.builder.nodes.items(.type)[stmtPtr];
+
+        if (stmtType == .Label) {
+            const labelName = self.typechecker.builder.nodes.items(.value)[stmtPtr];
+
+            labels.putAssumeCapacityNoClobber(labelName, .{
+                .sp = self.stack.items.len - 1,
+                .off = stmtPtr - stmtStart,
+            });
+        }
+        else if (stmtType == .VariableDef) {
+            const stmtValue = self.typechecker.builder.nodes.items(.value)[stmtPtr];
+
+            const typeID = self.typechecker.builder.data.items[stmtValue + 1];
+            const name = self.typechecker.builder.data.items[stmtValue + 2];
+
+            variables.putAssumeCapacityNoClobber(name, .{ .Undefined = typeID });
+        }
+    }
+
+    const scope = Scope{
+        .labels = labels,
+        .variables = variables,
+        .bp = stmtStart,
+        .len = stmtLen,
+    };
+
+    try self.pushStack(scope);
+
+    var pc: u32 = 0;
+    while (pc < self.stack.peek().len) : (pc += 1) {
+        const stmt = self.typechecker.builder.nodes.get(self.stack.peek().bp + pc);
+
+        switch (stmt.type) {
+            .Jump => {
+                const label = try self.getLabel(stmt.value);
+                self.stack.revert(label.sp);
+            },
+            else => {
+                return common.debug.NotImplemented(self.typechecker.context.log, @src());
+            }
+        }
+    }
+}
 
 fn pushStack(self: *Executer, scope: Scope) Error!void {
     return self.stack.push(scope) catch {
@@ -103,6 +269,47 @@ fn popStack(self: *Executer) Error!Scope {
         self.report("Stack smash detected at comptime.", .{});
         return Error.StackUnderflow;
     };
+}
+
+fn getVar(self: *const Executer, name: defines.StringPtr) Error!Comptime.Value.Ptr {
+    var stack = self.stack;
+    while (stack.pop()) |scope| {
+        if (scope.variables.get(name)) |variable| {
+            return variable;
+        }
+    }
+
+    self.report("Given variable '{s}' is not in the comptime scope.", .{
+        self.typechecker.builder.getInternedString(name),
+    });
+    return Error.EarlyTypecheck;
+}
+
+fn setVar(self: *Executer, name: defines.StringPtr, newValue: Comptime.Value.Ptr) Error!void {
+    var stack = self.stack;
+    while (stack.pop()) |scope| {
+        if (scope.variables.get(name)) |_| {
+            self.stack.items[stack.index].variables.putAssumeCapacity(name, newValue)
+                catch return common.debug.ShouldBeImpossible(undefined, @src());
+            return;
+        }
+    }
+
+    self.report("Given variable '{s}' is not in the comptime scope.", .{
+        self.typechecker.builder.getInternedString(name),
+    });
+    return Error.EarlyTypecheck;
+}
+
+fn getLabel(self: *const Executer, name: defines.StringPtr) Error!Scope.Symbol {
+    var stack = self.stack;
+    while (stack.pop()) |scope| {
+        if (scope.labels.get(name)) |lbl| {
+            return lbl;
+        }
+    }
+
+    return common.debug.ShouldBeImpossible(undefined, @src());
 }
 
 fn report(self: *Executer, comptime fmt: []const u8, args: anytype) void {

@@ -452,7 +452,10 @@ fn typecheckVariableDef(
                 },
             };
 
-            try self.builder.functionDef(new, try self.builder.addFunction(func));
+            // @Note See folder.zig:evalFunction
+            if (!self.folder.getFlag(.InComptimeCall)) {
+                try self.builder.functionDef(new, try self.builder.addFunction(func));
+            }
         },
         else => { },
     }
@@ -1823,12 +1826,14 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
         .Field => self.typecheckField(&decl),
     };
 
+    // @Note preventing the caching of declarations when inside a comptime call.
+    // Since they'll get their own declarations and scopes, it is fine.
     isPresent.value_ptr.* = .{
-        .status = .Checked,
+        .status = if (self.folder.getFlag(.InComptimeCall)) .NotChecked else .Checked,
         .result = declType,
     };
 
-    if (decl.topLevel) {
+    if (decl.topLevel and !self.folder.getFlag(.InComptimeCall)) {
         try self.lowerer.topLevelDeclaration(isPresent.key_ptr.*, &decl);
     }
 
