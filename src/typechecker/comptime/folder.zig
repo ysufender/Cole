@@ -23,7 +23,6 @@ const Comptime = @import("../comptime.zig");
 
 const FlagMap = std.bit_set.IntegerBitSet(8);
 const Cache = collections.HashMap(defines.DeclPtr, Comptime.Value.Ptr);
-const ExprCache = collections.HashMap(defines.ExpressionPtr, Comptime.Value.Ptr);
 const Memory = std.ArrayList(Comptime.Value);
 
 pub const Flags = enum(u3) {
@@ -38,7 +37,6 @@ pub const Flags = enum(u3) {
 const Folder = @This();
 
 cache: Cache,
-exprCache: ExprCache,
 typechecker: *Typechecker,
 
 arena: Arena,
@@ -57,9 +55,6 @@ pub fn init(typechecker: *Typechecker, gpa: Allocator) Error!Folder {
     var cache = Cache.empty;
     cache.ensureTotalCapacity(allocator, typechecker.symbols.resolutionMap.count()) catch return Error.AllocatorFailure;
 
-    var exprCache = ExprCache.empty;
-    exprCache.ensureTotalCapacity(allocator, typechecker.symbols.resolutionMap.count()) catch return Error.AllocatorFailure;
-
     var memory = Memory.initCapacity(allocator, 512) catch return Error.AllocatorFailure;
     memory.appendAssumeCapacity(.{ .Type = Builtin.Type("any") });
     memory.appendAssumeCapacity(.{ .Type = Builtin.Type("incomplete") });
@@ -69,7 +64,6 @@ pub fn init(typechecker: *Typechecker, gpa: Allocator) Error!Folder {
         .typechecker = typechecker,
         .gpa = gpa,
         .cache = cache,
-        .exprCache = exprCache,
         .memory = memory,
         .flags = FlagMap.initEmpty(),
         .rng = std.Random.DefaultPrng.init(5315),
@@ -84,10 +78,6 @@ pub fn attemptEval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected:
 }
 
 pub fn eval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeID) Error!Comptime.Value.Ptr {    const typechecker = self.typechecker;
-    if (self.exprCache.get(exprPtr)) |cached| {
-        return cached;
-    }
-
     const file = typechecker.currentFile;
     const ast = typechecker.context.getAST(file);
 
@@ -161,10 +151,6 @@ pub fn eval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeI
         return Error.RedundantMark;
     }
 
-    if (!self.typechecker.getFlag(.InComptimeCall)) {
-        self.exprCache.put(self.arena.allocator(), exprPtr, addr) catch return Error.AllocatorFailure;
-    }
-
     defer self.dumpMem();
     return addr;
 }
@@ -187,6 +173,12 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
     const bodyPtr = ast.extra[extraPtr + 3];
 
     var isComptime = self.typechecker.hasMetadata(exprPtr, "@comptime");
+
+    // @TODO since comptime functions prevent caching, the returned type is not cached, alongside
+    // all the definitions it has. So the second time (after creation) someone tries to access
+    // some of the defs, compiler will try to resolve them without having the callstack to resolve
+    // parameter declarations. We need to loop through the definitions of the anonymous type
+    // created and create declarations for each definition. Then enable caching by declaration.
 
     const returnType = Typechecker.determineExpected(
         self.getValue(try self.expectType(returnTypeExpr)).Type
@@ -1124,19 +1116,17 @@ fn evalEnumType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Value
         fields[index] = lexeme;
     }
 
-    const scope = self.typechecker.symbols.findDecl(.{
-        .file = self.typechecker.currentFile,
-        .expr = expr,
-    });
-
     const name = try self.generateRandomName(.Enum);
     const newType = TypeInfo{
         .Enum = .{
             .mutable = false,
             .name = name,
             .fields = fields,
-            .definitions = try self.handleScopeDecls(name, scope, ast, tokens, defRange),
-            .scope = scope ,
+            .definitions = try self.handleScopeDecls(ast, tokens, defRange),
+            .scope = self.typechecker.symbols.findDecl(.{
+                .file = self.typechecker.currentFile,
+                .expr = expr,
+            })
         },
     };
 
@@ -1180,19 +1170,17 @@ fn evalStructType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Val
         };
     }
 
-    const scope = self.typechecker.symbols.findDecl(.{
-        .file = self.typechecker.currentFile,
-        .expr = expr,
-    });
-
     const name = try self.generateRandomName(.Struct);
     const newType = TypeInfo{
         .Struct = .{
             .mutable = false,
             .name = name,
             .fields = fields,
-            .definitions = try self.handleScopeDecls(name, scope, ast, tokens, defRange),
-            .scope = scope 
+            .definitions = try self.handleScopeDecls(ast, tokens, defRange),
+            .scope = self.typechecker.symbols.findDecl(.{
+                .file = self.typechecker.currentFile,
+                .expr = expr,
+            })
         },
     };
 
@@ -1289,11 +1277,6 @@ fn evalUnionType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Valu
         };
     }
 
-    const scope = self.typechecker.symbols.findDecl(.{
-        .file = self.typechecker.currentFile,
-        .expr = expr,
-    });
-
     const name = try self.generateRandomName(.Union);
     const newType = TypeInfo{
         .Union = .{
@@ -1302,8 +1285,11 @@ fn evalUnionType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Valu
             .mutable = false,
             .name = name,
             .fields = fields,
-            .definitions = try self.handleScopeDecls(name, scope, ast, tokens, defRange),
-            .scope = scope,
+            .definitions = try self.handleScopeDecls(ast, tokens, defRange),
+            .scope = self.typechecker.symbols.findDecl(.{
+                .file = self.typechecker.currentFile,
+                .expr = expr,
+            }),
         }
     };
 
@@ -1904,14 +1890,10 @@ pub fn generateRandomNameString(self: *Folder, comptime mode: @TypeOf(.EnumLiter
 // top-level declarations.
 fn handleScopeDecls(
     self: *Folder,
-    _of: defines.StringPtr,
-    scope: defines.ScopePtr,
     ast: *const Parser.AST,
     tokens: *const Lexer.TokenList.Slice,
     defRange: defines.Range,
 ) Error![]types.FieldInfo {
-    _ = _of;
-    _ = scope;
     const allocator = self.arena.allocator();
 
     const defsBuffer = allocator.alloc(types.FieldInfo, defRange.len()) catch return Error.AllocatorFailure;

@@ -827,7 +827,7 @@ pub fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID
         .Mark => self.mark(expr.value, ofType),
         .Identifier => self.identifier(exprPtr),
 
-        .Scoping => self.scoping(expr.value, exprPtr),
+        .Scoping => self.scoping(expr.value),
 
         .Lambda, .FunctionDefinition,
         .EnumDefinition, .StructDefinition, .UnionDefinition => {
@@ -865,23 +865,7 @@ pub fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID
     };
 }
 
-fn scoping(self: *Lowerer, _extraPtr: defines.OpaquePtr, exprPtr: defines.ExpressionPtr) Error!JIR.Ptr {
-    if (self.typechecker.symbols.resolutionMap.get(.{
-        .file = self.typechecker.currentFile,
-        .expr = exprPtr,
-    })) |decl| {
-        var qualified = self.typechecker.builder.getInternedString(
-            self.typechecker.symbols.getDecl(decl).name,
-        );
-        qualified = std.mem.replaceOwned(u8, self.typechecker.builder.allocator, qualified, "::", "__")
-            catch return Error.AllocatorFailure;
-        qualified = std.mem.replaceOwned(u8, self.typechecker.builder.allocator, qualified, "$$", "__")
-            catch return Error.AllocatorFailure;
-
-        const id = try self.typechecker.builder.internString(qualified);
-        return self.typechecker.builder.identifier(id);
-    }
-
+fn scoping(self: *Lowerer, _extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
     const tokens = self.typechecker.context.getTokens(ast.tokens);
 
@@ -902,11 +886,7 @@ fn scoping(self: *Lowerer, _extraPtr: defines.OpaquePtr, exprPtr: defines.Expres
             .expr = lhs,
             .file = ast.tokens,
         })) |decl| {
-            namespace = self.typechecker.context.moduleNameMap.items[
-                self.typechecker.symbols.scopes.items(.module)[
-                    self.typechecker.symbols.getDecl(decl).scope
-                ]
-            ];
+            namespace = self.typechecker.context.moduleNameMap.items[self.typechecker.symbols.getDecl(decl).node];
             break;
         }
 

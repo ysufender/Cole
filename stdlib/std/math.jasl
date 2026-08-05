@@ -22,11 +22,9 @@
         "theoric" side of the numbers, see std::numeric.
 */
 
-import std::numeric as Numeric;
-
 pub let Epsilon = 0.000000119209;
 
-pub let Create = fn (T: type) -> type {
+pub let Math = fn (T: type) -> type {
     return struct {
         pub let sign = fn (val: T) -> T {
             return if (val > 0) 1 else -1;
