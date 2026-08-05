@@ -106,7 +106,7 @@ pub fn HashMapCustom(comptime Key: type, comptime Value: type, comptime _eql: *c
         }
 
         pub fn put(self: *Self, key: Key, val: Value) Error!void {
-            return self.hm.putContext(key, val, self.ctx);
+            return self.hm.putContext(self.allocator, key, val, self.ctx);
         }
     };
 }

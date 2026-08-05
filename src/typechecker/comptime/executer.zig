@@ -1,7 +1,3 @@
-// @Note Function calls do not get cached as for now, that means
-// comptime execution goes on till the stack blows up. Stack, that
-// is the host machine stack, not the Stack here.
-
 const std = @import("std");
 const common = @import("../../core/common.zig");
 const defines = @import("../../core/defines.zig");
@@ -34,7 +30,7 @@ const Cache = struct {
     };
 
     pub const Key = struct {
-        func: JIR.Function.Ptr,
+        func: defines.StringPtr,
         args: []const Comptime.Value.Ptr,
 
         pub fn eql(_context: *anyopaque, key1: Key, key2: Key) bool {
@@ -57,7 +53,7 @@ const Cache = struct {
 
     pub const Entry = struct {
         status: Status,
-        result: Comptime.Value.Ptr,
+        result: Comptime.Value,
     };
 };
 
@@ -73,6 +69,7 @@ const Scope = struct {
     variables: VariableMap,
     labels: LabelMap,
     bp: defines.Offset,
+    pc: defines.Offset,
     len: u32,
 };
 
@@ -96,16 +93,14 @@ pub fn init(typechecker: *Typechecker, allocator: Allocator) Error!Executer {
     };
 }
 
-pub fn executeCall(self: *Executer, funcPtr: JIR.Function.Ptr, args: []const Comptime.Value.Ptr) Error!Comptime.Value.Ptr {
-    const func = self.typechecker.builder.functions.get(funcPtr);
-
+pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.Value.Ptr) Error!Comptime.Value {
     if (self.cache.get(.{
-        .func = funcPtr,
+        .func = func.name,
         .args = args,
     })) |res| {
         if (res.status == .InProgress) {
             self.report("Infinite recursion detected in function call. Call to '{s}' recurses on itself with the same parameters.", .{
-                func.name,
+                self.typechecker.builder.getInternedString(func.name),
             });
             return Error.DependencyCycle;
         }
@@ -113,26 +108,27 @@ pub fn executeCall(self: *Executer, funcPtr: JIR.Function.Ptr, args: []const Com
         return res.result;
     }
 
-    self.cache.put(.{
-        .func = funcPtr,
+    try self.cache.put(.{
+        .func = func.name,
         .args = args,
     }, .{
         .status = .InProgress,
-        .result = 0,
+        .result = .{ .Void = { } },
     });
 
     var variables = Scope.VariableMap.empty;
-    variables.ensureTotalCapacity(self.arena.allocator(), args.len)
+    variables.ensureTotalCapacity(self.arena.allocator(), @intCast(args.len))
         catch return Error.AllocatorFailure;
 
     for (args, 0..) |arg, idx| {
-        variables.putAssumeCapacityNoClobber(func.args[idx], arg);
+        variables.putAssumeCapacityNoClobber(func.args[idx], self.typechecker.folder.memory.items[arg]);
     }
 
     const scope = Scope{
         .variables = variables,
         .labels = Scope.LabelMap.empty,
         .bp = 0,
+        .pc = 0,
         .len = 0,
     };
     try self.stack.push(scope);
@@ -175,15 +171,68 @@ pub fn executeCall(self: *Executer, funcPtr: JIR.Function.Ptr, args: []const Com
         };
 
     try self.cache.put(.{
-        .func = funcPtr,
+        .func = func.name,
         .args = args,
     }, .{
         .status = .Evaluated,
         .result = res,
     });
+
+    return res;
 }
 
-fn executeBlock(self: *Executer, blockPtr: JIR.Ptr) Error!Comptime.Value.Ptr {
+fn executeBlock(self: *Executer, blockPtr: JIR.Ptr) Error!Comptime.Value {
+    try self.decodePushScope(blockPtr);
+
+    while (true) {
+        const topScope = self.stack.peek();
+        defer topScope.pc += 1;
+
+        if (topScope.pc >= topScope.len) {
+            _ = self.stack.pop() orelse break;
+            continue;
+        }
+
+        const stmt = self.typechecker.builder.nodes.get(topScope.bp + topScope.pc);
+
+        switch (stmt.type) {
+            .Jump => {
+                const label = try self.getLabel(stmt.value);
+                self.stack.revert(label.sp);
+            },
+            .Exit => _ = self.stack.pop() orelse {
+                self.report("Unterminated scope, but how?", .{});
+                return Error.MissingBrace;
+            },
+            .Scope => {
+                try self.decodePushScope(topScope.bp + topScope.pc);
+            },
+            .Code => {
+                self.report("Foreign code blocks are not suitable in comptime contexts.", .{});
+                return Error.ComptimeNotPossible;
+            },
+            .Return => return self.expression(stmt.value),
+            else => {
+                return common.debug.NotImplemented(self.typechecker.context.log, @src());
+            }
+        }
+    }
+
+    return self.typechecker.folder.memory.items[@intFromEnum(Comptime.Value.Implicit.Void)];
+}
+
+fn expression(self: *Executer, exprPtr: JIR.Ptr) Error!Comptime.Value {
+    const expr = self.typechecker.builder.nodes.get(exprPtr);
+
+    return switch (expr.type) {
+        .Jump, .JumpIf, .Exit, .Scope, .Code, .VariableDef, .Assignment,
+        .FunctionDef, .Label, .TypeDef, .Return => common.debug.ShouldBeImpossible(undefined, @src()),
+        .Identifier => self.getVar(expr.value),
+        else => common.debug.NotImplemented(self.typechecker.context.log, @src()),
+    };
+}
+
+fn decodePushScope(self: *Executer, blockPtr: JIR.Ptr) Error!void {
     const blockValue = self.typechecker.builder.nodes.items(.value)[blockPtr];
 
     const stmtLen = self.typechecker.builder.data.items[blockValue + 1];
@@ -218,7 +267,7 @@ fn executeBlock(self: *Executer, blockPtr: JIR.Ptr) Error!Comptime.Value.Ptr {
             const labelName = self.typechecker.builder.nodes.items(.value)[stmtPtr];
 
             labels.putAssumeCapacityNoClobber(labelName, .{
-                .sp = self.stack.items.len - 1,
+                .sp = @intCast(self.stack.items.len - 1),
                 .off = stmtPtr - stmtStart,
             });
         }
@@ -236,25 +285,11 @@ fn executeBlock(self: *Executer, blockPtr: JIR.Ptr) Error!Comptime.Value.Ptr {
         .labels = labels,
         .variables = variables,
         .bp = stmtStart,
+        .pc = 0,
         .len = stmtLen,
     };
 
     try self.pushStack(scope);
-
-    var pc: u32 = 0;
-    while (pc < self.stack.peek().len) : (pc += 1) {
-        const stmt = self.typechecker.builder.nodes.get(self.stack.peek().bp + pc);
-
-        switch (stmt.type) {
-            .Jump => {
-                const label = try self.getLabel(stmt.value);
-                self.stack.revert(label.sp);
-            },
-            else => {
-                return common.debug.NotImplemented(self.typechecker.context.log, @src());
-            }
-        }
-    }
 }
 
 fn pushStack(self: *Executer, scope: Scope) Error!void {
@@ -271,7 +306,7 @@ fn popStack(self: *Executer) Error!Scope {
     };
 }
 
-fn getVar(self: *const Executer, name: defines.StringPtr) Error!Comptime.Value.Ptr {
+fn getVar(self: *Executer, name: defines.StringPtr) Error!Comptime.Value {
     var stack = self.stack;
     while (stack.pop()) |scope| {
         if (scope.variables.get(name)) |variable| {

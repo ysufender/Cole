@@ -40,6 +40,10 @@ pub fn compile(outDir: Dir, allocator: std.mem.Allocator, context: *common.Compi
 
     if (context.settings.hasFlag("--debug")) {
         tcc.tcc_define_symbol(state, "DEBUG", "");
+        if (tcc.tcc_set_options(state, "-gdwarf -bt10") == -1) {
+            report("Failed to set backend settings.");
+            return Error.BackendError;
+        }
     }
 
     // Set output type

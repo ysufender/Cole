@@ -116,19 +116,23 @@ pub fn eval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeI
     const expr = ast.expressions.get(exprPtr);
 
     const addr = switch (expr.type) {
-        .Identifier =>
-            if (expr.value == 0) @intFromEnum(Comptime.Value.Implicit.Type.Any)
-            else if (typechecker.symbols.tryGetDecl(.{ .file = file, .expr = exprPtr })) |decl|
-                try self.evalDecl(decl, maybeExpected)
-            else {
-                self.report("Unable to resolve identifier '{s}'.", .{
-                    self.typechecker.context
-                        .getTokens(self.typechecker.currentFile)
-                        .get(expr.value)
-                        .lexeme(self.typechecker.context, self.typechecker.currentFile)
-                });
-                return Error.MissingIdentifier;
-            },
+        .Identifier => addr: {
+            self.typechecker.lastToken = expr.value;
+
+            break :addr
+                if (expr.value == 0) @intFromEnum(Comptime.Value.Implicit.Type.Any)
+                else if (typechecker.symbols.tryGetDecl(.{ .file = file, .expr = exprPtr })) |decl|
+                    try self.evalDecl(decl, maybeExpected)
+                else {
+                    self.report("Unable to resolve identifier '{s}'.", .{
+                        self.typechecker.context
+                            .getTokens(self.typechecker.currentFile)
+                            .get(expr.value)
+                            .lexeme(self.typechecker.context, self.typechecker.currentFile)
+                    });
+                    return Error.MissingIdentifier;
+                };
+        },
         .Call => try self.evalCall(expr.value, maybeExpected),
         .Indexing => try self.evalIndexing(expr.value),
         .Scoping => try self.evalScoping(exprPtr),
@@ -247,6 +251,8 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
             .type = decl.type,
             .parent = decl.parent,
         });
+
+        self.typechecker.lastToken = decl.token;
 
         if (self.typechecker.typeTable.get(argType).isZeroBit() and !isComptime) {
             self.report("Zero bit-sized parameter '{s}' is not allowed.", .{
@@ -1130,7 +1136,8 @@ fn evalEnumType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Value
     var fields = allocator.alloc([]const u8, fieldRange.len()) catch return Error.AllocatorFailure;
 
     for (0..fieldRange.len()) |index| {
-        const token = tokens.get(ast.extra[fieldRange.at(@intCast(index))]);
+        self.typechecker.lastToken = ast.extra[fieldRange.at(@intCast(index))];
+        const token = tokens.get(self.typechecker.lastToken);
         const lexeme = token.lexeme(self.typechecker.context, self.typechecker.currentFile);
         fields[index] = lexeme;
     }
@@ -1175,6 +1182,8 @@ fn evalStructType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Val
 
     for (0..fieldRange.len()) |index| {
         const symbol = ast.signatures.get(ast.extra[fieldRange.at(@intCast(index))]);
+
+        self.typechecker.lastToken = symbol.name;
 
         const symbolToken = tokens.get(symbol.name);
         const symbolName = symbolToken.lexeme(self.typechecker.context, self.typechecker.currentFile);
@@ -1238,6 +1247,9 @@ fn evalUnionType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Valu
         const symbolTokenPtr: defines.TokenPtr = ast.signatures.items(.name)[
             ast.extra[fieldRange.at(@intCast(index))]
         ];
+
+        self.typechecker.lastToken = symbolTokenPtr;
+
         const symbolToken = tokens.get(symbolTokenPtr);
         const symbolName = symbolToken.lexeme(self.typechecker.context, self.typechecker.currentFile);
 
@@ -1282,6 +1294,8 @@ fn evalUnionType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Valu
 
     for (0..fieldRange.len()) |index| {
         const symbol = ast.signatures.get(ast.extra[fieldRange.at(@intCast(index))]);
+
+        self.typechecker.lastToken = symbol.name;
 
         const symbolToken = tokens.get(symbol.name);
         const symbolName = symbolToken.lexeme(self.typechecker.context, self.typechecker.currentFile);
@@ -1680,9 +1694,29 @@ fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID) 
         else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
     };
 
-    _ = function;
-    self.report("Comptime function calls are not yet supported.", .{});
-    return common.debug.NotImplemented(self.typechecker.context.log, @src());
+    const signature = self.typechecker.typeTable.get(function.signature).Function;
+
+    const argsListPtr = ast.extra[extraPtr + 1];
+    const argsList: defines.OpaquePtr = ast.expressions.items(.value)[argsListPtr];
+
+    const argsRange = defines.Range{
+        .start = ast.extra[argsList],
+        .end = ast.extra[argsList + 1],
+    };
+
+    var args = self.arena.allocator().alloc(Comptime.Value.Ptr, signature.argTypes.len)
+        catch return Error.AllocatorFailure;
+
+    for (argsRange.start..argsRange.end) |ptr| {
+        args[ptr - argsRange.start] = try self.eval(@intCast(ptr), signature.argTypes[ptr - argsRange.start]);
+    }
+
+    const val = try self.typechecker.executer.executeCall(function, args);
+
+    return switch (val) {
+        .Void => @intFromEnum(Comptime.Value.Implicit.Void),
+        else => self.appendValue(val),
+    };
 }
 
 fn evalIndexing(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {
