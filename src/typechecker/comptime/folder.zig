@@ -1708,7 +1708,7 @@ fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID) 
         catch return Error.AllocatorFailure;
 
     for (argsRange.start..argsRange.end) |ptr| {
-        args[ptr - argsRange.start] = try self.eval(@intCast(ptr), signature.argTypes[ptr - argsRange.start]);
+        args[ptr - argsRange.start] = try self.eval(ast.extra[@intCast(ptr)], signature.argTypes[ptr - argsRange.start]);
     }
 
     const val = try self.typechecker.executer.executeCall(function, args);

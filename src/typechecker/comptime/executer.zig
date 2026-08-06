@@ -27,6 +27,7 @@ const Cache = struct {
     pub const Status = enum {
         InProgress,
         Evaluated,
+        NotEvaluated,
     };
 
     pub const Key = struct {
@@ -52,7 +53,7 @@ const Cache = struct {
     };
 
     pub const Entry = struct {
-        status: Status,
+        status: Status = .NotEvaluated,
         result: Comptime.Value,
     };
 };
@@ -148,6 +149,9 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
             //    .expr = func.name 
             // }) orelse return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
             // defer self.typechecker.currentScope = prev;
+            const prevfile = self.typechecker.currentFile;
+            self.typechecker.currentFile = func.source;
+            defer self.typechecker.currentFile = prevfile;
 
             const pc = self.typechecker.setFlag(.CoveredAllPaths, false);
             defer _ = self.typechecker.setFlag(.CoveredAllPaths, pc);
@@ -193,7 +197,7 @@ fn executeBlock(self: *Executer, blockPtr: JIR.Ptr) Error!Comptime.Value {
             continue;
         }
 
-        const stmt = self.typechecker.builder.nodes.get(topScope.bp + topScope.pc);
+        const stmt = self.typechecker.builder.nodes.get(self.typechecker.builder.data.items[topScope.bp + topScope.pc]);
 
         switch (stmt.type) {
             .Jump => {
@@ -205,7 +209,7 @@ fn executeBlock(self: *Executer, blockPtr: JIR.Ptr) Error!Comptime.Value {
                 return Error.MissingBrace;
             },
             .Scope => {
-                try self.decodePushScope(topScope.bp + topScope.pc);
+                try self.decodePushScope(self.typechecker.builder.data.items[topScope.bp + topScope.pc]);
             },
             .Code => {
                 self.report("Foreign code blocks are not suitable in comptime contexts.", .{});
