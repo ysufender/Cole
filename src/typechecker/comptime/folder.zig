@@ -905,7 +905,14 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
         .Capture =>
             if (self.cache.get(.{ .file = self.typechecker.currentFile, .expr = decl.node })) |capture| capture
             else Error.ComptimeNotPossible,
-        .Parameter => common.debug.NotImplemented(self.typechecker.context.log, @src()),
+        .Parameter =>
+            if (self.getFlag(.InComptimeCall)) try self.appendValue(try self.typechecker.executer.getVar(decl.name)) 
+            else {
+                self.report("Attempt to evaluate parameter '{s}' in non-comptime scope.", .{
+                    self.typechecker.builder.getInternedString(decl.name),
+                });
+                return Error.ComptimeNotPossible;
+            },
         else => |t| {
             self.report("{s} declaration is not implemented.", .{@tagName(t)});
             return common.debug.NotImplemented(self.typechecker.context.log, @src());
@@ -2113,7 +2120,7 @@ fn cacheValue(self: *Folder, ptr: Resolver.ResolutionKey, val: Comptime.Value.Pt
     }
 }
 
-fn appendValue(self: *Folder, value: Comptime.Value) Error!Comptime.Value.Ptr {
+pub fn appendValue(self: *Folder, value: Comptime.Value) Error!Comptime.Value.Ptr {
     const addr = self.memory.items.len;
     self.memory.append(self.arena.allocator(), value)
         catch return Error.AllocatorFailure;

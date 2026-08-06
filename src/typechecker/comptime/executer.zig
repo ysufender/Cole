@@ -95,6 +95,9 @@ pub fn init(typechecker: *Typechecker, allocator: Allocator) Error!Executer {
 }
 
 pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.Value.Ptr) Error!Comptime.Value {
+    const prev = self.typechecker.folder.setFlag(.InComptimeCall, true);
+    defer _ = self.typechecker.folder.setFlag(.InComptimeCall, prev);
+
     if (self.cache.get(.{
         .func = func.name,
         .args = args,
@@ -109,13 +112,16 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
         return res.result;
     }
 
+    const signature = self.typechecker.typeTable.get(func.signature).Function;
+
     try self.cache.put(.{
         .func = func.name,
         .args = args,
     }, .{
         .status = .InProgress,
-        .result = .{ .Void = { } },
+        .result = .{ .Undefined = signature.returnType },
     });
+    errdefer _ = self.cache.remove(.{ .func = func.name, .args = args });
 
     var variables = Scope.VariableMap.empty;
     variables.ensureTotalCapacity(self.arena.allocator(), @intCast(args.len))
@@ -133,8 +139,6 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
         .len = 0,
     };
     try self.stack.push(scope);
-
-    const signature = self.typechecker.typeTable.get(func.signature).Function;
 
     const res =
         try if (signature.isComptime) res: {
@@ -170,9 +174,7 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
             const stmt = try self.typechecker.lowerer.statement(func.body);
             break :res self.executeBlock(stmt);
         }
-        else {
-            return common.debug.NotImplemented(self.typechecker.context.log, @src());
-        };
+        else self.executeBlock(func.body);
 
     try self.cache.put(.{
         .func = func.name,
@@ -204,6 +206,18 @@ fn executeBlock(self: *Executer, blockPtr: JIR.Ptr) Error!Comptime.Value {
                 const label = try self.getLabel(stmt.value);
                 self.stack.revert(label.sp);
             },
+            .VariableDef => {
+                const typeID = self.typechecker.builder.data.items[stmt.value + 1];
+                const name = self.typechecker.builder.data.items[stmt.value + 2];
+
+                const initializer =
+                    if (self.typechecker.builder.data.items[stmt.value + 3] == 1) Comptime.Value{
+                        .Undefined = typeID,
+                    }
+                    else try self.expression(self.typechecker.builder.data.items[stmt.value + 4]);
+
+                topScope.variables.putAssumeCapacityNoClobber(name, initializer);
+            },
             .Exit => _ = self.stack.pop() orelse {
                 self.report("Unterminated scope, but how?", .{});
                 return Error.MissingBrace;
@@ -231,8 +245,63 @@ fn expression(self: *Executer, exprPtr: JIR.Ptr) Error!Comptime.Value {
     return switch (expr.type) {
         .Jump, .JumpIf, .Exit, .Scope, .Code, .VariableDef, .Assignment,
         .FunctionDef, .Label, .TypeDef, .Return => common.debug.ShouldBeImpossible(undefined, @src()),
+        .ComptimeDef => self.typechecker.folder.getValue(
+            try self.typechecker.folder.eval(
+                expr.value,
+                try self.typechecker.typecheckExpression(expr.value, null),
+            )
+        ),
         .Identifier => self.getVar(expr.value),
+        .Literal => self.literal(expr.value),
+        .Call => self.call(expr.value),
         else => common.debug.NotImplemented(self.typechecker.context.log, @src()),
+    };
+}
+
+fn call(self: *Executer, dataPtr: defines.OpaquePtr) Error!Comptime.Value {
+    const funcPtr = self.typechecker.builder.data.items[dataPtr + 1];
+    const argsLen = self.typechecker.builder.data.items[dataPtr + 2];
+    const argsStart = dataPtr + 3;
+
+    const function = (try self.expression(funcPtr)).Function;
+
+    const args = self.arena.allocator().alloc(JIR.Ptr, argsLen)
+        catch return Error.AllocatorFailure;
+
+    for (0..argsLen) |idx| {
+        args[idx] = try self.typechecker.folder.appendValue(
+            try self.expression(@intCast(argsStart + idx))
+        );
+    }
+
+    return self.executeCall(function, args);
+}
+
+fn literal(self: *Executer, litPtr: JIR.Ptr) Error!Comptime.Value {
+    const constPtr = self.typechecker.builder.nodes.items(.value)[litPtr];
+    const constant = self.typechecker.builder.constants.get(constPtr);
+
+    return switch (constant) {
+        .Undefined => |typeID| .{ .Undefined = typeID },
+        .Float => |fl| .{ .Float = fl },
+        .Function => |func| .{ .Function = self.typechecker.builder.functions.get(func) },
+        .String => |str| .{ .String = self.typechecker.builder.getInternedString(str) },
+        .Void => .{ .Void = { } },
+        .Type => |typeID| .{ .Type = typeID },
+        .Integer => |integer| .{
+            .Int = switch (integer) {
+                .i32 => |i| @intCast(i),
+                .u32 => |i| @intCast(i),
+                .i8 => |i| @intCast(i),
+                .u8 => |i| @intCast(i),
+            },
+        },
+        else => |t| {
+            self.report("'{s}' literals are not supported in comptime sopces.", .{
+                @tagName(t),
+            });
+            return Error.ComptimeNotPossible;
+        },
     };
 }
 
@@ -275,14 +344,6 @@ fn decodePushScope(self: *Executer, blockPtr: JIR.Ptr) Error!void {
                 .off = stmtPtr - stmtStart,
             });
         }
-        else if (stmtType == .VariableDef) {
-            const stmtValue = self.typechecker.builder.nodes.items(.value)[stmtPtr];
-
-            const typeID = self.typechecker.builder.data.items[stmtValue + 1];
-            const name = self.typechecker.builder.data.items[stmtValue + 2];
-
-            variables.putAssumeCapacityNoClobber(name, .{ .Undefined = typeID });
-        }
     }
 
     const scope = Scope{
@@ -310,7 +371,7 @@ fn popStack(self: *Executer) Error!Scope {
     };
 }
 
-fn getVar(self: *Executer, name: defines.StringPtr) Error!Comptime.Value {
+pub fn getVar(self: *Executer, name: defines.StringPtr) Error!Comptime.Value {
     var stack = self.stack;
     while (stack.pop()) |scope| {
         if (scope.variables.get(name)) |variable| {

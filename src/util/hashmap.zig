@@ -72,9 +72,9 @@ pub fn HashMapCustom(comptime Key: type, comptime Value: type, comptime _eql: *c
         context: *anyopaque,
 
         pub fn hash(_: @This(), key: Key) u64 { 
-            var hasher = std.hash.XxHash64.init(0);
+            var hasher = std.hash.SipHash64(2, 4).init(@ptrCast(&key));
             std.hash.autoHashStrat(&hasher, key, .DeepRecursive);
-            return hasher.final();
+            return hasher.finalInt();
         }
 
         pub fn eql(self: @This(), a: Key, b: Key) bool {
@@ -107,6 +107,10 @@ pub fn HashMapCustom(comptime Key: type, comptime Value: type, comptime _eql: *c
 
         pub fn put(self: *Self, key: Key, val: Value) Error!void {
             return self.hm.putContext(self.allocator, key, val, self.ctx);
+        }
+
+        pub fn remove(self: *Self, key: Key) bool {
+            return self.hm.removeContext(key, self.ctx);
         }
     };
 }
