@@ -1109,8 +1109,18 @@ fn builtinCall(
             const builtinUnreach = try self.identifier(try self.typechecker.builder.internString("__builtin_unreachable"));
             break :blk self.typechecker.builder.call(true, builtinUnreach, &.{});
         },
+        BI("typeName") => self.typechecker.builder.literal(
+            try self.typechecker.builder.addConstant(.{ .String =
+                try self.typechecker.builder.internString(
+                    try self.typechecker.typeName(self.typechecker.arena.allocator(),
+                        self.typechecker.folder.getValue(
+                            try self.typechecker.folder.expectType(ast.extra[args.at(0)])
+                        ).Type
+                    )
+                )
+            })
+        ),
         BI("compileLog"), BI("compileError") => 0,
-
         else => common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
     };
 }

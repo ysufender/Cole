@@ -737,7 +737,7 @@ fn resolveExpression(self: *Resolver, exprPtr: defines.ExpressionPtr) Error!void
                 .expr = exprPtr,
             }, lambda) catch return Error.AllocatorFailure;
 
-            for (captures.start..captures.end) |capturePtrPtr| {
+            for (captures.start..captures.end, 0..) |capturePtrPtr, i| {
                 const name = ast.extra[capturePtrPtr];
                 const lexeme = tokens.get(name).lexeme(self.context, self.dataIndex());
 
@@ -748,8 +748,8 @@ fn resolveExpression(self: *Resolver, exprPtr: defines.ExpressionPtr) Error!void
                     .scope = self.currentScope,
                     .public = false,
                     .token = name,
-                    .node = name,
-                    .type = 0,
+                    .node = @intCast(i),
+                    .type = @intCast(i),
                     .topLevel = false,
                 });
 

@@ -33,17 +33,5 @@ pub let Math = fn (T: type) -> type {
         pub let abs = fn (val: T) -> T {
             return if (val > 0) val else -val;
         };
-
-        pub let sin = fn (angle: T) -> T {
-            let res: mut T = 0.0;
-            code { res = sinf(180 * angle); }
-            return res;
-        };
-
-        pub let random = fn (max: T) -> T {
-            let res: mut T = 0;
-            code { res = (T)((T)rand() + (((T)rand() / (T)rand()))); }
-            return res;
-        };
     };
 };

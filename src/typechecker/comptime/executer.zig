@@ -108,8 +108,9 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
             });
             return Error.DependencyCycle;
         }
-
-        return res.result;
+        else if (res.status == .Evaluated) {
+            return res.result;
+        }
     }
 
     const signature = self.typechecker.typeTable.get(func.signature).Function;
@@ -142,17 +143,6 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
 
     const res =
         try if (signature.isComptime) res: {
-            // @TODO
-            //  Typecheck body
-            //  Codepath check
-            //  Execute
-
-            // const prev = self.typechecker.currentScope;
-            // self.typechecker.currentScope = self.typechecker.symbols.tryGetDecl(.{
-            //    .file = self.typechecker.currentFile,
-            //    .expr = func.name 
-            // }) orelse return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
-            // defer self.typechecker.currentScope = prev;
             const prevfile = self.typechecker.currentFile;
             self.typechecker.currentFile = func.source;
             defer self.typechecker.currentFile = prevfile;
@@ -245,12 +235,15 @@ fn expression(self: *Executer, exprPtr: JIR.Ptr) Error!Comptime.Value {
     return switch (expr.type) {
         .Jump, .JumpIf, .Exit, .Scope, .Code, .VariableDef, .Assignment,
         .FunctionDef, .Label, .TypeDef, .Return => common.debug.ShouldBeImpossible(undefined, @src()),
-        .ComptimeDef => self.typechecker.folder.getValue(
-            try self.typechecker.folder.eval(
-                expr.value,
-                try self.typechecker.typecheckExpression(expr.value, null),
-            )
-        ),
+        .ComptimeDef => {
+            common.log.debug("Comptime definition.", .{});
+            return self.typechecker.folder.getValue(
+                try self.typechecker.folder.eval(
+                    expr.value,
+                    try self.typechecker.typecheckExpression(expr.value, null),
+                )
+            );
+        },
         .Identifier => self.getVar(expr.value),
         .Literal => self.literal(expr.value),
         .Call => self.call(expr.value),
@@ -277,8 +270,7 @@ fn call(self: *Executer, dataPtr: defines.OpaquePtr) Error!Comptime.Value {
     return self.executeCall(function, args);
 }
 
-fn literal(self: *Executer, litPtr: JIR.Ptr) Error!Comptime.Value {
-    const constPtr = self.typechecker.builder.nodes.items(.value)[litPtr];
+fn literal(self: *Executer, constPtr: JIR.Ptr) Error!Comptime.Value {
     const constant = self.typechecker.builder.constants.get(constPtr);
 
     return switch (constant) {
