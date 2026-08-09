@@ -257,7 +257,7 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
         else .{ .Void = { } },
 
         .Function => |func| .{
-            .Function = func.name,
+            .Function = try self.typechecker.builder.addFunction(func),
         },
 
         .Type => |id| .{ .Type = id },

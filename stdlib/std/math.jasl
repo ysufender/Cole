@@ -31,7 +31,7 @@ pub let Math = fn (T: type) -> type {
         };
 
         pub let abs = fn (val: T) -> T {
-            return val * sign(val);
+            return if (val > 0) val else -val;
         };
     };
 };

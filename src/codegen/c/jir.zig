@@ -102,7 +102,7 @@ pub const Constant = union(enum) {
     Aggregate: ConstantArray, 
     Array: ConstantArray,
     Undefined: TypeID,
-    Function: defines.StringPtr,
+    Function: Function.Ptr,
     Type: TypeID,
     Void: void,
 };
@@ -505,8 +505,8 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
         .ComptimeDef => { },
         .TypeDef => { },
         .FunctionDef => {
-            const name = self.strings[self.data[node.value]];
             const func = self.functions.get(self.data[node.value + 1]);
+            const name = self.strings[func.name];
             const typeInfo = self.types.get(func.signature).Function;
 
             if (typeInfo.isComptime) {
@@ -515,7 +515,6 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
 
             var args: []const u8 = "";
             for (0.., typeInfo.argTypes) |i, typePtr| {
-                // @Important TODO: Function parameter names WHY AREN'T THEY HERE???
                 args = std.fmt.allocPrint(self.allocator, "{s}{s} {s}{s}{s}", .{
                     args,
                     try self.getCName(typePtr, null, false, false),
@@ -736,7 +735,7 @@ fn literal(self: *JIR, out: *Writer, ptr: Constant.Ptr) Error!void {
         },
         .Float => |fl| self.write(out, "{}", .{fl}),
         .Function => |func| {
-            const str = @constCast(self.strings[func]);
+            const str = @constCast(self.strings[self.functions.get(func).name]);
             _ = std.mem.replace(u8, str, "::", "__", str);
             try self.write(out, "{s}", .{str});
         },

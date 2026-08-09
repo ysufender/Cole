@@ -38,6 +38,10 @@ fn InnerStaticStack(comptime T: type, comptime Size: usize) type {
             return &stack.items[stack.items.len - 1];
         }
 
+        pub fn peekm(stack: *const Self) ?*T {
+            return if (stack.items.len == 0) null else &stack.items[stack.items.len - 1];
+        }
+
         pub fn revert(self: *Self, index: u32) void {
             std.debug.assert(self.index > index);
             self.index = index;

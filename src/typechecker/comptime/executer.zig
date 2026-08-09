@@ -100,6 +100,16 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
     const prev = self.typechecker.folder.setFlag(.InComptimeCall, true);
     defer _ = self.typechecker.folder.setFlag(.InComptimeCall, prev);
 
+    const instantiation = blk: {
+        var hasher = std.hash.Wyhash.init(0);
+        hasher.update(std.mem.asBytes(&func.name));
+        for (args) |a| hasher.update(std.mem.asBytes(&a));
+        break :blk hasher.final();
+    };
+    const prevInstantiation = self.typechecker.folder.currentInstantiation;
+    self.typechecker.folder.currentInstantiation = instantiation;
+    defer self.typechecker.folder.currentInstantiation = prevInstantiation;
+
     if (self.cache.get(.{
         .func = func.name,
         .args = args,
@@ -148,6 +158,7 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
         .len = 0,
     };
     try self.stack.push(scope);
+    defer self.stack.index = 0;
 
     const res =
         try if (signature.isComptime) res: {

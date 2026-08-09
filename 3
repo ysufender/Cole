@@ -22,15 +22,15 @@ const JIR = backend.C.JIR;
 const Comptime = @import("../comptime.zig");
 
 const FlagMap = std.bit_set.IntegerBitSet(8);
-
-pub const FolderCacheKey = struct {
-    file: defines.FilePtr,
-    expr: defines.ExpressionPtr,
-    instantiation: u64,
-};
-const Cache = collections.HashMap(FolderCacheKey, Comptime.Value.Ptr);
+const Cache = collections.HashMap(Key, Comptime.Value.Ptr);
 const DeclCache = collections.HashMap(defines.DeclPtr, Comptime.Value.Ptr);
 const Memory = std.ArrayList(Comptime.Value);
+
+const Key = struct {
+    file: defines.FilePtr,
+    expr: defines.ExpressionPtr,
+    meta: 
+};
 
 pub const Flags = enum(u3) {
     ComptimeBanned = 0,
@@ -45,8 +45,6 @@ pub const Flags = enum(u3) {
 const Folder = @This();
 
 cache: Cache,
-
-currentInstantiation: u64 = 0,
 
 /// @Readonly in this file. Intended for use in executer.zig
 declCache: DeclCache,
@@ -99,10 +97,9 @@ pub fn eval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeI
     const typechecker = self.typechecker;
     const file = typechecker.currentFile;
 
-    const key = FolderCacheKey{
+    const key = Resolver.ResolutionKey{
         .file = file,
         .expr = exprPtr,
-        .instantiation = self.currentInstantiation,
     };
 
     if (self.cache.get(key)) |cached| {
@@ -597,14 +594,12 @@ pub fn evalBinary(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Ty
 
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
 
-    const lhsType = try self.typechecker.typecheckExpression(ast.extra[extraPtr], null);
-
     const operation: Lexer.TokenType = @enumFromInt(ast.extra[extraPtr + 1]);
 
     switch (operation) {
         .Or, .And => |logic| {
             const isOr = logic == .Or;
-            const lhs = self.getValue(try self.expectDefined(ast.extra[extraPtr], lhsType));
+            const lhs = self.getValue(try self.expectDefined(ast.extra[extraPtr], maybeExpected));
 
             if (lhs.Bool == if (isOr) true else false) {
                 return self.appendValue(.{
@@ -612,7 +607,7 @@ pub fn evalBinary(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Ty
                 });
             }
 
-            const rhs = self.getValue(try self.expectDefined(ast.extra[extraPtr + 1], lhsType));
+            const rhs = self.getValue(try self.expectDefined(ast.extra[extraPtr + 1], maybeExpected));
             return self.appendValue(.{
                 .Bool =
                     if (isOr) lhs.Bool or rhs.Bool
@@ -622,8 +617,8 @@ pub fn evalBinary(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Ty
         .EqualEqual, .BangEqual => |equality| {
             const multiplier = equality == .EqualEqual;
 
-            const lhs = self.getValue(try self.expectDefined(ast.extra[extraPtr], lhsType));
-            const rhs = self.getValue(try self.expectDefined(ast.extra[extraPtr + 2], lhsType));
+            const lhs = self.getValue(try self.expectDefined(ast.extra[extraPtr], null));
+            const rhs = self.getValue(try self.expectDefined(ast.extra[extraPtr + 2], null));
 
             return self.appendValue(.{
                 .Bool = multiplier and self.comptimeEq(lhs, rhs)
@@ -631,8 +626,8 @@ pub fn evalBinary(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Ty
         },
         .LeftShift, .RightShift,
         .Pipe, .Xor, .Ampersand => |bitwise| {
-            const lhs = self.getValue(try self.expectDefined(ast.extra[extraPtr], lhsType)).Int;
-            const rhs = self.getValue(try self.expectDefined(ast.extra[extraPtr + 2], lhsType)).Int;
+            const lhs = self.getValue(try self.expectDefined(ast.extra[extraPtr], null)).Int;
+            const rhs = self.getValue(try self.expectDefined(ast.extra[extraPtr + 2], null)).Int;
 
             return self.appendValue(.{
                 .Int = switch (bitwise) {
@@ -648,8 +643,8 @@ pub fn evalBinary(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Ty
         .Greater, .LesserEqual => |comparison| {
             const multiplier = comparison == .Greater;
 
-            const lhs = self.getValue(try self.expectDefined(ast.extra[extraPtr], lhsType));
-            const rhs = self.getValue(try self.expectDefined(ast.extra[extraPtr + 2], lhsType));
+            const lhs = self.getValue(try self.expectDefined(ast.extra[extraPtr], null));
+            const rhs = self.getValue(try self.expectDefined(ast.extra[extraPtr + 2], null));
 
             return self.appendValue(.{
                 .Bool = multiplier and switch (lhs) {
@@ -662,8 +657,8 @@ pub fn evalBinary(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Ty
         .Lesser, .GreaterEqual => |comparison| {
             const multiplier = comparison == .Lesser;
 
-            const lhs = self.getValue(try self.expectDefined(ast.extra[extraPtr], lhsType));
-            const rhs = self.getValue(try self.expectDefined(ast.extra[extraPtr + 2], lhsType));
+            const lhs = self.getValue(try self.expectDefined(ast.extra[extraPtr], null));
+            const rhs = self.getValue(try self.expectDefined(ast.extra[extraPtr + 2], null));
 
             return self.appendValue(.{
                 .Bool = multiplier and switch (lhs) {
@@ -675,7 +670,7 @@ pub fn evalBinary(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Ty
 
         },
         .Plus, .Minus, .Slash, .Star => |arithmetic| {
-            const lhs = self.getValue(try self.expectDefined(ast.extra[extraPtr], lhsType));
+            const lhs = self.getValue(try self.expectDefined(ast.extra[extraPtr], null));
             const rhs = self.getValue(try self.expectDefined(ast.extra[extraPtr + 2], null));
 
             return self.appendValue(switch (arithmetic) {
@@ -788,7 +783,6 @@ fn evalSwitchExpression(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpecte
                     try self.cacheValue(.{
                         .file = self.typechecker.currentFile,
                         .expr = capture,
-                        .instantiation = self.currentInstantiation,
                     }, varToSwitchOn);
                 }
 
@@ -833,7 +827,6 @@ fn evalSwitchExpression(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpecte
                     try self.cacheValue(.{
                         .file = self.typechecker.currentFile,
                         .expr = capture,
-                        .instantiation = self.currentInstantiation,
                     }, varToSwitchOn);
                 }
 
@@ -930,16 +923,15 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
             break :blk self.castValue(valuePtr, expected);
         },
         .Capture =>
-            if (self.cache.get(.{
-                .file = self.typechecker.currentFile,
-                .expr = decl.node,
-                .instantiation = self.currentInstantiation,
-            })) |capture| capture
+            if (self.cache.get(.{ .file = self.typechecker.currentFile, .expr = decl.node })) |capture| capture
             else Error.ComptimeNotPossible,
         .Parameter =>
             if (self.getFlag(.InComptimeCall)) try self.appendValue(try self.typechecker.executer.getVar(decl.name)) 
+            else  if (self.typechecker.executer.cacheStack.pop()) |c| c.args[decl.node]
             else {
-                self.report("Can't eval.", .{});
+                self.report("Early evaluation of comptime variable '{s}'", .{
+                    self.typechecker.builder.getInternedString(decl.name),
+                });
                 return Error.EarlyEval;
             },
         else => |t| {
@@ -1082,8 +1074,7 @@ fn evalLiteral(self: *Folder, tokenPtr: defines.TokenPtr, maybeExpected: ?TypeID
         else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
     };
 
-    const res = try self.appendValue(value);
-    return self.castValue(res, maybeExpected orelse Builtin.Type("any"));
+    return self.appendValue(value);
 }
 
 fn evalPtrType(
@@ -1286,7 +1277,6 @@ fn evalStructType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Val
         self.cache.put(self.arena.allocator(), .{
             .file = self.typechecker.currentFile,
             .expr = expr,
-            .instantiation = self.currentInstantiation,
         }, res) catch return Error.AllocatorFailure;
     }
 
@@ -2231,7 +2221,7 @@ fn setValue(self: *const Folder, address: defines.Offset, new: Comptime.Value) v
     self.memory.items[address] = new;
 }
 
-fn cacheValue(self: *Folder, ptr: FolderCacheKey, val: Comptime.Value.Ptr) Error!void {
+fn cacheValue(self: *Folder, ptr: Resolver.ResolutionKey, val: Comptime.Value.Ptr) Error!void {
     if (!self.getFlag(.InComptimeCall)) {
         self.cache.put(self.arena.allocator(), ptr, val)
             catch return Error.AllocatorFailure;

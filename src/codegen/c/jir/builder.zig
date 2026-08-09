@@ -19,6 +19,7 @@ const Builder = @This();
 
 constants: std.MultiArrayList(JIR.Constant),
 functions: MultiArrayList(JIR.Function),
+functionCache: collections.HashMap(JIR.Ptr, JIR.Function.Ptr),
 nodes: JIR.Node.List,
 data: std.ArrayList(u32),
 allocator: Allocator,
@@ -32,6 +33,10 @@ pub fn init(allocator: Allocator, counts: common.CompilerContext.Counts, typeche
     strings.ensureTotalCapacity(allocator, counts.string + counts.types * 4 + counts.functions)
         catch return Error.AllocatorFailure;
 
+    var funcCache = collections.HashMap(JIR.Ptr, JIR.Function.Ptr).empty;
+    funcCache.ensureTotalCapacity(allocator, counts.functions)
+        catch return Error.AllocatorFailure;
+
     return .{
         .nodes = try JIR.Node.List.init(allocator, counts.statements + counts.expressions),
         .keyNodes = std.ArrayList(JIR.Ptr).initCapacity(allocator, counts.statements + counts.expressions)
@@ -42,6 +47,7 @@ pub fn init(allocator: Allocator, counts: common.CompilerContext.Counts, typeche
             catch return Error.AllocatorFailure,
         .functions = try MultiArrayList(JIR.Function).init(allocator, counts.functions),
         .topLevelAsms = try std.ArrayList(defines.StringPtr).initCapacity(allocator, 128),
+        .functionCache = funcCache,
         .strings = strings,
         .allocator = allocator,
         .typechecker = typechecker,
@@ -64,9 +70,16 @@ pub fn build(self: *const Builder, allocator: Allocator) Error!JIR {
 }
 
 pub fn addFunction(self: *Builder, function: JIR.Function) Error!JIR.Function.Ptr {
-    const res = try self.functions.addOne(self.allocator);
-    self.functions.set(res, function);
-    return res;
+    if (self.functionCache.get(function.body)) |ptr| {
+        common.log.debug("Setting to {s}", .{self.getInternedString(function.name)});
+        self.functions.set(ptr, function);
+        return ptr;
+    }
+    else {
+        const res = try self.functions.addOne(self.allocator);
+        self.functions.set(res, function);
+        return res;
+    }
 }
 
 pub fn addConstant(self: *Builder, constant: JIR.Constant) Error!JIR.Constant.Ptr {
