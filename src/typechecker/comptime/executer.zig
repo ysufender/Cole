@@ -20,9 +20,9 @@ const TypeInfo = types.TypeInfo;
 const JIR = backend.C.JIR;
 
 const Stack = collections.StaticStack(Scope, defines.comptimeStackLimit);
-
 const Cache = struct {
     pub const HashMap = collections.HashMapCustom(Key, Entry, Key.eql);
+    pub const Stack = collections.StaticStack(Key, defines.comptimeStackLimit);
 
     pub const Status = enum {
         InProgress,
@@ -77,6 +77,7 @@ const Scope = struct {
 const Executer = @This();
 
 cache: Cache.HashMap,
+cacheStack: Cache.Stack,
 stack: Stack,
 
 typechecker: *Typechecker,
@@ -89,6 +90,7 @@ pub fn init(typechecker: *Typechecker, allocator: Allocator) Error!Executer {
     return Executer{
         .cache = try Cache.HashMap.init(@ptrCast(&typechecker.folder), arena.allocator(), typechecker.context.counts.functions),
         .stack = .{ },
+        .cacheStack = .{ },
         .arena = arena,
         .typechecker = typechecker,
     };
@@ -123,6 +125,12 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
         .result = .{ .Undefined = signature.returnType },
     });
     errdefer _ = self.cache.remove(.{ .func = func.name, .args = args });
+
+    try self.cacheStack.push(.{
+        .func = func.name,
+        .args = args,
+    });
+    errdefer _ = self.cacheStack.pop();
 
     var variables = Scope.VariableMap.empty;
     variables.ensureTotalCapacity(self.arena.allocator(), @intCast(args.len))

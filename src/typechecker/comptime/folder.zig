@@ -907,7 +907,7 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
             else Error.ComptimeNotPossible,
         .Parameter =>
             if (self.getFlag(.InComptimeCall)) try self.appendValue(try self.typechecker.executer.getVar(decl.name)) 
-            else  unreachable,
+            else  self.typechecker.executer.cacheStack.peek().args[decl.node],
         else => |t| {
             self.report("{s} declaration is not implemented.", .{@tagName(t)});
             return common.debug.NotImplemented(self.typechecker.context.log, @src());
@@ -1144,10 +1144,20 @@ fn evalEnumType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Value
         fields[index] = lexeme;
     }
 
-    self.typechecker.currentScope = self.typechecker.symbols.resolutionMap.get(.{
+    const oldScope = self.typechecker.symbols.resolutionMap.get(.{
         .file = self.typechecker.currentFile,
         .expr = expr,
     }).?;
+
+    if (self.getFlag(.InComptimeCall)) {
+        const newScope = try self.typechecker.symbols.scopes.addOne(self.typechecker.arena.allocator());
+        self.typechecker.symbols.scopes.set(newScope, self.typechecker.symbols.scopes.get(oldScope));
+        self.typechecker.currentScope = newScope;
+    }
+
+    const scope =
+        if (self.getFlag(.InComptimeCall) )self.typechecker.currentScope
+        else oldScope;
 
     const name = try self.generateRandomName(.Enum);
     const newType = TypeInfo{
@@ -1155,11 +1165,8 @@ fn evalEnumType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Value
             .mutable = false,
             .name = name,
             .fields = fields,
-            .definitions = try self.handleScopeDecls(ast, tokens, defRange),
-            .scope = self.typechecker.symbols.findDecl(.{
-                .file = self.typechecker.currentFile,
-                .expr = expr,
-            })
+            .definitions = try self.handleScopeDecls(oldScope, scope, ast, tokens, defRange),
+            .scope = scope,
         },
     };
 
@@ -1205,10 +1212,20 @@ fn evalStructType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Val
         };
     }
 
-    self.typechecker.currentScope = self.typechecker.symbols.resolutionMap.get(.{
+    const oldScope = self.typechecker.symbols.resolutionMap.get(.{
         .file = self.typechecker.currentFile,
         .expr = expr,
     }).?;
+
+    if (self.getFlag(.InComptimeCall)) {
+        const newScope = try self.typechecker.symbols.scopes.addOne(self.typechecker.arena.allocator());
+        self.typechecker.symbols.scopes.set(newScope, self.typechecker.symbols.scopes.get(oldScope));
+        self.typechecker.currentScope = newScope;
+    }
+
+    const scope =
+        if (self.getFlag(.InComptimeCall) )self.typechecker.currentScope
+        else oldScope;
 
     const name = try self.generateRandomName(.Struct);
     const newType = TypeInfo{
@@ -1216,17 +1233,23 @@ fn evalStructType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Val
             .mutable = false,
             .name = name,
             .fields = fields,
-            .definitions = try self.handleScopeDecls(ast, tokens, defRange),
-            .scope = self.typechecker.symbols.findDecl(.{
-                .file = self.typechecker.currentFile,
-                .expr = expr,
-            })
+            .definitions = try self.handleScopeDecls(oldScope, scope, ast, tokens, defRange),
+            .scope = scope
         },
     };
 
-    return self.appendValue(.{
+    const res = try self.appendValue(.{
         .Type = try self.typechecker.registerType(newType),
     });
+
+    if (self.getFlag(.InComptimeCall)) {
+        self.cache.put(self.arena.allocator(), .{
+            .file = self.typechecker.currentFile,
+            .expr = expr,
+        }, res) catch return Error.AllocatorFailure;
+    }
+
+    return res;
 }
 
 fn evalUnionType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Value.Ptr {
@@ -1322,10 +1345,20 @@ fn evalUnionType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Valu
         };
     }
 
-    self.typechecker.currentScope = self.typechecker.symbols.resolutionMap.get(.{
+    const oldScope = self.typechecker.symbols.resolutionMap.get(.{
         .file = self.typechecker.currentFile,
         .expr = expr,
     }).?;
+
+    if (self.getFlag(.InComptimeCall)) {
+        const newScope = try self.typechecker.symbols.scopes.addOne(self.typechecker.arena.allocator());
+        self.typechecker.symbols.scopes.set(newScope, self.typechecker.symbols.scopes.get(oldScope));
+        self.typechecker.currentScope = newScope;
+    }
+
+    const scope =
+        if (self.getFlag(.InComptimeCall) )self.typechecker.currentScope
+        else oldScope;
 
     const name = try self.generateRandomName(.Union);
     const newType = TypeInfo{
@@ -1335,11 +1368,8 @@ fn evalUnionType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Valu
             .mutable = false,
             .name = name,
             .fields = fields,
-            .definitions = try self.handleScopeDecls(ast, tokens, defRange),
-            .scope = self.typechecker.symbols.findDecl(.{
-                .file = self.typechecker.currentFile,
-                .expr = expr,
-            }),
+            .definitions = try self.handleScopeDecls(oldScope, scope, ast, tokens, defRange),
+            .scope = scope,
         }
     };
 
@@ -1935,6 +1965,8 @@ pub fn generateRandomNameString(self: *Folder, comptime mode: @TypeOf(.EnumLiter
 // top-level declarations.
 fn handleScopeDecls(
     self: *Folder,
+    scope: defines.ScopePtr,
+    newScope: defines.ScopePtr,
     ast: *const Parser.AST,
     tokens: *const Lexer.TokenList.Slice,
     defRange: defines.Range,
@@ -1947,7 +1979,6 @@ fn handleScopeDecls(
     const defsBuffer = allocator.alloc(types.FieldInfo, defRange.len()) catch return Error.AllocatorFailure;
     var defs = std.ArrayList(types.FieldInfo).initBuffer(defsBuffer);
 
-    const scope = self.typechecker.currentScope;
     for (0..defRange.len()) |defIndex| {
         const defPtr = ast.extra[defRange.at(@intCast(defIndex))];
         const valPtr: defines.OpaquePtr = ast.statements.items(.value)[defPtr];
@@ -1960,30 +1991,35 @@ fn handleScopeDecls(
             .scope = scope,
             .name = symbolName,
         }) orelse return common.debug.ShouldBeImpossible(undefined, @src());
+        const decl = self.typechecker.symbols.getDecl(declPtr);
+
+        const newDecl = try self.typechecker.symbols.declarations.addOne(self.typechecker.arena.allocator());
+        self.typechecker.symbols.declarations.set(newDecl, decl);
+
+        self.typechecker.symbols.lookup.put(self.typechecker.arena.allocator(), .{
+            .scope = newScope,
+            .name = symbolName,
+        }, newDecl) catch return Error.AllocatorFailure;
 
         const valueType =
-            if (self.getFlag(.InComptimeCall)) try self.typechecker.typecheckDecl(declPtr, null)
+            if (self.getFlag(.InComptimeCall)) try self.typechecker.typecheckDecl(newDecl, null)
             else Builtin.Type("incomplete");
 
+        const newName = try self.typechecker.builder.internString(symbolName);
         defs.appendAssumeCapacity(.{
             .public = sig.public,
-            .name = try self.typechecker.builder.internString(symbolName),
+            .name = newName,
             .valueType = valueType,
             .isComptime = false,
         });
 
         if (self.getFlag(.InComptimeCall)) {
-            const res = try self.evalDecl(declPtr, valueType);
-            const ex = self.declCache.getOrPut(self.arena.allocator(), declPtr)
+            const res = try self.evalDecl(newDecl, valueType);
+            const ex = self.declCache.getOrPut(self.arena.allocator(), newDecl)
                 catch return Error.AllocatorFailure;
 
             if (!ex.found_existing) {
                 ex.value_ptr.* = res;
-
-                const resv = self.getValue(res);
-                if (resv == .Function) {
-                    try self.typechecker.builder.functionDef(resv.Function.name, try self.typechecker.builder.addFunction(resv.Function));
-                }
             }
         }
     }
