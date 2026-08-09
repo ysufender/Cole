@@ -406,11 +406,9 @@ fn typecheckVariableDef(
 
                 if (self.typeTable.get(def.valueType) == .Function) {
                     const funcPtr = try self.folder.evalDecl(rres.value, def.valueType);
-                    const func = self.folder.getValue(funcPtr).Function;
-                    try self.builder.functionDef(nnname, try self.builder.addFunction(func));
+                    // const func = self.folder.getValue(funcPtr).Function;
+                    // try self.builder.functionDef(nnname, try self.builder.addFunction(func));
                     self.folder.memory.items[funcPtr].Function.name = nnname;
-
-                    common.log.debug("New decl rename {s} {d}", .{defName, rres.value});
                 }
             }
         },

@@ -851,9 +851,23 @@ fn evalIfExpression(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?
         else self.expectDefined(conditional.otherwise, maybeExpected);
 }
 
-pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID) Error!Comptime.Value.Ptr {    const decls = self.typechecker.symbols.declarations;
+pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID) Error!Comptime.Value.Ptr {
+    const decls = self.typechecker.symbols.declarations;
+
     // @Readonly never write, only read here.
     if (self.declCache.get(declPtr)) |val| {
+        const rres = self.getValue(val);
+        if (
+            rres == .Function
+            and !std.mem.startsWith(u8,
+                self.typechecker.builder.getInternedString(rres.Function.name),
+                "__"
+            )
+        ) {
+            const funcPtr = try self.typechecker.builder.addFunction(rres.Function);
+            try self.typechecker.builder.functionDef(rres.Function.name, funcPtr);
+        }
+
         return val;
     }
 
@@ -919,6 +933,11 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
             return common.debug.NotImplemented(self.typechecker.context.log, @src());
         },
     };
+
+    if (!self.getFlag(.InComptimeCall)) {
+        self.declCache.put(self.arena.allocator(), declPtr, res)
+            catch return Error.AllocatorFailure;
+    }
 
     return res;
 }
@@ -2025,7 +2044,6 @@ fn handleScopeDecls(
             const res = try self.evalDecl(newDecl, valueType);
             const ex = self.declCache.getOrPut(self.arena.allocator(), newDecl)
                 catch return Error.AllocatorFailure;
-            common.log.debug("New decl {s} {d}", .{symbolName, newDecl});
 
             if (!ex.found_existing) {
                 ex.value_ptr.* = res;

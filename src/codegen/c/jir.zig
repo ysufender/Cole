@@ -565,7 +565,11 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
                 try self.write(out, ";\n", .{ });
             }
         },
-        .Identifier => try self.write(out, "{s}", .{self.strings[node.value]}),
+        .Identifier => {
+            const str = @constCast(self.strings[node.value]);
+            _ = std.mem.replace(u8, str, "::", "__", str);
+            try self.write(out, "{s}", .{str});
+        },
         .Literal => self.literal(out, node.value),
         .Scope => {
             try self.writeln(out, "{{\n{s}: (void)(0);\n", .{
@@ -731,7 +735,11 @@ fn literal(self: *JIR, out: *Writer, ptr: Constant.Ptr) Error!void {
             .u8 => |t| self.write(out, "{d}", .{t}),
         },
         .Float => |fl| self.write(out, "{}", .{fl}),
-        .Function => |func| try self.write(out, "{s}", .{self.strings[func]}),
+        .Function => |func| {
+            const str = @constCast(self.strings[func]);
+            _ = std.mem.replace(u8, str, "::", "__", str);
+            try self.write(out, "{s}", .{str});
+        },
         .Aggregate => |agg| {
             try self.write(out, "({s}){{", .{
                 try self.getCName(agg.type, null, true, false),

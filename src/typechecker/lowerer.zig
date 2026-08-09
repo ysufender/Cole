@@ -893,7 +893,6 @@ fn scoping(self: *Lowerer, _extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     }) catch return Error.AllocatorFailure;
 
     _ = std.mem.replace(u8, qualified, "::", "__", qualified);
-    _ = std.mem.replace(u8, qualified, "$$", "__", qualified);
 
     const id = try self.typechecker.builder.internString(qualified);
 
