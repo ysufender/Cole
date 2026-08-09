@@ -907,7 +907,13 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
             else Error.ComptimeNotPossible,
         .Parameter =>
             if (self.getFlag(.InComptimeCall)) try self.appendValue(try self.typechecker.executer.getVar(decl.name)) 
-            else  self.typechecker.executer.cacheStack.peek().args[decl.node],
+            else  if (self.typechecker.executer.cacheStack.pop()) |c| c.args[decl.node]
+            else {
+                self.report("Early evaluation of comptime variable '{s}'", .{
+                    self.typechecker.builder.getInternedString(decl.name),
+                });
+                return Error.EarlyEval;
+            },
         else => |t| {
             self.report("{s} declaration is not implemented.", .{@tagName(t)});
             return common.debug.NotImplemented(self.typechecker.context.log, @src());
@@ -1460,6 +1466,7 @@ pub fn evalTypeName(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.V
         .Type => |t| .{ .String = self.typechecker.builder.getInternedString(
             self.typechecker.typenameMap.get(t) orelse return common.debug.ShouldBeImpossible(undefined, @src()),
         )},
+        .Function => |func| .{ .String = self.typechecker.builder.getInternedString(func.name) },
         else => {
             self.report("Expected a type expression.", .{});
             return Error.TypeMismatch;
@@ -1995,6 +2002,7 @@ fn handleScopeDecls(
 
         const newDecl = try self.typechecker.symbols.declarations.addOne(self.typechecker.arena.allocator());
         self.typechecker.symbols.declarations.set(newDecl, decl);
+        self.typechecker.symbols.declarations.items(.scope)[newDecl] = newScope;
 
         self.typechecker.symbols.lookup.put(self.typechecker.arena.allocator(), .{
             .scope = newScope,
@@ -2017,6 +2025,7 @@ fn handleScopeDecls(
             const res = try self.evalDecl(newDecl, valueType);
             const ex = self.declCache.getOrPut(self.arena.allocator(), newDecl)
                 catch return Error.AllocatorFailure;
+            common.log.debug("New decl {s} {d}", .{symbolName, newDecl});
 
             if (!ex.found_existing) {
                 ex.value_ptr.* = res;
@@ -2037,14 +2046,18 @@ fn castValue(self: *Folder, valuePtr: Comptime.Value.Ptr, to: TypeID) Error!Comp
                 .To = ptr.To,
             },
         },
-        .Function => |func| .{
-            .Function = .{
-                .args = func.args,
-                .body = func.body,
-                .name = func.name,
-                .signature = to,
-                .source = func.source,
+        .Function => |func| switch (self.typechecker.typeTable.get(to)) {
+            .Type => .{ .Type = func.signature },
+            .Function => .{
+                .Function = .{
+                    .args = func.args,
+                    .body = func.body,
+                    .name = func.name,
+                    .signature = to,
+                    .source = func.source,
+                },
             },
+            else => return common.debug.ShouldBeImpossible(undefined, @src()),
         },
         .Float => |fromFloat| switch (self.typechecker.typeTable.get(to)) {
             .Float, .ComptimeFloat => value,

@@ -386,8 +386,9 @@ fn typecheckVariableDef(
                         defName,
                 }) catch return Error.AllocatorFailure;
 
+                const nnname = try self.builder.internString(nname);
                 defs[idx] = Types.FieldInfo{
-                    .name = try self.builder.internString(nname),
+                    .name = nnname,
                     .valueType = def.valueType,
                     .public = def.public,
                     .isComptime = def.isComptime,
@@ -402,6 +403,15 @@ fn typecheckVariableDef(
                     .scope = scope,
                     .name = nname,
                 }, rres.value);
+
+                if (self.typeTable.get(def.valueType) == .Function) {
+                    const funcPtr = try self.folder.evalDecl(rres.value, def.valueType);
+                    const func = self.folder.getValue(funcPtr).Function;
+                    try self.builder.functionDef(nnname, try self.builder.addFunction(func));
+                    self.folder.memory.items[funcPtr].Function.name = nnname;
+
+                    common.log.debug("New decl rename {s} {d}", .{defName, rres.value});
+                }
             }
         },
         .Function => {
@@ -453,7 +463,7 @@ fn typecheckVariableDef(
             };
 
             // @Note See folder.zig:evalFunction
-            if (!self.folder.getFlag(.InComptimeCall)) {
+            if (!self.folder.getFlag(.InComptimeCall) and decl.parent == null) {
                 try self.builder.functionDef(new, try self.builder.addFunction(func));
             }
         },
@@ -2650,7 +2660,7 @@ pub fn assertCastable(self: *Typechecker, from: TypeID, to: TypeID, unsafe: bool
             else => try functional.throwIf(!unsafe or !self.isInt(to), Error.IncompatibleTypes),
         },
         .Function => switch (toType) {
-            .Function => { },
+            .Function, .Type => { },
             else => return Error.IncompatibleTypes,
         },
         .Any, .Type,

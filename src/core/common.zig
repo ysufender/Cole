@@ -136,7 +136,7 @@ pub const CompilerError = error {
     VoidPointer,
     UndefinedPointerType,
     EmptyNonExternalType,
-    EarlyTypecheck,
+    EarlyEval,
     StackOverflow,
     StackUnderflow,
     Terminate,

@@ -232,17 +232,9 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
             };
         },
 
-        .Pointer => |ptr| blk: {
-            const val = self.typechecker.folder.getValue(ptr.To);
-            switch (val) {
-                .Function => |func| break :blk JIR.Constant{
-                    .Function = func.name,
-                },
-                else => {
-                    self.report("Comptime pointers can't live outside the comptime scope.", .{});
-                    return Error.ExistentialDilemma;
-                }
-            }
+        .Pointer => {
+            self.report("Comptime pointers can't live outside the comptime scope.", .{});
+            return Error.ExistentialDilemma;
         },
         .Bool => |boolValue| .{ .Integer = .{ .u8 = @intFromBool(boolValue), }, },
         .Void => if (false) {
@@ -874,8 +866,9 @@ fn scoping(self: *Lowerer, _extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     var leftMost: u32 = 0;
     var namespace: []const u8 = "";
 
+    var lhs: defines.ExpressionPtr = undefined;
     while (true) {
-        const lhs = ast.extra[extraPtr];
+        lhs = ast.extra[extraPtr];
         const rhs = ast.extra[extraPtr + 1];
         
         const rtoken = tokens.get(rhs);
@@ -903,6 +896,7 @@ fn scoping(self: *Lowerer, _extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     _ = std.mem.replace(u8, qualified, "$$", "__", qualified);
 
     const id = try self.typechecker.builder.internString(qualified);
+
     return self.typechecker.builder.identifier(id);
 }
 

@@ -244,7 +244,6 @@ fn expression(self: *Executer, exprPtr: JIR.Ptr) Error!Comptime.Value {
         .Jump, .JumpIf, .Exit, .Scope, .Code, .VariableDef, .Assignment,
         .FunctionDef, .Label, .TypeDef, .Return => common.debug.ShouldBeImpossible(undefined, @src()),
         .ComptimeDef => {
-            common.log.debug("Comptime definition.", .{});
             return self.typechecker.folder.getValue(
                 try self.typechecker.folder.eval(
                     expr.value,
@@ -382,7 +381,7 @@ pub fn getVar(self: *Executer, name: defines.StringPtr) Error!Comptime.Value {
     self.report("Given variable '{s}' is not in the comptime scope.", .{
         self.typechecker.builder.getInternedString(name),
     });
-    return Error.EarlyTypecheck;
+    return Error.EarlyEval;
 }
 
 fn setVar(self: *Executer, name: defines.StringPtr, newValue: Comptime.Value.Ptr) Error!void {
@@ -398,7 +397,7 @@ fn setVar(self: *Executer, name: defines.StringPtr, newValue: Comptime.Value.Ptr
     self.report("Given variable '{s}' is not in the comptime scope.", .{
         self.typechecker.builder.getInternedString(name),
     });
-    return Error.EarlyTypecheck;
+    return Error.EarlyEval;
 }
 
 fn getLabel(self: *const Executer, name: defines.StringPtr) Error!Scope.Symbol {
