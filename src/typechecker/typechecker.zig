@@ -27,7 +27,7 @@ const Error = common.CompilerError;
 const Context = common.CompilerContext;
 const Arena = std.heap.ArenaAllocator;
 const Allocator = std.mem.Allocator;
-const Callstack = collections.StaticRingStack(defines.DeclPtr, defines.stackLimit);
+const Callstack = collections.StaticRingStack(defines.DeclPtr, defines.callstackLimit);
 const FlagMap = std.bit_set.IntegerBitSet(8);
 
 const BuiltinIndex = Resolver.BuiltinIndex;
@@ -49,7 +49,6 @@ pub const Flags = enum(u8) {
     CoveredAllPaths = 4,
     InLoop = 5,
     InDefer = 6,
-    InComptimeCall = 7,
 
     pub fn flag(flagToGet: Flags) u8 {
         return @intFromEnum(flagToGet);
@@ -152,8 +151,9 @@ pub fn typecheck(self: *Typechecker, allocator: Allocator) Error!Resolution {
 
     self.builder = try backend.C.JIR.Builder.init(self.arena.child_allocator, self.context.counts, self);
     self.folder = try Comptime.Folder.init(self, allocator);
-    self.lowerer = try Lowerer.init(self);
+    self.folder = try Comptime.Folder.init(self, allocator);
     self.executer = try Comptime.Executer.init(self, allocator);
+    self.lowerer = try Lowerer.init(self);
 
     inline for (Comptime.Folder.builtinTypes, 0..) |builtin, id| {
         self.typeTable.appendAssumeCapacity(builtin.info);
@@ -292,6 +292,8 @@ fn typecheckVariableDef(
         .Type => {
             const newType = self.folder.getValue(try self.folder.eval(decl.node, expected)).Type;
 
+            const typeInfo = self.typeTable.get(newType);
+
             const ast = self.context.getAST(self.currentFile);
             const tokens = self.context.getTokens(ast.tokens);
 
@@ -321,7 +323,7 @@ fn typecheckVariableDef(
                 }) catch return Error.AllocatorFailure;
             const new = try self.builder.internString(newName);
 
-            self.typeTable.set(newType, switch (self.typeTable.get(newType)) {
+            self.typeTable.set(newType, switch (typeInfo) {
                 .Struct => |str| .{
                     .Struct = .{
                         .mutable = str.mutable,
@@ -367,24 +369,30 @@ fn typecheckVariableDef(
                 else => return common.debug.ShouldBeImpossible(self.context.log, @src()),
             });
 
+            const scope = switch (typeInfo) {
+                .Struct => |str| str.scope,
+                .Union => |str| str.scope,
+                .Enum => |str| str.scope,
+                else => return common.debug.ShouldBeImpossible(undefined, @src()),
+            };
+
             for (defs, 0..) |def, idx| {
+                var defName = self.builder.getInternedString(def.name);
+                defName = defName[std.mem.findScalarLast(u8, defName, ':') orelse 0..];
+
                 const nname = std.fmt.allocPrint(self.arena.allocator(),
                     "{s}::{s}", .{
                         newName,
-                        self.builder.getInternedString(def.name),
+                        defName,
                 }) catch return Error.AllocatorFailure;
 
+                const nnname = try self.builder.internString(nname);
                 defs[idx] = Types.FieldInfo{
-                    .name = try self.builder.internString(nname),
+                    .name = nnname,
                     .valueType = def.valueType,
                     .public = def.public,
                     .isComptime = def.isComptime,
                 };
-
-                const scope = self.symbols.resolutionMap.get(.{
-                    .file = self.currentFile,
-                    .expr = self.unwrapMark(decl.node),
-                }) orelse return common.debug.ShouldBeImpossible(self.context.log, @src());
 
                 const rres = self.symbols.lookup.fetchRemove(.{
                     .scope = scope,
@@ -395,6 +403,15 @@ fn typecheckVariableDef(
                     .scope = scope,
                     .name = nname,
                 }, rres.value);
+
+                if (self.typeTable.get(def.valueType) == .Function) {
+                    const funcPtr = try self.folder.evalDecl(rres.value, def.valueType);
+                    const func = self.folder.getValue(funcPtr).Function;
+                    try self.builder.functionDef(nnname, try self.builder.addFunction(func));
+                    self.folder.memory.items[funcPtr].Function.name = nnname;
+
+                    common.log.debug("New decl rename {s} {d}", .{defName, rres.value});
+                }
             }
         },
         .Function => {
@@ -441,10 +458,14 @@ fn typecheckVariableDef(
                     .signature = func.signature,
                     .body = func.body,
                     .args = func.args,
+                    .source = func.source,
                 },
             };
 
-            try self.builder.functionDef(new, try self.builder.addFunction(func));
+            // @Note See folder.zig:evalFunction
+            if (!self.folder.getFlag(.InComptimeCall) and decl.parent == null) {
+                try self.builder.functionDef(new, try self.builder.addFunction(func));
+            }
         },
         else => { },
     }
@@ -950,18 +971,9 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
         .ExpressionList => self.typecheckExpressionList(expr.value, maybeExpected),
         .Literal => self.typecheckValue(try self.folder.eval(expressionPtr, maybeExpected), maybeExpected),
 
-        .EnumDefinition, .UnionDefinition, .StructDefinition => {
-            const val = self.folder.eval(expressionPtr, maybeExpected) catch |err| switch (err) {
-                Error.EarlyTypecheck =>
-                    if (self.getFlag(.InComptimeCall)) return Comptime.Folder.Builtin.Type("type")
-                    else return err,
-                else => return err,
-            };
-            return self.typecheckValue(val, maybeExpected);
-        },
-
         .ArrayType, .CPointerType, .FunctionType,
-        .MutableType, .PointerType, .SliceType,
+        .MutableType, .PointerType, .SliceType, 
+        .EnumDefinition, .UnionDefinition, .StructDefinition,
         .FunctionDefinition, .Lambda => self.typecheckValue(
             try self.folder.eval(expressionPtr, maybeExpected),
             maybeExpected,
@@ -1070,7 +1082,7 @@ pub fn typecheckExpressionList(self: *Typechecker, extra: defines.OpaquePtr, _ma
     const expected =
         if (maybeExpected) |expected|
             if (range.len() == 1) switch (self.typeTable.get(expected)) {
-                .Type, .Array => return self.typecheckExpressionListRange(range, expected),
+                .Type, .Struct, .Enum, .Union, .Array => return self.typecheckExpressionListRange(range, expected),
                 else => return self.typecheckExpression(ast.extra[range.at(0)], expected),
             }
             else expected
@@ -1503,7 +1515,7 @@ pub fn typecheckBuiltinCall(self: *Typechecker, extraPtr: defines.ExpressionPtr,
         BI("cast") => self.typecheckCast(extraPtr, maybeExpected, false),
         BI("unsafeCast") => self.typecheckCast(extraPtr, maybeExpected, true),
         BI("as") => self.typecheckTypeForwarding(extraPtr, maybeExpected),
-        BI("typeOf") => Comptime.Folder.Builtin.Type("type"), // self.executer.getValue(try self.executer.evalTypeOf(extraPtr)).Type,
+        BI("typeOf") => Comptime.Folder.Builtin.Type("type"),
         BI("compileError") => return self.folder.evalCompileError(extraPtr),
         BI("sizeOf") => return Comptime.Folder.Builtin.Type("u32"),
         BI("typeName") => return Comptime.Folder.Builtin.Type("[]u8"),
@@ -1743,10 +1755,11 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
 
     if (isPresent.found_existing) {
         switch (isPresent.value_ptr.status) {
-            .Checked =>
+            .Checked => {
                 if (isPresent.value_ptr.result != Comptime.Folder.Builtin.Type("incomplete")) {
                     return isPresent.value_ptr.result;
-                } else {},
+                }
+            },
             .InProgress => {
                 if (!self.getFlag(.CanCycle)) {
                     self.report("Dependency cycle detected. '{s}' depends on itself.", .{
@@ -1772,6 +1785,10 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
         .parent = decl.parent,
         .name = res: {
             const symName = tokens.get(decl.token).lexeme(self.context, self.currentFile);
+
+            if (decl.kind != .Variable) {
+                break :res try self.builder.internString(symName);
+            }
 
             const namespace =
                 if (decl.parent != null and self.typeTable.get(try self.typecheckDecl(decl.parent.?, null)) == .Type) hasParent: {
@@ -1819,12 +1836,14 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
         .Field => self.typecheckField(&decl),
     };
 
+    // @Note preventing the caching of declarations when inside a comptime call.
+    // Since they'll get their own declarations and scopes, it is fine.
     isPresent.value_ptr.* = .{
-        .status = .Checked,
+        .status = if (self.folder.getFlag(.InComptimeCall)) .NotChecked else .Checked,
         .result = declType,
     };
 
-    if (decl.topLevel) {
+    if (decl.topLevel and !self.folder.getFlag(.InComptimeCall)) {
         try self.lowerer.topLevelDeclaration(isPresent.key_ptr.*, &decl);
     }
 
@@ -2641,7 +2660,7 @@ pub fn assertCastable(self: *Typechecker, from: TypeID, to: TypeID, unsafe: bool
             else => try functional.throwIf(!unsafe or !self.isInt(to), Error.IncompatibleTypes),
         },
         .Function => switch (toType) {
-            .Function => { },
+            .Function, .Type => { },
             else => return Error.IncompatibleTypes,
         },
         .Any, .Type,
@@ -2750,7 +2769,7 @@ pub fn assertCanCoerce(self: *const Typechecker, this: TypeID, that: TypeID) Err
     return switch (thatType) {
         .Noreturn => { },
         .ComptimeInt => functional.throwIf(!self.isInt(this) and !self.isFloat(this), Error.TypeMismatch),
-        .ComptimeFloat => functional.throwIf(!self.isFloat(this) and !self.isInt(this), Error.TypeMismatch),
+        .ComptimeFloat => functional.throwIf(!self.isFloat(this), Error.TypeMismatch),
         .Float => functional.throwIf(!self.isFloat(this), Error.TypeMismatch),
         .Integer => |itype| switch (thisType) {
             .Integer => |i2type| functional.throwIf(itype.size > i2type.size, Error.TypeMismatch),
@@ -3314,3 +3333,4 @@ fn unwrapMark(self: *Typechecker, exprPtr: defines.ExpressionPtr) defines.Expres
     }
     return e;
 }
+

@@ -95,7 +95,7 @@ pub const Resolution = struct {
     resolutionMap: ResolutionMap,
     declarations: DeclarationList,
     lookup: LookupMap,
-    scopes: ScopeList.Slice,
+    scopes: ScopeList,
 
     pub fn tryGetDecl(self: *const Resolution, key: ResolutionKey) ?defines.DeclPtr {
         return self.resolutionMap.get(key);
@@ -260,7 +260,7 @@ pub fn resolve(self: *Resolver, allocator: Allocator) Error!Resolution {
     return collections.deepCopy(Resolution{
         .resolutionMap = self.resolved,
         .declarations = self.decls.mutableSlice(),
-        .scopes = self.scopes.slice(),
+        .scopes = self.scopes.mutableSlice(),
         .lookup = self.lookup,
     }, allocator);
 }
@@ -572,8 +572,8 @@ fn resolveExpression(self: *Resolver, exprPtr: defines.ExpressionPtr) Error!void
                 .end = ast.extra[expr.value + 1],
             };
 
-            for (fields.start..fields.end) |fieldPtrPtr| {
-                if (try self.resolveSignature(ast.extra[fieldPtrPtr], .Field, .Struct)) {
+            for (fields.start..fields.end, 0..) |fieldPtrPtr, i| {
+                if (try self.resolveSignature(ast.extra[fieldPtrPtr], .Field, .Struct, i)) {
                     const lexeme = tokens.get(ast.signatures.get(ast.extra[fieldPtrPtr]).name).lexeme(self.context, self.dataIndex());
                     self.report("Given field '{s}' collides with the previous definition of '{s}'.", .{lexeme, lexeme});
                     return Error.DuplicateSymbol;
@@ -609,8 +609,8 @@ fn resolveExpression(self: *Resolver, exprPtr: defines.ExpressionPtr) Error!void
                 .end = ast.extra[expr.value + 1],
             };
 
-            for (fields.start..fields.end) |fieldPtrPtr| {
-                if (try self.resolveSignature(ast.extra[fieldPtrPtr], .Field, .Enum)) {
+            for (fields.start..fields.end, 0..) |fieldPtrPtr, i| {
+                if (try self.resolveSignature(ast.extra[fieldPtrPtr], .Field, .Enum, i)) {
                     const lexeme = tokens.get(ast.signatures.get(ast.extra[fieldPtrPtr]).name).lexeme(self.context, self.dataIndex());
                     self.report("Given field '{s}' is already present in the enum body.", .{lexeme});
                     return Error.DuplicateSymbol;
@@ -658,8 +658,8 @@ fn resolveExpression(self: *Resolver, exprPtr: defines.ExpressionPtr) Error!void
                 .end = ast.extra[expr.value + offset + 1],
             };
 
-            for (fields.start..fields.end) |fieldPtrPtr| {
-                if (try self.resolveSignature(ast.extra[fieldPtrPtr], .Field, .Union)) {
+            for (fields.start..fields.end, 0..) |fieldPtrPtr, i| {
+                if (try self.resolveSignature(ast.extra[fieldPtrPtr], .Field, .Union, i)) {
                     const lexeme = tokens.get(ast.signatures.get(ast.extra[fieldPtrPtr]).name).lexeme(self.context, self.dataIndex());
                     self.report("Given field '{s}' collides with the previous definition of '{s}'.", .{lexeme, lexeme});
                     return Error.DuplicateSymbol;
@@ -688,9 +688,9 @@ fn resolveExpression(self: *Resolver, exprPtr: defines.ExpressionPtr) Error!void
             defer self.currentScope = previous;
             self.currentScope = function;
 
-            for (params.start..params.end) |paramPtrPtr| {
+            for (params.start..params.end, 0..) |paramPtrPtr, i| {
                 const lexeme = tokens.get(ast.signatures.get(ast.extra[paramPtrPtr]).name).lexeme(self.context, self.dataIndex());
-                if (try self.resolveSignature(ast.extra[paramPtrPtr], .Parameter, .Block)) {
+                if (try self.resolveSignature(ast.extra[paramPtrPtr], .Parameter, .Block, i)) {
                     self.report("Duplicate parameter name '{s}'.", .{lexeme});
                     return Error.DuplicateSymbol;
                 }
@@ -737,7 +737,7 @@ fn resolveExpression(self: *Resolver, exprPtr: defines.ExpressionPtr) Error!void
                 .expr = exprPtr,
             }, lambda) catch return Error.AllocatorFailure;
 
-            for (captures.start..captures.end) |capturePtrPtr| {
+            for (captures.start..captures.end, 0..) |capturePtrPtr, i| {
                 const name = ast.extra[capturePtrPtr];
                 const lexeme = tokens.get(name).lexeme(self.context, self.dataIndex());
 
@@ -748,8 +748,8 @@ fn resolveExpression(self: *Resolver, exprPtr: defines.ExpressionPtr) Error!void
                     .scope = self.currentScope,
                     .public = false,
                     .token = name,
-                    .node = name,
-                    .type = 0,
+                    .node = @intCast(i),
+                    .type = @intCast(i),
                     .topLevel = false,
                 });
 
@@ -912,7 +912,13 @@ fn resolveScoping(
     return leftMost;
 }
 
-fn resolveSignature(self: *Resolver, signaturePtr: defines.SignaturePtr, comptime signatureType: Declaration.Kind, comptime bodyType: Scope.Kind) Error!bool {
+fn resolveSignature(
+    self: *Resolver,
+    signaturePtr: defines.SignaturePtr,
+    comptime signatureType: Declaration.Kind,
+    comptime bodyType: Scope.Kind,
+    idx: usize,
+) Error!bool {
     const allocator = self.arena.allocator();
     const ast = self.context.getAST(self.dataIndex());
     const tokens = self.context.getTokens(self.dataIndex());
@@ -949,7 +955,7 @@ fn resolveSignature(self: *Resolver, signaturePtr: defines.SignaturePtr, comptim
                     .scope = self.currentScope,
                     .public = field.public,
                     .token = field.name,
-                    .node = field.type,
+                    .node = @intCast(idx),
                     .type = field.type,
                     .topLevel = false,
                 });

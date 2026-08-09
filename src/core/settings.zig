@@ -46,9 +46,9 @@ pub fn print(self: *const Self, allocator: std.mem.Allocator) void {
             self.maxErr,
             @tagName(self.optimize),
             @tagName(self.backend),
+            std.mem.join(allocator, ", ", self.includeDirs) catch "",
             std.mem.join(allocator, ", ", self.linkDirs) catch "",
             std.mem.join(allocator, ", ", self.libraries) catch "",
-            std.mem.join(allocator, ", ", self.includeDirs) catch "",
         }
     );
 }

@@ -37,10 +37,9 @@ pub let TraitInfo = struct {
 };
 
 pub let VerifyTrait = fn (Trait: TraitInfo, On: type) -> type {
-    let typeInfo = switch typeInfo(On) {
-        @Struct -> |s| s,
-        else -> compileError("{s} trait can only be implemented on structs.", (Trait.name)),
-    };
+    let typeInfo =
+        if (typeInfo(On) == @Struct) On.Struct
+        else compileError("{s} trait can only be implemented on structs.", (Trait.name));
 
     let i: mut u32 = 0;
     while i < Trait.members.len {

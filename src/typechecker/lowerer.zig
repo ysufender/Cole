@@ -232,17 +232,9 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
             };
         },
 
-        .Pointer => |ptr| blk: {
-            const val = self.typechecker.folder.getValue(ptr.To);
-            switch (val) {
-                .Function => |func| break :blk JIR.Constant{
-                    .Function = func.name,
-                },
-                else => {
-                    self.report("Comptime pointers can't live outside the comptime scope.", .{});
-                    return Error.ExistentialDilemma;
-                }
-            }
+        .Pointer => {
+            self.report("Comptime pointers can't live outside the comptime scope.", .{});
+            return Error.ExistentialDilemma;
         },
         .Bool => |boolValue| .{ .Integer = .{ .u8 = @intFromBool(boolValue), }, },
         .Void => if (false) {
@@ -317,7 +309,7 @@ pub fn statement(self: *Lowerer, statementPtr: defines.StatementPtr) Error!JIR.P
         .Return => try self.@"return"(try self.expression(stmt.value, self.lastReturnType)),
         .Break => try self.@"break"(),
         .Continue => try self.@"continue"(),
-        .Discard => try self.expression(stmt.value, try self.typechecker.typecheckExpression(stmt.value, null)),
+        .Discard => try self.expressionStmt(stmt.value),
         .VariableDefinition => try self.variableDef(stmt.value),
         .Import => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
 
@@ -874,8 +866,9 @@ fn scoping(self: *Lowerer, _extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     var leftMost: u32 = 0;
     var namespace: []const u8 = "";
 
+    var lhs: defines.ExpressionPtr = undefined;
     while (true) {
-        const lhs = ast.extra[extraPtr];
+        lhs = ast.extra[extraPtr];
         const rhs = ast.extra[extraPtr + 1];
         
         const rtoken = tokens.get(rhs);
@@ -903,6 +896,7 @@ fn scoping(self: *Lowerer, _extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     _ = std.mem.replace(u8, qualified, "$$", "__", qualified);
 
     const id = try self.typechecker.builder.internString(qualified);
+
     return self.typechecker.builder.identifier(id);
 }
 
@@ -1109,8 +1103,18 @@ fn builtinCall(
             const builtinUnreach = try self.identifier(try self.typechecker.builder.internString("__builtin_unreachable"));
             break :blk self.typechecker.builder.call(true, builtinUnreach, &.{});
         },
+        BI("typeName") => self.typechecker.builder.literal(
+            try self.typechecker.builder.addConstant(.{ .String =
+                try self.typechecker.builder.internString(
+                    try self.typechecker.typeName(self.typechecker.arena.allocator(),
+                        self.typechecker.folder.getValue(
+                            try self.typechecker.folder.expectType(ast.extra[args.at(0)])
+                        ).Type
+                    )
+                )
+            })
+        ),
         BI("compileLog"), BI("compileError") => 0,
-
         else => common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
     };
 }
