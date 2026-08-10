@@ -1,6 +1,0 @@
-let main = fn () -> i32 {
-    for i in 0..10 {
-        return i;
-    }
-    return 0;
-};

@@ -194,20 +194,20 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
     try self.write(out, 
     \\/*
     \\ * This file has been automatically generated
-    \\ * by the JASL compiler.
+    \\ * by the Cole compiler.
     \\ */
     \\
-    \\#ifndef JASL_CODEGEN_C_FORWARD_DECL_H
-    \\#define JASL_CODEGEN_C_FORWARD_DECL_H
+    \\#ifndef COLE_CODEGEN_C_FORWARD_DECL_H
+    \\#define COLE_CODEGEN_C_FORWARD_DECL_H
     \\
     \\#include <stdint.h>
     \\
-    \\typedef uint8_t jasl_bool;
+    \\typedef uint8_t cole_bool;
     \\
     \\
     , .{});
     defer { 
-        self.write(out, "\n#endif /* JASL_CODEGEN_C_FORWARD_DECL_H */\n" , .{}) catch common.log.err("Failed to end header.", .{});
+        self.write(out, "\n#endif /* COLE_CODEGEN_C_FORWARD_DECL_H */\n" , .{}) catch common.log.err("Failed to end header.", .{});
         out.flush() catch common.log.err("Failed to flush forward declarations.", .{});
     }
 
@@ -795,7 +795,7 @@ fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool
             if (noSymbol) "noreturn"
             else "void __attribute__((noreturn))",
 
-        .Bool => |v| name = std.fmt.allocPrint(self.allocator, "jasl_bool{s}", .{
+        .Bool => |v| name = std.fmt.allocPrint(self.allocator, "cole_bool{s}", .{
             if (v) ""
             else if (noSymbol) "_const"
             else " const"

@@ -1,6 +1,6 @@
 /*
  * This file has been automatically generated
- * by the JASL compiler.
+ * by the Cole compiler.
  */
 
 #include <stdlib.h>

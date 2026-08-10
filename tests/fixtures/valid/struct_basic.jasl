@@ -1,9 +1,0 @@
-let Point = struct {
-    x: i32,
-    y: i32,
-};
-
-let main = fn () -> i32 {
-    let p: Point = Point { x: 1, y: 2 };
-    return p.x;
-};

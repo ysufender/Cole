@@ -10,7 +10,7 @@ pub const debug = @import("../debug/debug.zig");
 pub const CompilerContext = @import("context.zig");
 pub const CompilerSettings = @import("settings.zig");
 
-pub const JASL_VERSION = @import("config").version;
+pub const COLE_VERSION = @import("config").version;
 
 pub const CompilerError = error {
     MissingFlag,

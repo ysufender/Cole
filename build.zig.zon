@@ -1,5 +1,5 @@
 .{
-    .name = .JASL,
+    .name = .Cole,
     .version = "0.1.0",
     .fingerprint = 0x4a49839e81e2bad0, // Changing this has security and trust implications.
     .minimum_zig_version = "0.16.0",

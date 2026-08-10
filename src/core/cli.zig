@@ -59,8 +59,6 @@ const flags = std.StaticStringMap(Flag).initComptime(&(.{
 
     .{ "--resolve-only", .Flag },
 
-    .{ "--allow-recursion", .Flag },
-
     .{ "--supress-warnings", .Flag },
     .{ "-s", .Flag },
 
@@ -262,7 +260,7 @@ pub fn parseCLI(allocator: std.mem.Allocator, _args: std.process.Args, io: std.I
             .backend = targetBackend,
         }
         else {
-            common.log.err("jaslc expects an input file.", .{});
+            common.log.err("cole expects an input file.", .{});
             return Error.NoSourceFile;
         }
     };
@@ -270,8 +268,8 @@ pub fn parseCLI(allocator: std.mem.Allocator, _args: std.process.Args, io: std.I
 
 fn printHeader() common.CompilerError {
     common.log.info(
-        "The JASL Compiler:" ++
-        "\n\tVersion: " ++ common.JASL_VERSION,
+        "The Cole Compiler:" ++
+        "\n\tVersion: " ++ common.COLE_VERSION,
         .{}
     );
 

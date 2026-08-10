@@ -1,5 +1,5 @@
 /*
-    This file is a part of the JASL Standard Library,
+    This file is a part of the Cole Standard Library,
     and is licensed under MIT License.
 
     Any user code that imports this module agrees that it
@@ -7,7 +7,7 @@
 
     DISCLAIMER:
         The traits and conventions mentioned in this document
-        are to be obeyed, otherwise neither JASL STDLib nor the
+        are to be obeyed, otherwise neither Cole STDLib nor the
         compiler can guarantee a well defined program.
 
     Name:

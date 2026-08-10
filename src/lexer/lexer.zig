@@ -551,14 +551,3 @@ fn report(self: *Lexer, comptime fmt: []const u8, args: anytype) void {
     errToken.printLocation(self.allocator(), self.context, self.file, pos, true);
 }
 
-//
-// Tests
-//
-pub const Tests = struct {
-    var debugAllocator = std.heap.DebugAllocator(.{}){};
-    const gpa = debugAllocator.allocator();
-
-    test "All" {
-        try std.testing.expect(false);
-    }
-};

@@ -87,7 +87,7 @@ fn addTargets(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
         opts.addOption([]const u8, "version", versionString);
 
         const exe = b.addExecutable(.{
-            .name = "jaslc",
+            .name = "colec",
             .version = version,
             .root_module = b.createModule(.{
                 .root_source_file = b.path("src/main.zig"),
@@ -137,7 +137,7 @@ fn addDebugTarget(b: *std.Build) void {
     opts.addOption([]const u8, "version", "debug");
 
     const exe = b.addExecutable(.{
-        .name = "jaslc-debug",
+        .name = "cole-debug",
         .version = version,
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/main.zig"),

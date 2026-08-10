@@ -1,6 +1,6 @@
 
     Usage:
-        jaslc <input_file> [options]
+        cole <input_file> [options]
 
     Options:
         --help, -h                  : Print this help message.
@@ -16,8 +16,6 @@
         --parse-only                : Parse the project, do not compile
         --typecheck-only            : Typecheck the project, do not compile
         --resolve-only              : Resolve the project, do not compile
-
-        --allow-recursion           : Allow recursion, for some reason. Why don't you just iterate?
 
         --link, -l     <lib>        : Link <lib>, found from the searchpath, to the final
                                       output.

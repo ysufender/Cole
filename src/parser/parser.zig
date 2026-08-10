@@ -1735,14 +1735,3 @@ fn report(self: *Parser, comptime fmt: []const u8, args: anytype) void {
     token.printLocation(self.arena.allocator(), self.context, self.file, position, true);
 }
 
-//
-// Tests
-//
-
-pub const Tests = struct {
-    var debugAllocator = std.heap.DebugAllocator(.{}){};
-    const gpa = debugAllocator.allocator();
-
-    test "All" {
-    }
-};

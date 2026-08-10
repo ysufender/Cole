@@ -1,5 +1,3 @@
-// main.jasl
-
 import std::io::console as Console;
 import std::io::file as File;
 import std::c as C;

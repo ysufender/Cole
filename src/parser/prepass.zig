@@ -346,7 +346,7 @@ fn prepassVariableDef(
 
 fn getModulePathWithExtension(allocator: std.mem.Allocator, id: u32, ast: *const Parser.AST, context: *Context) Error![]const u8 {
     return context.realpath(
-        std.fmt.allocPrint(allocator, "{s}.jasl", .{
+        std.fmt.allocPrint(allocator, "{s}.cole", .{
             try getModulePath(allocator, id, ast, context)
         }) catch return Error.AllocatorFailure
     );
