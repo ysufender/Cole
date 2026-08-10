@@ -822,10 +822,7 @@ pub fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID
         .Scoping => self.scoping(expr.value),
 
         .Lambda, .FunctionDefinition,
-        .EnumDefinition, .StructDefinition, .UnionDefinition => {
-            return self.typechecker.builder.comptimeDef(exprPtr);
-        },
-
+        .EnumDefinition, .StructDefinition, .UnionDefinition,
         .FunctionType, .ArrayType,
         .CPointerType, .MutableType, .PointerType,
         .SliceType => common.debug.ShouldBeImpossible(undefined, @src()),

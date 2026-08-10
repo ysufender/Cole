@@ -157,8 +157,9 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
         .pc = 0,
         .len = 0,
     };
+    const current = self.stack.index;
     try self.stack.push(scope);
-    defer self.stack.index = 0;
+    defer self.stack.revert(current);
 
     const res =
         try if (signature.isComptime) res: {
@@ -254,14 +255,6 @@ fn expression(self: *Executer, exprPtr: JIR.Ptr) Error!Comptime.Value {
     return switch (expr.type) {
         .Jump, .JumpIf, .Exit, .Scope, .Code, .VariableDef, .Assignment,
         .FunctionDef, .Label, .TypeDef, .Return => common.debug.ShouldBeImpossible(undefined, @src()),
-        .ComptimeDef => {
-            return self.typechecker.folder.getValue(
-                try self.typechecker.folder.eval(
-                    expr.value,
-                    try self.typechecker.typecheckExpression(expr.value, null),
-                )
-            );
-        },
         .Identifier => self.getVar(expr.value),
         .Literal => self.literal(expr.value),
         .Call => self.call(expr.value),

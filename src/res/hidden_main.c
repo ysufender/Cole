@@ -19,7 +19,9 @@ int main(int const argc, char const* const* const argv) {{
         .len = argc - 1,
     }};
 
-    return root__main(args);
+    int32_t const err = root__main(args);
+    free(strings);
+    return err;
 }}
 
 

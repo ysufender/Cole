@@ -71,7 +71,6 @@ pub fn build(self: *const Builder, allocator: Allocator) Error!JIR {
 
 pub fn addFunction(self: *Builder, function: JIR.Function) Error!JIR.Function.Ptr {
     if (self.functionCache.get(function.body)) |ptr| {
-        common.log.debug("Setting to {s}", .{self.getInternedString(function.name)});
         self.functions.set(ptr, function);
         return ptr;
     }
@@ -137,10 +136,6 @@ pub inline fn typeDef(self: *Builder, typeID: TypeID) Error!JIR.Ptr {
     const res = try self.commonSingle(.TypeDef, typeID);
     try self.addKeyNode(res);
     return res;
-}
-
-pub inline fn comptimeDef(self: *Builder, exprPtr: defines.ExpressionPtr) Error!JIR.Ptr {
-    return self.commonBinary(.ComptimeDef, exprPtr, self.typechecker.currentFile);
 }
 
 pub inline fn @"return"(self: *Builder, expr: JIR.Ptr) Error!JIR.Ptr {

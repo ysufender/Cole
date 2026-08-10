@@ -34,7 +34,6 @@ pub const Node = struct {
     pub const List = MultiArrayList(Node);
 
     pub const Type = enum {
-        ComptimeDef,
         TypeDef,
         FunctionDef,
         VariableDef,
@@ -116,6 +115,7 @@ pub const Function = struct {
     args: []const defines.StringPtr,
     body: JIR.Ptr,
     source: defines.FilePtr,
+    checked: bool = true,
 };
 
 const JIR = @This();
@@ -502,7 +502,6 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
     const node = self.nodes.get(nodePtr);
 
     try switch (node.type) {
-        .ComptimeDef => { },
         .TypeDef => { },
         .FunctionDef => {
             const func = self.functions.get(self.data[node.value + 1]);

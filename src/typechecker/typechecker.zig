@@ -406,9 +406,8 @@ fn typecheckVariableDef(
 
                 if (self.typeTable.get(def.valueType) == .Function) {
                     const funcPtr = try self.folder.evalDecl(rres.value, def.valueType);
-                    // const func = self.folder.getValue(funcPtr).Function;
-                    // try self.builder.functionDef(nnname, try self.builder.addFunction(func));
-                    self.folder.memory.items[funcPtr].Function.name = nnname;
+                    const func = &self.folder.memory.items[funcPtr].Function;
+                    func.name = nnname;
                 }
             }
         },
@@ -461,8 +460,9 @@ fn typecheckVariableDef(
             };
 
             // @Note See folder.zig:evalFunction
+            const fun = try self.builder.addFunction(func);
             if (!self.folder.getFlag(.InComptimeCall) and decl.parent == null) {
-                try self.builder.functionDef(new, try self.builder.addFunction(func));
+                try self.builder.functionDef(new, fun);
             }
         },
         else => { },
