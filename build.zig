@@ -1,6 +1,5 @@
 const std = @import("std");
 
-
 const resourcePath = "res/";
 
 var targets = [_]std.Target.Query{
@@ -87,7 +86,7 @@ fn addTargets(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
         opts.addOption([]const u8, "version", versionString);
 
         const exe = b.addExecutable(.{
-            .name = "colec",
+            .name = "cole",
             .version = version,
             .root_module = b.createModule(.{
                 .root_source_file = b.path("src/main.zig"),

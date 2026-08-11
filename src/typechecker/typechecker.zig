@@ -38,7 +38,7 @@ const eql = std.meta.eql;
 pub const TypeTable = MultiArrayList(TypeInfo);
 pub const TypeMap = collections.HashMap(TypeInfo, TypeID);
 pub const TypeNameMap = std.AutoHashMapUnmanaged(TypeID, defines.StringPtr);
-pub const MetadataMap = collections.HashMap(defines.ExpressionPtr, []const Comptime.Value.Ptr);
+pub const MetadataMap = collections.HashMap(Resolver.ResolutionKey, []const Comptime.Value.Ptr);
 const LookupMap = collections.HashMap(defines.DeclPtr, TypecheckStatus);
 
 pub const Flags = enum(u8) {
@@ -330,6 +330,7 @@ fn typecheckVariableDef(
                         .name = new,
                         .fields = str.fields,
                         .definitions = str.definitions,
+                        .external = str.external,
                         .scope = str.scope,
                     },
                 },
@@ -340,6 +341,7 @@ fn typecheckVariableDef(
                         .name = new,
                         .definitions = enm.definitions,
                         .fields = enm.fields,
+                        .external = enm.external,
                         .scope = enm.scope,
                     },
                 },
@@ -352,6 +354,7 @@ fn typecheckVariableDef(
                         .mutable = uni.mutable,
                         .definitions = uni.definitions,
                         .fields = uni.fields,
+                        .external = uni.external,
                         .scope = uni.scope,
                     },
                 },
@@ -446,21 +449,16 @@ fn typecheckVariableDef(
             }
 
             const val = try self.folder.eval(decl.node, expected);
-            var func = self.folder.getValue(val).Function;
+            var func = &self.folder.memory.items[val].Function;
             func.name = new;
 
-            self.folder.memory.items[val] = .{
-                .Function = .{
-                    .name = func.name,
-                    .signature = func.signature,
-                    .body = func.body,
-                    .args = func.args,
-                    .source = func.source,
-                },
-            };
+            if (!func.checked) {
+                func.body = try self.lowerer.statement(func.body);
+                func.checked = true;
+            }
 
             // @Note See folder.zig:evalFunction
-            const fun = try self.builder.addFunction(func);
+            const fun = try self.builder.addFunction(func.*);
             if (!self.folder.getFlag(.InComptimeCall) and decl.parent == null) {
                 try self.builder.functionDef(new, fun);
             }
@@ -929,11 +927,24 @@ pub fn typecheckField(self: *Typechecker, decl: *const Resolver.Declaration) Err
     return self.expectType(decl.type);
 }
 
-pub fn typecheckParameter(self: *Typechecker, decl: *const Resolver.Declaration) Error!TypeID {
-    return self.expectType(decl.type);
+pub fn typecheckParameter(self: *Typechecker, decl: *const Resolver.Declaration, ptr: defines.DeclPtr) Error!TypeID {
+    if (self.folder.getFlag(.InComptimeCall)) {
+        const res = try self.folder.evalDecl(ptr, null);
+        return try self.typecheckValue(res, null);
+    }
+    else {
+        return self.expectType(decl.type);
+    }
 }
 
 pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.ExpressionPtr, _maybeExpected: ?TypeID) Error!TypeID {
+    defer if (self.folder.getFlag(.InComptimeCall)) {
+        _ = self.metadata.remove(.{
+            .file = self.currentFile,
+            .expr = expressionPtr,
+        });
+    };
+
     const ast = self.context.getAST(self.currentFile);
 
     const maybeExpected =
@@ -1373,6 +1384,7 @@ pub fn discoverScopeDef(
                     .definitions = defs,
                     .scope = enm.scope,
                     .fields = enm.fields,
+                    .external = enm.external,
                     .mutable = enm.mutable,
                 },
             });
@@ -1387,6 +1399,7 @@ pub fn discoverScopeDef(
                     .definitions = defs,
                     .scope = str.scope,
                     .fields = str.fields,
+                    .external = str.external,
                     .mutable = str.mutable,
                 },
             });
@@ -1403,6 +1416,7 @@ pub fn discoverScopeDef(
                     .definitions = defs,
                     .scope = uni.scope,
                     .fields = uni.fields,
+                    .external = uni.external,
                     .mutable = uni.mutable,
                 },
             });
@@ -1830,7 +1844,7 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
             return Error.NamespaceAsValue;
         },
         .Builtin, .Capture => return common.debug.ShouldBeImpossible(self.context.log, @src()),
-        .Parameter => self.typecheckParameter(&decl),
+        .Parameter => self.typecheckParameter(&decl, declPtr),
         .Field => self.typecheckField(&decl),
     };
 
@@ -1990,7 +2004,7 @@ pub fn typecheckDot(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!TypeI
 
 pub fn typecheckMark(
     self: *Typechecker,
-    ptr: defines.EitherPtr(defines.StatementPtr, defines.ExpressionPtr),
+    ptr: defines.ExpressionPtr,
     extraPtr: defines.OpaquePtr,
     maybeExpected: ?TypeID
 ) Error!TypeID {
@@ -2667,8 +2681,8 @@ pub fn assertCastable(self: *Typechecker, from: TypeID, to: TypeID, unsafe: bool
     }
 }
 
-pub fn castable(self: *Typechecker, from: TypeID, to: TypeID) bool {
-    self.assertCastable(from, to) catch return false;
+pub fn castable(self: *Typechecker, from: TypeID, to: TypeID, unsafe: bool) bool {
+    self.assertCastable(from, to, unsafe) catch return false;
     return true;
 }
 
@@ -2767,10 +2781,11 @@ pub fn assertCanCoerce(self: *const Typechecker, this: TypeID, that: TypeID) Err
     return switch (thatType) {
         .Noreturn => { },
         .ComptimeInt => functional.throwIf(!self.isInt(this) and !self.isFloat(this), Error.TypeMismatch),
-        .ComptimeFloat => functional.throwIf(!self.isFloat(this), Error.TypeMismatch),
+        .ComptimeFloat => functional.throwIf(!self.isFloat(this) and !self.isInt(this), Error.TypeMismatch),
         .Float => functional.throwIf(!self.isFloat(this), Error.TypeMismatch),
         .Integer => |itype| switch (thisType) {
             .Integer => |i2type| functional.throwIf(itype.size > i2type.size, Error.TypeMismatch),
+            .Float => { },
             else => functional.throwIf(!self.isInt(this), Error.TypeMismatch),
         },
         else => switch (thisType) {
@@ -2881,7 +2896,7 @@ pub fn maybeSwitchable(self: *const Typechecker, this: TypeID) ?TypeInfo {
 /// Checks which of 'this' or 'that' is more suitable in general.
 pub fn coerce(self: *Typechecker, this: TypeID, that: TypeID) Error!TypeID {
     self.assertCanCoerce(this, that) catch |err| {
-        self.report("Failed to infer type ('{s}' and '{s}')", .{
+        self.report("Failed to infer type ('{s}' vs {s}')", .{
             try self.typeName(self.arena.allocator(), this),
             try self.typeName(self.arena.allocator(), that),
         });
@@ -2907,9 +2922,13 @@ pub fn coerce(self: *Typechecker, this: TypeID, that: TypeID) Error!TypeID {
 
     return switch (thatType) {
         .Noreturn => that,
-        .ComptimeInt, .ComptimeFloat => this,
+        .ComptimeInt =>
+            if (self.isFloat(that)) that
+            else this,
+        .ComptimeFloat =>
+            if (self.isInt(that)) that
+            else this,
         else => switch (thisType) {
-            .ComptimeInt, .ComptimeFloat => that,
             .Integer => switch (thatType) {
                 .Integer =>
                     if (thatType.Integer.size > thisType.Integer.size) that
@@ -2960,6 +2979,7 @@ pub fn makeMutable(_: *const Typechecker, info: TypeInfo) TypeInfo {
                 .fields = str.fields,
                 .definitions = str.definitions,
                 .scope = str.scope,
+                .external = str.external,
             },
         },
         .Union => |uni| .{
@@ -2971,6 +2991,7 @@ pub fn makeMutable(_: *const Typechecker, info: TypeInfo) TypeInfo {
                 .fields = uni.fields,
                 .definitions = uni.definitions,
                 .scope = uni.scope,
+                .external = uni.external,
             },
         },
         .Enum => |enm| .{
@@ -2980,6 +3001,7 @@ pub fn makeMutable(_: *const Typechecker, info: TypeInfo) TypeInfo {
                 .fields = enm.fields,
                 .definitions = enm.definitions,
                 .scope = enm.scope,
+                .external = enm.external,
             },
         },
         .Pointer => |ptr| .{
@@ -3277,14 +3299,20 @@ pub fn setMetadata(
     element: defines.ExpressionPtr,
     metadata: []const Comptime.Value.Ptr,
 ) Error!void {
-    return self.metadata.put(self.arena.allocator(), element, metadata) catch Error.AllocatorFailure;
+    return self.metadata.put(self.arena.allocator(), .{
+        .file = self.currentFile,
+        .expr = element,
+    }, metadata) catch Error.AllocatorFailure;
 }
 
 pub fn getMetadata(
     self: *const Typechecker,
-    value: defines.EitherPtr(defines.ExpressionPtr, defines.StatementPtr)
+    value: defines.ExpressionPtr,
 ) ?[]const defines.ExpressionPtr {
-    return self.metadata.get(value);
+    return self.metadata.get(.{
+        .file = self.currentFile,
+        .expr = value,
+    });
 }
 
 pub fn hasMetadata(

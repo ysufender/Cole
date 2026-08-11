@@ -24,20 +24,20 @@ pub let RawAllocator = struct {
     destroy: *fn (*void, *void) -> void,
     alloc: *fn (*void, u32, u32) -> []void,
     free: *fn (*void, [@c]void) -> void,
-};
 
-pub let create = fn (self: RawAllocator, size: u32) -> *void {
-    return self.create(self.context, size);
-};
+    pub let create = fn (self: RawAllocator, size: u32) -> *void {
+        return self.create(self.context, size);
+    };
 
-pub let destroy = fn (self: RawAllocator, ptr: *void) -> void {
-    return self.destroy(self.context, ptr);
-};
+    pub let destroy = fn (self: RawAllocator, ptr: *void) -> void {
+        return self.destroy(self.context, ptr);
+    };
 
-pub let alloc = fn (self: RawAllocator, count: u32, sizeBytesEach: u32) -> []void {
-    return self.alloc(self.context, count, sizeBytesEach);
-};
+    pub let alloc = fn (self: RawAllocator, count: u32, sizeBytesEach: u32) -> []void {
+        return self.alloc(self.context, count, sizeBytesEach);
+    };
 
-pub let free = fn (self: RawAllocator, arr: [@c]void) -> void {
-    return self.free(self.context, arr);
+    pub let free = fn (self: RawAllocator, arr: [@c]void) -> void {
+        return self.free(self.context, arr);
+    };
 };

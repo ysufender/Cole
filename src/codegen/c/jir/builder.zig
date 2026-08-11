@@ -12,14 +12,17 @@ pub const InternTable = std.array_hash_map.String(void);
 const Error = common.CompilerError;
 const TypeID = Types.TypeID;
 const Declaration = @import("../../../typechecker/resolver.zig").Declaration;
+const Comptime = @import("../../../typechecker/comptime.zig");
 
 pub const StringPtr = defines.Offset;
+pub const MetadataMap = collections.HashMap(JIR.Ptr, []const Comptime.Value.Ptr);
 
 const Builder = @This();
 
 constants: std.MultiArrayList(JIR.Constant),
 functions: MultiArrayList(JIR.Function),
 functionCache: collections.HashMap(JIR.Ptr, JIR.Function.Ptr),
+metadata: MetadataMap,
 nodes: JIR.Node.List,
 data: std.ArrayList(u32),
 allocator: Allocator,
@@ -37,6 +40,9 @@ pub fn init(allocator: Allocator, counts: common.CompilerContext.Counts, typeche
     funcCache.ensureTotalCapacity(allocator, counts.functions)
         catch return Error.AllocatorFailure;
 
+    var metadata = MetadataMap.empty;
+    metadata.ensureTotalCapacity(allocator, counts.meta * 3) catch return Error.AllocatorFailure;
+
     return .{
         .nodes = try JIR.Node.List.init(allocator, counts.statements + counts.expressions),
         .keyNodes = std.ArrayList(JIR.Ptr).initCapacity(allocator, counts.statements + counts.expressions)
@@ -51,6 +57,7 @@ pub fn init(allocator: Allocator, counts: common.CompilerContext.Counts, typeche
         .strings = strings,
         .allocator = allocator,
         .typechecker = typechecker,
+        .metadata = metadata,
     };
 }
 
@@ -66,6 +73,7 @@ pub fn build(self: *const Builder, allocator: Allocator) Error!JIR {
         .data = try collections.deepCopy(self.data.items, allocator),
         .topLevelAsms = try collections.deepCopy(self.topLevelAsms.items, allocator),
         .context = self.typechecker.context,
+        .metadata = self.metadata.clone(allocator) catch return Error.AllocatorFailure,
     };
 }
 
@@ -95,6 +103,10 @@ pub fn internString(self: *Builder, str: []const u8) Error!defines.StringPtr {
 
 pub inline fn getInternedString(self: *const Builder, index: defines.StringPtr)  []const u8 {
     return self.strings.keys()[index];
+}
+
+pub inline fn addMetadata(self: *Builder, node: JIR.Ptr, metadata: []const Comptime.Value.Ptr) Error!void {
+    return self.metadata.put(self.allocator, node, metadata);
 }
 
 pub fn addKeyNode(self: *Builder, node: JIR.Ptr) Error!void {

@@ -115,7 +115,7 @@ pub const Function = struct {
     args: []const defines.StringPtr,
     body: JIR.Ptr,
     source: defines.FilePtr,
-    checked: bool = true,
+    checked: bool = false,
 };
 
 const JIR = @This();
@@ -127,6 +127,7 @@ typeNames: TypeNameMap,
 constants: Constant.List,
 functions: Function.List,
 nodes: Node.List.Slice,
+metadata: Builder.MetadataMap,
 topLevelAsms: std.ArrayList(defines.StringPtr).Slice,
 keyNodes: []const Ptr,
 data: []const u32,
@@ -244,7 +245,6 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
 
                 const name = std.fmt.allocPrint(self.allocator, "{s}Array_{s}_{d}", .{
                     "",
-                    // if (arr.mutable) "" else "const_",
                     childName,
                     arr.len,
                 }) catch return Error.AllocatorFailure;
@@ -272,7 +272,6 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
 
                     const name = std.fmt.allocPrint(self.allocator, "{s}Slice_{s}", .{
                         "",
-                        // if (ptr.mutable) "" else "const_",
                         childName,
                     }) catch return Error.AllocatorFailure;
 
@@ -293,6 +292,10 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
             },
 
             .Struct => |str| {
+                if (str.external) {
+                    continue;
+                }
+
                 const name = try self.getCName(@intCast(typeID), null, true, false);
                 const res = visited.getOrPut(self.allocator, name)
                     catch return Error.AllocatorFailure;
@@ -322,6 +325,10 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
             },
 
             .Union => |uni| {
+                if (uni.external) {
+                    continue;
+                }
+
                 const name = try self.getCName(@intCast(typeID), null, true, false);
                 const res = visited.getOrPut(self.allocator, name)
                     catch return Error.AllocatorFailure;
@@ -382,6 +389,10 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
             },
 
             .Enum => |enm| {
+                if (enm.external) {
+                    continue;
+                }
+
                 const name = try self.getCName(@intCast(typeID), null, true, false);
                 const res = visited.getOrPut(self.allocator, name)
                     catch return Error.AllocatorFailure;

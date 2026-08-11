@@ -95,6 +95,7 @@ pub const Struct = struct {
     name: defines.StringPtr,
     fields: []const FieldInfo,
     definitions: []const FieldInfo,
+    external: bool,
 
     // @CompilerOnly
     scope: defines.ScopePtr,
@@ -111,6 +112,7 @@ pub const Union = struct {
     name: defines.StringPtr,
     fields: []const FieldInfo,
     definitions: []const FieldInfo,
+    external: bool,
 
     // @CompilerOnly
     scope: defines.ScopePtr,
@@ -121,6 +123,7 @@ pub const Enum = struct {
     name: defines.StringPtr,
     fields: []const []const u8,
     definitions: []const FieldInfo,
+    external: bool,
 
     // @CompilerOnly
     scope: defines.ScopePtr,

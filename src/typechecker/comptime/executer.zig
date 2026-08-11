@@ -96,7 +96,8 @@ pub fn init(typechecker: *Typechecker, allocator: Allocator) Error!Executer {
     };
 }
 
-pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.Value.Ptr) Error!Comptime.Value {
+pub fn executeCall(self: *Executer, _func: JIR.Function, args: []const Comptime.Value.Ptr) Error!Comptime.Value {
+    var func = _func;
     const prev = self.typechecker.folder.setFlag(.InComptimeCall, true);
     defer _ = self.typechecker.folder.setFlag(.InComptimeCall, prev);
 
@@ -181,10 +182,16 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
                 return Error.UncoveredCodePath;
             }
 
-            const stmt = try self.typechecker.lowerer.statement(func.body);
-            break :res self.executeBlock(stmt);
+            func.body = try self.typechecker.lowerer.statement(func.body);
+            break :res self.executeBlock(func.body);
         }
-        else self.executeBlock(func.body);
+        else res: {
+            if (!func.checked) {
+                func.body = try self.typechecker.lowerer.statement(func.body);
+            }
+
+            break :res self.executeBlock(func.body);
+        };
 
     try self.cache.put(.{
         .func = func.name,

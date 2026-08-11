@@ -52,10 +52,6 @@ pub fn topLevelDeclaration(self: *Lowerer, ptr: defines.DeclPtr, decl: *const De
     switch (typeInfo) {
         .Function => { },
         .Type => {
-            if (self.typechecker.hasMetadata(decl.node, "@extern")) {
-                return;
-            }
-
             const typeDefPtr = self.typechecker.folder.expectType(decl.node)
                 catch return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
             const typeDef = self.typechecker.folder.getValue(typeDefPtr).Type;
@@ -257,7 +253,7 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
         else .{ .Void = { } },
 
         .Function => |func| .{
-            .Function = try self.typechecker.builder.addFunction(func),
+            .Undefined = func.signature,
         },
 
         .Type => |id| .{ .Type = id },
@@ -535,11 +531,6 @@ fn variableDef(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     const decl = self.typechecker.symbols.getDecl(declPtr);
 
     if (typeID == Comptime.Folder.Builtin.Type("type")) {
-        if (self.typechecker.hasMetadata(decl.node, "@extern")) {
-            common.debug.hello(1);
-            return self.typechecker.builder.scope(0, &.{});
-        }
-
         const vdef = try self.typechecker.builder.typeDef(
             self.typechecker.folder.getValue(
                 try self.typechecker.folder.eval(decl.node, null),
@@ -668,9 +659,6 @@ fn loop(
             else {
                 return self.typechecker.builder.label(try self.typechecker.folder.generateRandomName(.OptimizedLoop));
             }
-        }
-        else {
-            return self.typechecker.builder.label(try self.typechecker.folder.generateRandomName(.OptimizedLoop));
         }
     }
 
@@ -1374,7 +1362,9 @@ fn identifier(self: *Lowerer, id: defines.ExpressionPtr) Error!JIR.Ptr {
 
 fn mark(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR.Ptr {
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
-    return self.expression(ast.extra[extraPtr + 2], ofType);
+    const expr = try self.expression(ast.extra[extraPtr + 2], ofType);
+    try self.typechecker.builder.addMetadata(expr, self.typechecker.getMetadata(ast.extra[extraPtr + 2]) orelse &.{});
+    return expr;
 }
 
 fn literal(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID) Error!JIR.Ptr {

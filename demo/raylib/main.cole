@@ -59,14 +59,14 @@ let main = fn (args: [][]u8) -> i32 {
 
 		if b.x < 5 {
 			cpu.score = cpu.score + 1;
-			b.x = (as(float, WIDTH)/2.0) - b.r;
+			b.x = (as(float, cast(WIDTH))/2.0) - b.r;
 			b.y = 120;
 			b.bx = -5;
 			
 		}
         else if b.x > WIDTH - 5 {
 			ply.score = ply.score + 1;
-			b.x = (as(float, WIDTH)/2.0) - b.r;
+			b.x = (as(float, cast(WIDTH))/2.0) - b.r;
 			b.y = 120;
 			b.bx = 5;
 		}
@@ -97,6 +97,8 @@ let main = fn (args: [][]u8) -> i32 {
 /*
  * Helpers
  */
+
+// Workaround
 let intToChar = fn (a: u8) -> [2]u8 {
     let str: [2]u8 = (48 + a , 0);
 	return str;

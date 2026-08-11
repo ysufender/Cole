@@ -322,7 +322,7 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
 
     const functionDef = JIR.Function{
         .signature = functionType,
-        .body = try self.typechecker.lowerer.statement(bodyPtr),
+        .body = bodyPtr, // try self.typechecker.lowerer.statement(bodyPtr),
         .name = try self.generateRandomName(.Function),
         .args = argNames,
         .source = self.typechecker.currentFile,
@@ -869,14 +869,20 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
 
     // @Readonly never write, only read here.
     if (self.declCache.get(declPtr)) |val| {
-        const rres = self.getValue(val);
+        const rres = &self.memory.items[val];
         if (
-            rres == .Function
+            rres.* == .Function
+            and decls.get(declPtr).parent != null
             and !std.mem.startsWith(u8,
                 self.typechecker.builder.getInternedString(rres.Function.name),
                 "__"
             )
         ) {
+            if (!rres.Function.checked) {
+                rres.Function.body = try self.typechecker.lowerer.statement(rres.Function.body);
+                rres.Function.checked = true;
+            }
+
             const funcPtr = try self.typechecker.builder.addFunction(rres.Function);
             try self.typechecker.builder.functionDef(rres.Function.name, funcPtr);
         }
@@ -1083,7 +1089,14 @@ fn evalLiteral(self: *Folder, tokenPtr: defines.TokenPtr, maybeExpected: ?TypeID
     };
 
     const res = try self.appendValue(value);
-    return self.castValue(res, maybeExpected orelse Builtin.Type("any"));
+    const rest = try self.typechecker.typecheckValue(res, null);
+
+    if (self.typechecker.castable(rest, maybeExpected orelse rest, false)) {
+        return self.castValue(res, maybeExpected orelse rest);
+    }
+    else {
+        return res;
+    }
 }
 
 fn evalPtrType(
@@ -1207,6 +1220,7 @@ fn evalEnumType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Value
             .fields = fields,
             .definitions = try self.handleScopeDecls(oldScope, scope, ast, tokens, defRange),
             .scope = scope,
+            .external = self.typechecker.hasMetadata(expr, "@extern"),
         },
     };
 
@@ -1274,7 +1288,8 @@ fn evalStructType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Val
             .name = name,
             .fields = fields,
             .definitions = try self.handleScopeDecls(oldScope, scope, ast, tokens, defRange),
-            .scope = scope
+            .scope = scope,
+            .external = self.typechecker.hasMetadata(expr, "@extern"),
         },
     };
 
@@ -1341,7 +1356,8 @@ fn evalUnionType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Valu
             .scope = self.typechecker.symbols.findDecl(.{
                 .file = self.typechecker.currentFile,
                 .expr = expr,
-            })
+            }),
+            .external = self.typechecker.hasMetadata(expr, "@extern"),
         },
     };
 
@@ -1411,6 +1427,7 @@ fn evalUnionType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Valu
             .fields = fields,
             .definitions = try self.handleScopeDecls(oldScope, scope, ast, tokens, defRange),
             .scope = scope,
+            .external = self.typechecker.hasMetadata(expr, "@extern"),
         }
     };
 
@@ -2213,7 +2230,8 @@ pub fn comptimeEq(self: *const Folder, lhs: Comptime.Value, rhs: Comptime.Value)
         },
         .Bool => lhs.Bool == rhs.Bool,
         .Type => lhs.Type == rhs.Type,
-        else => unreachable,
+        .Function => lhs.Function.body == rhs.Function.body,
+        else => false,
     };
 }
 
@@ -2356,9 +2374,9 @@ pub const builtinTypes = [_]struct {
     // mut any
     .{ .name = "mut any", .info = .{ .Any = true } },
     // incomplete
-    .{ .name = "incomplete", .info = .{ .Struct = .{ .mutable = false, .name = Resolver.BuiltinIndex("any") + 3, .fields = &.{}, .definitions = &.{}, .scope = 0 } } },
+    .{ .name = "incomplete", .info = .{ .Struct = .{ .mutable = false, .name = Resolver.BuiltinIndex("any") + 3, .fields = &.{}, .definitions = &.{}, .scope = 0, .external = true } } },
     // builtin_metadata
-    .{ .name = "builtin_metadata", .info = .{ .Enum = .{ .mutable = false, .name = Resolver.BuiltinIndex("any") + 5, .fields = &.{}, .definitions = &.{}, .scope = 0 } } },
+    .{ .name = "builtin_metadata", .info = .{ .Enum = .{ .mutable = false, .name = Resolver.BuiltinIndex("any") + 5, .fields = &.{}, .definitions = &.{}, .scope = 0, .external = true } } },
     // []u8
     .{ .name = "[]u8", .info = .{ .Pointer = .{ .mutable = false, .child = 2, .size = .Slice, }, } },
 };
