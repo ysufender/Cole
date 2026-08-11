@@ -943,11 +943,24 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
             })) |capture| capture
             else Error.ComptimeNotPossible,
         .Parameter =>
-            if (self.getFlag(.InComptimeCall)) try self.appendValue(try self.typechecker.executer.getVar(decl.name)) 
-            else {
-                self.report("Can't eval.", .{});
-                return Error.EarlyEval;
-            },
+            if (self.getFlag(.InComptimeCall)) res: {
+                const newDecl = try self.typechecker.symbols.declarations.addOne(self.typechecker.arena.allocator());
+                self.typechecker.symbols.declarations.set(newDecl, decl);
+                self.typechecker.symbols.declarations.items(.scope)[newDecl] = self.typechecker.currentScope;
+
+                const res = try self.appendValue(try self.typechecker.executer.getVar(decl.name));
+
+                self.typechecker.symbols.lookup.put(self.typechecker.arena.allocator(), .{
+                    .scope = self.typechecker.currentScope,
+                    .name = self.typechecker.builder.getInternedString(decl.name),
+                }, newDecl) catch return Error.AllocatorFailure;
+
+                self.declCache.put(self.arena.allocator(), newDecl, res)
+                    catch return Error.AllocatorFailure;
+
+                break :res res;
+            } 
+            else return Error.EarlyEval,
         else => |t| {
             self.report("{s} declaration is not implemented.", .{@tagName(t)});
             return common.debug.NotImplemented(self.typechecker.context.log, @src());
@@ -2075,6 +2088,7 @@ fn handleScopeDecls(
 
         if (self.getFlag(.InComptimeCall)) {
             const res = try self.evalDecl(newDecl, valueType);
+            std.mem.doNotOptimizeAway(&res);
             const ex = self.declCache.getOrPut(self.arena.allocator(), newDecl)
                 catch return Error.AllocatorFailure;
 

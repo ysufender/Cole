@@ -927,14 +927,8 @@ pub fn typecheckField(self: *Typechecker, decl: *const Resolver.Declaration) Err
     return self.expectType(decl.type);
 }
 
-pub fn typecheckParameter(self: *Typechecker, decl: *const Resolver.Declaration, ptr: defines.DeclPtr) Error!TypeID {
-    if (self.folder.getFlag(.InComptimeCall)) {
-        const res = try self.folder.evalDecl(ptr, null);
-        return try self.typecheckValue(res, null);
-    }
-    else {
-        return self.expectType(decl.type);
-    }
+pub fn typecheckParameter(self: *Typechecker, decl: *const Resolver.Declaration, _: defines.DeclPtr) Error!TypeID {
+    return self.expectType(decl.type);
 }
 
 pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.ExpressionPtr, _maybeExpected: ?TypeID) Error!TypeID {
@@ -1053,7 +1047,7 @@ pub fn typecheckValueDirect(self: *Typechecker, val: Comptime.Value, maybeExpect
         }
         else Comptime.Folder.Builtin.Type("any");
 
-    return self.coerce(expected, switch (val) {
+    const valType = switch (val) {
         .Int => Comptime.Folder.Builtin.Type("comptime_int"),
         .Float => Comptime.Folder.Builtin.Type("comptime_float"),
         .Bool => Comptime.Folder.Builtin.Type("bool"),
@@ -1067,7 +1061,14 @@ pub fn typecheckValueDirect(self: *Typechecker, val: Comptime.Value, maybeExpect
         .Undefined => |undef| undef,
         .Slice => |slice| slice.Type,
         .String => Comptime.Folder.Builtin.Type("[]u8"),
-    });
+    };
+
+    self.assertCanCoerce(valType, expected) catch |err| switch (err) {
+        Error.TypeMismatch => return valType,
+        else => return err,
+    };
+
+    return self.coerce(expected, valType);
 }
 
 pub fn typecheckExpressionList(self: *Typechecker, extra: defines.OpaquePtr, _maybeExpected: ?TypeID) Error!TypeID {
