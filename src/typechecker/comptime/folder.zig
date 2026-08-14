@@ -322,7 +322,7 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
 
     const functionDef = JIR.Function{
         .signature = functionType,
-        .body = bodyPtr, // try self.typechecker.lowerer.statement(bodyPtr),
+        .body = try self.typechecker.lowerer.statement(bodyPtr),
         .name = try self.generateRandomName(.Function),
         .args = argNames,
         .source = self.typechecker.currentFile,
@@ -878,11 +878,6 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
                 "__"
             )
         ) {
-            if (!rres.Function.checked) {
-                rres.Function.body = try self.typechecker.lowerer.statement(rres.Function.body);
-                rres.Function.checked = true;
-            }
-
             const funcPtr = try self.typechecker.builder.addFunction(rres.Function);
             try self.typechecker.builder.functionDef(rres.Function.name, funcPtr);
         }

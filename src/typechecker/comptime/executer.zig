@@ -186,10 +186,6 @@ pub fn executeCall(self: *Executer, _func: JIR.Function, args: []const Comptime.
             break :res self.executeBlock(func.body);
         }
         else res: {
-            if (!func.checked) {
-                func.body = try self.typechecker.lowerer.statement(func.body);
-            }
-
             break :res self.executeBlock(func.body);
         };
 

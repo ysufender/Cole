@@ -452,11 +452,6 @@ fn typecheckVariableDef(
             var func = &self.folder.memory.items[val].Function;
             func.name = new;
 
-            if (!func.checked) {
-                func.body = try self.lowerer.statement(func.body);
-                func.checked = true;
-            }
-
             // @Note See folder.zig:evalFunction
             const fun = try self.builder.addFunction(func.*);
             if (!self.folder.getFlag(.InComptimeCall) and decl.parent == null) {
