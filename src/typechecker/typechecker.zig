@@ -411,6 +411,11 @@ fn typecheckVariableDef(
                     const funcPtr = try self.folder.evalDecl(rres.value, def.valueType);
                     const func = &self.folder.memory.items[funcPtr].Function;
                     func.name = nnname;
+
+                    self.builder.functions.items(.name)[
+                        self.builder.functionCache.get(func.body)
+                            orelse return common.debug.ShouldBeImpossible(undefined, @src())
+                    ] = nnname;
                 }
             }
         },

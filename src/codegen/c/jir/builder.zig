@@ -81,10 +81,11 @@ pub fn addFunction(self: *Builder, function: JIR.Function) Error!JIR.Function.Pt
     if (self.functionCache.get(function.body)) |ptr| {
         self.functions.set(ptr, function);
         return ptr;
-    }
-    else {
+    } else {
         const res = try self.functions.addOne(self.allocator);
         self.functions.set(res, function);
+        self.functionCache.put(self.allocator, function.body, res)
+            catch return Error.AllocatorFailure;
         return res;
     }
 }
