@@ -115,7 +115,6 @@ pub const Function = struct {
     args: []const defines.StringPtr,
     body: JIR.Ptr,
     source: defines.FilePtr,
-    checked: bool = true,
 };
 
 const JIR = @This();

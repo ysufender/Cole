@@ -381,7 +381,8 @@ fn typecheckVariableDef(
 
             for (defs, 0..) |def, idx| {
                 var defName = self.builder.getInternedString(def.name);
-                defName = defName[std.mem.findScalarLast(u8, defName, ':') orelse 0..];
+                const i = std.mem.findScalarLast(u8, defName, ':') orelse 0;
+                defName = defName[(if (i == 0) 0 else i + 1)..];
 
                 const nname = std.fmt.allocPrint(self.arena.allocator(),
                     "{s}::{s}", .{
@@ -411,11 +412,6 @@ fn typecheckVariableDef(
                     const funcPtr = try self.folder.evalDecl(rres.value, def.valueType);
                     const func = &self.folder.memory.items[funcPtr].Function;
                     func.name = nnname;
-
-                    self.builder.functions.items(.name)[
-                        self.builder.functionCache.get(func.body)
-                            orelse return common.debug.ShouldBeImpossible(undefined, @src())
-                    ] = nnname;
                 }
             }
         },

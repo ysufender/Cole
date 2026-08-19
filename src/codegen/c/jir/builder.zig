@@ -21,7 +21,7 @@ const Builder = @This();
 
 constants: std.MultiArrayList(JIR.Constant),
 functions: MultiArrayList(JIR.Function),
-functionCache: collections.HashMap(JIR.Ptr, JIR.Function.Ptr),
+functionDefCache: collections.HashMap(JIR.Function.Ptr, void),
 metadata: MetadataMap,
 nodes: JIR.Node.List,
 data: std.ArrayList(u32),
@@ -36,8 +36,8 @@ pub fn init(allocator: Allocator, counts: common.CompilerContext.Counts, typeche
     strings.ensureTotalCapacity(allocator, counts.string + counts.types * 4 + counts.functions)
         catch return Error.AllocatorFailure;
 
-    var funcCache = collections.HashMap(JIR.Ptr, JIR.Function.Ptr).empty;
-    funcCache.ensureTotalCapacity(allocator, counts.functions)
+    var functionDefCache = collections.HashMap(JIR.Function.Ptr, void).empty;
+    functionDefCache.ensureTotalCapacity(allocator, counts.functions)
         catch return Error.AllocatorFailure;
 
     var metadata = MetadataMap.empty;
@@ -53,7 +53,7 @@ pub fn init(allocator: Allocator, counts: common.CompilerContext.Counts, typeche
             catch return Error.AllocatorFailure,
         .functions = try MultiArrayList(JIR.Function).init(allocator, counts.functions),
         .topLevelAsms = try std.ArrayList(defines.StringPtr).initCapacity(allocator, 128),
-        .functionCache = funcCache,
+        .functionDefCache = functionDefCache,
         .strings = strings,
         .allocator = allocator,
         .typechecker = typechecker,
@@ -78,16 +78,9 @@ pub fn build(self: *const Builder, allocator: Allocator) Error!JIR {
 }
 
 pub fn addFunction(self: *Builder, function: JIR.Function) Error!JIR.Function.Ptr {
-    if (self.functionCache.get(function.body)) |ptr| {
-        self.functions.set(ptr, function);
-        return ptr;
-    } else {
-        const res = try self.functions.addOne(self.allocator);
-        self.functions.set(res, function);
-        self.functionCache.put(self.allocator, function.body, res)
-            catch return Error.AllocatorFailure;
-        return res;
-    }
+    const res = try self.functions.addOne(self.allocator);
+    self.functions.set(res, function);
+    return res;
 }
 
 pub fn addConstant(self: *Builder, constant: JIR.Constant) Error!JIR.Constant.Ptr {
@@ -141,6 +134,12 @@ pub fn variableDef(
 }
 
 pub inline fn functionDef(self: *Builder, name: defines.StringPtr, function: JIR.Function.Ptr) Error!void {
+    if (self.functionDefCache.contains(function)) {
+        return;
+    }
+
+    self.functionDefCache.putNoClobber(self.allocator, function, {})
+        catch return Error.AllocatorFailure;
     const node = try self.commonBinary(.FunctionDef, name, function);
     return self.addKeyNode(node);
 }
