@@ -183,6 +183,8 @@ pub fn executeCall(self: *Executer, _func: JIR.Function, args: []const Comptime.
             }
 
             func.body = try self.typechecker.lowerer.statement(func.body);
+            func.checked = true;
+
             break :res self.executeBlock(func.body);
         }
         else res: {
@@ -203,7 +205,7 @@ pub fn executeCall(self: *Executer, _func: JIR.Function, args: []const Comptime.
 fn executeBlock(self: *Executer, blockPtr: JIR.Ptr) Error!Comptime.Value {
     try self.decodePushScope(blockPtr);
 
-    while (true) {
+    while (self.stack.items.len > 0) {
         const topScope = self.stack.peek();
         defer topScope.pc += 1;
 

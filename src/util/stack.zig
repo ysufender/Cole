@@ -43,7 +43,10 @@ fn InnerStaticStack(comptime T: type, comptime Size: usize) type {
         }
 
         pub fn revert(self: *Self, index: u32) void {
-            std.debug.assert(self.index > index);
+            if (self.index <= index) {
+                return;
+            }
+
             self.index = index;
         }
     };

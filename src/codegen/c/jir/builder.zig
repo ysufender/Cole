@@ -21,6 +21,7 @@ const Builder = @This();
 
 constants: std.MultiArrayList(JIR.Constant),
 functions: MultiArrayList(JIR.Function),
+functionCache: collections.HashMap(JIR.Ptr, JIR.Function.Ptr),
 functionDefCache: collections.HashMap(JIR.Function.Ptr, void),
 metadata: MetadataMap,
 nodes: JIR.Node.List,
@@ -34,6 +35,10 @@ typechecker: *Typechecker,
 pub fn init(allocator: Allocator, counts: common.CompilerContext.Counts, typechecker: *Typechecker) Error!Builder {
     var strings = InternTable.empty;
     strings.ensureTotalCapacity(allocator, counts.string + counts.types * 4 + counts.functions)
+        catch return Error.AllocatorFailure;
+
+    var funcCache = collections.HashMap(JIR.Ptr, JIR.Function.Ptr).empty;
+    funcCache.ensureTotalCapacity(allocator, counts.functions)
         catch return Error.AllocatorFailure;
 
     var functionDefCache = collections.HashMap(JIR.Function.Ptr, void).empty;
@@ -53,6 +58,7 @@ pub fn init(allocator: Allocator, counts: common.CompilerContext.Counts, typeche
             catch return Error.AllocatorFailure,
         .functions = try MultiArrayList(JIR.Function).init(allocator, counts.functions),
         .topLevelAsms = try std.ArrayList(defines.StringPtr).initCapacity(allocator, 128),
+        .functionCache = funcCache,
         .functionDefCache = functionDefCache,
         .strings = strings,
         .allocator = allocator,
@@ -78,15 +84,24 @@ pub fn build(self: *const Builder, allocator: Allocator) Error!JIR {
 }
 
 pub fn addFunction(self: *Builder, function: JIR.Function) Error!JIR.Function.Ptr {
-    const res = try self.functions.addOne(self.allocator);
-    self.functions.set(res, function);
-    return res;
+    const ptr =
+        if (self.functionCache.get(function.body)) |ptr| ptr 
+        else try self.functions.addOne(self.allocator);
+
+    self.functions.set(ptr, function);
+    self.functionCache.put(self.allocator, function.body, ptr)
+        catch return Error.AllocatorFailure;
+    return ptr;
 }
 
 pub fn addConstant(self: *Builder, constant: JIR.Constant) Error!JIR.Constant.Ptr {
     const res = self.constants.addOne(self.allocator) catch return Error.AllocatorFailure;
     self.constants.set(res, constant);
     return @intCast(res);
+}
+
+pub fn modifyInternedString(self: *Builder, strPtr: defines.StringPtr, new: []const u8) void {
+    self.strings.keys()[strPtr] = new;
 }
 
 pub fn internString(self: *Builder, str: []const u8) Error!defines.StringPtr {

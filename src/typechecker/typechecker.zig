@@ -411,6 +411,7 @@ fn typecheckVariableDef(
                 if (self.typeTable.get(def.valueType) == .Function) {
                     const funcPtr = try self.folder.evalDecl(rres.value, def.valueType);
                     const func = &self.folder.memory.items[funcPtr].Function;
+                    self.builder.modifyInternedString(func.name, nname);
                     func.name = nnname;
                 }
             }
@@ -451,11 +452,12 @@ fn typecheckVariableDef(
 
             const val = try self.folder.eval(decl.node, expected);
             var func = &self.folder.memory.items[val].Function;
+            self.builder.modifyInternedString(func.name, newName);
             func.name = new;
 
             // @Note See folder.zig:evalFunction
-            const fun = try self.builder.addFunction(func.*);
             if (!self.folder.getFlag(.InComptimeCall) and decl.parent == null) {
+                const fun = try self.builder.addFunction(func.*);
                 try self.builder.functionDef(new, fun);
             }
         },
@@ -1419,6 +1421,12 @@ pub fn discoverScopeDef(
             });
         },
         else => return common.debug.ShouldBeImpossible(self.context.log, @src()),
+    }
+
+    if (self.typeTable.get(discoveredType) == .Function) {
+        const func = self.folder.getValue(try self.folder.evalDecl(decl, discoveredType)).Function;
+        const funcPtr = try self.builder.addFunction(func);
+        try self.builder.functionDef(func.name, funcPtr);
     }
 
     return discoveredType;
