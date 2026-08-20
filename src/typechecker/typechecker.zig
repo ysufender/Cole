@@ -408,7 +408,7 @@ fn typecheckVariableDef(
                     .name = nname,
                 }, rres.value);
 
-                if (self.typeTable.get(def.valueType) == .Function) {
+                if (false and self.typeTable.get(def.valueType) == .Function) {
                     const funcPtr = try self.folder.evalDecl(rres.value, def.valueType);
                     const func = &self.folder.memory.items[funcPtr].Function;
                     self.builder.modifyInternedString(func.name, nname);
@@ -455,6 +455,30 @@ fn typecheckVariableDef(
 
             // @Note See folder.zig:evalFunction
             if (!self.folder.getFlag(.InComptimeCall) and decl.parent == null) {
+                const pc = self.setFlag(.CoveredAllPaths, false);
+                defer _ = self.setFlag(.CoveredAllPaths, pc);
+
+                const signature = self.typeTable.get(func.signature).Function;
+
+                const lret = self.lowerer.lastReturnType;
+                defer self.lowerer.lastReturnType = lret;
+                self.lowerer.lastReturnType = signature.returnType;
+
+                const stmtExtra = ast.statements.get(func.body).value;
+
+                try self.typecheckBlock(stmtExtra, signature.returnType);
+                if (!(
+                    self.typeTable.get(signature.returnType).isZeroBit()
+                    or self.getFlag(.CoveredAllPaths)
+                )) {
+                    self.report("Function with return type '{s}' does not return a value in all code paths.", .{
+                        try self.typeName(self.arena.allocator(), signature.returnType),
+                    });
+                    return Error.UncoveredCodePath;
+                }
+                func.checked = true;
+                func.body = try self.lowerer.statement(func.body);
+
                 const fun = try self.builder.addFunction(func.*);
                 try self.builder.functionDef(func.name, fun);
             }
@@ -1422,8 +1446,34 @@ pub fn discoverScopeDef(
     }
 
     if (self.typeTable.get(discoveredType) == .Function) {
-        const func = self.folder.getValue(try self.folder.evalDecl(decl, discoveredType)).Function;
-        const funcPtr = try self.builder.addFunction(func);
+        const func = &self.folder.memory.items[try self.folder.evalDecl(decl, discoveredType)].Function;
+
+        const pc = self.setFlag(.CoveredAllPaths, false);
+        defer _ = self.setFlag(.CoveredAllPaths, pc);
+
+        const signature = self.typeTable.get(func.signature).Function;
+
+        const lret = self.lowerer.lastReturnType;
+        defer self.lowerer.lastReturnType = lret;
+        self.lowerer.lastReturnType = signature.returnType;
+
+        const ast = self.context.getAST(self.currentFile);
+        const stmtExtra = ast.statements.get(func.body).value;
+
+        try self.typecheckBlock(stmtExtra, signature.returnType);
+        if (!(
+            self.typeTable.get(signature.returnType).isZeroBit()
+            or self.getFlag(.CoveredAllPaths)
+        )) {
+            self.report("Function with return type '{s}' does not return a value in all code paths.", .{
+                try self.typeName(self.arena.allocator(), signature.returnType),
+            });
+            return Error.UncoveredCodePath;
+        }
+        func.checked = true;
+        func.body = try self.lowerer.statement(func.body);
+
+        const funcPtr = try self.builder.addFunction(func.*);
         try self.builder.functionDef(func.name, funcPtr);
     }
 

@@ -116,7 +116,7 @@ pub const Function = struct {
     body: JIR.Ptr,
     source: defines.FilePtr,
     checked: bool = false,
-    scope: defines.ScopePtr = 0,
+    scope: defines.ScopePtr,
 };
 
 const JIR = @This();

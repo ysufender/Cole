@@ -170,7 +170,7 @@ pub fn eval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeI
 
         .Dot => try self.evalDot(expr.value),
         
-        .Lambda => try self.evalLambda(exprPtr, expr.value, maybeExpected),
+        .Lambda => return common.debug.NotImplemented(self.typechecker.context.log, @src()),
         .FunctionDefinition => try self.evalFunction(exprPtr, expr.value),
 
         // @Note should be handled with the statements.
@@ -221,22 +221,13 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
         isComptime = true;
     }
 
-    const originalScopePtr = self.typechecker.symbols.resolutionMap.get(.{
+    const scope = self.typechecker.symbols.resolutionMap.get(.{
         .file = self.typechecker.currentFile,
         .expr = exprPtr,
     }).?;
 
-    const originalScope = self.typechecker.symbols.scopes.get(originalScopePtr);
-
-    const newScope = try self.typechecker.symbols.scopes.addOne(self.typechecker.arena.allocator());
-    self.typechecker.symbols.scopes.set(newScope, .{
-        .kind = .Block,
-        .module = originalScope.module,
-        .parent = null,
-    });
-
     const prev = self.typechecker.currentScope;
-    self.typechecker.currentScope = newScope;
+    self.typechecker.currentScope = scope;
     defer self.typechecker.currentScope = prev;
 
     for (paramsRange.start..paramsRange.end) |paramPtrPtr| {
@@ -259,15 +250,14 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
 
         const declPtr = self.typechecker.symbols.lookup.get(.{
             .name = name,
-            .scope = originalScopePtr,
+            .scope = scope,
         }).?;
         const decl = self.typechecker.symbols.getDecl(declPtr);
 
         self.typechecker.lastToken = decl.token;
 
-        const newDecl = try self.typechecker.symbols.declarations.addOne(self.typechecker.arena.allocator());
-        self.typechecker.symbols.declarations.set(newDecl, .{
-            .scope = newScope,
+        self.typechecker.symbols.declarations.set(declPtr, .{
+            .scope = scope,
             .name = try self.typechecker.builder.internString(name),
             .kind = decl.kind,
             .node = decl.node,
@@ -279,9 +269,9 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
         });
 
         self.typechecker.symbols.lookup.put(self.typechecker.arena.allocator(), .{
-            .scope = newScope,
+            .scope = scope,
             .name = name
-        }, newDecl) catch return Error.AllocatorFailure;
+        }, declPtr) catch return Error.AllocatorFailure;
 
         if (self.typechecker.typeTable.get(argType).isZeroBit() and !isComptime) {
             self.report("Zero bit-sized parameter '{s}' is not allowed.", .{
@@ -304,158 +294,45 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
         },
     });
 
-    // @Note the complete typechecking and evaluation part is handled in the Executer.
-    if (isComptime) {
-        const functionDef = JIR.Function{
-            .signature = functionType,
-            .body = bodyPtr,
-            .name = try self.generateRandomName(.Comptime_Function),
-            .args = argNames,
-            .source = self.typechecker.currentFile,
-        };
+    if (false) {
+        // @Note the complete typechecking and evaluation part is handled in the Executer.
+        if (isComptime) {
+            const functionDef = JIR.Function{
+                .signature = functionType,
+                .body = bodyPtr,
+                .name = try self.generateRandomName(.Comptime_Function),
+                .args = argNames,
+                .source = self.typechecker.currentFile,
+                .scope = scope,
+            };
 
-        return self.appendValue(.{
-            .Function = functionDef,
-        });
-    }
+            return self.appendValue(.{
+                .Function = functionDef,
+            });
+        }
 
-    const pc = self.typechecker.setFlag(.CoveredAllPaths, false);
-    defer _ = self.typechecker.setFlag(.CoveredAllPaths, pc);
+        const pc = self.typechecker.setFlag(.CoveredAllPaths, false);
+        defer _ = self.typechecker.setFlag(.CoveredAllPaths, pc);
 
-    try self.typechecker.typecheckStatement(bodyPtr, returnType);
-    if (!(
-        self.typechecker.typeTable.get(returnType).isZeroBit()
-        or self.typechecker.getFlag(.CoveredAllPaths)
-    )) {
-        self.typechecker.report("Function with return type '{s}' does not return a value in all code paths.", .{
-            try self.typechecker.typeName(self.arena.allocator(), returnType),
-        });
-        return Error.UncoveredCodePath;
+        try self.typechecker.typecheckStatement(bodyPtr, returnType);
+        if (!(
+            self.typechecker.typeTable.get(returnType).isZeroBit()
+            or self.typechecker.getFlag(.CoveredAllPaths)
+        )) {
+            self.typechecker.report("Function with return type '{s}' does not return a value in all code paths.", .{
+                try self.typechecker.typeName(self.arena.allocator(), returnType),
+            });
+            return Error.UncoveredCodePath;
+        }
     }
 
     const functionDef = JIR.Function{
         .signature = functionType,
-        .body = try self.typechecker.lowerer.statement(bodyPtr),
+        .body = bodyPtr, // try self.typechecker.lowerer.statement(bodyPtr),
         .name = try self.generateRandomName(.Function),
         .args = argNames,
         .source = self.typechecker.currentFile,
-    };
-
-    return self.appendValue(.{
-        .Function = functionDef,
-    });
-}
-
-fn evalLambda(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID) Error!Comptime.Value.Ptr {
-    const expected =
-        if (maybeExpected) |expected| switch (expected) {
-            Builtin.Type("any"), Builtin.Type("mut any") => {
-                self.report("Couldn't infer the type of lambda expression.", .{});
-                return error.InferenceError;
-            },
-            else => switch (self.typechecker.typeTable.get(expected)) {
-                .Function => |func| func,
-                else => {
-                    self.report("Expected '{s}', received lambda expression.", .{
-                        try self.typechecker.typeName(self.arena.allocator(), expected),
-                    });
-                    return error.TypeMismatch;
-                },
-            },
-        }
-        else {
-            self.report("Couldn't infer the type of lambda expression.", .{});
-            return error.InferenceError;
-        };
-
-    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
-
-    const paramsRange = defines.Range{
-        .start = ast.extra[extraPtr],
-        .end = ast.extra[extraPtr + 1],
-    };
-
-    if (paramsRange.len() != expected.argTypes.len) blk: {
-        if (
-            paramsRange.len() == 0
-            and expected.argTypes.len == 1
-            and expected.argTypes[0] == Builtin.Type("void")
-        ) {
-            break :blk;
-        }
-
-        self.report(
-            "Mismatching parameter counts in lambda expression. Expected {d}, received {d}", .{
-                expected.argTypes.len,
-                paramsRange.len(),
-            }
-        );
-        return error.ArgumentCountMismatch;
-    }
-
-    const tokens = self.typechecker.context.getTokens(self.typechecker.currentFile);
-
-    const prev = self.typechecker.currentScope;
-    self.typechecker.currentScope = self.typechecker.symbols.findDecl(.{
-        .file = self.typechecker.currentFile,
-        .expr = exprPtr,
-    });
-    defer self.typechecker.currentScope = prev;
-
-    const argNames = self.typechecker.arena.allocator().alloc(defines.StringPtr, paramsRange.len())
-        catch return Error.AllocatorFailure;
-
-    for (paramsRange.start..paramsRange.end) |index| {
-        const paramName = tokens.get(ast.extra[index]).lexeme(self.typechecker.context, self.typechecker.currentFile);
-        argNames[index - paramsRange.start] = try self.typechecker.builder.internString(paramName);
-        if (self.typechecker.symbols.lookup.get(.{ .scope = self.typechecker.currentScope, .name = paramName })) |param| {
-            self.typechecker.lookup.put(self.typechecker.arena.allocator(), param, .{
-                .status = .Checked,
-                .result = expected.argTypes[index - paramsRange.start],
-            }) catch return Error.AllocatorFailure;
-        }
-        else return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
-    }
-
-    const declPtr = self.typechecker.callstack.peek() orelse return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
-    const declStatus = self.typechecker.lookup.getPtr(declPtr) orelse return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
-
-    // @Beware TODO: May cause strange bugs, properly design sometime.
-    if (self.typechecker.context.settings.hasFlag("--allow-recursion")) {
-        if (declStatus.status == .InProgress) {
-            declStatus.* = .{
-                .status = .Checked,
-                .result = maybeExpected orelse return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
-            };
-        }
-    }
-
-    const returnType = try self.typechecker.typecheckExpression(
-        ast.extra[extraPtr + 2],
-        expected.returnType,
-    );
-
-    if (expected.returnType != returnType) {
-        self.report(
-            "Mismatching return type in lambda expression. Expected '{s}', received '{s}'", .{
-                try self.typechecker.typeName(self.arena.allocator(), expected.returnType),
-                try self.typechecker.typeName(self.arena.allocator(), returnType),
-            }
-        );
-
-        return error.TypeMismatch;
-    }
-
-    // @Incomplete TOOD: should insert a return statement here instead of a direct
-    // expression. Finish after statement typechecking and lowering.
-    const retExpr = try self.typechecker.lowerer.expression(ast.extra[extraPtr + 2], expected.returnType);
-    const retStmt = try self.typechecker.builder.@"return"(retExpr);
-    const functionDef = JIR.Function{
-        .signature = maybeExpected orelse return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
-        .body = retStmt,
-        .name = try self.generateRandomName(.Function),
-        .args = argNames,
-        .source = self.typechecker.currentFile,
+        .scope = scope,
     };
 
     return self.appendValue(.{
@@ -951,7 +828,7 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
             })) |capture| capture
             else Error.ComptimeNotPossible,
         .Parameter =>
-            if (self.getFlag(.InComptimeCall)) res: {
+            if (false and self.getFlag(.InComptimeCall)) res: {
                 const newDecl = try self.typechecker.symbols.declarations.addOne(self.typechecker.arena.allocator());
                 self.typechecker.symbols.declarations.set(newDecl, decl);
                 self.typechecker.symbols.declarations.items(.scope)[newDecl] = self.typechecker.currentScope;
@@ -1834,9 +1711,26 @@ fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID) 
     var args = self.arena.allocator().alloc(Comptime.Value.Ptr, signature.argTypes.len)
         catch return Error.AllocatorFailure;
 
-    for (argsRange.start..argsRange.end) |ptr| {
-        args[ptr - argsRange.start] = try self.eval(ast.extra[@intCast(ptr)], signature.argTypes[ptr - argsRange.start]);
+    for (argsRange.start..argsRange.end, 0..) |ptr, idx| {
+        args[idx] = try self.eval(ast.extra[@intCast(ptr)], signature.argTypes[idx]);
+
+        const declPtr = self.typechecker.symbols.lookup.get(.{
+            .scope = function.scope,
+            .name = self.typechecker.builder.getInternedString(function.args[idx]),
+        }) orelse return common.debug.ShouldBeImpossible(undefined, @src());
+
+        self.declCache.put(self.arena.allocator(), declPtr, args[idx])
+            catch return Error.AllocatorFailure;
     }
+
+    defer for (0..argsRange.len()) |idx| {
+        const declPtr = self.typechecker.symbols.lookup.get(.{
+            .scope = function.scope,
+            .name = self.typechecker.builder.getInternedString(function.args[idx]),
+        }) orelse unreachable;
+
+        _ = self.declCache.remove(declPtr);
+    };
 
     const val = try self.typechecker.executer.executeCall(function, args);
 
@@ -2127,6 +2021,7 @@ fn castValue(self: *Folder, valuePtr: Comptime.Value.Ptr, to: TypeID) Error!Comp
                     .name = func.name,
                     .signature = to,
                     .source = func.source,
+                    .scope = func.scope,
                 },
             },
             else => return common.debug.ShouldBeImpossible(undefined, @src()),

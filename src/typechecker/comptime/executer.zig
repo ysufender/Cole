@@ -171,6 +171,10 @@ pub fn executeCall(self: *Executer, _func: JIR.Function, args: []const Comptime.
             const pc = self.typechecker.setFlag(.CoveredAllPaths, false);
             defer _ = self.typechecker.setFlag(.CoveredAllPaths, pc);
 
+            const prevRet = self.typechecker.lowerer.lastReturnType;
+            defer self.typechecker.lowerer.lastReturnType = prevRet;
+            self.typechecker.lowerer.lastReturnType = signature.returnType;
+
             try self.typechecker.typecheckStatement(func.body, signature.returnType);
             if (!(
                 self.typechecker.typeTable.get(signature.returnType).isZeroBit()
