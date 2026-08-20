@@ -163,7 +163,7 @@ pub fn executeCall(self: *Executer, _func: JIR.Function, args: []const Comptime.
     defer self.stack.revert(current);
 
     const res =
-        try if (signature.isComptime) res: {
+        try if (signature.isComptime and !func.checked) res: {
             const prevfile = self.typechecker.currentFile;
             self.typechecker.currentFile = func.source;
             defer self.typechecker.currentFile = prevfile;
