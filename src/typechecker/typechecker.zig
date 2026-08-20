@@ -412,7 +412,6 @@ fn typecheckVariableDef(
                     const funcPtr = try self.folder.evalDecl(rres.value, def.valueType);
                     const func = &self.folder.memory.items[funcPtr].Function;
                     self.builder.modifyInternedString(func.name, nname);
-                    func.name = nnname;
                 }
             }
         },
@@ -443,7 +442,7 @@ fn typecheckVariableDef(
                     namespace,
                     symName,
                 }) catch return Error.AllocatorFailure;
-            const new = try self.builder.internString(newName);
+            // const new = try self.builder.internString(newName);
 
             if (std.mem.eql(u8, namespace, "root") and std.mem.eql(u8, newName, "main")) {
                 self.report("Main function can't be exported.", .{});
@@ -451,14 +450,13 @@ fn typecheckVariableDef(
             }
 
             const val = try self.folder.eval(decl.node, expected);
-            var func = &self.folder.memory.items[val].Function;
+            const func = &self.folder.memory.items[val].Function;
             self.builder.modifyInternedString(func.name, newName);
-            func.name = new;
 
             // @Note See folder.zig:evalFunction
             if (!self.folder.getFlag(.InComptimeCall) and decl.parent == null) {
                 const fun = try self.builder.addFunction(func.*);
-                try self.builder.functionDef(new, fun);
+                try self.builder.functionDef(func.name, fun);
             }
         },
         else => { },

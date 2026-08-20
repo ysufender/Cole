@@ -101,7 +101,7 @@ pub const Constant = union(enum) {
     Aggregate: ConstantArray, 
     Array: ConstantArray,
     Undefined: TypeID,
-    Function: Function.Ptr,
+    Function: defines.StringPtr,
     Type: TypeID,
     Void: void,
 };
@@ -116,6 +116,7 @@ pub const Function = struct {
     body: JIR.Ptr,
     source: defines.FilePtr,
     checked: bool = false,
+    scope: defines.ScopePtr = 0,
 };
 
 const JIR = @This();
@@ -744,8 +745,8 @@ fn literal(self: *JIR, out: *Writer, ptr: Constant.Ptr) Error!void {
             .u8 => |t| self.write(out, "{d}", .{t}),
         },
         .Float => |fl| self.write(out, "{}", .{fl}),
-        .Function => |func| {
-            const str = @constCast(self.strings[self.functions.get(func).name]);
+        .Function => |name| {
+            const str = @constCast(self.strings[name]);
             _ = std.mem.replace(u8, str, "::", "__", str);
             try self.write(out, "{s}", .{str});
         },

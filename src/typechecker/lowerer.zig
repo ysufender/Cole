@@ -253,7 +253,7 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
         else .{ .Void = { } },
 
         .Function => |func| .{
-            .Function = try self.typechecker.builder.addFunction(func),
+            .Function = func.name,
         },
 
         .Type => |id| .{ .Type = id },
@@ -983,7 +983,7 @@ fn switchExpr(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error
         written += 1;
     }
 
-    var result: JIR.Ptr = defaultVal orelse
+    var result = defaultVal orelse
         return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
 
     var j: u32 = written;

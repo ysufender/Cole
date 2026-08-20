@@ -221,6 +221,24 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
         isComptime = true;
     }
 
+    const originalScopePtr = self.typechecker.symbols.resolutionMap.get(.{
+        .file = self.typechecker.currentFile,
+        .expr = exprPtr,
+    }).?;
+
+    const originalScope = self.typechecker.symbols.scopes.get(originalScopePtr);
+
+    const newScope = try self.typechecker.symbols.scopes.addOne(self.typechecker.arena.allocator());
+    self.typechecker.symbols.scopes.set(newScope, .{
+        .kind = .Block,
+        .module = originalScope.module,
+        .parent = null,
+    });
+
+    const prev = self.typechecker.currentScope;
+    self.typechecker.currentScope = newScope;
+    defer self.typechecker.currentScope = prev;
+
     for (paramsRange.start..paramsRange.end) |paramPtrPtr| {
         const param = ast.signatures.get(ast.extra[paramPtrPtr]);
         const argType = Typechecker.determineExpected(
@@ -239,18 +257,17 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
             isComptime = true;
         }
 
-        const scope = self.typechecker.symbols.resolutionMap.get(.{
-            .expr = exprPtr,
-            .file = self.typechecker.currentFile,
-        }).?;
-
         const declPtr = self.typechecker.symbols.lookup.get(.{
             .name = name,
-            .scope = scope,
+            .scope = originalScopePtr,
         }).?;
         const decl = self.typechecker.symbols.getDecl(declPtr);
-        self.typechecker.symbols.declarations.set(declPtr, .{
-            .scope = decl.scope,
+
+        self.typechecker.lastToken = decl.token;
+
+        const newDecl = try self.typechecker.symbols.declarations.addOne(self.typechecker.arena.allocator());
+        self.typechecker.symbols.declarations.set(newDecl, .{
+            .scope = newScope,
             .name = try self.typechecker.builder.internString(name),
             .kind = decl.kind,
             .node = decl.node,
@@ -261,7 +278,10 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
             .parent = decl.parent,
         });
 
-        self.typechecker.lastToken = decl.token;
+        self.typechecker.symbols.lookup.put(self.typechecker.arena.allocator(), .{
+            .scope = newScope,
+            .name = name
+        }, newDecl) catch return Error.AllocatorFailure;
 
         if (self.typechecker.typeTable.get(argType).isZeroBit() and !isComptime) {
             self.report("Zero bit-sized parameter '{s}' is not allowed.", .{
@@ -298,13 +318,6 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
             .Function = functionDef,
         });
     }
-
-    const prev = self.typechecker.currentScope;
-    self.typechecker.currentScope = self.typechecker.symbols.tryGetDecl(.{
-        .file = self.typechecker.currentFile,
-        .expr = exprPtr
-    }) orelse return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
-    defer self.typechecker.currentScope = prev;
 
     const pc = self.typechecker.setFlag(.CoveredAllPaths, false);
     defer _ = self.typechecker.setFlag(.CoveredAllPaths, pc);
@@ -2083,7 +2096,6 @@ fn handleScopeDecls(
 
         if (self.getFlag(.InComptimeCall)) {
             const res = try self.evalDecl(newDecl, valueType);
-            std.mem.doNotOptimizeAway(&res);
             const ex = self.declCache.getOrPut(self.arena.allocator(), newDecl)
                 catch return Error.AllocatorFailure;
 
