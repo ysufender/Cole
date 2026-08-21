@@ -1176,7 +1176,7 @@ fn evalStructType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Val
     }
 
     const scope =
-        if (self.getFlag(.InComptimeCall) )self.typechecker.currentScope
+        if (self.getFlag(.InComptimeCall)) self.typechecker.currentScope
         else oldScope;
 
     const name = try self.generateRandomName(.Struct);
@@ -1685,8 +1685,8 @@ fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID) 
         return self.evalBuiltinCall(extraPtr, decl.type, maybeExpected);
     }
 
-    const maybeFunction = self.getValue(try self.expectDefined(ast.extra[extraPtr], null));
-    const function = switch (maybeFunction) {
+    var maybeFunction = &self.memory.items[(try self.expectDefined(ast.extra[extraPtr], null))];
+    const function = switch (maybeFunction.*) {
         .Type => |id| {
             _ = try self.typechecker.typecheckCall(extraPtr, maybeExpected);
             return self.evalExpressionList(
@@ -1694,7 +1694,7 @@ fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID) 
                 id,
             );
         },
-        .Function => |func| func,
+        .Function => &maybeFunction.Function,
         else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
     };
 
@@ -1714,6 +1714,9 @@ fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID) 
     for (argsRange.start..argsRange.end, 0..) |ptr, idx| {
         args[idx] = try self.eval(ast.extra[@intCast(ptr)], signature.argTypes[idx]);
     }
+
+    const prev = self.setFlag(.InComptimeCall, true);
+    defer _ = self.setFlag(.InComptimeCall, prev);
 
     const val = try self.typechecker.executer.executeCall(function, args);
 
@@ -1971,6 +1974,7 @@ fn handleScopeDecls(
             .isComptime = false,
         });
 
+        // @Note is never hit
         if (self.getFlag(.InComptimeCall)) {
             const res = try self.evalDecl(newDecl, valueType);
             const ex = self.declCache.getOrPut(self.arena.allocator(), newDecl)
@@ -2149,6 +2153,11 @@ fn setValue(self: *const Folder, address: defines.Offset, new: Comptime.Value) v
 }
 
 fn cacheValue(self: *Folder, ptr: FolderCacheKey, val: Comptime.Value.Ptr) Error!void {
+    const value = self.getValue(val);
+    if (value == .Function and self.typechecker.typeTable.get(value.Function.signature).Function.isComptime) {
+        return;
+    }
+
     if (!self.getFlag(.InComptimeCall)) {
         self.cache.put(self.arena.allocator(), ptr, val)
             catch return Error.AllocatorFailure;

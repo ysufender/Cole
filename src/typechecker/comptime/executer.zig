@@ -96,14 +96,10 @@ pub fn init(typechecker: *Typechecker, allocator: Allocator) Error!Executer {
     };
 }
 
-pub fn executeCall(self: *Executer, _func: JIR.Function, args: []const Comptime.Value.Ptr) Error!Comptime.Value {
-    var func = _func;
-    const prev = self.typechecker.folder.setFlag(.InComptimeCall, true);
-    defer _ = self.typechecker.folder.setFlag(.InComptimeCall, prev);
-
+pub fn executeCall(self: *Executer, func: *JIR.Function, args: []const Comptime.Value.Ptr) Error!Comptime.Value {
     const instantiation = blk: {
         var hasher = std.hash.Wyhash.init(0);
-        hasher.update(std.mem.asBytes(&func.name));
+        hasher.update(std.mem.asBytes(&func.body));
         for (args) |a| hasher.update(std.mem.asBytes(&a));
         break :blk hasher.final();
     };
@@ -280,7 +276,7 @@ fn call(self: *Executer, dataPtr: defines.OpaquePtr) Error!Comptime.Value {
     const argsLen = self.typechecker.builder.data.items[dataPtr + 2];
     const argsStart = dataPtr + 3;
 
-    const function = (try self.expression(funcPtr)).Function;
+    var function = (try self.expression(funcPtr)).Function;
 
     const args = self.arena.allocator().alloc(JIR.Ptr, argsLen)
         catch return Error.AllocatorFailure;
@@ -291,7 +287,7 @@ fn call(self: *Executer, dataPtr: defines.OpaquePtr) Error!Comptime.Value {
         );
     }
 
-    return self.executeCall(function, args);
+    return self.executeCall(&function, args);
 }
 
 fn literal(self: *Executer, constPtr: JIR.Ptr) Error!Comptime.Value {

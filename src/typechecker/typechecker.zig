@@ -409,9 +409,11 @@ fn typecheckVariableDef(
                 }, rres.value);
 
                 if (self.typeTable.get(def.valueType) == .Function) {
-                    const funcPtr = try self.folder.evalDecl(rres.value, def.valueType);
+                    const funcPtr = self.folder.declCache.get(rres.value)
+                        orelse return common.debug.ShouldBeImpossible(undefined, @src());
                     const func = &self.folder.memory.items[funcPtr].Function;
                     self.builder.modifyInternedString(func.name, nname);
+                    func.name = nnname;
                 }
             }
         },
@@ -452,6 +454,7 @@ fn typecheckVariableDef(
             const val = try self.folder.eval(decl.node, expected);
             const func = &self.folder.memory.items[val].Function;
             self.builder.modifyInternedString(func.name, newName);
+            func.name = try self.builder.internString(newName);
 
             // @Note See folder.zig:evalFunction
             if (!self.folder.getFlag(.InComptimeCall) and decl.parent == null) {
@@ -805,10 +808,12 @@ fn typecheckReturn(self: *Typechecker, exprPtr: defines.ExpressionPtr, expected:
         if (exprPtr != 0) try self.typecheckExpression(exprPtr, expected)
         else Comptime.Folder.Builtin.Type("void");
 
-    common.log.debug("{s}", .{try self.typeName(undefined, returnType)});
-
     if (std.mem.eql(u8, "comptime_int", try self.typeName(undefined, returnType))) {
         var iter = self.builder.functions.iterator();
+        common.log.debug("{s} expected {s}", .{
+            try self.typeName(undefined, returnType),
+            try self.typeName(undefined, expected),
+        });
         while (iter.next()) |func| {
             if (func.scope == self.currentScope) {
                 common.log.debug("{s}", .{self.builder.getInternedString(func.name)});
@@ -990,7 +995,7 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
         return self.typecheckValue(val, maybeExpected);
     }
 
-    // @Note all literals should be handled here.
+    // @Note all literals, types and functions should be handled here.
     if (self.folder.attemptEval(expressionPtr, maybeExpected)) |result| {
         return self.typecheckValue(result, maybeExpected);
     }
@@ -1011,10 +1016,7 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
         .ArrayType, .CPointerType, .FunctionType,
         .MutableType, .PointerType, .SliceType, 
         .EnumDefinition, .UnionDefinition, .StructDefinition,
-        .FunctionDefinition, .Lambda => self.typecheckValue(
-            try self.folder.eval(expressionPtr, maybeExpected),
-            maybeExpected,
-        ),
+        .FunctionDefinition, .Lambda => common.debug.ShouldBeImpossible(undefined, @src()),
 
         .Conditional => self.typecheckIfExpression(expr.value, maybeExpected),
         .Switch => self.typecheckSwitchExpression(expr.value, maybeExpected),
