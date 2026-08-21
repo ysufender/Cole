@@ -195,7 +195,7 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
             }
  
             break :slice switch (ofType) {
-                .Array => .{ .Aggregate = .{
+                .Array => .{ .Array = .{
                     .type = slice.Type,
                     .data = .{
                         .start = @intCast(start),

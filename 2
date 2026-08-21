@@ -1,0 +1,10 @@
+import std::math;
+
+let func = fn (i: i32) -> union(enum) { a: i32, b: float, } {
+    return (@a, 5);
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let b: mut any = func(1);
+    return 0;
+};

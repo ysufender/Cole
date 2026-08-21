@@ -26,7 +26,6 @@ const FlagMap = std.bit_set.IntegerBitSet(8);
 pub const FolderCacheKey = struct {
     file: defines.FilePtr,
     expr: defines.ExpressionPtr,
-    instantiation: u64,
 };
 const Cache = collections.HashMap(FolderCacheKey, Comptime.Value.Ptr);
 const DeclCache = collections.HashMap(defines.DeclPtr, Comptime.Value.Ptr);
@@ -46,15 +45,11 @@ const Folder = @This();
 
 cache: Cache,
 
-currentInstantiation: u64 = 0,
-
-/// @Readonly in this file. Intended for use in executer.zig
 declCache: DeclCache,
 
 typechecker: *Typechecker,
 
 arena: Arena,
-gpa: Allocator,
 
 flags: FlagMap,
 
@@ -79,7 +74,6 @@ pub fn init(typechecker: *Typechecker, gpa: Allocator) Error!Folder {
 
     return .{
         .typechecker = typechecker,
-        .gpa = gpa,
         .cache = cache,
         .declCache = declCache,
         .memory = memory,
@@ -102,7 +96,6 @@ pub fn eval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeI
     const key = FolderCacheKey{
         .file = file,
         .expr = exprPtr,
-        .instantiation = self.currentInstantiation,
     };
 
     if (self.cache.get(key)) |cached| {
@@ -300,6 +293,22 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
             .returnType = returnType,
         },
     });
+
+    // @Note comptime functions get typechecked on-the-fly.
+    if (isComptime) {
+        const functionDef = JIR.Function{
+            .signature = functionType,
+            .body = bodyPtr,
+            .name = try self.generateRandomName(.Function),
+            .args = argNames,
+            .source = self.typechecker.currentFile,
+            .scope = scope,
+        };
+
+        return self.appendValue(.{
+            .Function = functionDef,
+        });
+    }
 
     const pc = self.typechecker.setFlag(.CoveredAllPaths, false);
     defer _ = self.typechecker.setFlag(.CoveredAllPaths, pc);
@@ -667,7 +676,6 @@ fn evalSwitchExpression(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpecte
                     try self.cacheValue(.{
                         .file = self.typechecker.currentFile,
                         .expr = capture,
-                        .instantiation = self.currentInstantiation,
                     }, varToSwitchOn);
                 }
 
@@ -712,7 +720,6 @@ fn evalSwitchExpression(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpecte
                     try self.cacheValue(.{
                         .file = self.typechecker.currentFile,
                         .expr = capture,
-                        .instantiation = self.currentInstantiation,
                     }, varToSwitchOn);
                 }
 
@@ -813,7 +820,6 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
             if (self.cache.get(.{
                 .file = self.typechecker.currentFile,
                 .expr = decl.node,
-                .instantiation = self.currentInstantiation,
             })) |capture| capture
             else Error.ComptimeNotPossible,
         .Parameter => return Error.EarlyEval,
@@ -1170,7 +1176,6 @@ fn evalStructType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Val
         self.cache.put(self.arena.allocator(), .{
             .file = self.typechecker.currentFile,
             .expr = expr,
-            .instantiation = self.currentInstantiation,
         }, res) catch return Error.AllocatorFailure;
     }
 
@@ -1669,7 +1674,7 @@ pub fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Type
         else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
     };
 
-    const signature = self.typechecker.typeTable.get(function.signature).Function;
+        const signature = self.typechecker.typeTable.get(function.signature).Function;
 
     const argsListPtr = ast.extra[extraPtr + 1];
     const argsList: defines.OpaquePtr = ast.expressions.items(.value)[argsListPtr];

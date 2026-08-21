@@ -1,4 +1,4 @@
-// @Note Lowering to C IR is requested by the typechecker,
+// @Note Lowering to C IR is requested by the typechecker,typechecker
 // but it is done by the lowerer.zig, which makes calls to
 // JIR.Builder since JIR.Builder itself doesn't know about
 // untyped AST.
@@ -3049,6 +3049,14 @@ pub fn makeMutable(_: *const Typechecker, info: TypeInfo) TypeInfo {
                 .mutable = true,
                 .size = int.size,
                 .signed = int.signed,
+            },
+        },
+        .ComptimeFloat => .{ .Float = true },
+        .ComptimeInt => .{
+            .Integer = .{
+                .mutable = true,
+                .size = 32,
+                .signed = true,
             },
         },
         else => unreachable,

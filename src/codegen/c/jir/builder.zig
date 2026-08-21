@@ -238,6 +238,8 @@ pub inline fn not(self: *Builder, rhs: JIR.Ptr) Error!JIR.Ptr { return self.comm
 pub inline fn negate(self: *Builder, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonSingle(.Negation, rhs); }
 
 pub inline fn grouping(self: *Builder, args: []const JIR.Ptr) Error!JIR.Ptr {
+    std.debug.assert(args.len <= 1);
+
     const start: u32 = @intCast(self.data.items.len);
     self.data.append(self.allocator, @intCast(args.len)) catch return Error.AllocatorFailure;
     self.data.appendSlice(self.allocator, args) catch return Error.AllocatorFailure;
