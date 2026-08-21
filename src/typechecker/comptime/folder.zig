@@ -828,7 +828,7 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
             })) |capture| capture
             else Error.ComptimeNotPossible,
         .Parameter =>
-            if (false and self.getFlag(.InComptimeCall)) res: {
+            if (self.getFlag(.InComptimeCall)) res: {
                 const newDecl = try self.typechecker.symbols.declarations.addOne(self.typechecker.arena.allocator());
                 self.typechecker.symbols.declarations.set(newDecl, decl);
                 self.typechecker.symbols.declarations.items(.scope)[newDecl] = self.typechecker.currentScope;
@@ -1713,24 +1713,7 @@ fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID) 
 
     for (argsRange.start..argsRange.end, 0..) |ptr, idx| {
         args[idx] = try self.eval(ast.extra[@intCast(ptr)], signature.argTypes[idx]);
-
-        const declPtr = self.typechecker.symbols.lookup.get(.{
-            .scope = function.scope,
-            .name = self.typechecker.builder.getInternedString(function.args[idx]),
-        }) orelse return common.debug.ShouldBeImpossible(undefined, @src());
-
-        self.declCache.put(self.arena.allocator(), declPtr, args[idx])
-            catch return Error.AllocatorFailure;
     }
-
-    defer for (0..argsRange.len()) |idx| {
-        const declPtr = self.typechecker.symbols.lookup.get(.{
-            .scope = function.scope,
-            .name = self.typechecker.builder.getInternedString(function.args[idx]),
-        }) orelse unreachable;
-
-        _ = self.declCache.remove(declPtr);
-    };
 
     const val = try self.typechecker.executer.executeCall(function, args);
 

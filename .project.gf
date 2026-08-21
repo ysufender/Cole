@@ -3,7 +3,7 @@ arguments=-x debug.cfg
 
 [executable]
 path=zig-out/bin/cole-debug
-arguments=--working test main.jasl -O 1 --supress-warnings -o test -I ../stdlib
+arguments=--working test main.cole -O 1 --supress-warnings -o test -I ../stdlib
 ask_directory=0
 
 [theme]

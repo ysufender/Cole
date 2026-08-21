@@ -408,7 +408,7 @@ fn typecheckVariableDef(
                     .name = nname,
                 }, rres.value);
 
-                if (false and self.typeTable.get(def.valueType) == .Function) {
+                if (self.typeTable.get(def.valueType) == .Function) {
                     const funcPtr = try self.folder.evalDecl(rres.value, def.valueType);
                     const func = &self.folder.memory.items[funcPtr].Function;
                     self.builder.modifyInternedString(func.name, nname);
@@ -464,9 +464,12 @@ fn typecheckVariableDef(
                 defer self.lowerer.lastReturnType = lret;
                 self.lowerer.lastReturnType = signature.returnType;
 
-                const stmtExtra = ast.statements.get(func.body).value;
+                const pscope = self.currentScope;
+                defer self.currentScope = pscope;
+                self.currentScope = func.scope;
 
-                try self.typecheckBlock(stmtExtra, signature.returnType);
+                func.checked = true;
+                try self.typecheckStatement(func.body, signature.returnType);
                 if (!(
                     self.typeTable.get(signature.returnType).isZeroBit()
                     or self.getFlag(.CoveredAllPaths)
@@ -476,7 +479,6 @@ fn typecheckVariableDef(
                     });
                     return Error.UncoveredCodePath;
                 }
-                func.checked = true;
                 func.body = try self.lowerer.statement(func.body);
 
                 const fun = try self.builder.addFunction(func.*);
@@ -802,6 +804,18 @@ fn typecheckReturn(self: *Typechecker, exprPtr: defines.ExpressionPtr, expected:
     const returnType =
         if (exprPtr != 0) try self.typecheckExpression(exprPtr, expected)
         else Comptime.Folder.Builtin.Type("void");
+
+    common.log.debug("{s}", .{try self.typeName(undefined, returnType)});
+
+    if (std.mem.eql(u8, "comptime_int", try self.typeName(undefined, returnType))) {
+        var iter = self.builder.functions.iterator();
+        while (iter.next()) |func| {
+            if (func.scope == self.currentScope) {
+                common.log.debug("{s}", .{self.builder.getInternedString(func.name)});
+                break;
+            }
+        }
+    }
 
     if (!self.suitable(expected, returnType)) {
         self.report("Unsuitable return type, expected '{s}', received '{s}'", .{
@@ -1457,10 +1471,12 @@ pub fn discoverScopeDef(
         defer self.lowerer.lastReturnType = lret;
         self.lowerer.lastReturnType = signature.returnType;
 
-        const ast = self.context.getAST(self.currentFile);
-        const stmtExtra = ast.statements.get(func.body).value;
+        const pscope = self.currentScope;
+        defer self.currentScope = pscope;
+        self.currentScope = func.scope;
 
-        try self.typecheckBlock(stmtExtra, signature.returnType);
+        func.checked = true;
+        try self.typecheckStatement(func.body, signature.returnType);
         if (!(
             self.typeTable.get(signature.returnType).isZeroBit()
             or self.getFlag(.CoveredAllPaths)
@@ -1470,7 +1486,6 @@ pub fn discoverScopeDef(
             });
             return Error.UncoveredCodePath;
         }
-        func.checked = true;
         func.body = try self.lowerer.statement(func.body);
 
         const funcPtr = try self.builder.addFunction(func.*);

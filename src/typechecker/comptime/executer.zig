@@ -162,6 +162,10 @@ pub fn executeCall(self: *Executer, _func: JIR.Function, args: []const Comptime.
     try self.stack.push(scope);
     defer self.stack.revert(current);
 
+    const pscope = self.typechecker.currentScope;
+    defer self.typechecker.currentScope = pscope;
+    self.typechecker.currentScope = func.scope;
+
     const res =
         try if (signature.isComptime and !func.checked) res: {
             const prevfile = self.typechecker.currentFile;
@@ -175,6 +179,7 @@ pub fn executeCall(self: *Executer, _func: JIR.Function, args: []const Comptime.
             defer self.typechecker.lowerer.lastReturnType = prevRet;
             self.typechecker.lowerer.lastReturnType = signature.returnType;
 
+            func.checked = true;
             try self.typechecker.typecheckStatement(func.body, signature.returnType);
             if (!(
                 self.typechecker.typeTable.get(signature.returnType).isZeroBit()
@@ -187,7 +192,6 @@ pub fn executeCall(self: *Executer, _func: JIR.Function, args: []const Comptime.
             }
 
             func.body = try self.typechecker.lowerer.statement(func.body);
-            func.checked = true;
 
             break :res self.executeBlock(func.body);
         }
