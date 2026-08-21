@@ -409,8 +409,9 @@ fn typecheckVariableDef(
                 }, rres.value);
 
                 if (self.typeTable.get(def.valueType) == .Function) {
-                    const funcPtr = self.folder.declCache.get(rres.value)
-                        orelse return common.debug.ShouldBeImpossible(undefined, @src());
+                    const funcPtr = try self.folder.evalDecl(rres.value, def.valueType);
+                    // const funcPtr = self.folder.declCache.get(rres.value)
+                    //    orelse return common.debug.ShouldBeImpossible(undefined, @src());
                     const func = &self.folder.memory.items[funcPtr].Function;
                     self.builder.modifyInternedString(func.name, nname);
                     func.name = nnname;
@@ -458,32 +459,6 @@ fn typecheckVariableDef(
 
             // @Note See folder.zig:evalFunction
             if (!self.folder.getFlag(.InComptimeCall) and decl.parent == null) {
-                const pc = self.setFlag(.CoveredAllPaths, false);
-                defer _ = self.setFlag(.CoveredAllPaths, pc);
-
-                const signature = self.typeTable.get(func.signature).Function;
-
-                const lret = self.lowerer.lastReturnType;
-                defer self.lowerer.lastReturnType = lret;
-                self.lowerer.lastReturnType = signature.returnType;
-
-                const pscope = self.currentScope;
-                defer self.currentScope = pscope;
-                self.currentScope = func.scope;
-
-                func.checked = true;
-                try self.typecheckStatement(func.body, signature.returnType);
-                if (!(
-                    self.typeTable.get(signature.returnType).isZeroBit()
-                    or self.getFlag(.CoveredAllPaths)
-                )) {
-                    self.report("Function with return type '{s}' does not return a value in all code paths.", .{
-                        try self.typeName(self.arena.allocator(), signature.returnType),
-                    });
-                    return Error.UncoveredCodePath;
-                }
-                func.body = try self.lowerer.statement(func.body);
-
                 const fun = try self.builder.addFunction(func.*);
                 try self.builder.functionDef(func.name, fun);
             }
@@ -1016,7 +991,7 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
         .ArrayType, .CPointerType, .FunctionType,
         .MutableType, .PointerType, .SliceType, 
         .EnumDefinition, .UnionDefinition, .StructDefinition,
-        .FunctionDefinition, .Lambda => common.debug.ShouldBeImpossible(undefined, @src()),
+        .FunctionDefinition, .Lambda => self.typecheckValue(try self.folder.eval(expressionPtr, maybeExpected), maybeExpected),
 
         .Conditional => self.typecheckIfExpression(expr.value, maybeExpected),
         .Switch => self.typecheckSwitchExpression(expr.value, maybeExpected),
@@ -1463,33 +1438,6 @@ pub fn discoverScopeDef(
 
     if (self.typeTable.get(discoveredType) == .Function) {
         const func = &self.folder.memory.items[try self.folder.evalDecl(decl, discoveredType)].Function;
-
-        const pc = self.setFlag(.CoveredAllPaths, false);
-        defer _ = self.setFlag(.CoveredAllPaths, pc);
-
-        const signature = self.typeTable.get(func.signature).Function;
-
-        const lret = self.lowerer.lastReturnType;
-        defer self.lowerer.lastReturnType = lret;
-        self.lowerer.lastReturnType = signature.returnType;
-
-        const pscope = self.currentScope;
-        defer self.currentScope = pscope;
-        self.currentScope = func.scope;
-
-        func.checked = true;
-        try self.typecheckStatement(func.body, signature.returnType);
-        if (!(
-            self.typeTable.get(signature.returnType).isZeroBit()
-            or self.getFlag(.CoveredAllPaths)
-        )) {
-            self.report("Function with return type '{s}' does not return a value in all code paths.", .{
-                try self.typeName(self.arena.allocator(), signature.returnType),
-            });
-            return Error.UncoveredCodePath;
-        }
-        func.body = try self.lowerer.statement(func.body);
-
         const funcPtr = try self.builder.addFunction(func.*);
         try self.builder.functionDef(func.name, funcPtr);
     }

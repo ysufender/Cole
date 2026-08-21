@@ -115,7 +115,6 @@ pub const Function = struct {
     args: []const defines.StringPtr,
     body: JIR.Ptr,
     source: defines.FilePtr,
-    checked: bool = false,
     scope: defines.ScopePtr,
 };
 
@@ -471,6 +470,7 @@ fn discoverFunctionsAndTypes(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void 
             }
 
             _ = std.mem.replace(u8, self.strings[self.data[node.value]], "::", "__", @constCast(self.strings[self.data[node.value]]));
+            _ = std.mem.replace(u8, self.strings[func.name], "::", "__", @constCast(self.strings[func.name]));
             try self.write(out, "{s} {s}({s});\n\n", .{
                 try self.getCName(typeInfo.returnType, null, false, false),
                 self.strings[func.name],

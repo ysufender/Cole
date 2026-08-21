@@ -50,7 +50,7 @@ pub fn main(init: std.process.Init) void {
         });
     };
 
-    common.log.info("Compilation took {d} miliseconds.", .{
+    common.log.info("Compilation took {d} milliseconds.", .{
         start.durationTo(std.Io.Clock.now(.real, init.io)).toMilliseconds(),
     });
     common.log.info("Exited successfully.", .{});

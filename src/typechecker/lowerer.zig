@@ -1052,7 +1052,11 @@ fn call(
         },
         .Function => |fnc|
             // @TODO inline functions
-            if (fnc.isComptime) self.literal(exprPtr, ofType)
+            if (fnc.isComptime) res: {
+                const resultingValue = try self.typechecker.folder.eval(exprPtr, ofType);
+                const constant = try self.addConstant(resultingValue, ofType);
+                break :res self.typechecker.builder.literal(constant);
+            }
             else self.typechecker.builder.call(
                 stmt,
                 try self.expression(func, funcType),
