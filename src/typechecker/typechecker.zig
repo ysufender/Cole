@@ -438,8 +438,15 @@ fn typecheckVariableDef(
                 else if (decl.topLevel) self.modules.modules.get(self.symbols.scopes.items(.module)[decl.scope]).name
                 else try self.folder.generateRandomNameString(.Function);
 
+            const val = try self.folder.eval(decl.node, expected);
+            const func = &self.folder.memory.items[val].Function;
+
             const newName =
-                if (self.hasMetadata(decl.node, "@export") and decl.topLevel) symName
+                if (
+                    self.hasMetadata(func.expr, "@export")
+                    or self.hasMetadata(func.expr, "@extern")
+                    and decl.topLevel
+                ) symName
                 else if (!decl.topLevel) namespace
                 else std.fmt.allocPrint(self.arena.allocator(), "{s}::{s}", .{
                     namespace,
@@ -452,8 +459,6 @@ fn typecheckVariableDef(
                 return Error.ExportOfMainFunction;
             }
 
-            const val = try self.folder.eval(decl.node, expected);
-            const func = &self.folder.memory.items[val].Function;
             self.builder.modifyInternedString(func.name, newName);
             func.name = try self.builder.internString(newName);
 
@@ -1434,12 +1439,6 @@ pub fn discoverScopeDef(
             });
         },
         else => return common.debug.ShouldBeImpossible(self.context.log, @src()),
-    }
-
-    if (self.typeTable.get(discoveredType) == .Function) {
-        const func = &self.folder.memory.items[try self.folder.evalDecl(decl, discoveredType)].Function;
-        const funcPtr = try self.builder.addFunction(func.*);
-        try self.builder.functionDef(func.name, funcPtr);
     }
 
     return discoveredType;
@@ -2639,6 +2638,13 @@ pub fn dumpCallStack(self: *Typechecker) void {
 }
 
 pub fn assertCastable(self: *Typechecker, from: TypeID, to: TypeID, unsafe: bool) Error!void {
+    blk: {
+        self.assertCanCoerce(from, to) catch {
+            break :blk;
+        };
+        return;
+    }
+
     const fromType = self.typeTable.get(from);
     const toType = self.typeTable.get(to);
 
@@ -2823,6 +2829,22 @@ pub fn assertCanCoerce(self: *const Typechecker, this: TypeID, that: TypeID) Err
                 try functional.throwIf(std.meta.activeTag(thisType) != std.meta.activeTag(thatType), Error.TypeMismatch);
                 try functional.throwIf(!std.mem.eql(u32, f1.argTypes, thatType.Function.argTypes), Error.IncompatibleTypes);
                 try functional.throwIf(f1.returnType != thatType.Function.returnType, Error.IncompatibleTypes);
+            },
+            .Pointer => |fromPtr| switch (thatType) {
+                .Pointer => |toPtr| {
+                    if (
+                        toPtr.size == .Slice
+                        and toPtr.child == (comptime Comptime.Folder.Builtin.Type("u8"))
+                        and fromPtr.size == .C
+                        and fromPtr.child == (comptime Comptime.Folder.Builtin.Type("u8"))
+                    ) {
+                        return;
+                    }
+
+                    try functional.throwIf(fromPtr.size != toPtr.size, Error.TypeMismatch);
+                    try self.assertCanCoerce(fromPtr.child, toPtr.child);
+                },
+                else => Error.TypeMismatch,
             },
             else => functional.throwIf(std.meta.activeTag(thisType) != std.meta.activeTag(thatType), Error.TypeMismatch),
         },
@@ -3334,7 +3356,7 @@ pub fn setMetadata(
 pub fn getMetadata(
     self: *const Typechecker,
     value: defines.ExpressionPtr,
-) ?[]const defines.ExpressionPtr {
+) ?[]const Comptime.Value.Ptr{
     return self.metadata.get(.{
         .file = self.currentFile,
         .expr = value,

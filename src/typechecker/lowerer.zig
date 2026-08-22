@@ -174,7 +174,9 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
             }};
         },
         .String => |string| .{
-            .String = try self.typechecker.builder.internString(string),
+            .String = .{
+                .str = try self.typechecker.builder.internString(string),
+            },
         },
         .Slice => |slice| slice: {
             const child = switch (ofType) {
@@ -182,7 +184,16 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
                 .Pointer => |ptr| ptr.child,
                 else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
             };
- 
+
+            if (child == comptime Comptime.Folder.Builtin.Type("u8")) {
+                break :slice JIR.Constant{
+                    .String = .{
+                        .type = .C,
+                        .str = slice.To,
+                    }
+                };
+            }
+
             const elemConsts = self.typechecker.builder.allocator.alloc(JIR.Constant.Ptr, slice.Size)
                 catch return Error.AllocatorFailure;
             for (0..slice.Size) |index| {
@@ -793,7 +804,6 @@ fn block(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
 //
 // Expression
 //
-
 pub fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID) Error!JIR.Ptr {
     if (self.typechecker.folder.attemptEval(exprPtr, ofType)) |_| {
         return self.literal(exprPtr, ofType);
@@ -1092,14 +1102,14 @@ fn builtinCall(
             break :blk self.typechecker.builder.call(true, builtinUnreach, &.{});
         },
         BI("typeName") => self.typechecker.builder.literal(
-            try self.typechecker.builder.addConstant(.{ .String =
+            try self.typechecker.builder.addConstant(.{ .String = .{ .str =
                 try self.typechecker.builder.internString(
                     try self.typechecker.typeName(self.typechecker.arena.allocator(),
                         self.typechecker.folder.getValue(
                             try self.typechecker.folder.expectType(ast.extra[args.at(0)])
                         ).Type
                     )
-                )
+                )}
             })
         ),
         BI("compileLog"), BI("compileError") => 0,
@@ -1367,8 +1377,26 @@ fn identifier(self: *Lowerer, id: defines.ExpressionPtr) Error!JIR.Ptr {
 fn mark(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR.Ptr {
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
     const expr = try self.expression(ast.extra[extraPtr + 2], ofType);
-    try self.typechecker.builder.addMetadata(expr, self.typechecker.getMetadata(ast.extra[extraPtr + 2]) orelse &.{});
+
+    try self.addMetadata(expr, ast.extra[extraPtr + 2]);
     return expr;
+}
+
+pub fn addMetadata(self: *Lowerer, to: JIR.Ptr, from: defines.ExpressionPtr) Error!void {
+    const expressions = self.typechecker.getMetadata(from) orelse &.{};
+
+    const metadata = self.typechecker.arena.allocator().alloc(JIR.Constant.Ptr, expressions.len)
+        catch return Error.AllocatorFailure;
+
+    for (expressions, 0..) |valuePtr, idx| {
+        const constant = try self.addConstant(
+            valuePtr,
+            try self.typechecker.typecheckValue(valuePtr, comptime Comptime.Folder.Builtin.Type("builtin_metadata"))
+        );
+        metadata[idx] = constant;
+    }
+
+    try self.typechecker.builder.addMetadata(to, metadata);
 }
 
 fn literal(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID) Error!JIR.Ptr {

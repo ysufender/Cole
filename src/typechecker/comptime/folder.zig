@@ -296,6 +296,11 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
 
     // @Note comptime functions get typechecked on-the-fly.
     if (isComptime) {
+        if (self.typechecker.hasMetadata(exprPtr, "@extern")) {
+            self.report("Attempt to mark a comptime function as extern.", .{});
+            return Error.ExternComptime;
+        }
+
         const functionDef = JIR.Function{
             .signature = functionType,
             .body = bodyPtr,
@@ -303,6 +308,7 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
             .args = argNames,
             .source = self.typechecker.currentFile,
             .scope = scope,
+            .expr = exprPtr,
         };
 
         return self.appendValue(.{
@@ -310,18 +316,20 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
         });
     }
 
-    const pc = self.typechecker.setFlag(.CoveredAllPaths, false);
-    defer _ = self.typechecker.setFlag(.CoveredAllPaths, pc);
+    if (!self.typechecker.hasMetadata(exprPtr, "@extern")) {
+        const pc = self.typechecker.setFlag(.CoveredAllPaths, false);
+        defer _ = self.typechecker.setFlag(.CoveredAllPaths, pc);
 
-    try self.typechecker.typecheckStatement(bodyPtr, returnType);
-    if (!(
-        self.typechecker.typeTable.get(returnType).isZeroBit()
-        or self.typechecker.getFlag(.CoveredAllPaths)
-    )) {
-        self.typechecker.report("Function with return type '{s}' does not return a value in all code paths.", .{
-            try self.typechecker.typeName(self.arena.allocator(), returnType),
-        });
-        return Error.UncoveredCodePath;
+        try self.typechecker.typecheckStatement(bodyPtr, returnType);
+        if (!(
+            self.typechecker.typeTable.get(returnType).isZeroBit()
+            or self.typechecker.getFlag(.CoveredAllPaths)
+        )) {
+            self.typechecker.report("Function with return type '{s}' does not return a value in all code paths.", .{
+                try self.typechecker.typeName(self.arena.allocator(), returnType),
+            });
+            return Error.UncoveredCodePath;
+        }
     }
 
     const functionDef = JIR.Function{
@@ -331,6 +339,7 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
         .args = argNames,
         .source = self.typechecker.currentFile,
         .scope = scope,
+        .expr = exprPtr,
     };
 
     return self.appendValue(.{
@@ -1985,6 +1994,7 @@ fn castValue(self: *Folder, valuePtr: Comptime.Value.Ptr, to: TypeID) Error!Comp
                     .signature = to,
                     .source = func.source,
                     .scope = func.scope,
+                    .expr = func.expr,
                 },
             },
             else => return common.debug.ShouldBeImpossible(undefined, @src()),
@@ -2071,6 +2081,20 @@ fn castValue(self: *Folder, valuePtr: Comptime.Value.Ptr, to: TypeID) Error!Comp
                 self.report("Attempt to cast value of type 'type'.", .{});
                 return Error.CastOfIncastableValue;
             },
+
+        .String => |str| Comptime.Value{
+            .Slice = .{
+                .Type = try self.typechecker.registerType(TypeInfo{
+                    .Pointer = .{
+                        .size = .C,
+                        .child = comptime Builtin.Type("u8"),
+                        .mutable = true,
+                    },
+                }),
+                .Size = @intCast(str.len),
+                .To = try self.typechecker.builder.internString(str),
+            }
+        },
 
         else => {
             self.report("Attempt to cast value of type '{s}.'", .{@tagName(value)});

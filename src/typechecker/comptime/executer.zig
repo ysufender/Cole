@@ -83,6 +83,8 @@ typechecker: *Typechecker,
 
 arena: Arena,
 
+currentCall: Cache.Key = undefined,
+
 pub fn init(typechecker: *Typechecker, allocator: Allocator) Error!Executer {
     var arena = Arena.init(allocator);
 
@@ -95,6 +97,11 @@ pub fn init(typechecker: *Typechecker, allocator: Allocator) Error!Executer {
 }
 
 pub inline fn executeCall(self: *Executer, func: *JIR.Function, args: []const Comptime.Value.Ptr) Error!Comptime.Value {
+    if (self.typechecker.hasMetadata(func.expr, "@extern")) {
+        self.report("Comptime execution of external function '{s}' is not possible.", .{self.typechecker.builder.getInternedString(func.name)});
+        return Error.ComptimeNotPossible;
+    }
+
     const signature = self.typechecker.typeTable.get(func.signature).Function;
     if (self.cache.get(.{
         .func = func.name,
@@ -120,6 +127,13 @@ pub inline fn executeCall(self: *Executer, func: *JIR.Function, args: []const Co
     });
     errdefer _ = self.cache.remove(.{ .func = func.name, .args = args });
 
+    const prevCall = self.currentCall;
+    defer self.currentCall = prevCall;
+    self.currentCall = .{
+        .func = func.name,
+        .args = args,
+    };
+
     const res =
         if (signature.isComptime) try self.executeCallComptime(func, args)
         else try self.executeCallNormal(func, args);
@@ -139,9 +153,84 @@ pub inline fn executeCall(self: *Executer, func: *JIR.Function, args: []const Co
 // Unchecked Comptime Call
 //
 
-fn executeCallComptime(self: *Executer, _: *JIR.Function, _: []const Comptime.Value.Ptr) Error!Comptime.Value {
-    self.report("Unchecked comptime function calls are not yet supported.", .{});
-    return common.debug.NotImplemented(self.typechecker.context.log, @src());
+fn executeCallComptime(self: *Executer, func: *JIR.Function, args: []const Comptime.Value.Ptr) Error!Comptime.Value {
+    var variables = Scope.VariableMap.empty;
+    variables.ensureTotalCapacity(self.arena.allocator(), @intCast(args.len))
+        catch return Error.AllocatorFailure;
+
+    for (args, 0..) |arg, idx| {
+        variables.putAssumeCapacityNoClobber(func.args[idx], self.typechecker.folder.memory.items[arg]);
+    }
+
+    const scope = Scope{
+        .variables = variables,
+        .labels = Scope.LabelMap.empty,
+        .bp = 0,
+        .pc = 0,
+        .len = 0,
+    };
+    const current = self.stack.index;
+    try self.stack.push(scope);
+    defer self.stack.revert(current);
+
+    const pscope = self.typechecker.currentScope;
+    defer self.typechecker.currentScope = pscope;
+    self.typechecker.currentScope = func.scope;
+
+    return self.executeBlockAST(func.body);
+}
+
+fn executeBlockAST(self: *Executer, blockPtr: defines.StatementPtr) Error!Comptime.Value {
+    try self.decodePushScope(blockPtr);
+
+    while (self.stack.items.len > 0) {
+        const topScope = self.stack.peek();
+        defer topScope.pc += 1;
+
+        if (topScope.pc >= topScope.len) {
+            _ = self.stack.pop() orelse break;
+            continue;
+        }
+
+        const stmt = self.typechecker.builder.nodes.get(self.typechecker.builder.data.items[topScope.bp + topScope.pc]);
+
+        switch (stmt.type) {
+            .Jump => {
+                const label = try self.getLabel(stmt.value);
+                self.stack.revert(label.sp);
+            },
+            .VariableDef => {
+                const typeID = self.typechecker.builder.data.items[stmt.value + 1];
+                const name = self.typechecker.builder.data.items[stmt.value + 2];
+
+                const initializer =
+                    if (self.typechecker.builder.data.items[stmt.value + 3] == 1) Comptime.Value{
+                        .Undefined = typeID,
+                    }
+                    else try self.expression(self.typechecker.builder.data.items[stmt.value + 4]);
+
+                topScope.variables.putAssumeCapacityNoClobber(name, initializer);
+            },
+            .Exit => _ = self.stack.pop() orelse {
+                self.report("Unterminated scope, but how?", .{});
+                return Error.MissingBrace;
+            },
+            .Scope => {
+                try self.decodePushScope(self.typechecker.builder.data.items[topScope.bp + topScope.pc]);
+            },
+            .Code => {
+                self.report("Foreign code blocks are not suitable in comptime contexts.", .{});
+                return Error.ComptimeNotPossible;
+            },
+            .Return => return self.expression(stmt.value),
+            .TypeDef => { },
+            else => {
+                return common.debug.NotImplemented(self.typechecker.context.log, @src());
+            }
+        }
+    }
+
+    return self.typechecker.folder.memory.items[@intFromEnum(Comptime.Value.Implicit.Void)];
 }
 
 //
@@ -237,7 +326,7 @@ fn expression(self: *Executer, exprPtr: JIR.Ptr) Error!Comptime.Value {
         .Identifier => self.getVar(expr.value),
         .Literal => self.literal(expr.value),
         .Call => self.call(expr.value),
-        .Grouping =>
+        .Grouping => self.expression(self.typechecker.builder.data.items[expr.value + 1]),
         else => common.debug.NotImplemented(self.typechecker.context.log, @src()),
     };
 }
@@ -268,7 +357,7 @@ fn literal(self: *Executer, constPtr: JIR.Ptr) Error!Comptime.Value {
         .Undefined => |typeID| .{ .Undefined = typeID },
         .Float => |fl| .{ .Float = fl },
         .Function => |func| .{ .Function = self.typechecker.builder.functions.get(func) },
-        .String => |str| .{ .String = self.typechecker.builder.getInternedString(str) },
+        .String => |str| .{ .String = self.typechecker.builder.getInternedString(str.str) },
         .Void => .{ .Void = { } },
         .Type => |typeID| .{ .Type = typeID },
         .Integer => |integer| .{

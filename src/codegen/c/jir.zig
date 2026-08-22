@@ -96,7 +96,13 @@ pub const Constant = union(enum) {
         i8: i8,
         u8: u8,
     },
-    String: defines.StringPtr,
+    String: struct {
+        type: enum {
+            C,
+            Cole,
+        } = .Cole,
+        str: defines.StringPtr
+    },
     Float: f32,
     Aggregate: ConstantArray, 
     Array: ConstantArray,
@@ -116,6 +122,7 @@ pub const Function = struct {
     body: JIR.Ptr,
     source: defines.FilePtr,
     scope: defines.ScopePtr,
+    expr: defines.ExpressionPtr,
 };
 
 const JIR = @This();
@@ -471,7 +478,8 @@ fn discoverFunctionsAndTypes(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void 
 
             _ = std.mem.replace(u8, self.strings[self.data[node.value]], "::", "__", @constCast(self.strings[self.data[node.value]]));
             _ = std.mem.replace(u8, self.strings[func.name], "::", "__", @constCast(self.strings[func.name]));
-            try self.write(out, "{s} {s}({s});\n\n", .{
+            try self.write(out, "{s}{s} {s}({s});\n\n", .{
+                if (self.hasMetadata(nodePtr, "@extern")) "extern " else "",
                 try self.getCName(typeInfo.returnType, null, false, false),
                 self.strings[func.name],
                 args
@@ -520,7 +528,7 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
             const name = self.strings[func.name];
             const typeInfo = self.types.get(func.signature).Function;
 
-            if (typeInfo.isComptime) {
+            if (typeInfo.isComptime or self.hasMetadata(nodePtr, "@extern")) {
                 return;
             }
 
@@ -774,13 +782,21 @@ fn literal(self: *JIR, out: *Writer, ptr: Constant.Ptr) Error!void {
             }
             try self.write(out, "}}", .{ });
         },
-        .String => |str| {
-            const rstr = self.strings[str];
-            try self.write(out, "({s}){{(uint8_t*)\"{s}\", {d}}}", .{
-                try self.getCName(Comptime.Folder.Builtin.Type("[]u8"), null, true, false),
-                rstr,
-                rstr.len,
-            });
+        .String => |str| switch (str.type) {
+            .Cole => {
+                const rstr = self.strings[str.str];
+                try self.write(out, "({s}){{(uint8_t*)\"{s}\", {d}}}", .{
+                    try self.getCName(Comptime.Folder.Builtin.Type("[]u8"), null, true, false),
+                    rstr,
+                    rstr.len,
+                });
+            },
+            .C => {
+                const rstr = self.strings[str.str];
+                try self.write(out, "((char const*)\"{s}\")", .{
+                    rstr,
+                });
+            },
         },
     };
 }
@@ -911,11 +927,16 @@ fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool
                 }) catch return Error.AllocatorFailure;
             },
             .Single, .C => {
-                name = std.fmt.allocPrint(self.allocator, "{s}{s}{s}", .{
-                    try self.getCName(ptr.child, _name, false, noSymbol),
-                    if (noSymbol) "_ptr" else "*",
-                    if (ptr.mutable) "" else " const",
-                }) catch return Error.AllocatorFailure;
+                if (ptr.child == comptime Comptime.Folder.Builtin.Type("u8")) {
+                    name = if (noSymbol) "char_const_ptr" else "char const*";
+                }
+                else {
+                    name = std.fmt.allocPrint(self.allocator, "{s}{s}{s}", .{
+                        try self.getCName(ptr.child, _name, false, noSymbol),
+                        if (noSymbol) "_ptr" else "*",
+                        if (ptr.mutable) "" else " const",
+                    }) catch return Error.AllocatorFailure;
+                }
             },
         },
     }
@@ -959,4 +980,35 @@ fn write(_: *JIR, out: *Writer, comptime msg: []const u8, args: anytype) Error!v
 fn writeln(self: *JIR, out: *Writer, comptime msg: []const u8, args: anytype) Error!void {
     try self.indentf(out);
     return out.print(msg, args) catch Error.IOError;
+}
+
+pub fn hasMetadata(
+    self: *const JIR,
+    _value: JIR.Ptr,
+    _meta: []const u8,
+) bool {
+    return
+        if (self.getMetadata(_value)) |metadata| blk: {
+            for (metadata) |meta| {
+                const constant = self.constants.get(meta);
+                switch (constant) {
+                    .Aggregate => |agg|
+                        if (agg.type == Comptime.Folder.Builtin.Type("builtin_metadata")) {
+                            const enumValue = self.constants.get(agg.data.start).Integer.u32;
+                            if (enumValue == Comptime.Folder.Builtin.Metadata(_meta)) break :blk true;
+                        },
+                    else => { },
+                }
+            }
+
+            break :blk false;
+        }
+        else false;
+}
+
+pub fn getMetadata(
+    self: *const JIR,
+    value: defines.ExpressionPtr,
+) ?[]const defines.ExpressionPtr {
+    return self.metadata.get(value);
 }

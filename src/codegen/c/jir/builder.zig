@@ -15,7 +15,7 @@ const Declaration = @import("../../../typechecker/resolver.zig").Declaration;
 const Comptime = @import("../../../typechecker/comptime.zig");
 
 pub const StringPtr = defines.Offset;
-pub const MetadataMap = collections.HashMap(JIR.Ptr, []const Comptime.Value.Ptr);
+pub const MetadataMap = collections.HashMap(JIR.Ptr, []const JIR.Constant.Ptr);
 
 const Builder = @This();
 
@@ -114,7 +114,7 @@ pub inline fn getInternedString(self: *const Builder, index: defines.StringPtr) 
     return self.strings.keys()[index];
 }
 
-pub inline fn addMetadata(self: *Builder, node: JIR.Ptr, metadata: []const Comptime.Value.Ptr) Error!void {
+pub inline fn addMetadata(self: *Builder, node: JIR.Ptr, metadata: []const JIR.Constant.Ptr) Error!void {
     return self.metadata.put(self.allocator, node, metadata);
 }
 
@@ -145,6 +145,7 @@ pub fn variableDef(
         .value = start,
     });
     try self.addKeyNode(res);
+
     return res;
 }
 
@@ -156,6 +157,7 @@ pub inline fn functionDef(self: *Builder, name: defines.StringPtr, function: JIR
     self.functionDefCache.putNoClobber(self.allocator, function, {})
         catch return Error.AllocatorFailure;
     const node = try self.commonBinary(.FunctionDef, name, function);
+    try self.typechecker.lowerer.addMetadata(node, self.functions.get(function).expr);
     return self.addKeyNode(node);
 }
 
