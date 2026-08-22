@@ -20,7 +20,7 @@
 */
 
 /* Output */
-let printf = #(@extern) fn (msg: [@c]u8) -> void {};
+let printf = #(@extern) fn (msg: [@c]c_char) -> void {};
 
 pub let println = fn (msg: []u8) -> void {
     printf(msg.ptr);

@@ -124,42 +124,42 @@ pub let MENU: KeyboardKey = 5;
 pub let VOLUME_UP: KeyboardKey = 24;
 pub let VOLUME_DOWN: KeyboardKey = 25;
 
-pub let InitWindow = fn (width: i32, height: i32, title: []u8) -> void  { code { InitWindow(width, height, title.ptr); } };
-pub let CloseWindow = fn () -> void { code { CloseWindow(); } };
-pub let ClearBackground = fn (color: Color) -> void { code { ClearBackground(color); } };
-pub let BeginDrawing = fn () -> void { code { BeginDrawing(); } };
-pub let EndDrawing = fn () -> void { code { EndDrawing(); } };
-pub let SetTargetFPS = fn (fps: i32 ) -> void { code { SetTargetFPS(fps); } };
+pub let InitWindow = #(@extern) fn (width: c_int, height: c_int, title: [@c]c_char) -> void  { };
+pub let CloseWindow = #(@extern) fn () -> void { };
+pub let ClearBackground = #(@extern) fn (color: Color) -> void { };
+pub let BeginDrawing = #(@extern) fn () -> void { };
+pub let EndDrawing = #(@extern) fn () -> void { };
+pub let SetTargetFPS = #(@extern) fn (fps: c_int) -> void { };
 
-pub let IsKeyDown = #(@extern) fn (key: KeyboardKey) -> bool {};
+pub let IsKeyDown = fn (key: KeyboardKey) -> bool {
+    let res: mut bool = false;
+    code { res = IsKeyDown((KeyboardKey)key); }
+    return res;
+};
 
 pub let GetFrameTime = #(@extern) fn () -> float { };
 
-pub let DrawCircle = fn (
+pub let DrawCircle = #(@extern) fn (
     centerX: i32,
     centerY: i32,
     radius: float,
     color: Color
 ) -> void { code { DrawCircle(centerX, centerY, radius, color); } };
 
-pub let DrawText = fn (
-    text: []u8,
-    posX: i32,
-    posY: i32,
-    fontSize: i32,
+pub let DrawText = #(@extern) fn (
+    text: [@c]c_char,
+    posX: c_int,
+    posY: c_int,
+    fontSize: c_int,
     color: Color
-) -> void{ code { DrawText(text.ptr, posX, posY, fontSize, color); } };
+) -> void { };
 
-pub let DrawRectangle = fn (
-    posX: i32,
-    posY: i32,
-    width: i32,
-    height: i32,
+pub let DrawRectangle = #(@extern) fn (
+    posX: c_int,
+    posY: c_int,
+    width: c_int,
+    height: c_int,
     color: Color
-) -> void { code { DrawRectangle(posX, posY, width, height, color); } };
+) -> void { };
 
-pub let WindowShouldClose = fn () -> bool {
-    let res: mut bool = false;
-    code { res = WindowShouldClose(); }
-    return res;
-};
+pub let WindowShouldClose = #(@extern) fn () -> mut bool { };

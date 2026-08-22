@@ -26,6 +26,10 @@ pub const TypeInfo = union(enum) {
     CChar: bool,
     CUChar: bool,
     CDouble: bool,
+    CLong: bool,
+    CULong: bool,
+    CShort: bool,
+    CUShort: bool,
 
     Array: Array,
 
@@ -71,6 +75,15 @@ pub const TypeInfo = union(enum) {
             .Pointer => |ptr| ptr.mutable,
             .Array => |arr| arr.mutable,
             .Function => |func| func.mutable,
+            .CInt => |m| m,
+            .CUInt => |m| m,
+            .CChar => |m| m,
+            .CUChar => |m| m,
+            .CDouble => |m| m,
+            .CLong => |m| m,
+            .CULong => |m| m,
+            .CShort => |m| m,
+            .CUShort => |m| m,
             else => false,
         };
     }

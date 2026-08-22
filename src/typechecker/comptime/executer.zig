@@ -359,7 +359,10 @@ fn literal(self: *Executer, constPtr: JIR.Ptr) Error!Comptime.Value {
 
     return switch (constant) {
         .Undefined => |typeID| .{ .Undefined = typeID },
-        .Float => |fl| .{ .Float = fl },
+        .Float => |fl| switch (fl) {
+            .f32 => |f| .{ .Float = f },
+            .f64 => |f| .{ .Float = f },
+        },
         .Function => |func| .{ .Function = self.typechecker.builder.functions.get(func) },
         .String => |str| .{
             .String = .{
@@ -375,6 +378,14 @@ fn literal(self: *Executer, constPtr: JIR.Ptr) Error!Comptime.Value {
                 .u32 => |i| @intCast(i),
                 .i8 => |i| @intCast(i),
                 .u8 => |i| @intCast(i),
+                .c_int => |i| @intCast(i),
+                .c_uint => |i| @intCast(i),
+                .c_char => |i| @intCast(i),
+                .c_uchar => |i| @intCast(i),
+                .c_long => |i| @intCast(i),
+                .c_ulong => |i| @intCast(i),
+                .c_short => |i| @intCast(i),
+                .c_ushort => |i| @intCast(i),
             },
         },
         .Array => |arr| {

@@ -2664,22 +2664,22 @@ pub fn assertCastable(self: *Typechecker, from: TypeID, to: TypeID, unsafe: bool
             .Integer => |int| {
                 try functional.throwIf(int.range().max < enm.fields.len - 1, Error.IncompatibleTypes);
             },
-            else => functional.throwIf(!self.isInt(to), Error.IncompatibleTypes),
+            else => try functional.throwIf(!self.isInt(to), Error.IncompatibleTypes),
         },
         .CChar, .CUChar => try functional.throwIf(!self.isInt(to), Error.IncompatibleTypes),
-        .CUInt, .CInt => switch (toType) {
+        .CUInt, .CInt, .CLong, .CShort, .CUShort, .CULong => switch (toType) {
             .Integer => |toInt| try functional.throwIf(
                 if (unsafe) !self.isInt(to) and !self.isCPtr(to)
-                else toInt.size < @bitSizeOf(c_uint),
+                else toInt.size < self.sizeOf(to),
                 Error.SizeMismatch
             ),
-            else => functional.throwIf(!self.isInt(to) and !self.isFloat(to), Error.IncompatibleTypes),
+            else => try functional.throwIf(!self.isInt(to) and !self.isFloat(to), Error.IncompatibleTypes),
         },
-        .CDouble => functional.throwIf(!self.isInt(to) and !self.isFloat(to), Error.IncompatibleTypes),
+        .CDouble => try functional.throwIf(!self.isInt(to) and !self.isFloat(to), Error.IncompatibleTypes),
         .Union, .Struct => try self.assertStructurallyIdentical(from, to),
         .Bool => switch (toType) {
             .Integer => |int| try functional.throwIf(int.size <= 0, Error.SizeMismatch),
-            else => functional.throwIf(!self.isInt(to), Error.IncompatibleTypes)
+            else => try functional.throwIf(!self.isInt(to), Error.IncompatibleTypes)
         },
         .ComptimeInt => try functional.throwIf(!self.isInt(to) and !self.isFloat(to) and !(unsafe and self.isCPtr(to)), Error.IncompatibleTypes),
         .ComptimeFloat => try functional.throwIf(!self.isFloat(to) and !self.isInt(to), Error.IncompatibleTypes),
@@ -2689,9 +2689,9 @@ pub fn assertCastable(self: *Typechecker, from: TypeID, to: TypeID, unsafe: bool
                 else !toInt.canContain(fromInt),
                 Error.SizeMismatch
             ),
-            else => functional.throwIf(!self.isInt(to), Error.IncompatibleTypes)
+            else => try functional.throwIf(!self.isInt(to), Error.IncompatibleTypes)
         },
-        .Float => functional.throwIf(!self.isInt(to), Error.IncompatibleTypes),
+        .Float => try functional.throwIf(!self.isInt(to), Error.IncompatibleTypes),
         .Pointer => |fromPtr| switch (toType) {
             .Pointer => |toPtr| {
                 try self.assertCastablePtr(fromPtr, toPtr, unsafe);
@@ -2879,7 +2879,7 @@ pub fn comparable(self: *const Typechecker, this: TypeID, that: TypeID) bool {
 
 pub fn isInt(self: *const Typechecker, maybeInt: TypeID) bool {
     return switch (self.typeTable.get(maybeInt)) {
-        .ComptimeInt, .Integer, .CUChar, .CChar, .CInt, .CUInt => true,
+        .ComptimeInt, .Integer, .CUChar, .CChar, .CInt, .CUInt, .CULong, .CLong, .CShort, .CUShort => true,
         else => false,
     };
 }
@@ -2895,6 +2895,18 @@ pub fn isCPtr(self: *const Typechecker, maybeCPtr: TypeID) bool {
     return switch (self.typeTable.get(maybeCPtr)) {
         .Pointer => |ptr| switch (ptr.size) {
             .C => true,
+            else => false,
+        },
+        else => false,
+    };
+}
+
+pub fn isCStr(self: *const Typechecker, maybeCStr: TypeID) bool {
+    const info = self.typeTable.get(maybeCStr);
+
+    return switch (info) {
+        .Pointer => |ptr| switch (ptr.size) {
+            .C => self.typeTable.get(ptr.child) == .CChar,
             else => false,
         },
         else => false,
@@ -2981,11 +2993,9 @@ pub fn mutable(self: *const Typechecker, typeID: TypeID) bool {
 
 pub fn canBeMutable(self: *const Typechecker, typeID: TypeID) bool {
     return switch (self.typeTable.get(typeID)) {
-        .Any, .Bool, .Float,
-        .Struct, .Union, .Enum,
-        .Integer, .Pointer, .Array,
-        .Function => !self.mutable(typeID),
-        else => false,
+        .Type, .ComptimeFloat, .EnumLiteral, .ComptimeInt,
+        .Noreturn, .Void => false,
+        else => !self.mutable(typeID),
     };
 }
 
@@ -3069,6 +3079,15 @@ pub fn makeMutable(_: *const Typechecker, info: TypeInfo) TypeInfo {
                 .signed = true,
             },
         },
+        .CInt => .{ .CInt = true },
+        .CUInt => .{ .CUInt = true },
+        .CChar => .{ .CChar = true },
+        .CUChar => .{ .CUChar = true },
+        .CDouble => .{ .CDouble = true },
+        .CLong => .{ .CLong = true },
+        .CULong => .{ .CULong = true },
+        .CShort => .{ .CShort = true },
+        .CUShort => .{ .CUShort = true },
         else => unreachable,
     };
 }
@@ -3100,6 +3119,11 @@ pub fn sliceOf(self: *Typechecker, of: TypeID) Error!u32 {
 /// In bytes
 pub fn sizeOf(self: *const Typechecker, of: TypeID) u32 {
     return ret: switch (self.typeTable.get(of)) {
+        .CUShort, .CShort => @bitSizeOf(c_ushort),
+        .CULong, .CLong => @bitSizeOf(c_ulong),
+        .CDouble => @bitSizeOf(f64),
+        .CChar, .CUChar => @bitSizeOf(c_char),
+        .CInt, .CUInt => @bitSizeOf(c_uint),
         .Pointer => @bitSizeOf(*void),
         .Function => @bitSizeOf(@TypeOf(&sizeOf)),
         .Enum => @bitSizeOf(u32),
@@ -3231,6 +3255,15 @@ pub fn typeName(self: *Typechecker, allocator: Allocator, typeID: TypeID) Error!
         return self.builder.getInternedString(namePtr);
     }
     else return ret: switch (self.typeTable.get(typeID)) {
+        .CUShort => "c_ushort",
+        .CShort => "c_short",
+        .CULong => "c_ulong",
+        .CLong => "c_long",
+        .CDouble => "c_double",
+        .CUInt => "c_uint",
+        .CInt => "c_int",
+        .CUChar => "c_uchar",
+        .CChar => "c_char",
         .Pointer => {
             const ptr: Types.Pointer = self.typeTable.get(typeID).Pointer;
             const child = try self.typeName(allocator, ptr.child);

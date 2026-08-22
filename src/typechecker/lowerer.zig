@@ -83,7 +83,7 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
     const ofType = self.typechecker.typeTable.get(ofTypePtr);
     return self.typechecker.builder.addConstant(switch (value) {
         .Int => |val| switch (ofType) {
-            .Integer, .ComptimeInt => switch (self.typechecker.sizeOf(ofTypePtr)) {
+            .Integer, .ComptimeInt, =>switch (self.typechecker.sizeOf(ofTypePtr)) {
                 64 => .{ .Integer = .{
                     .i32 = @intCast(val),
                 }},
@@ -105,9 +105,19 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
                     return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
                 },
             },
-            
+
+            .CInt => .{ .Integer = .{ .c_int = @intCast(val) } },
+            .CUInt => .{ .Integer = .{ .c_uint = @intCast(val) } },
+            .CChar => .{ .Integer = .{ .c_char = @intCast(val) } },
+            .CUChar => .{ .Integer = .{ .c_uchar = @intCast(val) } },
+            .CLong => .{ .Integer = .{ .c_long = @intCast(val) } },
+            .CULong => .{ .Integer = .{ .c_ulong = @intCast(val) } },
+            .CShort => .{ .Integer = .{ .c_short = @intCast(val) } },
+            .CUShort => .{ .Integer = .{ .c_ushort = @intCast(val) } },
+
+            .CDouble => .{ .Float = .{ .f64 = @floatFromInt(val) } },
             .Float, .ComptimeFloat => .{
-                .Float = @floatFromInt(value.Int),
+                .Float = .{ .f32 = @floatFromInt(value.Int) },
             },
 
             .Bool => .{
@@ -120,7 +130,7 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
             },
         },
 
-        .Float => |val| .{ .Float = val },
+        .Float => |val| .{ .Float = .{ .f32 = @floatCast(val) } },
         .Undefined => |valueType| .{ .Undefined = valueType },
         .Struct => |str| @"struct": {
             const fieldConsts = self.typechecker.builder.allocator.alloc(JIR.Constant.Ptr, str.Fields.len())

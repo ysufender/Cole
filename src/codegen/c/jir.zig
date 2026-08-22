@@ -95,6 +95,15 @@ pub const Constant = union(enum) {
         u32: u32,
         i8: i8,
         u8: u8,
+
+        c_int: c_int,
+        c_uint: c_uint,
+        c_char: c_char,
+        c_uchar: u8,
+        c_long: c_long,
+        c_ulong: c_ulong,
+        c_short: c_short,
+        c_ushort: c_ushort,
     },
     String: struct {
         type: enum {
@@ -103,7 +112,10 @@ pub const Constant = union(enum) {
         },
         str: defines.StringPtr,
     },
-    Float: f32,
+    Float: union(enum) {
+        f32: f32,
+        f64: f64,
+    },
     Aggregate: ConstantArray, 
     Array: ConstantArray,
     Undefined: TypeID,
@@ -209,8 +221,9 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
     \\#define COLE_CODEGEN_C_FORWARD_DECL_H
     \\
     \\#include <stdint.h>
+    \\#include <stdbool.h>
     \\
-    \\typedef uint8_t cole_bool;
+    \\typedef bool cole_bool;
     \\
     \\
     , .{});
@@ -751,8 +764,19 @@ fn literal(self: *JIR, out: *Writer, ptr: Constant.Ptr) Error!void {
             .u32 => |t| self.write(out, "{d}", .{t}),
             .i8 => |t| self.write(out, "{d}", .{t}),
             .u8 => |t| self.write(out, "{d}", .{t}),
+            .c_int => |t| self.write(out, "{d}", .{t}),
+            .c_uint => |t| self.write(out, "{d}", .{t}),
+            .c_char => |t| self.write(out, "{d}", .{t}),
+            .c_uchar => |t| self.write(out, "{d}", .{t}),
+            .c_long => |t| self.write(out, "{d}", .{t}),
+            .c_ulong => |t| self.write(out, "{d}", .{t}),
+            .c_short => |t| self.write(out, "{d}", .{t}),
+            .c_ushort => |t| self.write(out, "{d}", .{t}),
         },
-        .Float => |fl| self.write(out, "{}", .{fl}),
+        .Float => |fl| switch (fl) {
+            .f32 => |f| self.write(out, "{d}", .{f}),
+            .f64 => |f| self.write(out, "{d}", .{f}),
+        },
         .Function => |name| {
             const str = @constCast(self.strings[name]);
             _ = std.mem.replace(u8, str, "::", "__", str);
@@ -844,6 +868,28 @@ fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool
             if (m) "double"
             else if (noSymbol) "double_const"
             else "double const",
+
+        .CLong => |m| return
+            if (m) "long"
+            else if (noSymbol) "long_const"
+            else "long const",
+
+        .CULong => |m| return
+            if (m and !noSymbol) "unsigned long"
+            else if (m and noSymbol) "unsigned_long"
+            else if (noSymbol) "unsigned_long_const"
+            else "unsigned long const",
+
+        .CShort => |m| return
+            if (m) "short"
+            else if (noSymbol) "short_const"
+            else "short const",
+
+        .CUShort => |m| return
+            if (m and !noSymbol) "unsigned short"
+            else if (m and noSymbol) "unsigned_short"
+            else if (noSymbol) "unsigned_short_const"
+            else "unsigned short const",
 
         .Void => return "void",
         .Noreturn => return

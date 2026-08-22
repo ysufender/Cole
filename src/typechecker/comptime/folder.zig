@@ -2100,23 +2100,19 @@ fn castValue(self: *Folder, valuePtr: Comptime.Value.Ptr, to: TypeID, unsafe: bo
                 return Error.CastOfIncastableValue;
             },
 
-        // @Note I don't know why this is here
-        .String => |str| switch (self.typechecker.typeTable.get(to)) {
-            .Pointer => |ptr|
-                if (ptr.size == .C and ptr.child == comptime Builtin.Type("u8")) .{
-                    .String = .{
-                        .type = .C,
-                        .str = str.str,
-                    },
-                }
-                else .{
-                    .String = .{
-                        .type = .Cole,
-                        .str = str.str,
-                    },
+        .String => |str| 
+            if (self.typechecker.isCStr(to)) .{
+                .String = .{
+                    .type = .C,
+                    .str = str.str,
                 },
-            else => unreachable,
-        },
+            }
+            else .{
+                .String = .{
+                    .type = .Cole,
+                    .str = str.str,
+                },
+            },
 
         else => {
             self.report("Attempt to cast value of type '{s}.'", .{@tagName(value)});
@@ -2284,6 +2280,24 @@ pub const builtinTypes = [_]struct {
     .{ .name = "i8", .info = .{ .Integer = .{ .mutable = false, .size = 8, .signed = true, } } },
     // bool
     .{ .name = "bool", .info = .{ .Bool = false } },
+    // c_int
+    .{ .name = "c_int", .info = .{ .CInt = false }, },
+    // c_uint
+    .{ .name = "c_uint", .info = .{ .CUInt = false }, },
+    // c_char
+    .{ .name = "c_char", .info = .{ .CChar = false }, },
+    // c_uchar
+    .{ .name = "c_uchar", .info = .{ .CUChar = false }, },
+    // c_double
+    .{ .name = "c_double", .info = .{ .CDouble = false }, },
+    // c_long
+    .{ .name = "c_long", .info = .{ .CLong = false }, },
+    // c_ulong
+    .{ .name = "c_ulong", .info = .{ .CULong = false }, },
+    // c_short
+    .{ .name = "c_short", .info = .{ .CShort = false }, },
+    // c_ushort
+    .{ .name = "c_ushort", .info = .{ .CUShort = false }, },
     // flaot
     .{ .name = "float", .info = .{ .Float = false } },
     // void
@@ -2298,16 +2312,6 @@ pub const builtinTypes = [_]struct {
     .{ .name = "noreturn", .info = .{ .Noreturn = { }, } },
     // enum literal
     .{ .name = "enum_literal", .info = .{ .EnumLiteral = { } } },
-    // c_int
-    .{ .name = "c_int", .info = .{ .CInt = false }, },
-    // c_uint
-    .{ .name = "c_uint", .info = .{ .CUInt = false }, },
-    // c_char
-    .{ .name = "c_char", .info = .{ .CChar = false }, },
-    // c_uchar
-    .{ .name = "c_uchar", .info = .{ .CUChar = false }, },
-    // c_double
-    .{ .name = "c_double", .info = .{ .CDouble = false }, },
     // any
     .{ .name = "any", .info = .{ .Any = false } },
 

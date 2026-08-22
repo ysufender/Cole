@@ -28,7 +28,7 @@ pub const Value = union(enum) {
     pub const Ptr = defines.Offset;
 
     Int: i64,
-    Float: f32,
+    Float: f64,
     Bool: bool,
     Enum: struct {
         Type: TypeID,
