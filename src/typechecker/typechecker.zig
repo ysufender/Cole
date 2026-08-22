@@ -2664,13 +2664,22 @@ pub fn assertCastable(self: *Typechecker, from: TypeID, to: TypeID, unsafe: bool
             .Integer => |int| {
                 try functional.throwIf(int.range().max < enm.fields.len - 1, Error.IncompatibleTypes);
             },
-            .ComptimeInt => { },
-            else => return Error.IncompatibleTypes,
+            else => functional.throwIf(!self.isInt(to), Error.IncompatibleTypes),
         },
+        .CChar, .CUChar => try functional.throwIf(!self.isInt(to), Error.IncompatibleTypes),
+        .CUInt, .CInt => switch (toType) {
+            .Integer => |toInt| try functional.throwIf(
+                if (unsafe) !self.isInt(to) and !self.isCPtr(to)
+                else toInt.size < @bitSizeOf(c_uint),
+                Error.SizeMismatch
+            ),
+            else => functional.throwIf(!self.isInt(to) and !self.isFloat(to), Error.IncompatibleTypes),
+        },
+        .CDouble => functional.throwIf(!self.isInt(to) and !self.isFloat(to), Error.IncompatibleTypes),
         .Union, .Struct => try self.assertStructurallyIdentical(from, to),
         .Bool => switch (toType) {
             .Integer => |int| try functional.throwIf(int.size <= 0, Error.SizeMismatch),
-            else => return Error.IncompatibleTypes,
+            else => functional.throwIf(!self.isInt(to), Error.IncompatibleTypes)
         },
         .ComptimeInt => try functional.throwIf(!self.isInt(to) and !self.isFloat(to) and !(unsafe and self.isCPtr(to)), Error.IncompatibleTypes),
         .ComptimeFloat => try functional.throwIf(!self.isFloat(to) and !self.isInt(to), Error.IncompatibleTypes),
@@ -2680,14 +2689,9 @@ pub fn assertCastable(self: *Typechecker, from: TypeID, to: TypeID, unsafe: bool
                 else !toInt.canContain(fromInt),
                 Error.SizeMismatch
             ),
-            .ComptimeInt => {},
-            .Float => {},
-            else => return Error.IncompatibleTypes,
+            else => functional.throwIf(!self.isInt(to), Error.IncompatibleTypes)
         },
-        .Float => switch (toType) {
-            .Integer, .ComptimeInt, .ComptimeFloat => {},
-            else => return Error.IncompatibleTypes,
-        },
+        .Float => functional.throwIf(!self.isInt(to), Error.IncompatibleTypes),
         .Pointer => |fromPtr| switch (toType) {
             .Pointer => |toPtr| {
                 try self.assertCastablePtr(fromPtr, toPtr, unsafe);
@@ -2875,14 +2879,14 @@ pub fn comparable(self: *const Typechecker, this: TypeID, that: TypeID) bool {
 
 pub fn isInt(self: *const Typechecker, maybeInt: TypeID) bool {
     return switch (self.typeTable.get(maybeInt)) {
-        .ComptimeInt, .Integer => true,
+        .ComptimeInt, .Integer, .CUChar, .CChar, .CInt, .CUInt => true,
         else => false,
     };
 }
 
 pub fn isFloat(self: *const Typechecker, maybeFloat: TypeID) bool {
     return switch (self.typeTable.get(maybeFloat)) {
-        .ComptimeFloat, .Float => true,
+        .ComptimeFloat, .Float, .CDouble => true,
         else => false,
     };
 }

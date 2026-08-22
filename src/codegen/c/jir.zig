@@ -818,6 +818,33 @@ fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool
             return common.debug.ShouldBeImpossible(self.context.log, @src());
         },
 
+        .CInt => |m| return
+            if (m) "int"
+            else if (noSymbol) "int_const"
+            else "int const",
+
+        .CUInt => |m| return
+            if (m and !noSymbol) "unsigned int"
+            else if (m and noSymbol) "unsigned_int"
+            else if (noSymbol) "unsigned_int_const"
+            else "unsigned int const",
+
+        .CChar => |m| return
+            if (m) "char"
+            else if (noSymbol) "char_const"
+            else "char const",
+
+        .CUChar => |m| return
+            if (m and !noSymbol) "unsigned char"
+            else if (m and noSymbol) "unsigned_char"
+            else if (noSymbol) "unsigned_char_const"
+            else "unsigned char const",
+
+        .CDouble => |m| return
+            if (m) "double"
+            else if (noSymbol) "double_const"
+            else "double const",
+
         .Void => return "void",
         .Noreturn => return
             if (noSymbol) "noreturn"
