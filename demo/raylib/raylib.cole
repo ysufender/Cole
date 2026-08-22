@@ -1,5 +1,5 @@
 code {
-    #include "raylib.h"
+    #include <raylib.h>
 }
 
 pub let Color = #(@extern) struct {
@@ -131,17 +131,9 @@ pub let BeginDrawing = fn () -> void { code { BeginDrawing(); } };
 pub let EndDrawing = fn () -> void { code { EndDrawing(); } };
 pub let SetTargetFPS = fn (fps: i32 ) -> void { code { SetTargetFPS(fps); } };
 
-pub let IsKeyDown = fn (key: KeyboardKey) -> bool {
-    let res: mut bool = false;
-    code { res = IsKeyDown(key); }
-    return res;
-};
+pub let IsKeyDown = #(@extern) fn (key: KeyboardKey) -> bool {};
 
-pub let GetFrameTime = fn () -> float {
-    let res: mut float = 0;
-    code { res = GetFrameTime(); }
-    return res;
-};
+pub let GetFrameTime = #(@extern) fn () -> float { };
 
 pub let DrawCircle = fn (
     centerX: i32,

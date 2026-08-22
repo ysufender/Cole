@@ -2830,22 +2830,6 @@ pub fn assertCanCoerce(self: *const Typechecker, this: TypeID, that: TypeID) Err
                 try functional.throwIf(!std.mem.eql(u32, f1.argTypes, thatType.Function.argTypes), Error.IncompatibleTypes);
                 try functional.throwIf(f1.returnType != thatType.Function.returnType, Error.IncompatibleTypes);
             },
-            .Pointer => |fromPtr| switch (thatType) {
-                .Pointer => |toPtr| {
-                    if (
-                        toPtr.size == .Slice
-                        and toPtr.child == (comptime Comptime.Folder.Builtin.Type("u8"))
-                        and fromPtr.size == .C
-                        and fromPtr.child == (comptime Comptime.Folder.Builtin.Type("u8"))
-                    ) {
-                        return;
-                    }
-
-                    try functional.throwIf(fromPtr.size != toPtr.size, Error.TypeMismatch);
-                    try self.assertCanCoerce(fromPtr.child, toPtr.child);
-                },
-                else => Error.TypeMismatch,
-            },
             else => functional.throwIf(std.meta.activeTag(thisType) != std.meta.activeTag(thatType), Error.TypeMismatch),
         },
     };

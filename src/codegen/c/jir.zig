@@ -100,8 +100,8 @@ pub const Constant = union(enum) {
         type: enum {
             C,
             Cole,
-        } = .Cole,
-        str: defines.StringPtr
+        },
+        str: defines.StringPtr,
     },
     Float: f32,
     Aggregate: ConstantArray, 
@@ -783,6 +783,12 @@ fn literal(self: *JIR, out: *Writer, ptr: Constant.Ptr) Error!void {
             try self.write(out, "}}", .{ });
         },
         .String => |str| switch (str.type) {
+            .C => {
+                const rstr = self.strings[str.str];
+                try self.write(out, "((char const*)\"{s}\")", .{
+                    rstr,
+                });
+            },
             .Cole => {
                 const rstr = self.strings[str.str];
                 try self.write(out, "({s}){{(uint8_t*)\"{s}\", {d}}}", .{
@@ -790,13 +796,7 @@ fn literal(self: *JIR, out: *Writer, ptr: Constant.Ptr) Error!void {
                     rstr,
                     rstr.len,
                 });
-            },
-            .C => {
-                const rstr = self.strings[str.str];
-                try self.write(out, "((char const*)\"{s}\")", .{
-                    rstr,
-                });
-            },
+            }
         },
     };
 }

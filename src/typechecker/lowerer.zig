@@ -175,7 +175,8 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
         },
         .String => |string| .{
             .String = .{
-                .str = try self.typechecker.builder.internString(string),
+                .type = if (string.type == .Cole) .Cole else .C,
+                .str = try self.typechecker.builder.internString(string.str),
             },
         },
         .Slice => |slice| slice: {
@@ -184,15 +185,6 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
                 .Pointer => |ptr| ptr.child,
                 else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
             };
-
-            if (child == comptime Comptime.Folder.Builtin.Type("u8")) {
-                break :slice JIR.Constant{
-                    .String = .{
-                        .type = .C,
-                        .str = slice.To,
-                    }
-                };
-            }
 
             const elemConsts = self.typechecker.builder.allocator.alloc(JIR.Constant.Ptr, slice.Size)
                 catch return Error.AllocatorFailure;
@@ -1102,14 +1094,17 @@ fn builtinCall(
             break :blk self.typechecker.builder.call(true, builtinUnreach, &.{});
         },
         BI("typeName") => self.typechecker.builder.literal(
-            try self.typechecker.builder.addConstant(.{ .String = .{ .str =
-                try self.typechecker.builder.internString(
-                    try self.typechecker.typeName(self.typechecker.arena.allocator(),
-                        self.typechecker.folder.getValue(
-                            try self.typechecker.folder.expectType(ast.extra[args.at(0)])
-                        ).Type
+            try self.typechecker.builder.addConstant(.{
+                .String = .{
+                    .type = .Cole,
+                    .str = try self.typechecker.builder.internString(
+                        try self.typechecker.typeName(self.typechecker.arena.allocator(),
+                            self.typechecker.folder.getValue(
+                                try self.typechecker.folder.expectType(ast.extra[args.at(0)])
+                            ).Type
+                        )
                     )
-                )}
+                }
             })
         ),
         BI("compileLog"), BI("compileError") => 0,

@@ -23,12 +23,12 @@
 let printf = #(@extern) fn (msg: [@c]u8) -> void {};
 
 pub let println = fn (msg: []u8) -> void {
-    printf(msg);
+    printf(msg.ptr);
     printf("\n");
 };
 
 pub let print = fn (msg: []u8) -> void {
-    printf(msg);
+    printf(msg.ptr);
 };
 
 /* Input */

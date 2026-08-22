@@ -48,7 +48,13 @@ pub const Value = union(enum) {
         Type: TypeID,
         To: Value.Ptr,
     },
-    String: []const u8,
+    String: struct {
+        type: enum {
+            Cole,
+            C,
+        },
+        str: []const u8,
+    },
     Slice: struct {
         const Self = @This();
 

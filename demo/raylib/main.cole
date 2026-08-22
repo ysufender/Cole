@@ -8,7 +8,6 @@ let Player = struct {
     y    : mut i32,
 	w    : i32,
 	h    : i32,
-	score: mut i32,
 };
 
 let Ball = struct {
@@ -23,8 +22,8 @@ let WIDTH  = 640;
 let HEIGHT = 480;
 
 let main = fn (args: [][]u8) -> i32 {
-	let ply: mut Player = (20, 100, 20, 70, 0);
-	let cpu: mut Player = (WIDTH-35, 100, 20, 70, 0);
+	let ply: mut Player = (20, 100, 20, 70);
+	let cpu: mut Player = (WIDTH-35, 100, 20, 70);
 	let b: mut Ball = (WIDTH/2.0 - 10.0, 120.0, -5.0, -5.0, 10.0);
 
 	rl::InitWindow(WIDTH, HEIGHT, "Ping pong");
@@ -37,15 +36,11 @@ let main = fn (args: [][]u8) -> i32 {
 		rl::DrawRectangle((WIDTH/2), 0, (WIDTH/2), HEIGHT, rl::Color::White);
 		rl::DrawRectangle(ply.x, ply.y, ply.w, ply.h, rl::Color::White);
 		rl::DrawRectangle(cpu.x, cpu.y, cpu.w, cpu.h, rl::Color::Black);
-        let pscore = intToChar(unsafeCast(ply.score));
-        let cscore = intToChar(unsafeCast(cpu.score));
-		rl::DrawText(pscore[0..2], (WIDTH/2) - 200, 30, 48, rl::Color::White);
-		rl::DrawText(cscore[0..2], (WIDTH/2) + 200, 30, 48, rl::Color::Black);
 		
 		if
             checkCollision(ply.x, b.x, ply.y, b.y, ply.w, ply.h, b.r)
             or checkCollision(cpu.x, b.x, cpu.y, b.y, cpu.w,cpu.h,b.r) {
-			b.bx = -1.0 * b.bx;
+			b.bx = as(float, -1.0) * b.bx;
 		}
 
 		cpu.y = unsafeCast(b.y * 0.8);
@@ -58,14 +53,12 @@ let main = fn (args: [][]u8) -> i32 {
 		b.y = b.by + b.y;
 
 		if b.x < 5 {
-			cpu.score = cpu.score + 1;
 			b.x = (as(float, cast(WIDTH))/2.0) - b.r;
 			b.y = 120;
 			b.bx = -5;
 			
 		}
         else if b.x > WIDTH - 5 {
-			ply.score = ply.score + 1;
 			b.x = (as(float, cast(WIDTH))/2.0) - b.r;
 			b.y = 120;
 			b.bx = 5;
@@ -84,7 +77,7 @@ let main = fn (args: [][]u8) -> i32 {
             }
 		}
         else if rl::IsKeyDown(rl::S) or rl::IsKeyDown(rl::DOWN) {
-			if ply.y <= (HEIGHT-ply.h) {
+			if ply.y <= (as(i32, cast(HEIGHT))-ply.h) {
 			    ply.y = ply.y + 5;
             }
 		}
@@ -97,12 +90,6 @@ let main = fn (args: [][]u8) -> i32 {
 /*
  * Helpers
  */
-
-// Workaround
-let intToChar = fn (a: u8) -> [2]u8 {
-    let str: [2]u8 = (48 + a , 0);
-	return str;
-};
 
 let checkCollision = fn (
     x1: i32,

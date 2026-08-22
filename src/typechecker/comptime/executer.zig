@@ -97,6 +97,10 @@ pub fn init(typechecker: *Typechecker, allocator: Allocator) Error!Executer {
 }
 
 pub inline fn executeCall(self: *Executer, func: *JIR.Function, args: []const Comptime.Value.Ptr) Error!Comptime.Value {
+    const psrc = self.typechecker.currentFile;
+    defer self.typechecker.currentFile = psrc;
+    self.typechecker.currentFile = func.source;
+
     if (self.typechecker.hasMetadata(func.expr, "@extern")) {
         self.report("Comptime execution of external function '{s}' is not possible.", .{self.typechecker.builder.getInternedString(func.name)});
         return Error.ComptimeNotPossible;
@@ -357,7 +361,12 @@ fn literal(self: *Executer, constPtr: JIR.Ptr) Error!Comptime.Value {
         .Undefined => |typeID| .{ .Undefined = typeID },
         .Float => |fl| .{ .Float = fl },
         .Function => |func| .{ .Function = self.typechecker.builder.functions.get(func) },
-        .String => |str| .{ .String = self.typechecker.builder.getInternedString(str.str) },
+        .String => |str| .{
+            .String = .{
+                .type = if (str.type == .Cole) .Cole else .C,
+                .str = self.typechecker.builder.getInternedString(str.str),
+            }
+        },
         .Void => .{ .Void = { } },
         .Type => |typeID| .{ .Type = typeID },
         .Integer => |integer| .{

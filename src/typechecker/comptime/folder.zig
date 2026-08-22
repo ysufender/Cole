@@ -823,7 +823,7 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
             }
 
             const valuePtr = try self.expectDefined(decl.node, maybeExpected);
-            break :blk self.castValue(valuePtr, expected);
+            break :blk self.castValue(valuePtr, expected, false);
         },
         .Capture =>
             if (self.cache.get(.{
@@ -928,7 +928,12 @@ fn evalLiteral(self: *Folder, tokenPtr: defines.TokenPtr, maybeExpected: ?TypeID
                 return Error.InternalError;
             },
         }},
-        .String => .{ .String = lexeme },
+        .String => .{
+            .String = .{
+                .type = .Cole,
+                .str = lexeme,
+            },
+        },
         .EnumLiteral =>
             if (Typechecker.determineExpected(maybeExpected)) |expected|
                 if (Builtin.Metadata(lexeme)) |metadata| .{
@@ -976,7 +981,7 @@ fn evalLiteral(self: *Folder, tokenPtr: defines.TokenPtr, maybeExpected: ?TypeID
     const rest = try self.typechecker.typecheckValue(res, null);
 
     if (self.typechecker.castable(rest, maybeExpected orelse rest, false)) {
-        return self.castValue(res, maybeExpected orelse rest);
+        return self.castValue(res, maybeExpected orelse rest, false);
     }
     else {
         return res;
@@ -1341,7 +1346,7 @@ fn evalCast(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID, 
 
     const thingToCast = try self.expectDefined(ast.extra[thingToCastRange.at(0)], null);
 
-    return self.castValue(thingToCast, targetType);
+    return self.castValue(thingToCast, targetType, false);
 }
 
 pub fn evalCompileLog(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {
@@ -1368,7 +1373,7 @@ pub fn evalCompileLog(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime
         },
     };
 
-    common.log.info("COMPILE LOG: {s}", .{message});
+    common.log.info("COMPILE LOG: {s}", .{message.str});
     const token = self.typechecker.context.getTokens(self.typechecker.currentFile).get(self.typechecker.lastToken);
     const position = token.position(self.typechecker.context, self.typechecker.currentFile);
 
@@ -1398,10 +1403,20 @@ pub fn evalTypeName(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.V
     }
 
     return self.appendValue(switch (self.getValue(try self.eval(ast.extra[args.at(0)], null))) {
-        .Type => |t| .{ .String = self.typechecker.builder.getInternedString(
-            self.typechecker.typenameMap.get(t) orelse return common.debug.ShouldBeImpossible(undefined, @src()),
-        )},
-        .Function => |func| .{ .String = self.typechecker.builder.getInternedString(func.name) },
+        .Type => |t| .{
+            .String = .{
+                .type = .Cole,
+                .str = self.typechecker.builder.getInternedString(
+                    self.typechecker.typenameMap.get(t) orelse return common.debug.ShouldBeImpossible(undefined, @src()),
+                ),
+            },
+        },
+        .Function => |func| .{
+            .String = .{
+                .type = .Cole,
+                .str = self.typechecker.builder.getInternedString(func.name),
+            }
+        },
         else => {
             self.report("Expected a type expression.", .{});
             return Error.TypeMismatch;
@@ -1433,7 +1448,7 @@ pub fn evalCompileError(self: *Folder, extraPtr: defines.OpaquePtr) Error {
         },
     };
 
-    self.report("USERSPACE ERROR: {s}", .{message});
+    self.report("USERSPACE ERROR: {s}", .{message.str});
     return Error.UserspaceError;
 }
 
@@ -1726,7 +1741,7 @@ fn evalIndexing(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value
 
     const size = switch (slice) {
         .Slice => |s| s.Size,
-        .String => |s| s.len,
+        .String => |s| s.str.len,
         .Pointer => |ptr|
             if (lValue) {
                 const ptrType = TypeInfo{
@@ -1786,7 +1801,7 @@ fn evalIndexing(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value
         }
         else switch (slice) {
             .String => |s| self.appendValue(.{
-                .Int = s[@intCast(index.Int)],
+                .Int = s.str[@intCast(index.Int)],
             }),
             .Slice => slice.Slice.at(@intCast(index.Int)),
             else => common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
@@ -1974,8 +1989,11 @@ fn handleScopeDecls(
     return defs.items;
 }
 
-fn castValue(self: *Folder, valuePtr: Comptime.Value.Ptr, to: TypeID) Error!Comptime.Value.Ptr {
+fn castValue(self: *Folder, valuePtr: Comptime.Value.Ptr, to: TypeID, unsafe: bool) Error!Comptime.Value.Ptr {
     const value = self.getValue(valuePtr);
+
+    const valueType = try self.typechecker.typecheckValueDirect(value, to);
+    try self.typechecker.assertCastable(valueType, to, unsafe);
 
     const newValue: Comptime.Value = switch (value) {
         .Pointer => |ptr| .{
@@ -2082,18 +2100,22 @@ fn castValue(self: *Folder, valuePtr: Comptime.Value.Ptr, to: TypeID) Error!Comp
                 return Error.CastOfIncastableValue;
             },
 
-        .String => |str| Comptime.Value{
-            .Slice = .{
-                .Type = try self.typechecker.registerType(TypeInfo{
-                    .Pointer = .{
-                        .size = .C,
-                        .child = comptime Builtin.Type("u8"),
-                        .mutable = true,
+        // @Note I don't know why this is here
+        .String => |str| switch (self.typechecker.typeTable.get(to)) {
+            .Pointer => |ptr|
+                if (ptr.size == .C and ptr.child == comptime Builtin.Type("u8")) .{
+                    .String = .{
+                        .type = .C,
+                        .str = str.str,
                     },
-                }),
-                .Size = @intCast(str.len),
-                .To = try self.typechecker.builder.internString(str),
-            }
+                }
+                else .{
+                    .String = .{
+                        .type = .Cole,
+                        .str = str.str,
+                    },
+                },
+            else => unreachable,
         },
 
         else => {
