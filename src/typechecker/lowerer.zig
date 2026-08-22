@@ -245,6 +245,7 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
             self.report("Comptime pointers can't live outside the comptime scope.", .{});
             return Error.ExistentialDilemma;
         },
+
         .Bool => |boolValue| .{ .Integer = .{ .u8 = @intFromBool(boolValue), }, },
         .Void => if (false) {
             self.report(
@@ -807,7 +808,10 @@ fn block(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
 // Expression
 //
 pub fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID) Error!JIR.Ptr {
-    if (self.typechecker.folder.attemptEval(exprPtr, ofType)) |_| {
+    if (self.typechecker.folder.cache.get(.{
+        .file = self.typechecker.currentFile,
+        .expr = exprPtr
+    })) |_| {
         return self.literal(exprPtr, ofType);
     }
 
@@ -1406,7 +1410,10 @@ pub fn addMetadata(self: *Lowerer, to: JIR.Ptr, from: defines.ExpressionPtr) Err
 
 fn literal(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID) Error!JIR.Ptr {
     // @Note should already been evaluated before.
-    const valuePtr = try self.typechecker.folder.eval(exprPtr, null);
+    const valuePtr = self.typechecker.folder.cache.get(.{
+        .file = self.typechecker.currentFile,
+        .expr = exprPtr,
+    }) orelse return common.debug.ShouldBeImpossible(undefined, @src()); // try self.typechecker.folder.eval(exprPtr, null);
     const constant = try self.addConstant(valuePtr, ofType);
     return self.typechecker.builder.literal(constant);
 }

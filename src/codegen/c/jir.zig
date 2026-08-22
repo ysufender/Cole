@@ -572,7 +572,8 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
                 return;
             }
 
-            if (info.isComptime(undefined)) {
+            // @Beware @Note Remove the false if you want constants to not be declared.
+            if (false and info.isComptime(undefined)) {
                 return;
             }
 
