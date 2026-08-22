@@ -916,7 +916,7 @@ fn evalLiteral(self: *Folder, tokenPtr: defines.TokenPtr, maybeExpected: ?TypeID
                 else switch (self.typechecker.typeTable.get(expected)) {
                     .Enum => |enm|
                     ret: for (enm.fields, 0..) |field, index| {
-                        if (std.mem.eql(u8, field.name, lexeme[1..])) {
+                        if (std.mem.eql(u8, field, lexeme[1..])) {
                             break :ret Comptime.Value{
                                 .Enum = .{
                                     .Type = expected,
@@ -1048,12 +1048,10 @@ fn evalEnumType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Value
         .end = ast.extra[extraPtr + 3],
     };
 
-    var fields = allocator.alloc(types.EnumField, fieldRange.len()) catch return Error.AllocatorFailure;
+    var fields = allocator.alloc([]const u8, fieldRange.len()) catch return Error.AllocatorFailure;
 
     var idx: u32 = 0;
     for (0..fieldRange.len()) |index| {
-        defer idx += 1;
-
         const fieldPtr = ast.extra[fieldRange.at(@intCast(index))];
 
         const enumField: struct {
@@ -1066,27 +1064,12 @@ fn evalEnumType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Value
             .assignment = ast.extra[fieldPtr + 2],
         };
 
-        if (enumField.isAssigned == 1) {
-            const value = switch (self.getValue(try self.eval(enumField.assignment, null))) {
-                .Int => |i| i,
-                else => |val| {
-                    self.report("Expected a compile time integer in enumeration assignment. Received '{s}' insteead.", .{
-                        try self.typechecker.typeName(undefined, try self.typechecker.typecheckValueDirect(val, null))
-                    });
-                    return Error.TypeMismatch;
-                },
-            };
-
-            idx = @intCast(value);
-        }
+        if /()
 
         self.typechecker.lastToken = enumField.name;
         const token = tokens.get(self.typechecker.lastToken);
         const lexeme = token.lexeme(self.typechecker.context, self.typechecker.currentFile);
-        fields[index] = .{
-            .name = lexeme,
-            .value = idx,
-        };
+        fields[index] = lexeme;
     }
 
     const oldScope = self.typechecker.symbols.resolutionMap.get(.{
@@ -1223,7 +1206,7 @@ fn evalUnionType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Valu
         .end = ast.extra[extraPtr + offset + 3],
     };
 
-    var tags = allocator.alloc(types.EnumField, fieldRange.len()) catch return Error.AllocatorFailure;
+    var tags = allocator.alloc([]const u8, fieldRange.len()) catch return Error.AllocatorFailure;
 
     for (0..fieldRange.len()) |index| {
         const symbolTokenPtr: defines.TokenPtr = ast.signatures.items(.name)[
@@ -1235,10 +1218,7 @@ fn evalUnionType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Valu
         const symbolToken = tokens.get(symbolTokenPtr);
         const symbolName = symbolToken.lexeme(self.typechecker.context, self.typechecker.currentFile);
 
-        tags[index] = .{
-            .name = symbolName,
-            .value = @intCast(index),
-        };
+        tags[index] = symbolName;
     }
 
     const tagType = TypeInfo{

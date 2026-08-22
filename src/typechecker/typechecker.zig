@@ -291,8 +291,18 @@ fn typecheckVariableDef(
     blk: switch (self.typeTable.get(initializer)) {
         .Type => {
             const newType = self.folder.getValue(try self.folder.eval(decl.node, expected)).Type;
-
             const typeInfo = self.typeTable.get(newType);
+
+            const prevName = self.builder.getInternedString(switch (typeInfo) {
+                .Struct => |str| str.name,
+                .Union => |uni| uni.name,
+                .Enum => |enm| enm.name,
+                else => return common.debug.ShouldBeImpossible(undefined, @src()),
+            });
+
+            if (!std.mem.startsWith(u8, prevName, "__")) {
+                break :blk;
+            }
 
             const ast = self.context.getAST(self.currentFile);
             const tokens = self.context.getTokens(ast.tokens);
@@ -419,6 +429,13 @@ fn typecheckVariableDef(
             }
         },
         .Function => {
+            const val = try self.folder.eval(decl.node, expected);
+            const func = &self.folder.memory.items[val].Function;
+            const prevName = self.builder.getInternedString(func.name);
+            if (!std.mem.startsWith(u8, prevName, "__")) {
+                break :blk;
+            }
+
             const ast = self.context.getAST(self.currentFile);
             const tokens = self.context.getTokens(ast.tokens);
 
@@ -437,9 +454,6 @@ fn typecheckVariableDef(
                 }
                 else if (decl.topLevel) self.modules.modules.get(self.symbols.scopes.items(.module)[decl.scope]).name
                 else try self.folder.generateRandomNameString(.Function);
-
-            const val = try self.folder.eval(decl.node, expected);
-            const func = &self.folder.memory.items[val].Function;
 
             const newName =
                 if (
@@ -621,13 +635,13 @@ fn typecheckSwitchStatementOnUnion(
 
                 if (fieldMap.isSet(enumeration)) {
                     self.report("Duplicate switch case '{s}'.", .{
-                        tag.fields[enumeration],
+                        tag.fields[enumeration].name,
                     });
                     return Error.DuplicateSwitchCase;
                 }
 
                 fieldMap.set(enumeration);
-                break :blk tag.fields[enumeration];
+                break :blk tag.fields[enumeration].name;
             };
 
         const prev = self.currentScope;
@@ -671,7 +685,7 @@ fn typecheckSwitchStatementOnUnion(
         while (iterator.next()) |field| {
             const fieldName = tag.fields[field];
             common.log.err(("." ** 4) ++ " {s}", .{
-                fieldName,
+                fieldName.name,
             });
         }
 
@@ -725,7 +739,7 @@ fn typecheckSwitchStatementOnEnum(
 
             if (fieldMap.isSet(enumeration)) {
                 self.report("Duplicate switch case '{s}'.", .{
-                    enm.fields[enumeration],
+                    enm.fields[enumeration].name,
                 });
                 return Error.DuplicateSwitchCase;
             }
@@ -765,7 +779,7 @@ fn typecheckSwitchStatementOnEnum(
         while (iterator.next()) |field| {
             const fieldName = enm.fields[field];
             common.log.err(("." ** 4) ++ " {s}", .{
-                fieldName,
+                fieldName.name,
             });
         }
 
@@ -1342,7 +1356,7 @@ pub fn typecheckScoping(self: *Typechecker, expr: defines.ExpressionPtr) Error!T
     switch (lhsType) {
         .Enum => |enm| {
             for (enm.fields) |field| {
-                if (std.mem.eql(u8, field, member)) {
+                if (std.mem.eql(u8, field.name, member)) {
                     return lhsTypeID;
                 }
             }
@@ -2371,13 +2385,13 @@ fn typecheckSwitchOnUnion(
 
                 if (fieldMap.isSet(enumeration)) {
                     self.report("Duplicate switch case '{s}'.", .{
-                        tag.fields[enumeration],
+                        tag.fields[enumeration].name,
                     });
                     return Error.DuplicateSwitchCase;
                 }
 
                 fieldMap.set(enumeration);
-                break :blk tag.fields[enumeration];
+                break :blk tag.fields[enumeration].name;
             };
 
         const prev = self.currentScope;
@@ -2432,7 +2446,7 @@ fn typecheckSwitchOnUnion(
         while (iterator.next()) |field| {
             const fieldName = tag.fields[field];
             common.log.err(("." ** 4) ++ " {s}", .{
-                fieldName,
+                fieldName.name,
             });
         }
 
@@ -2492,13 +2506,13 @@ fn typecheckSwitchOnEnum(
 
                 if (fieldMap.isSet(enumeration)) {
                     self.report("Duplicate switch case '{s}'.", .{
-                        enm.fields[enumeration],
+                        enm.fields[enumeration].name,
                     });
                     return Error.DuplicateSwitchCase;
                 }
 
                 fieldMap.set(enumeration);
-                break :blk enm.fields[enumeration];
+                break :blk enm.fields[enumeration].name;
             };
 
         const captureCount = ast.extra[case + 1];
@@ -2544,7 +2558,7 @@ fn typecheckSwitchOnEnum(
         while (iterator.next()) |field| {
             const fieldName = enm.fields[field];
             common.log.err(("." ** 4) ++ " {s}", .{
-                fieldName,
+                fieldName.name,
             });
         }
 
@@ -2770,7 +2784,7 @@ pub fn assertStructurallyIdentical(self: *const Typechecker, this: TypeID, that:
             }
 
             for (fromEnum.fields, toEnum.fields) |fromField, toField| {
-                if (!std.mem.eql(u8, fromField, toField)) {
+                if (!std.mem.eql(u8, fromField.name, toField.name)) {
                     return Error.StructuralMismatch;
                 }
             }
@@ -3196,7 +3210,7 @@ pub fn tryGetFieldIndex(self: *Typechecker, from: TypeID, fieldNamePtr: defines.
         .Union => |uni| uni.fields,
         .Enum => |enm| blk: {
             for (enm.fields, 0..) |field, index| {
-                if (std.mem.eql(u8, field, fieldName)) {
+                if (std.mem.eql(u8, field.name, fieldName)) {
                     return @intCast(index);
                 }
             }

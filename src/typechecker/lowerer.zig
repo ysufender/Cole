@@ -351,7 +351,7 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
             else null
         else null;
     const typeInfo = typechecker.typeTable.get(enumOrUnionType);
-    const tag: struct { type: TypeID, fields: []const []const u8 } = switch (typeInfo) {
+    const tag: struct { type: TypeID, fields: []const types.EnumField } = switch (typeInfo) {
         .Enum => |enm| .{ .type = enumOrUnionType, .fields = enm.fields },
         .Union => |uni| .{ .type = uni.tag, .fields = typechecker.typeTable.get(uni.tag).Enum.fields },
         else => return common.debug.ShouldBeImpossible(undefined, @src()),
@@ -952,7 +952,7 @@ fn switchExpr(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error
     const enumOrUnionType = try typechecker.typecheckExpression(ast.extra[extraPtr], null);
     const enumOrUnion = try self.expression(ast.extra[extraPtr], enumOrUnionType);
     const typeInfo = typechecker.typeTable.get(enumOrUnionType);
-    const tag: struct { type: TypeID, fields: []const []const u8 } = switch (typeInfo) {
+    const tag: struct { type: TypeID, fields: []const types.EnumField } = switch (typeInfo) {
         .Enum => |enm| .{ .type = enumOrUnionType, .fields = enm.fields },
         .Union => |uni| .{ .type = uni.tag, .fields = typechecker.typeTable.get(uni.tag).Enum.fields },
         else => return common.debug.ShouldBeImpossible(undefined, @src()),

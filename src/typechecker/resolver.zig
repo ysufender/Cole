@@ -611,7 +611,8 @@ fn resolveExpression(self: *Resolver, exprPtr: defines.ExpressionPtr) Error!void
 
             for (fields.start..fields.end, 0..) |fieldPtrPtr, i| {
                 if (try self.resolveSignature(ast.extra[fieldPtrPtr], .Field, .Enum, i)) {
-                    const lexeme = tokens.get(ast.signatures.get(ast.extra[fieldPtrPtr]).name).lexeme(self.context, self.dataIndex());
+                    const nameToken = ast.extra[ast.extra[fieldPtrPtr]];
+                    const lexeme = tokens.get(nameToken).lexeme(self.context, self.dataIndex());
                     self.report("Given field '{s}' is already present in the enum body.", .{lexeme});
                     return Error.DuplicateSymbol;
                 }
@@ -930,9 +931,23 @@ fn resolveSignature(
                     @compileError("Illegal signature type.");
                 }
 
-                const field = tokens.get(signaturePtr);
+                const enumField: struct {
+                    name: defines.TokenPtr,
+                    isAssigned: u32,
+                    assignment: defines.ExpressionPtr,
+                } = .{
+                    .name = ast.extra[signaturePtr],
+                    .isAssigned = ast.extra[signaturePtr + 1],
+                    .assignment = ast.extra[signaturePtr + 2],
+                };
+
+                const field = tokens.get(enumField.name);
                 self.lastToken = signaturePtr;
                 const lexeme = field.lexeme(self.context, self.dataIndex());
+
+                if (enumField.isAssigned == 1) {
+                    try self.resolveExpression(enumField.assignment);
+                }
 
                 const isPresent = self.lookup.getOrPut(allocator, .{ .name = lexeme, .scope = self.currentScope })
                     catch return Error.AllocatorFailure;

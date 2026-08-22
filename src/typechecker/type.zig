@@ -137,10 +137,15 @@ pub const Union = struct {
     scope: defines.ScopePtr,
 };
 
+pub const EnumField = struct {
+    name: []const u8,
+    value: u32,
+};
+
 pub const Enum = struct {
     mutable: bool,
     name: defines.StringPtr,
-    fields: []const []const u8,
+    fields: []const EnumField,
     definitions: []const FieldInfo,
     external: bool,
 

@@ -425,9 +425,10 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
                 _ = std.mem.replace(u8, name, ":", "_", @constCast(name));
                 try self.write(out, "typedef enum __attribute__((aligned (sizeof(uint32_t)))) {s} {{\n", .{name});
                 for (enm.fields) |field| {
-                    try self.write(out, "\t{s}_{s},\n", .{
+                    try self.write(out, "\t{s}_{s} = {d},\n", .{
                         name,
-                        field,
+                        field.name,
+                        field.value,
                     });
                 }
                 try self.write(out, "}} {s};\n\n", .{

@@ -71,12 +71,12 @@ let main = fn (args: [][]u8) -> i32 {
 		}
 		
 
-		if rl::IsKeyDown(rl::W) or rl::IsKeyDown(rl::UP) {
+		if rl::IsKeyDown(cast(rl::KeyboardKey(@W))) or rl::IsKeyDown(cast(rl::KeyboardKey(@UP))) {
 			if ply.y >= 5 {
 			    ply.y = ply.y - 5;
             }
 		}
-        else if rl::IsKeyDown(rl::S) or rl::IsKeyDown(rl::DOWN) {
+        else if rl::IsKeyDown(cast(rl::KeyboardKey(@S))) or rl::IsKeyDown(cast(rl::KeyboardKey(@DOWN))) {
 			if ply.y <= (as(i32, cast(HEIGHT))-ply.h) {
 			    ply.y = ply.y + 5;
             }

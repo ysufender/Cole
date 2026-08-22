@@ -1179,7 +1179,23 @@ fn enumDefinition(self: *Parser) ExpressionResult {
                 try definitions.append(try self.variable(false));
             },
             .Identifier => {
-                try variablesTmp.push(self.advance());
+                const start: u32 = @intCast(self.extra.items.len);
+
+                const name = self.advance();
+                self.extra.append(self.allocator(), name) catch return error.AllocatorFailure;
+
+                if (self.match(&.{.Equal})) {
+                    const expr = try self.ifExpression();
+
+                    self.extra.append(self.allocator(), 1) catch return error.AllocatorFailure;
+                    self.extra.append(self.allocator(), expr) catch return error.AllocatorFailure;
+                }
+                else {
+                    self.extra.append(self.allocator(), 0) catch return error.AllocatorFailure;
+                    self.extra.append(self.allocator(), 0) catch return error.AllocatorFailure;
+                }
+
+                try variablesTmp.push(start);
                 if (!self.match(&.{.Comma})) break;
             },
             else => {
@@ -1192,12 +1208,12 @@ fn enumDefinition(self: *Parser) ExpressionResult {
 
     _ = try self.consume(.RBrace, error.MissingBrace, "Expected enclosing brace after enum definition.");
 
-    const variables = try self.commitFromSlice(variablesTmp.items);
+    const enumerations = try self.commitFromSlice(variablesTmp.items);
     const defs = try self.commitFromSlice(definitions.items);
 
     const start: defines.OpaquePtr = @intCast(self.extra.items.len);
-    self.extra.append(self.allocator(), variables.start) catch return error.AllocatorFailure;
-    self.extra.append(self.allocator(), variables.end) catch return error.AllocatorFailure;
+    self.extra.append(self.allocator(), enumerations.start) catch return error.AllocatorFailure;
+    self.extra.append(self.allocator(), enumerations.end) catch return error.AllocatorFailure;
     self.extra.append(self.allocator(), defs.start) catch return error.AllocatorFailure;
     self.extra.append(self.allocator(), defs.end) catch return error.AllocatorFailure;
 
