@@ -21,6 +21,12 @@ pub const TypeInfo = union(enum) {
     Float: bool, // mutability bool
     Void,
 
+    CInt: bool,
+    CUInt: bool,
+    CChar: bool,
+    CUChar: bool,
+    CDouble: bool,
+
     Array: Array,
 
     Pointer: Pointer,

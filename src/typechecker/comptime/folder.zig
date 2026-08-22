@@ -2298,6 +2298,16 @@ pub const builtinTypes = [_]struct {
     .{ .name = "noreturn", .info = .{ .Noreturn = { }, } },
     // enum literal
     .{ .name = "enum_literal", .info = .{ .EnumLiteral = { } } },
+    // c_int
+    .{ .name = "c_int", .info = .{ .CInt = false }, },
+    // c_uint
+    .{ .name = "c_uint", .info = .{ .CUInt = false }, },
+    // c_char
+    .{ .name = "c_char", .info = .{ .CChar = false }, },
+    // c_uchar
+    .{ .name = "c_uchar", .info = .{ .CUChar = false }, },
+    // c_double
+    .{ .name = "c_double", .info = .{ .CDouble = false }, },
     // any
     .{ .name = "any", .info = .{ .Any = false } },
 
