@@ -808,10 +808,7 @@ fn block(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
 // Expression
 //
 pub fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID) Error!JIR.Ptr {
-    if (self.typechecker.folder.cache.get(.{
-        .file = self.typechecker.currentFile,
-        .expr = exprPtr
-    })) |_| {
+    if (self.typechecker.folder.attemptEval(exprPtr, ofType)) |_| {
         return self.literal(exprPtr, ofType);
     }
 
@@ -1263,13 +1260,16 @@ fn dot(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     const exprPtr = ast.extra[extraPtr];
     const exprType = try self.typechecker.typecheckExpression(exprPtr, null);
 
-    var obj = try self.expression(exprPtr, exprType);
     const member = tokens
                     .get(ast.extra[extraPtr + 1])
                     .lexeme(self.typechecker.context, self.typechecker.currentFile);
 
     const ref = std.mem.eql(u8, member, "&");
     const deref = std.mem.eql(u8, member, "*");
+
+    const prev = self.typechecker.folder.setFlag(.ComptimeBanned, ref or deref);
+    defer _ = self.typechecker.folder.setFlag(.ComptimeBanned, prev);
+    var obj = try self.expression(exprPtr, exprType);
 
     switch (self.typechecker.typeTable.get(exprType)) {
         .Array => |arr|
@@ -1410,10 +1410,7 @@ pub fn addMetadata(self: *Lowerer, to: JIR.Ptr, from: defines.ExpressionPtr) Err
 
 fn literal(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID) Error!JIR.Ptr {
     // @Note should already been evaluated before.
-    const valuePtr = self.typechecker.folder.cache.get(.{
-        .file = self.typechecker.currentFile,
-        .expr = exprPtr,
-    }) orelse return common.debug.ShouldBeImpossible(undefined, @src()); // try self.typechecker.folder.eval(exprPtr, null);
+    const valuePtr = try self.typechecker.folder.eval(exprPtr, null);
     const constant = try self.addConstant(valuePtr, ofType);
     return self.typechecker.builder.literal(constant);
 }

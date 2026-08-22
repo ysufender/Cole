@@ -4,87 +4,87 @@ import raylib as rl;
  * Types
  */
 let Player = struct {
-	x    : mut i32,
+    x    : mut i32,
     y    : mut i32,
-	w    : i32,
-	h    : i32,
+    w    : i32,
+    h    : i32,
 };
 
 let Ball = struct {
-	x: mut float,
+    x: mut float,
     y: mut float,
     bx: mut float,
     by: mut float,
-	r: float,
+    r: float,
 }; 
 
 let WIDTH  = 640;
 let HEIGHT = 480;
 
 let main = fn (args: [][]u8) -> i32 {
-	let ply: mut Player = (20, 100, 20, 70);
-	let cpu: mut Player = (WIDTH-35, 100, 20, 70);
-	let b: mut Ball = (WIDTH/2.0 - 10.0, 120.0, -5.0, -5.0, 10.0);
+    let ply: mut Player = (20, 100, 20, 70);
+    let cpu: mut Player = (WIDTH-35, 100, 20, 70);
+    let b: mut Ball = (WIDTH/2.0 - 10.0, 120.0, -5.0, -5.0, 10.0);
 
-	rl::InitWindow(WIDTH, HEIGHT, "Ping pong");
-	rl::SetTargetFPS(60);
+    rl::InitWindow(WIDTH, HEIGHT, "Ping pong");
+    rl::SetTargetFPS(60);
 
     while !rl::WindowShouldClose() {
-		rl::BeginDrawing();
-		rl::ClearBackground(rl::Color::Black);
-		rl::DrawRectangle(0, 0, (WIDTH/2), HEIGHT, rl::Color::Black);
-		rl::DrawRectangle((WIDTH/2), 0, (WIDTH/2), HEIGHT, rl::Color::White);
-		rl::DrawRectangle(ply.x, ply.y, ply.w, ply.h, rl::Color::White);
-		rl::DrawRectangle(cpu.x, cpu.y, cpu.w, cpu.h, rl::Color::Black);
-		
-		if
+    	rl::BeginDrawing();
+    	rl::ClearBackground(rl::Color::Black);
+    	rl::DrawRectangle(0, 0, (WIDTH/2), HEIGHT, rl::Color::Black);
+    	rl::DrawRectangle((WIDTH/2), 0, (WIDTH/2), HEIGHT, rl::Color::White);
+    	rl::DrawRectangle(ply.x, ply.y, ply.w, ply.h, rl::Color::White);
+    	rl::DrawRectangle(cpu.x, cpu.y, cpu.w, cpu.h, rl::Color::Black);
+    	
+    	if
             checkCollision(ply.x, b.x, ply.y, b.y, ply.w, ply.h, b.r)
             or checkCollision(cpu.x, b.x, cpu.y, b.y, cpu.w,cpu.h,b.r) {
-			b.bx = as(float, -1.0) * b.bx;
-		}
+    		b.bx = as(float, -1.0) * b.bx;
+    	}
 
-		cpu.y = unsafeCast(b.y * 0.8);
+    	cpu.y = unsafeCast(b.y * 0.8);
 
-		if b.x < (WIDTH/2) { rl::DrawCircle(cast(b.x), cast(b.y), b.r, rl::Color::White); }
-		else { rl::DrawCircle(cast(b.x), cast(b.y), b.r, rl::Color::Black); }
-		rl::EndDrawing();
+    	if b.x < (WIDTH/2) { rl::DrawCircle(cast(b.x), cast(b.y), b.r, rl::Color::White); }
+    	else { rl::DrawCircle(cast(b.x), cast(b.y), b.r, rl::Color::Black); }
+    	rl::EndDrawing();
 
-		b.x = b.bx + b.x;
-		b.y = b.by + b.y;
+    	b.x = b.bx + b.x;
+    	b.y = b.by + b.y;
 
-		if b.x < 5 {
-			b.x = (as(float, cast(WIDTH))/2.0) - b.r;
-			b.y = 120;
-			b.bx = -5;
-			
-		}
+    	if b.x < 5 {
+    		b.x = (as(float, cast(WIDTH))/2.0) - b.r;
+    		b.y = 120;
+    		b.bx = -5;
+    		
+    	}
         else if b.x > WIDTH - 5 {
-			b.x = (as(float, cast(WIDTH))/2.0) - b.r;
-			b.y = 120;
-			b.bx = 5;
-		}
-		if b.y < 5 {
-			b.by = -b.by;
-		}
+    		b.x = (as(float, cast(WIDTH))/2.0) - b.r;
+    		b.y = 120;
+    		b.bx = 5;
+    	}
+    	if b.y < 5 {
+    		b.by = -b.by;
+    	}
         else if b.y > HEIGHT - 5 {
-			b.by = -(b.by);
-		}
-		
+    		b.by = -(b.by);
+    	}
+    	
 
-		if rl::IsKeyDown(cast(rl::KeyboardKey(@W))) or rl::IsKeyDown(cast(rl::KeyboardKey(@UP))) {
-			if ply.y >= 5 {
-			    ply.y = ply.y - 5;
+    	if rl::IsKeyDown(cast(rl::KeyboardKey(@W))) or rl::IsKeyDown(cast(rl::KeyboardKey(@UP))) {
+    		if ply.y >= 5 {
+    		    ply.y = ply.y - 5;
             }
-		}
+    	}
         else if rl::IsKeyDown(cast(rl::KeyboardKey(@S))) or rl::IsKeyDown(cast(rl::KeyboardKey(@DOWN))) {
-			if ply.y <= (as(i32, cast(HEIGHT))-ply.h) {
-			    ply.y = ply.y + 5;
+    		if ply.y <= (as(i32, cast(HEIGHT))-ply.h) {
+    		    ply.y = ply.y + 5;
             }
-		}
-	}
+    	}
+    }
 
-	rl::CloseWindow();
-	return 0;
+    rl::CloseWindow();
+    return 0;
 };
 
 /*
@@ -100,12 +100,12 @@ let checkCollision = fn (
     h1: i32,
     r: float
 ) -> bool {
-	if
+    if
         x1 <= x2 + r and y1 <= y2 + r
         and
-		x2 <= x1 + w1 and y2 <= y1 + h1 {
-			return true;
-		}
+    	x2 <= x1 + w1 and y2 <= y1 + h1 {
+    		return true;
+    	}
 
     return false;
 };

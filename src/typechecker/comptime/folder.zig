@@ -92,10 +92,6 @@ pub fn eval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeI
         .expr = exprPtr,
     };
 
-    if (self.cache.get(key)) |cached| {
-        return cached;
-    }
-
     const ast = typechecker.context.getAST(file);
 
     if (
@@ -107,6 +103,10 @@ pub fn eval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeI
     ) {
         self.report("Comptime execution is not possible in this context.", .{});
         return Error.ComptimeNotPossible;
+    }
+
+    if (self.cache.get(key)) |cached| {
+        return cached;
     }
 
     const expr = ast.expressions.get(exprPtr);
@@ -347,20 +347,18 @@ pub fn evalDot(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
     const tokens = self.typechecker.context.getTokens(ast.tokens);
 
-    const objectPtr = try self.eval(ast.extra[extraPtr], null);
-
     const memberToken = tokens.get(ast.extra[extraPtr + 1]);
 
+    // @TODO Handle proper addressing
     switch (memberToken.type) {
-        .Ampersand => return self.appendValue(.{
-            .Pointer = .{
-                .Type = resType,
-                .To = objectPtr,
-            },
-        }),
-        .Star => return self.appendValue(self.getValue(self.getValue(objectPtr).Pointer.To)),
+        .Ampersand, .Star => {
+            self.report("Attempt to use pointers in compile time scope.", .{});
+            return Error.ExistentialDilemma;
+        },
         else => { },
     }
+
+    const objectPtr = try self.eval(ast.extra[extraPtr], null);
 
     const object = self.getValue(objectPtr);
     const member = memberToken.lexeme(self.typechecker.context, self.typechecker.currentFile);
@@ -915,12 +913,12 @@ fn evalLiteral(self: *Folder, tokenPtr: defines.TokenPtr, maybeExpected: ?TypeID
                 }
                 else switch (self.typechecker.typeTable.get(expected)) {
                     .Enum => |enm|
-                    ret: for (enm.fields, 0..) |field, index| {
+                    ret: for (enm.fields) |field| {
                         if (std.mem.eql(u8, field.name, lexeme[1..])) {
                             break :ret Comptime.Value{
                                 .Enum = .{
                                     .Type = expected,
-                                    .Value = @intCast(index),
+                                    .Value = field.value,
                                 },
                             };
                         }
