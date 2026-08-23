@@ -849,6 +849,7 @@ pub fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID
         .Dot => self.dot(expr.value),
         .Indexing => self.indexing(expr.value),
         .ExpressionList => self.expressionList(expr.value, ofType),
+        .TupleDefinition => common.debug.ShouldBeImpossible(undefined, @src()),
 
         .Call => self.call(false, exprPtr, expr.value, ofType),
 
@@ -1054,7 +1055,7 @@ fn call(
 
     for (argsRange.start..argsRange.end, 0..) |ptr, i| {
         args[i] = try self.expression(ast.extra[@intCast(ptr)], try self.typechecker.typecheckExpression(ast.extra[@intCast(ptr)], switch (fti) {
-            .Function => |function| function.argTypes[i],
+            .Function => |function| if (i >= function.argTypes.len) null else function.argTypes[i],
             else => null,
         }));
     }

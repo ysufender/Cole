@@ -144,6 +144,7 @@ pub fn eval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeI
         .EnumDefinition => try self.evalEnumType(exprPtr),
         .StructDefinition => try self.evalStructType(exprPtr),
         .UnionDefinition => try self.evalUnionType(exprPtr),
+        .TupleDefinition => try self.evalTuple(expr.value),
 
         .Conditional => try self.evalIfExpression(expr.value, maybeExpected),
         .Switch => try self.evalSwitchExpression(expr.value, maybeExpected),
@@ -199,9 +200,9 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
 
     const returnType = Typechecker.determineExpected(
         self.getValue(try self.expectType(returnTypeExpr)).Type
-    ) orelse {
-        self.report("Unknown return type in function signatures is not allowed.", .{});
-        return Error.IllegalGenericType;
+    ) orelse res: {
+        isComptime = true;
+        break :res Builtin.Type("any");
     };
 
     if (self.typechecker.typeTable.get(returnType).isComptime(undefined)) {
@@ -225,9 +226,9 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
         const param = ast.signatures.get(ast.extra[paramPtrPtr]);
         const argType = Typechecker.determineExpected(
             self.getValue(try self.expectType(param.type)).Type
-        ) orelse {
-            self.report("Unknown argument type in function signatures is not allowed.", .{});
-            return Error.IllegalGenericType;
+        ) orelse res: {
+            isComptime = true;
+            break :res Builtin.Type("any");
         };
 
         argTypes[paramPtrPtr - paramsRange.start] = argType;
@@ -279,12 +280,29 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
     defer self.typechecker.lowerer.lastReturnType = lret;
     self.typechecker.lowerer.lastReturnType = returnType;
 
+    if (
+        self.typechecker.hasMetadata(exprPtr, "@variadic")
+        and !self.typechecker.hasMetadata(exprPtr, "@extern")
+    ) {
+        self.report("Variadic arguments are only accepted for external functions.", .{});
+        return Error.NonExternVariadicFunction;
+    }
+
+    if (
+        self.typechecker.hasMetadata(exprPtr, "@variadic")
+        and argTypes.len == 0
+    ) {
+        self.report("ISO C does not allow variadic arguments without a named parameter..", .{});
+        return Error.UnnamedVariadic;
+    }
+
     const functionType = try self.typechecker.registerType(.{
         .Function = .{
             .mutable = false,
             .isComptime = isComptime,
             .argTypes = argTypes,
             .returnType = returnType,
+            .variadic = self.typechecker.hasMetadata(exprPtr, "@variadic"),
         },
     });
 
@@ -895,7 +913,7 @@ fn evalLiteral(self: *Folder, tokenPtr: defines.TokenPtr, maybeExpected: ?TypeID
                 .str = lexeme,
             },
         },
-        .EnumLiteral =>
+        .LiteralPrefix =>
             if (Typechecker.determineExpected(maybeExpected)) |expected|
                 if (Builtin.Metadata(lexeme)) |metadata| .{
                     .Enum = .{
@@ -1017,6 +1035,7 @@ fn evalFuncType(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
             .isComptime = isComptime,
             .argTypes = argTypes,
             .returnType = returnType.Type,
+            .variadic = self.typechecker.hasMetadata(exprPtr, "@variadic")
         },
     });
 
@@ -1176,6 +1195,7 @@ fn evalStructType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Val
             .definitions = try self.handleScopeDecls(oldScope, scope, ast, tokens, defRange),
             .scope = scope,
             .external = self.typechecker.hasMetadata(expr, "@extern"),
+            .isTuple = false,
         },
     };
 
@@ -1322,6 +1342,52 @@ fn evalUnionType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Valu
     return self.appendValue(.{
         .Type = try self.typechecker.registerType(newType),
     });
+}
+
+fn evalTuple(self: *Folder, exprListPtr: defines.ExpressionPtr) Error!Comptime.Value.Ptr {
+    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+    const allocator = self.arena.allocator();
+
+    const exprList: defines.OpaquePtr = ast.expressions.items(.value)[exprListPtr];
+
+    const range = defines.Range{
+        .start = ast.extra[exprList],
+        .end = ast.extra[exprList + 1],
+    };
+
+    var fields = allocator.alloc(types.FieldInfo, range.len())
+        catch return Error.AllocatorFailure;
+
+    for (range.start..range.end, 0..) |ptr, idx| {
+        const exprPtr = ast.extra[ptr];
+        const fieldType = try self.typechecker.typecheckExpression(exprPtr, null);
+
+        const name = std.fmt.allocPrint(allocator, "_{d}", .{idx})
+            catch return Error.AllocatorFailure;
+
+        fields[idx] = .{
+            .name = try self.typechecker.builder.internString(name),
+            .isComptime = self.typechecker.typeTable.get(fieldType).isComptime(undefined),
+            .public = true,
+            .valueType = fieldType,
+        };
+    }
+
+    const newType = TypeInfo{
+        .Struct = .{
+            .name = try self.generateRandomName(.Tuple),
+            .fields = fields,
+            .definitions = &.{},
+            .external = false,
+            .mutable = false,
+            .scope = 0,
+            .isTuple = true,
+        },
+    };
+
+    const tupleType = try self.typechecker.registerType(newType);
+
+    return self.evalExpressionList(exprList, tupleType);
 }
 
 fn evalCast(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID, unsafe: bool) Error!Comptime.Value.Ptr {
@@ -1698,7 +1764,9 @@ pub fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Type
         else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
     };
 
-        const signature = self.typechecker.typeTable.get(function.signature).Function;
+    _ = try self.typechecker.typecheckCall(extraPtr, maybeExpected);
+        
+    const signature = self.typechecker.typeTable.get(function.signature).Function;
 
     const argsListPtr = ast.extra[extraPtr + 1];
     const argsList: defines.OpaquePtr = ast.expressions.items(.value)[argsListPtr];
@@ -1708,11 +1776,11 @@ pub fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Type
         .end = ast.extra[argsList + 1],
     };
 
-    var args = self.arena.allocator().alloc(Comptime.Value.Ptr, signature.argTypes.len)
+    var args = self.arena.allocator().alloc(Comptime.Value.Ptr, argsRange.len())
         catch return Error.AllocatorFailure;
 
     for (argsRange.start..argsRange.end, 0..) |ptr, idx| {
-        args[idx] = try self.eval(ast.extra[@intCast(ptr)], signature.argTypes[idx]);
+        args[idx] = try self.eval(ast.extra[@intCast(ptr)], if (idx >= signature.argTypes.len) null else signature.argTypes[idx]);
     }
 
     const prev = self.setFlag(.InComptimeCall, true);
@@ -2307,7 +2375,7 @@ pub const builtinTypes = [_]struct {
     // mut any
     .{ .name = "mut any", .info = .{ .Any = true } },
     // incomplete
-    .{ .name = "incomplete", .info = .{ .Struct = .{ .mutable = false, .name = Resolver.BuiltinIndex("any") + 3, .fields = &.{}, .definitions = &.{}, .scope = 0, .external = true } } },
+    .{ .name = "incomplete", .info = .{ .Struct = .{ .mutable = false, .name = Resolver.BuiltinIndex("any") + 3, .fields = &.{}, .definitions = &.{}, .scope = 0, .external = true, .isTuple = false } } },
     // builtin_metadata
     .{ .name = "builtin_metadata", .info = .{ .Enum = .{ .mutable = false, .name = Resolver.BuiltinIndex("any") + 5, .fields = &.{}, .definitions = &.{}, .scope = 0, .external = true } } },
     // []u8
@@ -2319,4 +2387,5 @@ pub const builtinMetadata = [_][]const u8 {
     "@comptime",
     "@export",
     "@extern",
+    "@variadic",
 };

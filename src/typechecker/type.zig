@@ -63,6 +63,7 @@ pub const TypeInfo = union(enum) {
         };
     }
 
+    // @CompilerOnly
     pub fn isMutable(self: TypeInfo) bool {
         return switch (self) {
             .Any => |any| any,
@@ -115,6 +116,7 @@ pub const Struct = struct {
     fields: []const FieldInfo,
     definitions: []const FieldInfo,
     external: bool,
+    isTuple: bool,
 
     // @CompilerOnly
     scope: defines.ScopePtr,
@@ -172,6 +174,7 @@ pub const Array = struct {
 pub const Function = struct {
     mutable: bool,
     isComptime: bool, 
+    variadic: bool,
     argTypes: []const TypeID,
     returnType: TypeID,
 };

@@ -32,7 +32,7 @@ pub const TokenType = enum(u8) {
     And, Or, Mark,
     Identifier,
     Modulo,
-    String, Integer, Float, False, True, EnumLiteral,
+    String, Integer, Float, False, True, LiteralPrefix,
     Discard,
     Range,
     EOF,
@@ -388,28 +388,7 @@ fn scanToken(self: *Lexer) common.CompilerError!void {
             self.start += 1;
             try self.addToken(.String);
         },
-        '@' => {
-            const ch = self.advance();
-            if (std.ascii.isAlphabetic(ch) or ch == '_'){
-                const alpha = comptime "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_";
-                const num = comptime "0123456789";
-                const alphanum = comptime (alpha ++ num);
-
-                const index =
-                    if (std.mem.indexOfNonePos(u8, self.source, self.current, alphanum))
-                        |idx| idx 
-                    else
-                        self.end;
-
-                self.current = @intCast(index);
-
-                break :blk self.addToken(.EnumLiteral);
-            }
-            else {
-                self.report("Unexpected character '{c}'", .{ch});
-                break :blk Error.UnexpectedCharacter;
-            }
-        },
+        '@' => break :blk self.addToken(.LiteralPrefix),
         else => |ch| {
             const alpha = comptime "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_#";
             const num = comptime "0123456789";

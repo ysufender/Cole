@@ -492,11 +492,13 @@ fn discoverFunctionsAndTypes(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void 
 
             _ = std.mem.replace(u8, self.strings[self.data[node.value]], "::", "__", @constCast(self.strings[self.data[node.value]]));
             _ = std.mem.replace(u8, self.strings[func.name], "::", "__", @constCast(self.strings[func.name]));
-            try self.write(out, "{s}{s} {s}({s});\n\n", .{
+            try self.write(out, "{s}{s} {s}({s}{s});\n\n", .{
                 if (self.hasMetadata(nodePtr, "@extern")) "extern " else "",
                 try self.getCName(typeInfo.returnType, null, false, false),
                 self.strings[func.name],
-                args
+                args,
+                if (typeInfo.variadic) ", ..."
+                else "",
             });
         },
 

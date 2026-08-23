@@ -170,6 +170,7 @@ pub fn typecheck(self: *Typechecker, allocator: Allocator) Error!Resolution {
         .{ .Function = .{
             .mutable = false,
             .isComptime = false,
+            .variadic = false,
             .argTypes = &.{ entryPointID + 1 },
             .returnType = Comptime.Folder.Builtin.Type("i32"),
         }},
@@ -342,6 +343,7 @@ fn typecheckVariableDef(
                         .definitions = str.definitions,
                         .external = str.external,
                         .scope = str.scope,
+                        .isTuple = str.isTuple,
                     },
                 },
 
@@ -1030,6 +1032,8 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
             });
             return Error.IllegalSyntax;
         },
+
+        .TupleDefinition => common.debug.ShouldBeImpossible(undefined, @src()),
     };
 }
 
@@ -1432,6 +1436,7 @@ pub fn discoverScopeDef(
                     .fields = str.fields,
                     .external = str.external,
                     .mutable = str.mutable,
+                    .isTuple = str.isTuple,
                 },
             });
         },
@@ -1525,15 +1530,7 @@ pub fn typecheckCall(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpec
         ast.extra[exprList + 1]
     ];
 
-    if (args.len != func.argTypes.len) {
-        self.report("Mismatching argument counts in function call. Expected {d}, received {d}.", .{
-            func.argTypes.len,
-            args.len,
-        });
-        return Error.ArgumentCountMismatch;
-    }
-
-    for (func.argTypes, args, 0..) |argType, expr, index| {
+    for (func.argTypes, args[0..func.argTypes.len], 0..) |argType, expr, index| {
         const exprType = try self.typecheckExpression(expr, argType);
 
         self.assertCanCoerce(argType, exprType) catch {
@@ -1546,6 +1543,14 @@ pub fn typecheckCall(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpec
             });
             return Error.TypeMismatch;
         };
+    }
+
+    if (args.len != func.argTypes.len and !func.variadic) {
+        self.report("Mismatching argument counts in function call. Expected {d}, received {d}.", .{
+            func.argTypes.len,
+            args.len,
+        });
+        return Error.ArgumentCountMismatch;
     }
 
     return func.returnType;
@@ -2049,10 +2054,9 @@ pub fn typecheckMark(
 ) Error!TypeID {
     // @Note In case of the mark of a mark, ptr is the marked this, which is the
     // current mark.
-    if (self.getMetadata(ptr)) |_| {
-        self.report("Redundant marking of already marked expression.", .{ });
-        return Error.RedundantMark;
-    }
+    const existingMeta =
+        if (self.getMetadata(ptr)) |meta| meta
+        else &.{};
 
     const ast = self.context.getAST(self.currentFile);
 
@@ -2061,7 +2065,7 @@ pub fn typecheckMark(
         .end = ast.extra[extraPtr + 1], 
     };
 
-    const metadata = self.arena.allocator().alloc(Comptime.Value.Ptr, marks.len())
+    const metadata = self.arena.allocator().alloc(Comptime.Value.Ptr, marks.len() + existingMeta.len)
         catch return Error.AllocatorFailure;
 
     for (0..marks.len()) |index| {
@@ -2070,6 +2074,9 @@ pub fn typecheckMark(
             Comptime.Folder.Builtin.Type("builtin_metadata")
         );
     }
+
+    // @Note @Beware ugly workaround, forward the markings to the inner mark.
+    @memcpy(metadata[marks.len()..], existingMeta);
 
     const marked = ast.extra[extraPtr + 2];
     try self.setMetadata(marked, metadata);
@@ -3041,6 +3048,7 @@ pub fn makeMutable(_: *const Typechecker, info: TypeInfo) TypeInfo {
                 .definitions = str.definitions,
                 .scope = str.scope,
                 .external = str.external,
+                .isTuple = str.isTuple,
             },
         },
         .Union => |uni| .{
@@ -3085,6 +3093,7 @@ pub fn makeMutable(_: *const Typechecker, info: TypeInfo) TypeInfo {
                 .isComptime = func.isComptime,
                 .argTypes = func.argTypes,
                 .returnType = func.returnType,
+                .variadic = func.variadic,
             },
         },
         .Integer => |int| .{

@@ -813,6 +813,7 @@ fn resolveExpression(self: *Resolver, exprPtr: defines.ExpressionPtr) Error!void
             }
         },
         .Dot => try self.resolveExpression(ast.extra[expr.value]),
+        .TupleDefinition => try self.resolveExpression(expr.value),
         else => {},
     }
 }
