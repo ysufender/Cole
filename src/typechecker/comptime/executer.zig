@@ -96,7 +96,7 @@ pub fn init(typechecker: *Typechecker, allocator: Allocator) Error!Executer {
     };
 }
 
-pub inline fn executeCall(self: *Executer, func: *JIR.Function, args: []const Comptime.Value.Ptr) Error!Comptime.Value {
+pub fn executeCall(self: *Executer, func: *JIR.Function, args: []const Comptime.Value.Ptr) Error!Comptime.Value {
     const psrc = self.typechecker.currentFile;
     defer self.typechecker.currentFile = psrc;
     self.typechecker.currentFile = func.source;
@@ -194,43 +194,6 @@ fn executeBlockAST(self: *Executer, blockPtr: defines.StatementPtr) Error!Compti
         if (topScope.pc >= topScope.len) {
             _ = self.stack.pop() orelse break;
             continue;
-        }
-
-        const stmt = self.typechecker.builder.nodes.get(self.typechecker.builder.data.items[topScope.bp + topScope.pc]);
-
-        switch (stmt.type) {
-            .Jump => {
-                const label = try self.getLabel(stmt.value);
-                self.stack.revert(label.sp);
-            },
-            .VariableDef => {
-                const typeID = self.typechecker.builder.data.items[stmt.value + 1];
-                const name = self.typechecker.builder.data.items[stmt.value + 2];
-
-                const initializer =
-                    if (self.typechecker.builder.data.items[stmt.value + 3] == 1) Comptime.Value{
-                        .Undefined = typeID,
-                    }
-                    else try self.expression(self.typechecker.builder.data.items[stmt.value + 4]);
-
-                topScope.variables.putAssumeCapacityNoClobber(name, initializer);
-            },
-            .Exit => _ = self.stack.pop() orelse {
-                self.report("Unterminated scope, but how?", .{});
-                return Error.MissingBrace;
-            },
-            .Scope => {
-                try self.decodePushScope(self.typechecker.builder.data.items[topScope.bp + topScope.pc]);
-            },
-            .Code => {
-                self.report("Foreign code blocks are not suitable in comptime contexts.", .{});
-                return Error.ComptimeNotPossible;
-            },
-            .Return => return self.expression(stmt.value),
-            .TypeDef => { },
-            else => {
-                return common.debug.NotImplemented(self.typechecker.context.log, @src());
-            }
         }
     }
 

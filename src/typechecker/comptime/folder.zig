@@ -914,6 +914,7 @@ fn evalLiteral(self: *Folder, tokenPtr: defines.TokenPtr, maybeExpected: ?TypeID
                 .str = lexeme,
             },
         },
+
         .LiteralPrefix =>
             if (Typechecker.determineExpected(maybeExpected)) |expected|
                 if (Builtin.Metadata(lexeme)) |metadata| .{
@@ -954,7 +955,10 @@ fn evalLiteral(self: *Folder, tokenPtr: defines.TokenPtr, maybeExpected: ?TypeID
                 });
                 return Error.InferenceError;
             },
-        else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
+        else => |t| {
+            self.report("'{s}: {s}' not implemented.", .{@tagName(t), lexeme});
+            return common.debug.ShouldBeImpossible(undefined, @src());
+        },
     };
 
     const res = try self.appendValue(value);

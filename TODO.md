@@ -1,3 +1,3 @@
 # Session Goals
 
-- [ ] Tuples!
+- [ ] Comptime function calls

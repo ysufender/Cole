@@ -957,6 +957,9 @@ fn primary(self: *Parser) ExpressionResult {
             else {
                 const value = self.advance();
 
+                self.context.getTokens(self.file).items(.start)[value] -= 1;
+                self.context.getTokens(self.file).items(.type)[value] = .LiteralPrefix;
+
                 const expr = try self.alloc(Expression);
                 self.expressionMap.set(expr, .{
                     .type = .Literal,
