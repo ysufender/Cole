@@ -129,6 +129,7 @@ pub fn variableDef(
     name: defines.StringPtr,
     isUndefined: bool,
     initializer: JIR.Ptr,
+    initExpr: ?defines.ExpressionPtr,
 ) Error!JIR.Ptr {
     const start: u32 = @intCast(self.data.items.len);
     self.data.append(self.allocator, @intFromBool(topLevel)) catch return Error.AllocatorFailure;
@@ -140,6 +141,11 @@ pub fn variableDef(
     }
 
     const res = try self.nodes.addOne(self.allocator);
+
+    if (initExpr) |expr| {
+        try self.typechecker.lowerer.addMetadata(res, expr);
+    }
+
     self.nodes.set(res, .{
         .type = .VariableDef,
         .value = start,

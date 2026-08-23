@@ -856,15 +856,7 @@ fn evalBuiltin(self: *Folder, decl: *const Resolver.Declaration, maybeExpected: 
                         else => { },
                     }
 
-                    if (self.typechecker.suitable(expected, comptime Builtin.Type("any"))) {
-                        return self.constructUndefined(expected);
-                    }
-                    else  {
-                        self.report("Given type '{s}' can't be undefined.", .{
-                            try self.typechecker.typeName(self.arena.allocator(), expected),
-                        });
-                        return Error.MissingTypeSpecifier;
-                    }
+                    return self.constructUndefined(expected);
                 }
                 else {
                     self.report("Unable to infer the type of undefined value.", .{});
@@ -949,10 +941,14 @@ fn evalLiteral(self: *Folder, tokenPtr: defines.TokenPtr, maybeExpected: ?TypeID
     const res = try self.appendValue(value);
     const rest = try self.typechecker.typecheckValue(res, null);
 
-    if (self.typechecker.castable(rest, maybeExpected orelse rest, false)) {
+    if (
+        maybeExpected != null
+        and maybeExpected.? != Builtin.Type("any")
+        and maybeExpected.? != Builtin.Type("mut any")
+        and self.typechecker.castable(rest, maybeExpected orelse rest, false)
+    ) {
         return self.castValue(res, maybeExpected orelse rest, false);
-    }
-    else {
+    } else {
         return res;
     }
 }
@@ -1902,7 +1898,7 @@ fn expectDefined(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?
 
 pub fn constructUndefined(self: *Folder, valueType: TypeID) Error!Comptime.Value.Ptr {
     return switch (self.typechecker.typeTable.get(valueType)) {
-        .Function, .Type, .Any, .Noreturn, .EnumLiteral => {
+        .Void, .Function, .Type, .Any, .Noreturn, .EnumLiteral => {
             self.report("Given type '{s}' can't be undefined.", .{
                 try self.typechecker.typeName(self.arena.allocator(), valueType)
             });
@@ -2010,19 +2006,19 @@ fn castValue(self: *Folder, valuePtr: Comptime.Value.Ptr, to: TypeID, unsafe: bo
             },
             else => return common.debug.ShouldBeImpossible(undefined, @src()),
         },
-        .Float => |fromFloat| switch (self.typechecker.typeTable.get(to)) {
-            .Float, .ComptimeFloat => value,
-            else => .{ .Int = @intFromFloat(fromFloat) },
-        },
+        .Float => |fromFloat|
+            if (self.typechecker.isFloat(to)) value
+            else .{ .Int = @intFromFloat(fromFloat) },
         .Int => |fromInt| switch (self.typechecker.typeTable.get(to)) {
-            .Integer, .ComptimeInt => value,
             .Pointer => .{
                 .Pointer = .{
                     .Type = to,
                     .To = @intCast(fromInt),
                 },
             },
-            else => .{ .Float = @floatFromInt(fromInt) },
+            else =>
+                if (self.typechecker.isInt(to)) value
+                else .{ .Float = @floatFromInt(fromInt) },
         },
         .Bool => |fromBool| switch (self.typechecker.typeTable.get(to)) {
             .Bool => value,
@@ -2210,7 +2206,7 @@ pub fn dumpMem(self: *const Folder) void {
 
 pub const Builtin = struct {
     pub fn isBuiltinType(typeID: TypeID) bool {
-        return typeID <= Builtin.Type("any") + 3;
+        return typeID <= Builtin.Type("any");
     }
 
     pub fn TypeName(btype: TypeID) []const u8 {

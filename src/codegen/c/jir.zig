@@ -578,6 +578,10 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
                 return;
             }
 
+            if (self.hasMetadata(nodePtr, "@extern")) {
+                return;
+            }
+
             if (info == .Function) {
                 _ = std.mem.replace(u8, self.strings[self.data[node.value + 2]], "::", "__", @constCast(self.strings[self.data[node.value + 2]]));
                 try self.writeln(out, "{s}{s}", .{

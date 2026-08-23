@@ -1879,6 +1879,14 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
         .Field => self.typecheckField(&decl),
     };
 
+    if (self.hasMetadata(decl.node, "@extern")) {
+        const symName = tokens.get(decl.token).lexeme(self.context, self.currentFile);
+        const name = try self.builder.internString(symName);
+
+        self.symbols.declarations.items(.name)[declPtr] = name;
+        decl.name = name;
+    }
+
     // @Note preventing the caching of declarations when inside a comptime call.
     // Since they'll get their own declarations and scopes, it is fine.
     isPresent.value_ptr.* = .{
@@ -2065,6 +2073,7 @@ pub fn typecheckMark(
 
     const marked = ast.extra[extraPtr + 2];
     try self.setMetadata(marked, metadata);
+    try self.setMetadata(ptr, metadata);
     return self.typecheckExpression(marked, maybeExpected);
 }
 

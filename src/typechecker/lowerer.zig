@@ -72,7 +72,8 @@ pub fn topLevelDeclaration(self: *Lowerer, ptr: defines.DeclPtr, decl: *const De
                     if (self.typechecker.folder.attemptEval(decl.node, typeID)) |i| self.typechecker.folder.getValue(i) == .Undefined
                     else false
                 else false,
-                node
+                node,
+                decl.node,
             );
         },
     }
@@ -418,6 +419,7 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
                     name,
                     false,
                     try typechecker.builder.dot(enumOrUnion, caseField.name),
+                    null,
                 );
 
                 const body = try self.statement(bodyPtr);
@@ -570,6 +572,7 @@ fn variableDef(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
             else false
         else false,
         node,
+        decl.node,
     );
     return def; 
 }
