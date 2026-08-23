@@ -849,7 +849,8 @@ pub fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID
         .Dot => self.dot(expr.value),
         .Indexing => self.indexing(expr.value),
         .ExpressionList => self.expressionList(expr.value, ofType),
-        .TupleDefinition => common.debug.ShouldBeImpossible(undefined, @src()),
+
+        .TupleDefinition => self.tuple(expr.value, ofType),
 
         .Call => self.call(false, exprPtr, expr.value, ofType),
 
@@ -857,6 +858,32 @@ pub fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID
 
         .Slicing => self.slicing(expr.value, ofType),
     };
+}
+
+fn tuple(self: *Lowerer, exprListPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR.Ptr {
+    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+    const allocator = self.typechecker.builder.allocator;
+
+    const tupleType = self.typechecker.typeTable.get(ofType).Struct;
+    assert(tupleType.isTuple);
+
+    const exprList: defines.OpaquePtr = ast.expressions.items(.value)[exprListPtr];
+    // @Note ofType is the tuple here, or at least it should be.
+
+    const argsRange = defines.Range{
+        .start = ast.extra[exprList],
+        .end = ast.extra[exprList + 1],
+    };
+
+    const args = allocator.alloc(JIR.Ptr, argsRange.len())
+        catch return Error.AllocatorFailure;
+
+    for (argsRange.start..argsRange.end, 0..) |ptr, idx| {
+        const node = try self.expression(ast.extra[ptr], tupleType.fields[idx].valueType);
+        args[idx] = node;
+    }
+
+    return self.typechecker.builder.construct(ofType, args);
 }
 
 fn scoping(self: *Lowerer, _extraPtr: defines.OpaquePtr) Error!JIR.Ptr {

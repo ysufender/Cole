@@ -1277,7 +1277,7 @@ pub const builtins = [_][]const u8 {
     "bitSizeOf", "unreachable", "enumStr", "typeOf",
     "field", "fieldIndex", "hasDef", "definitionIndex",
     "this", "sizeOf", "bitSet", "cast", "unsafeCast",
-    "as", "compileLog", "typeName",
+    "as", "compileLog", "typeName", "Tuple",
 };
 
 pub fn BuiltinIndex(comptime builtin: []const u8) u32 {

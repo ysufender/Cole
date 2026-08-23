@@ -843,6 +843,7 @@ fn evalBuiltinCall(self: *Folder, extraPtr: defines.OpaquePtr, declPtr: defines.
         BI("typeOf") => self.evalTypeOf(extraPtr),
         BI("compileError") => self.evalCompileError(extraPtr),
         BI("typeName") => self.evalTypeName(extraPtr),
+        BI("Tuple") => self.evalNewTuple(extraPtr),
         BI("unreachable") => {
             self.report("Reached unreachable code.", .{});
             return Error.UnreachableCodePath;
@@ -1345,48 +1346,9 @@ fn evalUnionType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Valu
 }
 
 fn evalTuple(self: *Folder, exprListPtr: defines.ExpressionPtr) Error!Comptime.Value.Ptr {
+    const tupleType = try self.typechecker.typecheckTupleDefinition(exprListPtr);
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
-    const allocator = self.arena.allocator();
-
     const exprList: defines.OpaquePtr = ast.expressions.items(.value)[exprListPtr];
-
-    const range = defines.Range{
-        .start = ast.extra[exprList],
-        .end = ast.extra[exprList + 1],
-    };
-
-    var fields = allocator.alloc(types.FieldInfo, range.len())
-        catch return Error.AllocatorFailure;
-
-    for (range.start..range.end, 0..) |ptr, idx| {
-        const exprPtr = ast.extra[ptr];
-        const fieldType = try self.typechecker.typecheckExpression(exprPtr, null);
-
-        const name = std.fmt.allocPrint(allocator, "_{d}", .{idx})
-            catch return Error.AllocatorFailure;
-
-        fields[idx] = .{
-            .name = try self.typechecker.builder.internString(name),
-            .isComptime = self.typechecker.typeTable.get(fieldType).isComptime(undefined),
-            .public = true,
-            .valueType = fieldType,
-        };
-    }
-
-    const newType = TypeInfo{
-        .Struct = .{
-            .name = try self.generateRandomName(.Tuple),
-            .fields = fields,
-            .definitions = &.{},
-            .external = false,
-            .mutable = false,
-            .scope = 0,
-            .isTuple = true,
-        },
-    };
-
-    const tupleType = try self.typechecker.registerType(newType);
-
     return self.evalExpressionList(exprList, tupleType);
 }
 
@@ -1450,6 +1412,48 @@ pub fn evalCompileLog(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime
     });
     token.printLocationInfo(self.arena.allocator(), self.typechecker.context, self.typechecker.currentFile, position, self.typechecker.callstack.size == 1);
     return @intFromEnum(Comptime.Value.Implicit.Void);
+}
+
+pub fn evalNewTuple(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {
+    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+
+    const expressionList = ast.expressions.items(.value)[ast.extra[extraPtr + 1]];
+    const args = defines.Range{
+        .start = ast.extra[expressionList],
+        .end = ast.extra[expressionList + 1],
+    };
+
+    var fields = self.typechecker.arena.allocator().alloc(types.FieldInfo, args.len())
+        catch return Error.AllocatorFailure;
+
+    for (args.start..args.end, 0..) |ptr, idx| {
+        const exprPtr = ast.extra[ptr];
+        const fieldType = self.getValue(try self.expectType(exprPtr)).Type;
+
+        const name = std.fmt.allocPrint(self.typechecker.arena.allocator(), "_{d}", .{idx})
+            catch return Error.AllocatorFailure;
+
+        fields[idx] = .{
+            .name = try self.typechecker.builder.internString(name),
+            .isComptime = self.typechecker.typeTable.get(fieldType).isComptime(undefined),
+            .public = true,
+            .valueType = fieldType,
+        };
+    }
+
+    const newType = TypeInfo{
+        .Struct = .{
+            .name = try self.generateRandomName(.Tuple),
+            .fields = fields,
+            .definitions = &.{},
+            .external = false,
+            .mutable = false,
+            .scope = 0,
+            .isTuple = true,
+        },
+    };
+
+    return self.typechecker.registerType(newType);
 }
 
 pub fn evalTypeName(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {

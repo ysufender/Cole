@@ -1033,8 +1033,52 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
             return Error.IllegalSyntax;
         },
 
-        .TupleDefinition => common.debug.ShouldBeImpossible(undefined, @src()),
+        .TupleDefinition => self.typecheckTupleDefinition(expr.value),
     };
+}
+
+pub fn typecheckTupleDefinition(self: *Typechecker, exprListPtr: defines.OpaquePtr) Error!TypeID {
+    const ast = self.context.getAST(self.currentFile);
+    const allocator = self.arena.allocator();
+
+    const exprList: defines.OpaquePtr = ast.expressions.items(.value)[exprListPtr];
+
+    const range = defines.Range{
+        .start = ast.extra[exprList],
+        .end = ast.extra[exprList + 1],
+    };
+
+    var fields = allocator.alloc(Types.FieldInfo, range.len())
+        catch return Error.AllocatorFailure;
+
+    for (range.start..range.end, 0..) |ptr, idx| {
+        const exprPtr = ast.extra[ptr];
+        const fieldType = try self.typecheckExpression(exprPtr, null);
+
+        const name = std.fmt.allocPrint(allocator, "_{d}", .{idx})
+            catch return Error.AllocatorFailure;
+
+        fields[idx] = .{
+            .name = try self.builder.internString(name),
+            .isComptime = self.typeTable.get(fieldType).isComptime(undefined),
+            .public = true,
+            .valueType = fieldType,
+        };
+    }
+
+    const newType = TypeInfo{
+        .Struct = .{
+            .name = try self.folder.generateRandomName(.Tuple),
+            .fields = fields,
+            .definitions = &.{},
+            .external = false,
+            .mutable = false,
+            .scope = 0,
+            .isTuple = true,
+        },
+    };
+
+    return self.registerType(newType);
 }
 
 pub fn typecheckIfExpression(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID) Error!TypeID {
@@ -1567,6 +1611,7 @@ pub fn typecheckBuiltinCall(self: *Typechecker, extraPtr: defines.ExpressionPtr,
         BI("compileError") => return self.folder.evalCompileError(extraPtr),
         BI("sizeOf") => return Comptime.Folder.Builtin.Type("u32"),
         BI("typeName") => return Comptime.Folder.Builtin.Type("[]u8"),
+        BI("Tuple") => return Comptime.Folder.Builtin.Type("type"),
         BI("compileLog") => {
             _ = try self.folder.evalCompileLog(extraPtr);
             return Comptime.Folder.Builtin.Type("void");
