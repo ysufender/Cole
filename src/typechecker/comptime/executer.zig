@@ -18,84 +18,47 @@ const Error = common.CompilerError;
 const TypeID = types.TypeID;
 const TypeInfo = types.TypeInfo;
 const JIR = backend.C.JIR;
+const JIRExecuter = @import("executer/jir.zig");
+const ASTExecuter = @import("executer/ast.zig");
 
-const Stack = collections.StaticStack(Scope, defines.comptimeStackLimit);
-const Cache = struct {
-    pub const HashMap = collections.HashMapCustom(Key, Entry, Key.eql);
-    pub const Stack = collections.StaticStack(Key, defines.comptimeStackLimit);
-
-    pub const Status = enum {
-        InProgress,
-        Evaluated,
-        NotEvaluated,
-    };
-
-    pub const Key = struct {
-        func: defines.StringPtr,
-        args: []const Comptime.Value.Ptr,
-
-        pub fn eql(_context: *anyopaque, key1: Key, key2: Key) bool {
-            const context: *Comptime.Folder = @alignCast(@ptrCast(_context));
-            if (key1.func != key2.func) {
-                return false;
-            }
-
-            for (key1.args, key2.args) |_arg1, _arg2| {
-                const arg1 = context.getValue(_arg1);
-                const arg2 = context.getValue(_arg2);
-                if (!context.comptimeEq(arg1, arg2)) {
-                    return false;
-                }
-            }
-
-            return true;
-        }
-    };
-
-    pub const Entry = struct {
-        status: Status = .NotEvaluated,
-        result: Comptime.Value,
-    };
-};
-
-const Scope = struct {
-    pub const Symbol = struct {
-        sp: defines.Offset,
-        off: defines.Offset,
-    };
-
-    pub const VariableMap = collections.HashMap(defines.StringPtr, Comptime.Value);
-    pub const LabelMap = collections.HashMap(defines.StringPtr, Symbol);
-
-    variables: VariableMap,
-    labels: LabelMap,
-    bp: defines.Offset,
-    pc: defines.Offset,
-    len: u32,
-};
 
 const Executer = @This();
 
-cache: Cache.HashMap,
-cacheStack: Cache.Stack,
-stack: Stack,
-
 typechecker: *Typechecker,
-
 arena: Arena,
+
+jir: JIRExecuter,
+ast: ASTExecuter,
 
 pub fn init(typechecker: *Typechecker, allocator: Allocator) Error!Executer {
     var arena = Arena.init(allocator);
 
     return Executer{
-        .cache = try Cache.HashMap.init(@ptrCast(&typechecker.folder), arena.allocator(), typechecker.context.counts.functions),
-        .stack = .{ },
-        .cacheStack = .{ },
         .arena = arena,
         .typechecker = typechecker,
+        .jir = try JIRExecuter.init(typechecker, arena.allocator()),
+        .ast = try ASTExecuter.init(typechecker, arena.allocator()),
     };
 }
 
-pub fn executeCall(_: *Executer, _: *JIR.Function, _: []const Comptime.Value.Ptr) Error!Comptime.Value {
-    unreachable;
+pub fn executeCall(self: *Executer, func: *JIR.Function, args: []const Comptime.Value.Ptr) Error!Comptime.Value {
+    self.jir.allocator = self.arena.allocator();
+    self.jir.executer = self;
+
+    self.ast.allocator = self.arena.allocator();
+    self.ast.executer = self;
+
+    const psrc = self.typechecker.currentFile;
+    defer self.typechecker.currentFile = psrc;
+    self.typechecker.currentFile = func.source;
+
+    const signature = self.typechecker.typeTable.get(func.signature).Function;
+
+    return
+        if (signature.isComptime) try self.ast.executeCall(func, args)
+        else try self.jir.executeCall(func, args);
+}
+
+fn report(self: *Executer, comptime fmt: []const u8, args: anytype) void {
+    return self.typechecker.report("COMPTIME EXECUTER: " ++ fmt, args);
 }

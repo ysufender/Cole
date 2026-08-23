@@ -178,6 +178,9 @@ pub const PrintContext = struct {
         const ex    = printer.ast.extra;
 
         switch (etype) {
+            .TupleDefinition => {
+                printer.print("Tuple()", .{});
+            },
             .Literal => {
                 printer.print("Literal({s})", .{printer.tokenLexeme(val)});
             },

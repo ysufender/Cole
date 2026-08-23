@@ -15,7 +15,7 @@ const Declaration = @import("../../../typechecker/resolver.zig").Declaration;
 const Comptime = @import("../../../typechecker/comptime.zig");
 
 pub const StringPtr = defines.Offset;
-pub const MetadataMap = collections.HashMap(JIR.Ptr, []const Comptime.Value.Ptr);
+pub const MetadataMap = collections.HashMap(JIR.Ptr, []const JIR.Constant.Ptr);
 
 const Builder = @This();
 
@@ -114,7 +114,7 @@ pub inline fn getInternedString(self: *const Builder, index: defines.StringPtr) 
     return self.strings.keys()[index];
 }
 
-pub inline fn addMetadata(self: *Builder, node: JIR.Ptr, metadata: []const Comptime.Value.Ptr) Error!void {
+pub inline fn addMetadata(self: *Builder, node: JIR.Ptr, metadata: []const JIR.Constant.Ptr) Error!void {
     return self.metadata.put(self.allocator, node, metadata);
 }
 
@@ -129,6 +129,7 @@ pub fn variableDef(
     name: defines.StringPtr,
     isUndefined: bool,
     initializer: JIR.Ptr,
+    initExpr: ?defines.ExpressionPtr,
 ) Error!JIR.Ptr {
     const start: u32 = @intCast(self.data.items.len);
     self.data.append(self.allocator, @intFromBool(topLevel)) catch return Error.AllocatorFailure;
@@ -140,11 +141,17 @@ pub fn variableDef(
     }
 
     const res = try self.nodes.addOne(self.allocator);
+
+    if (initExpr) |expr| {
+        try self.typechecker.lowerer.addMetadata(res, expr);
+    }
+
     self.nodes.set(res, .{
         .type = .VariableDef,
         .value = start,
     });
     try self.addKeyNode(res);
+
     return res;
 }
 
@@ -156,6 +163,7 @@ pub inline fn functionDef(self: *Builder, name: defines.StringPtr, function: JIR
     self.functionDefCache.putNoClobber(self.allocator, function, {})
         catch return Error.AllocatorFailure;
     const node = try self.commonBinary(.FunctionDef, name, function);
+    try self.typechecker.lowerer.addMetadata(node, self.functions.get(function).expr);
     return self.addKeyNode(node);
 }
 
@@ -238,6 +246,8 @@ pub inline fn not(self: *Builder, rhs: JIR.Ptr) Error!JIR.Ptr { return self.comm
 pub inline fn negate(self: *Builder, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonSingle(.Negation, rhs); }
 
 pub inline fn grouping(self: *Builder, args: []const JIR.Ptr) Error!JIR.Ptr {
+    std.debug.assert(args.len <= 1);
+
     const start: u32 = @intCast(self.data.items.len);
     self.data.append(self.allocator, @intCast(args.len)) catch return Error.AllocatorFailure;
     self.data.appendSlice(self.allocator, args) catch return Error.AllocatorFailure;

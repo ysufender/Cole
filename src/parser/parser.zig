@@ -35,6 +35,7 @@ pub const Expression = struct {
         EnumDefinition,
         UnionDefinition,
         FunctionDefinition,
+        TupleDefinition,
         Mark,
         Lambda,
         Call,
@@ -924,8 +925,8 @@ fn postfix(self: *Parser) ExpressionResult {
 }
 
 fn primary(self: *Parser) ExpressionResult {
-    switch (self.tokens.items(.type)[self.peek()]) {
-        .False, .True, .Integer, .Float, .String, .EnumLiteral => |t| {
+    return switch (self.tokens.items(.type)[self.peek()]) {
+        .False, .True, .Integer, .Float, .String => |t| {
             switch (t) {
                 .False, .True => self.stats.bool += 1,
                 .Integer => self.stats.integer += 1,
@@ -941,37 +942,39 @@ fn primary(self: *Parser) ExpressionResult {
             });
             return expr;
         },
+        .LiteralPrefix => {
+            _ = self.advance();
+            if (self.check(.LParen)) {
+                const value = try self.expressionList();
+
+                const expr = try self.alloc(Expression);
+                self.expressionMap.set(expr, .{
+                    .type = .TupleDefinition,
+                    .value = value,
+                });
+                return expr;
+            }
+            else {
+                const value = self.advance();
+
+                self.context.getTokens(self.file).items(.start)[value] -= 1;
+                self.context.getTokens(self.file).items(.type)[value] = .LiteralPrefix;
+
+                const expr = try self.alloc(Expression);
+                self.expressionMap.set(expr, .{
+                    .type = .Literal,
+                    .value = value,
+                });
+                return expr;
+            }
+        },
         .Mut, .Star, .LBracket,
         .Enum, .Struct, .Union => {
             self.stats.types += 1;
             return self.typeExpression();
         },
-        .Fn => return self.function(),
-        .LParen => {
-            _ = self.advance();
-
-            const exprsStart = self.scratch.items.len;
-            while (!self.check(.RParen)) {
-                self.scratch.append(self.allocator(), try self.ifExpression()) catch return error.AllocatorFailure;
-                if (!self.match(&.{.Comma})) {
-                    break;
-                }
-            }
-
-            _ = try self.consume(.RParen, error.MissingBrace, "Expected enclosing parenthesis ')' in expression list.");
-            const expressions = try self.commitScratch(exprsStart);
-
-            const start: defines.OpaquePtr = @intCast(self.extra.items.len);
-            self.extra.append(self.allocator(), expressions.start) catch return error.AllocatorFailure;
-            self.extra.append(self.allocator(), expressions.end) catch return error.AllocatorFailure;
-
-            const expr = try self.alloc(Expression);
-            self.expressionMap.set(expr, .{
-                .type = .ExpressionList,
-                .value = start,
-            });
-            return expr;
-        },
+        .Fn => self.function(),
+        .LParen => self.expressionList(),
         .Identifier => {
             const expr = try self.alloc(Expression);
             self.expressionMap.set(expr, .{
@@ -985,7 +988,33 @@ fn primary(self: *Parser) ExpressionResult {
             self.report("Expected a primary expression, got '{s}' instead.", .{self.tokens.get(self.current).lexeme(self.context, self.file)});
             return error.InvalidToken;
         },
+    };
+}
+
+fn expressionList(self: *Parser) ExpressionResult {
+    _ = self.advance();
+
+    const exprsStart = self.scratch.items.len;
+    while (!self.check(.RParen)) {
+        self.scratch.append(self.allocator(), try self.ifExpression()) catch return error.AllocatorFailure;
+        if (!self.match(&.{.Comma})) {
+            break;
+        }
     }
+
+    _ = try self.consume(.RParen, error.MissingBrace, "Expected enclosing parenthesis ')' in expression list.");
+    const expressions = try self.commitScratch(exprsStart);
+
+    const start: defines.OpaquePtr = @intCast(self.extra.items.len);
+    self.extra.append(self.allocator(), expressions.start) catch return error.AllocatorFailure;
+    self.extra.append(self.allocator(), expressions.end) catch return error.AllocatorFailure;
+
+    const expr = try self.alloc(Expression);
+    self.expressionMap.set(expr, .{
+        .type = .ExpressionList,
+        .value = start,
+    });
+    return expr;
 }
 
 fn mark(self: *Parser) ExpressionResult {
@@ -1179,7 +1208,23 @@ fn enumDefinition(self: *Parser) ExpressionResult {
                 try definitions.append(try self.variable(false));
             },
             .Identifier => {
-                try variablesTmp.push(self.advance());
+                const start: u32 = @intCast(self.extra.items.len);
+
+                const name = self.advance();
+                self.extra.append(self.allocator(), name) catch return error.AllocatorFailure;
+
+                if (self.match(&.{.Equal})) {
+                    const expr = try self.ifExpression();
+
+                    self.extra.append(self.allocator(), 1) catch return error.AllocatorFailure;
+                    self.extra.append(self.allocator(), expr) catch return error.AllocatorFailure;
+                }
+                else {
+                    self.extra.append(self.allocator(), 0) catch return error.AllocatorFailure;
+                    self.extra.append(self.allocator(), 0) catch return error.AllocatorFailure;
+                }
+
+                try variablesTmp.push(start);
                 if (!self.match(&.{.Comma})) break;
             },
             else => {
@@ -1192,12 +1237,12 @@ fn enumDefinition(self: *Parser) ExpressionResult {
 
     _ = try self.consume(.RBrace, error.MissingBrace, "Expected enclosing brace after enum definition.");
 
-    const variables = try self.commitFromSlice(variablesTmp.items);
+    const enumerations = try self.commitFromSlice(variablesTmp.items);
     const defs = try self.commitFromSlice(definitions.items);
 
     const start: defines.OpaquePtr = @intCast(self.extra.items.len);
-    self.extra.append(self.allocator(), variables.start) catch return error.AllocatorFailure;
-    self.extra.append(self.allocator(), variables.end) catch return error.AllocatorFailure;
+    self.extra.append(self.allocator(), enumerations.start) catch return error.AllocatorFailure;
+    self.extra.append(self.allocator(), enumerations.end) catch return error.AllocatorFailure;
     self.extra.append(self.allocator(), defs.start) catch return error.AllocatorFailure;
     self.extra.append(self.allocator(), defs.end) catch return error.AllocatorFailure;
 
@@ -1361,11 +1406,14 @@ fn typeExpression(self: *Parser) ExpressionResult {
 
                 break :result expr;
             }
-            else if (self.match(&.{.EnumLiteral})) result: {
-                const literal = self.tokens.get(self.previous()).lexeme(self.context, self.file);
+            else if (self.match(&.{.LiteralPrefix})) result: {
+                _ = self.advance();
+                var literal = self.tokens.get(self.previous()).lexeme(self.context, self.file);
                 _ = try self.consume(.RBracket, error.MissingBracket, "Expected enclosing bracket in array type.");
                 const child = try self.typeExpression();
                 const expr = try self.alloc(Expression);
+
+                literal = (literal.ptr - 1)[0..literal.len + 1];
 
                 self.expressionMap.set(expr,
                     if (std.mem.eql(u8, literal, "@c")) .{

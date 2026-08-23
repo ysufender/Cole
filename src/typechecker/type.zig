@@ -21,6 +21,16 @@ pub const TypeInfo = union(enum) {
     Float: bool, // mutability bool
     Void,
 
+    CInt: bool,
+    CUInt: bool,
+    CChar: bool,
+    CUChar: bool,
+    CDouble: bool,
+    CLong: bool,
+    CULong: bool,
+    CShort: bool,
+    CUShort: bool,
+
     Array: Array,
 
     Pointer: Pointer,
@@ -53,6 +63,7 @@ pub const TypeInfo = union(enum) {
         };
     }
 
+    // @CompilerOnly
     pub fn isMutable(self: TypeInfo) bool {
         return switch (self) {
             .Any => |any| any,
@@ -65,6 +76,15 @@ pub const TypeInfo = union(enum) {
             .Pointer => |ptr| ptr.mutable,
             .Array => |arr| arr.mutable,
             .Function => |func| func.mutable,
+            .CInt => |m| m,
+            .CUInt => |m| m,
+            .CChar => |m| m,
+            .CUChar => |m| m,
+            .CDouble => |m| m,
+            .CLong => |m| m,
+            .CULong => |m| m,
+            .CShort => |m| m,
+            .CUShort => |m| m,
             else => false,
         };
     }
@@ -96,6 +116,7 @@ pub const Struct = struct {
     fields: []const FieldInfo,
     definitions: []const FieldInfo,
     external: bool,
+    isTuple: bool,
 
     // @CompilerOnly
     scope: defines.ScopePtr,
@@ -118,10 +139,15 @@ pub const Union = struct {
     scope: defines.ScopePtr,
 };
 
+pub const EnumField = struct {
+    name: []const u8,
+    value: u32,
+};
+
 pub const Enum = struct {
     mutable: bool,
     name: defines.StringPtr,
-    fields: []const []const u8,
+    fields: []const EnumField,
     definitions: []const FieldInfo,
     external: bool,
 
@@ -148,6 +174,7 @@ pub const Array = struct {
 pub const Function = struct {
     mutable: bool,
     isComptime: bool, 
+    variadic: bool,
     argTypes: []const TypeID,
     returnType: TypeID,
 };

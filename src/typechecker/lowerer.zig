@@ -72,7 +72,8 @@ pub fn topLevelDeclaration(self: *Lowerer, ptr: defines.DeclPtr, decl: *const De
                     if (self.typechecker.folder.attemptEval(decl.node, typeID)) |i| self.typechecker.folder.getValue(i) == .Undefined
                     else false
                 else false,
-                node
+                node,
+                decl.node,
             );
         },
     }
@@ -83,7 +84,7 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
     const ofType = self.typechecker.typeTable.get(ofTypePtr);
     return self.typechecker.builder.addConstant(switch (value) {
         .Int => |val| switch (ofType) {
-            .Integer, .ComptimeInt => switch (self.typechecker.sizeOf(ofTypePtr)) {
+            .Integer, .ComptimeInt, =>switch (self.typechecker.sizeOf(ofTypePtr)) {
                 64 => .{ .Integer = .{
                     .i32 = @intCast(val),
                 }},
@@ -105,9 +106,19 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
                     return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
                 },
             },
-            
+
+            .CInt => .{ .Integer = .{ .c_int = @intCast(val) } },
+            .CUInt => .{ .Integer = .{ .c_uint = @intCast(val) } },
+            .CChar => .{ .Integer = .{ .c_char = @intCast(val) } },
+            .CUChar => .{ .Integer = .{ .c_uchar = @intCast(val) } },
+            .CLong => .{ .Integer = .{ .c_long = @intCast(val) } },
+            .CULong => .{ .Integer = .{ .c_ulong = @intCast(val) } },
+            .CShort => .{ .Integer = .{ .c_short = @intCast(val) } },
+            .CUShort => .{ .Integer = .{ .c_ushort = @intCast(val) } },
+
+            .CDouble => .{ .Float = .{ .f64 = @floatFromInt(val) } },
             .Float, .ComptimeFloat => .{
-                .Float = @floatFromInt(value.Int),
+                .Float = .{ .f32 = @floatFromInt(value.Int) },
             },
 
             .Bool => .{
@@ -120,7 +131,7 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
             },
         },
 
-        .Float => |val| .{ .Float = val },
+        .Float => |val| .{ .Float = .{ .f32 = @floatCast(val) } },
         .Undefined => |valueType| .{ .Undefined = valueType },
         .Struct => |str| @"struct": {
             const fieldConsts = self.typechecker.builder.allocator.alloc(JIR.Constant.Ptr, str.Fields.len())
@@ -174,7 +185,10 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
             }};
         },
         .String => |string| .{
-            .String = try self.typechecker.builder.internString(string),
+            .String = .{
+                .type = if (string.type == .Cole) .Cole else .C,
+                .str = try self.typechecker.builder.internString(string.str),
+            },
         },
         .Slice => |slice| slice: {
             const child = switch (ofType) {
@@ -182,7 +196,7 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
                 .Pointer => |ptr| ptr.child,
                 else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
             };
- 
+
             const elemConsts = self.typechecker.builder.allocator.alloc(JIR.Constant.Ptr, slice.Size)
                 catch return Error.AllocatorFailure;
             for (0..slice.Size) |index| {
@@ -195,7 +209,7 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
             }
  
             break :slice switch (ofType) {
-                .Array => .{ .Aggregate = .{
+                .Array => .{ .Array = .{
                     .type = slice.Type,
                     .data = .{
                         .start = @intCast(start),
@@ -232,6 +246,7 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
             self.report("Comptime pointers can't live outside the comptime scope.", .{});
             return Error.ExistentialDilemma;
         },
+
         .Bool => |boolValue| .{ .Integer = .{ .u8 = @intFromBool(boolValue), }, },
         .Void => if (false) {
             self.report(
@@ -337,7 +352,7 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
             else null
         else null;
     const typeInfo = typechecker.typeTable.get(enumOrUnionType);
-    const tag: struct { type: TypeID, fields: []const []const u8 } = switch (typeInfo) {
+    const tag: struct { type: TypeID, fields: []const types.EnumField } = switch (typeInfo) {
         .Enum => |enm| .{ .type = enumOrUnionType, .fields = enm.fields },
         .Union => |uni| .{ .type = uni.tag, .fields = typechecker.typeTable.get(uni.tag).Enum.fields },
         else => return common.debug.ShouldBeImpossible(undefined, @src()),
@@ -404,6 +419,7 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
                     name,
                     false,
                     try typechecker.builder.dot(enumOrUnion, caseField.name),
+                    null,
                 );
 
                 const body = try self.statement(bodyPtr);
@@ -556,6 +572,7 @@ fn variableDef(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
             else false
         else false,
         node,
+        decl.node,
     );
     return def; 
 }
@@ -793,7 +810,6 @@ fn block(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
 //
 // Expression
 //
-
 pub fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID) Error!JIR.Ptr {
     if (self.typechecker.folder.attemptEval(exprPtr, ofType)) |_| {
         return self.literal(exprPtr, ofType);
@@ -834,12 +850,40 @@ pub fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID
         .Indexing => self.indexing(expr.value),
         .ExpressionList => self.expressionList(expr.value, ofType),
 
+        .TupleDefinition => self.tuple(expr.value, ofType),
+
         .Call => self.call(false, exprPtr, expr.value, ofType),
 
         .Switch => self.switchExpr(expr.value, ofType),
 
         .Slicing => self.slicing(expr.value, ofType),
     };
+}
+
+fn tuple(self: *Lowerer, exprListPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR.Ptr {
+    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+    const allocator = self.typechecker.builder.allocator;
+
+    const tupleType = self.typechecker.typeTable.get(ofType).Struct;
+    assert(tupleType.isTuple);
+
+    const exprList: defines.OpaquePtr = ast.expressions.items(.value)[exprListPtr];
+    // @Note ofType is the tuple here, or at least it should be.
+
+    const argsRange = defines.Range{
+        .start = ast.extra[exprList],
+        .end = ast.extra[exprList + 1],
+    };
+
+    const args = allocator.alloc(JIR.Ptr, argsRange.len())
+        catch return Error.AllocatorFailure;
+
+    for (argsRange.start..argsRange.end, 0..) |ptr, idx| {
+        const node = try self.expression(ast.extra[ptr], tupleType.fields[idx].valueType);
+        args[idx] = node;
+    }
+
+    return self.typechecker.builder.construct(ofType, args);
 }
 
 fn scoping(self: *Lowerer, _extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
@@ -936,7 +980,7 @@ fn switchExpr(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error
     const enumOrUnionType = try typechecker.typecheckExpression(ast.extra[extraPtr], null);
     const enumOrUnion = try self.expression(ast.extra[extraPtr], enumOrUnionType);
     const typeInfo = typechecker.typeTable.get(enumOrUnionType);
-    const tag: struct { type: TypeID, fields: []const []const u8 } = switch (typeInfo) {
+    const tag: struct { type: TypeID, fields: []const types.EnumField } = switch (typeInfo) {
         .Enum => |enm| .{ .type = enumOrUnionType, .fields = enm.fields },
         .Union => |uni| .{ .type = uni.tag, .fields = typechecker.typeTable.get(uni.tag).Enum.fields },
         else => return common.debug.ShouldBeImpossible(undefined, @src()),
@@ -1038,7 +1082,7 @@ fn call(
 
     for (argsRange.start..argsRange.end, 0..) |ptr, i| {
         args[i] = try self.expression(ast.extra[@intCast(ptr)], try self.typechecker.typecheckExpression(ast.extra[@intCast(ptr)], switch (fti) {
-            .Function => |function| function.argTypes[i],
+            .Function => |function| if (i >= function.argTypes.len) null else function.argTypes[i],
             else => null,
         }));
     }
@@ -1092,14 +1136,17 @@ fn builtinCall(
             break :blk self.typechecker.builder.call(true, builtinUnreach, &.{});
         },
         BI("typeName") => self.typechecker.builder.literal(
-            try self.typechecker.builder.addConstant(.{ .String =
-                try self.typechecker.builder.internString(
-                    try self.typechecker.typeName(self.typechecker.arena.allocator(),
-                        self.typechecker.folder.getValue(
-                            try self.typechecker.folder.expectType(ast.extra[args.at(0)])
-                        ).Type
+            try self.typechecker.builder.addConstant(.{
+                .String = .{
+                    .type = .Cole,
+                    .str = try self.typechecker.builder.internString(
+                        try self.typechecker.typeName(self.typechecker.arena.allocator(),
+                            self.typechecker.folder.getValue(
+                                try self.typechecker.folder.expectType(ast.extra[args.at(0)])
+                            ).Type
+                        )
                     )
-                )
+                }
             })
         ),
         BI("compileLog"), BI("compileError") => 0,
@@ -1244,13 +1291,16 @@ fn dot(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     const exprPtr = ast.extra[extraPtr];
     const exprType = try self.typechecker.typecheckExpression(exprPtr, null);
 
-    var obj = try self.expression(exprPtr, exprType);
     const member = tokens
                     .get(ast.extra[extraPtr + 1])
                     .lexeme(self.typechecker.context, self.typechecker.currentFile);
 
     const ref = std.mem.eql(u8, member, "&");
     const deref = std.mem.eql(u8, member, "*");
+
+    const prev = self.typechecker.folder.setFlag(.ComptimeBanned, ref or deref);
+    defer _ = self.typechecker.folder.setFlag(.ComptimeBanned, prev);
+    var obj = try self.expression(exprPtr, exprType);
 
     switch (self.typechecker.typeTable.get(exprType)) {
         .Array => |arr|
@@ -1367,8 +1417,26 @@ fn identifier(self: *Lowerer, id: defines.ExpressionPtr) Error!JIR.Ptr {
 fn mark(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR.Ptr {
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
     const expr = try self.expression(ast.extra[extraPtr + 2], ofType);
-    try self.typechecker.builder.addMetadata(expr, self.typechecker.getMetadata(ast.extra[extraPtr + 2]) orelse &.{});
+
+    try self.addMetadata(expr, ast.extra[extraPtr + 2]);
     return expr;
+}
+
+pub fn addMetadata(self: *Lowerer, to: JIR.Ptr, from: defines.ExpressionPtr) Error!void {
+    const expressions = self.typechecker.getMetadata(from) orelse &.{};
+
+    const metadata = self.typechecker.arena.allocator().alloc(JIR.Constant.Ptr, expressions.len)
+        catch return Error.AllocatorFailure;
+
+    for (expressions, 0..) |valuePtr, idx| {
+        const constant = try self.addConstant(
+            valuePtr,
+            try self.typechecker.typecheckValue(valuePtr, comptime Comptime.Folder.Builtin.Type("builtin_metadata"))
+        );
+        metadata[idx] = constant;
+    }
+
+    try self.typechecker.builder.addMetadata(to, metadata);
 }
 
 fn literal(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID) Error!JIR.Ptr {

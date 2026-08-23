@@ -28,7 +28,7 @@ pub const Value = union(enum) {
     pub const Ptr = defines.Offset;
 
     Int: i64,
-    Float: f32,
+    Float: f64,
     Bool: bool,
     Enum: struct {
         Type: TypeID,
@@ -48,7 +48,13 @@ pub const Value = union(enum) {
         Type: TypeID,
         To: Value.Ptr,
     },
-    String: []const u8,
+    String: struct {
+        type: enum {
+            Cole,
+            C,
+        },
+        str: []const u8,
+    },
     Slice: struct {
         const Self = @This();
 

@@ -1,5 +1,5 @@
 code {
-    #include "raylib.h"
+    #include <raylib.h>
 }
 
 pub let Color = #(@extern) struct {
@@ -12,162 +12,151 @@ pub let Color = #(@extern) struct {
     pub let White = Color(255, 255, 255, 255);
 };
 
-pub let KeyboardKey = u32;
-pub let NULL: KeyboardKey = 0;
-pub let APOSTROPHE: KeyboardKey = 39;
-pub let COMMA: KeyboardKey = 44;
-pub let MINUS: KeyboardKey = 45;
-pub let PERIOD: KeyboardKey = 46;
-pub let SLASH: KeyboardKey = 47;
-pub let ZERO: KeyboardKey = 48;
-pub let ONE: KeyboardKey = 49;
-pub let TWO: KeyboardKey = 50;
-pub let THREE: KeyboardKey = 51;
-pub let FOUR: KeyboardKey = 52;
-pub let FIVE: KeyboardKey = 53;
-pub let SIX: KeyboardKey = 54;
-pub let SEVEN: KeyboardKey = 55;
-pub let EIGHT: KeyboardKey = 56;
-pub let NINE: KeyboardKey = 57;
-pub let SEMICOLON: KeyboardKey = 59;
-pub let EQUAL: KeyboardKey = 61;
-pub let A: KeyboardKey = 65;
-pub let B: KeyboardKey = 66;
-pub let C: KeyboardKey = 67;
-pub let D: KeyboardKey = 68;
-pub let E: KeyboardKey = 69;
-pub let F: KeyboardKey = 70;
-pub let G: KeyboardKey = 71;
-pub let H: KeyboardKey = 72;
-pub let I: KeyboardKey = 73;
-pub let J: KeyboardKey = 74;
-pub let K: KeyboardKey = 75;
-pub let L: KeyboardKey = 76;
-pub let M: KeyboardKey = 77;
-pub let N: KeyboardKey = 78;
-pub let O: KeyboardKey = 79;
-pub let P: KeyboardKey = 80;
-pub let Q: KeyboardKey = 81;
-pub let R: KeyboardKey = 82;
-pub let S: KeyboardKey = 83;
-pub let T: KeyboardKey = 84;
-pub let U: KeyboardKey = 85;
-pub let V: KeyboardKey = 86;
-pub let W: KeyboardKey = 87;
-pub let X: KeyboardKey = 88;
-pub let Y: KeyboardKey = 89;
-pub let Z: KeyboardKey = 90;
-pub let LEFT_BRACKET: KeyboardKey = 91;
-pub let BACKSLASH: KeyboardKey = 92;
-pub let RIGHT_BRACKET: KeyboardKey = 93;
-pub let GRAVE: KeyboardKey = 96;
-pub let SPACE: KeyboardKey = 32;
-pub let ESCAPE: KeyboardKey = 256;
-pub let ENTER: KeyboardKey = 257;
-pub let TAB: KeyboardKey = 258;
-pub let BACKSPACE: KeyboardKey = 259;
-pub let INSERT: KeyboardKey = 260;
-pub let DELETE: KeyboardKey = 261;
-pub let RIGHT: KeyboardKey = 262;
-pub let LEFT: KeyboardKey = 263;
-pub let DOWN: KeyboardKey = 264;
-pub let UP: KeyboardKey = 265;
-pub let PAGE_UP: KeyboardKey = 266;
-pub let PAGE_DOWN: KeyboardKey = 267;
-pub let HOME: KeyboardKey = 268;
-pub let END: KeyboardKey = 269;
-pub let CAPS_LOCK: KeyboardKey = 280;
-pub let SCROLL_LOCK: KeyboardKey = 281;
-pub let NUM_LOCK: KeyboardKey = 282;
-pub let PRINT_SCREEN: KeyboardKey = 283;
-pub let PAUSE: KeyboardKey = 284;
-pub let F1: KeyboardKey = 290;
-pub let F2: KeyboardKey = 291;
-pub let F3: KeyboardKey = 292;
-pub let F4: KeyboardKey = 293;
-pub let F5: KeyboardKey = 294;
-pub let F6: KeyboardKey = 295;
-pub let F7: KeyboardKey = 296;
-pub let F8: KeyboardKey = 297;
-pub let F9: KeyboardKey = 298;
-pub let F10: KeyboardKey = 299;
-pub let F11: KeyboardKey = 300;
-pub let F12: KeyboardKey = 301;
-pub let LEFT_SHIFT: KeyboardKey = 340;
-pub let LEFT_CONTROL: KeyboardKey = 341;
-pub let LEFT_ALT: KeyboardKey = 342;
-pub let LEFT_SUPER: KeyboardKey = 343;
-pub let RIGHT_SHIFT: KeyboardKey = 344;
-pub let RIGHT_CONTROL: KeyboardKey = 345;
-pub let RIGHT_ALT: KeyboardKey = 346;
-pub let RIGHT_SUPER: KeyboardKey = 347;
-pub let KB_MENU: KeyboardKey = 348;
-pub let KP_0: KeyboardKey = 320;
-pub let KP_1: KeyboardKey = 321;
-pub let KP_2: KeyboardKey = 322;
-pub let KP_3: KeyboardKey = 323;
-pub let KP_4: KeyboardKey = 324;
-pub let KP_5: KeyboardKey = 325;
-pub let KP_6: KeyboardKey = 326;
-pub let KP_7: KeyboardKey = 327;
-pub let KP_8: KeyboardKey = 328;
-pub let KP_9: KeyboardKey = 329;
-pub let KP_DECIMAL: KeyboardKey = 330;
-pub let KP_DIVIDE: KeyboardKey = 331;
-pub let KP_MULTIPLY: KeyboardKey = 332;
-pub let KP_SUBTRACT: KeyboardKey = 333;
-pub let KP_ADD: KeyboardKey = 334;
-pub let KP_ENTER: KeyboardKey = 335;
-pub let KP_EQUAL: KeyboardKey = 336;
-pub let BACK: KeyboardKey = 4;
-pub let MENU: KeyboardKey = 5;
-pub let VOLUME_UP: KeyboardKey = 24;
-pub let VOLUME_DOWN: KeyboardKey = 25;
-
-pub let InitWindow = fn (width: i32, height: i32, title: []u8) -> void  { code { InitWindow(width, height, title.ptr); } };
-pub let CloseWindow = fn () -> void { code { CloseWindow(); } };
-pub let ClearBackground = fn (color: Color) -> void { code { ClearBackground(color); } };
-pub let BeginDrawing = fn () -> void { code { BeginDrawing(); } };
-pub let EndDrawing = fn () -> void { code { EndDrawing(); } };
-pub let SetTargetFPS = fn (fps: i32 ) -> void { code { SetTargetFPS(fps); } };
-
-pub let IsKeyDown = fn (key: KeyboardKey) -> bool {
-    let res: mut bool = false;
-    code { res = IsKeyDown(key); }
-    return res;
+pub let KeyboardKey = #(@extern) enum {
+    NULL = 0,
+    APOSTROPHE = 39,
+    COMMA = 44,
+    MINUS = 45,
+    PERIOD = 46,
+    SLASH = 47,
+    ZERO = 48,
+    ONE = 49,
+    TWO = 50,
+    THREE = 51,
+    FOUR = 52,
+    FIVE = 53,
+    SIX = 54,
+    SEVEN = 55,
+    EIGHT = 56,
+    NINE = 57,
+    SEMICOLON = 59,
+    EQUAL = 61,
+    A = 65,
+    B = 66,
+    C = 67,
+    D = 68,
+    E = 69,
+    F = 70,
+    G = 71,
+    H = 72,
+    I = 73,
+    J = 74,
+    K = 75,
+    L = 76,
+    M = 77,
+    N = 78,
+    O = 79,
+    P = 80,
+    Q = 81,
+    R = 82,
+    S = 83,
+    T = 84,
+    U = 85,
+    V = 86,
+    W = 87,
+    X = 88,
+    Y = 89,
+    Z = 90,
+    LEFT_BRACKET = 91,
+    BACKSLASH = 92,
+    RIGHT_BRACKET = 93,
+    GRAVE = 96,
+    SPACE = 32,
+    ESCAPE = 256,
+    ENTER = 257,
+    TAB = 258,
+    BACKSPACE = 259,
+    INSERT = 260,
+    DELETE = 261,
+    RIGHT = 262,
+    LEFT = 263,
+    DOWN = 264,
+    UP = 265,
+    PAGE_UP = 266,
+    PAGE_DOWN = 267,
+    HOME = 268,
+    END = 269,
+    CAPS_LOCK = 280,
+    SCROLL_LOCK = 281,
+    NUM_LOCK = 282,
+    PRINT_SCREEN = 283,
+    PAUSE = 284,
+    F1 = 290,
+    F2 = 291,
+    F3 = 292,
+    F4 = 293,
+    F5 = 294,
+    F6 = 295,
+    F7 = 296,
+    F8 = 297,
+    F9 = 298,
+    F10 = 299,
+    F11 = 300,
+    F12 = 301,
+    LEFT_SHIFT = 340,
+    LEFT_CONTROL = 341,
+    LEFT_ALT = 342,
+    LEFT_SUPER = 343,
+    RIGHT_SHIFT = 344,
+    RIGHT_CONTROL = 345,
+    RIGHT_ALT = 346,
+    RIGHT_SUPER = 347,
+    KB_MENU = 348,
+    KP_0 = 320,
+    KP_1 = 321,
+    KP_2 = 322,
+    KP_3 = 323,
+    KP_4 = 324,
+    KP_5 = 325,
+    KP_6 = 326,
+    KP_7 = 327,
+    KP_8 = 328,
+    KP_9 = 329,
+    KP_DECIMAL = 330,
+    KP_DIVIDE = 331,
+    KP_MULTIPLY = 332,
+    KP_SUBTRACT = 333,
+    KP_ADD = 334,
+    KP_ENTER = 335,
+    KP_EQUAL = 336,
+    BACK = 4,
+    MENU = 5,
+    VOLUME_UP = 24,
+    VOLUME_DOWN = 25,
 };
 
-pub let GetFrameTime = fn () -> float {
-    let res: mut float = 0;
-    code { res = GetFrameTime(); }
-    return res;
-};
+pub let InitWindow = #(@extern) fn (width: c_int, height: c_int, title: [@c]c_char) -> void  { };
+pub let CloseWindow = #(@extern) fn () -> void { };
+pub let ClearBackground = #(@extern) fn (color: Color) -> void { };
+pub let BeginDrawing = #(@extern) fn () -> void { };
+pub let EndDrawing = #(@extern) fn () -> void { };
+pub let SetTargetFPS = #(@extern) fn (fps: c_int) -> void { };
 
-pub let DrawCircle = fn (
+pub let IsKeyDown = #(@extern) fn (key: c_int) -> bool { };
+
+pub let GetFrameTime = #(@extern) fn () -> float { };
+
+pub let DrawCircle = #(@extern) fn (
     centerX: i32,
     centerY: i32,
     radius: float,
     color: Color
-) -> void { code { DrawCircle(centerX, centerY, radius, color); } };
+) -> void { };
 
-pub let DrawText = fn (
-    text: []u8,
-    posX: i32,
-    posY: i32,
-    fontSize: i32,
+pub let DrawText = #(@extern) fn (
+    text: [@c]c_char,
+    posX: c_int,
+    posY: c_int,
+    fontSize: c_int,
     color: Color
-) -> void{ code { DrawText(text.ptr, posX, posY, fontSize, color); } };
+) -> void { };
 
-pub let DrawRectangle = fn (
-    posX: i32,
-    posY: i32,
-    width: i32,
-    height: i32,
+pub let DrawRectangle = #(@extern) fn (
+    posX: c_int,
+    posY: c_int,
+    width: c_int,
+    height: c_int,
     color: Color
-) -> void { code { DrawRectangle(posX, posY, width, height, color); } };
+) -> void { };
 
-pub let WindowShouldClose = fn () -> bool {
-    let res: mut bool = false;
-    code { res = WindowShouldClose(); }
-    return res;
-};
+pub let WindowShouldClose = #(@extern) fn () -> mut bool { };

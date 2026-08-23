@@ -19,17 +19,16 @@
         Console I/O utilities.
 */
 
-code {
-    #include <stdio.h>
-}
-
 /* Output */
+let printf = #(@extern) fn (msg: [@c]c_char) -> void {};
+
 pub let println = fn (msg: []u8) -> void {
-    code { printf("%s\n", msg.ptr); }
+    printf(msg.ptr);
+    printf("\n");
 };
 
 pub let print = fn (msg: []u8) -> void {
-    code { printf("%s", msg.ptr); }
+    printf(msg.ptr);
 };
 
 /* Input */

@@ -95,9 +95,27 @@ pub const Constant = union(enum) {
         u32: u32,
         i8: i8,
         u8: u8,
+
+        c_int: c_int,
+        c_uint: c_uint,
+        c_char: c_char,
+        c_uchar: u8,
+        c_long: c_long,
+        c_ulong: c_ulong,
+        c_short: c_short,
+        c_ushort: c_ushort,
     },
-    String: defines.StringPtr,
-    Float: f32,
+    String: struct {
+        type: enum {
+            C,
+            Cole,
+        },
+        str: defines.StringPtr,
+    },
+    Float: union(enum) {
+        f32: f32,
+        f64: f64,
+    },
     Aggregate: ConstantArray, 
     Array: ConstantArray,
     Undefined: TypeID,
@@ -116,6 +134,7 @@ pub const Function = struct {
     body: JIR.Ptr,
     source: defines.FilePtr,
     scope: defines.ScopePtr,
+    expr: defines.ExpressionPtr,
 };
 
 const JIR = @This();
@@ -202,8 +221,9 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
     \\#define COLE_CODEGEN_C_FORWARD_DECL_H
     \\
     \\#include <stdint.h>
+    \\#include <stdbool.h>
     \\
-    \\typedef uint8_t cole_bool;
+    \\typedef bool cole_bool;
     \\
     \\
     , .{});
@@ -405,9 +425,10 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
                 _ = std.mem.replace(u8, name, ":", "_", @constCast(name));
                 try self.write(out, "typedef enum __attribute__((aligned (sizeof(uint32_t)))) {s} {{\n", .{name});
                 for (enm.fields) |field| {
-                    try self.write(out, "\t{s}_{s},\n", .{
+                    try self.write(out, "\t{s}_{s} = {d},\n", .{
                         name,
-                        field,
+                        field.name,
+                        field.value,
                     });
                 }
                 try self.write(out, "}} {s};\n\n", .{
@@ -471,10 +492,13 @@ fn discoverFunctionsAndTypes(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void 
 
             _ = std.mem.replace(u8, self.strings[self.data[node.value]], "::", "__", @constCast(self.strings[self.data[node.value]]));
             _ = std.mem.replace(u8, self.strings[func.name], "::", "__", @constCast(self.strings[func.name]));
-            try self.write(out, "{s} {s}({s});\n\n", .{
+            try self.write(out, "{s}{s} {s}({s}{s});\n\n", .{
+                if (self.hasMetadata(nodePtr, "@extern")) "extern " else "",
                 try self.getCName(typeInfo.returnType, null, false, false),
                 self.strings[func.name],
-                args
+                args,
+                if (typeInfo.variadic) ", ..."
+                else "",
             });
         },
 
@@ -520,7 +544,7 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
             const name = self.strings[func.name];
             const typeInfo = self.types.get(func.signature).Function;
 
-            if (typeInfo.isComptime) {
+            if (typeInfo.isComptime or self.hasMetadata(nodePtr, "@extern")) {
                 return;
             }
 
@@ -551,7 +575,12 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
                 return;
             }
 
-            if (info.isComptime(undefined)) {
+            // @Beware @Note Remove the false if you want constants to not be declared.
+            if (false and info.isComptime(undefined)) {
+                return;
+            }
+
+            if (self.hasMetadata(nodePtr, "@extern")) {
                 return;
             }
 
@@ -743,8 +772,19 @@ fn literal(self: *JIR, out: *Writer, ptr: Constant.Ptr) Error!void {
             .u32 => |t| self.write(out, "{d}", .{t}),
             .i8 => |t| self.write(out, "{d}", .{t}),
             .u8 => |t| self.write(out, "{d}", .{t}),
+            .c_int => |t| self.write(out, "{d}", .{t}),
+            .c_uint => |t| self.write(out, "{d}", .{t}),
+            .c_char => |t| self.write(out, "{d}", .{t}),
+            .c_uchar => |t| self.write(out, "{d}", .{t}),
+            .c_long => |t| self.write(out, "{d}", .{t}),
+            .c_ulong => |t| self.write(out, "{d}", .{t}),
+            .c_short => |t| self.write(out, "{d}", .{t}),
+            .c_ushort => |t| self.write(out, "{d}", .{t}),
         },
-        .Float => |fl| self.write(out, "{}", .{fl}),
+        .Float => |fl| switch (fl) {
+            .f32 => |f| self.write(out, "{d}", .{f}),
+            .f64 => |f| self.write(out, "{d}", .{f}),
+        },
         .Function => |name| {
             const str = @constCast(self.strings[name]);
             _ = std.mem.replace(u8, str, "::", "__", str);
@@ -774,13 +814,21 @@ fn literal(self: *JIR, out: *Writer, ptr: Constant.Ptr) Error!void {
             }
             try self.write(out, "}}", .{ });
         },
-        .String => |str| {
-            const rstr = self.strings[str];
-            try self.write(out, "({s}){{(uint8_t*)\"{s}\", {d}}}", .{
-                try self.getCName(Comptime.Folder.Builtin.Type("[]u8"), null, true, false),
-                rstr,
-                rstr.len,
-            });
+        .String => |str| switch (str.type) {
+            .C => {
+                const rstr = self.strings[str.str];
+                try self.write(out, "((char const*)\"{s}\")", .{
+                    rstr,
+                });
+            },
+            .Cole => {
+                const rstr = self.strings[str.str];
+                try self.write(out, "({s}){{(uint8_t*)\"{s}\", {d}}}", .{
+                    try self.getCName(Comptime.Folder.Builtin.Type("[]u8"), null, true, false),
+                    rstr,
+                    rstr.len,
+                });
+            }
         },
     };
 }
@@ -801,6 +849,55 @@ fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool
             common.log.err("Unsupported {s}", .{@tagName(typeInfo)});
             return common.debug.ShouldBeImpossible(self.context.log, @src());
         },
+
+        .CInt => |m| return
+            if (m) "int"
+            else if (noSymbol) "int_const"
+            else "int const",
+
+        .CUInt => |m| return
+            if (m and !noSymbol) "unsigned int"
+            else if (m and noSymbol) "unsigned_int"
+            else if (noSymbol) "unsigned_int_const"
+            else "unsigned int const",
+
+        .CChar => |m| return
+            if (m) "char"
+            else if (noSymbol) "char_const"
+            else "char const",
+
+        .CUChar => |m| return
+            if (m and !noSymbol) "unsigned char"
+            else if (m and noSymbol) "unsigned_char"
+            else if (noSymbol) "unsigned_char_const"
+            else "unsigned char const",
+
+        .CDouble => |m| return
+            if (m) "double"
+            else if (noSymbol) "double_const"
+            else "double const",
+
+        .CLong => |m| return
+            if (m) "long"
+            else if (noSymbol) "long_const"
+            else "long const",
+
+        .CULong => |m| return
+            if (m and !noSymbol) "unsigned long"
+            else if (m and noSymbol) "unsigned_long"
+            else if (noSymbol) "unsigned_long_const"
+            else "unsigned long const",
+
+        .CShort => |m| return
+            if (m) "short"
+            else if (noSymbol) "short_const"
+            else "short const",
+
+        .CUShort => |m| return
+            if (m and !noSymbol) "unsigned short"
+            else if (m and noSymbol) "unsigned_short"
+            else if (noSymbol) "unsigned_short_const"
+            else "unsigned short const",
 
         .Void => return "void",
         .Noreturn => return
@@ -911,11 +1008,16 @@ fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool
                 }) catch return Error.AllocatorFailure;
             },
             .Single, .C => {
-                name = std.fmt.allocPrint(self.allocator, "{s}{s}{s}", .{
-                    try self.getCName(ptr.child, _name, false, noSymbol),
-                    if (noSymbol) "_ptr" else "*",
-                    if (ptr.mutable) "" else " const",
-                }) catch return Error.AllocatorFailure;
+                if (ptr.child == comptime Comptime.Folder.Builtin.Type("u8")) {
+                    name = if (noSymbol) "char_const_ptr" else "char const*";
+                }
+                else {
+                    name = std.fmt.allocPrint(self.allocator, "{s}{s}{s}", .{
+                        try self.getCName(ptr.child, _name, false, noSymbol),
+                        if (noSymbol) "_ptr" else "*",
+                        if (ptr.mutable) "" else " const",
+                    }) catch return Error.AllocatorFailure;
+                }
             },
         },
     }
@@ -959,4 +1061,35 @@ fn write(_: *JIR, out: *Writer, comptime msg: []const u8, args: anytype) Error!v
 fn writeln(self: *JIR, out: *Writer, comptime msg: []const u8, args: anytype) Error!void {
     try self.indentf(out);
     return out.print(msg, args) catch Error.IOError;
+}
+
+pub fn hasMetadata(
+    self: *const JIR,
+    _value: JIR.Ptr,
+    _meta: []const u8,
+) bool {
+    return
+        if (self.getMetadata(_value)) |metadata| blk: {
+            for (metadata) |meta| {
+                const constant = self.constants.get(meta);
+                switch (constant) {
+                    .Aggregate => |agg|
+                        if (agg.type == Comptime.Folder.Builtin.Type("builtin_metadata")) {
+                            const enumValue = self.constants.get(agg.data.start).Integer.u32;
+                            if (enumValue == Comptime.Folder.Builtin.Metadata(_meta)) break :blk true;
+                        },
+                    else => { },
+                }
+            }
+
+            break :blk false;
+        }
+        else false;
+}
+
+pub fn getMetadata(
+    self: *const JIR,
+    value: defines.ExpressionPtr,
+) ?[]const defines.ExpressionPtr {
+    return self.metadata.get(value);
 }

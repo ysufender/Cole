@@ -611,7 +611,8 @@ fn resolveExpression(self: *Resolver, exprPtr: defines.ExpressionPtr) Error!void
 
             for (fields.start..fields.end, 0..) |fieldPtrPtr, i| {
                 if (try self.resolveSignature(ast.extra[fieldPtrPtr], .Field, .Enum, i)) {
-                    const lexeme = tokens.get(ast.signatures.get(ast.extra[fieldPtrPtr]).name).lexeme(self.context, self.dataIndex());
+                    const nameToken = ast.extra[ast.extra[fieldPtrPtr]];
+                    const lexeme = tokens.get(nameToken).lexeme(self.context, self.dataIndex());
                     self.report("Given field '{s}' is already present in the enum body.", .{lexeme});
                     return Error.DuplicateSymbol;
                 }
@@ -812,6 +813,7 @@ fn resolveExpression(self: *Resolver, exprPtr: defines.ExpressionPtr) Error!void
             }
         },
         .Dot => try self.resolveExpression(ast.extra[expr.value]),
+        .TupleDefinition => try self.resolveExpression(expr.value),
         else => {},
     }
 }
@@ -930,9 +932,23 @@ fn resolveSignature(
                     @compileError("Illegal signature type.");
                 }
 
-                const field = tokens.get(signaturePtr);
+                const enumField: struct {
+                    name: defines.TokenPtr,
+                    isAssigned: u32,
+                    assignment: defines.ExpressionPtr,
+                } = .{
+                    .name = ast.extra[signaturePtr],
+                    .isAssigned = ast.extra[signaturePtr + 1],
+                    .assignment = ast.extra[signaturePtr + 2],
+                };
+
+                const field = tokens.get(enumField.name);
                 self.lastToken = signaturePtr;
                 const lexeme = field.lexeme(self.context, self.dataIndex());
+
+                if (enumField.isAssigned == 1) {
+                    try self.resolveExpression(enumField.assignment);
+                }
 
                 const isPresent = self.lookup.getOrPut(allocator, .{ .name = lexeme, .scope = self.currentScope })
                     catch return Error.AllocatorFailure;
@@ -1253,6 +1269,7 @@ fn getModuleName(self: *Resolver, module: defines.ExpressionPtr) []const u8 {
 
 pub const builtins = [_][]const u8 {
     "u32", "i32", "u8", "i8", "bool",
+    "c_int", "c_uint", "c_char", "c_uchar", "c_double", "c_long", "c_ulong", "c_short", "c_ushort",
     "float", "void", "comptime_int", "comptime_float",
     "type", "noreturn", "enum_literal", "any",
 
@@ -1260,7 +1277,7 @@ pub const builtins = [_][]const u8 {
     "bitSizeOf", "unreachable", "enumStr", "typeOf",
     "field", "fieldIndex", "hasDef", "definitionIndex",
     "this", "sizeOf", "bitSet", "cast", "unsafeCast",
-    "as", "compileLog", "typeName",
+    "as", "compileLog", "typeName", "Tuple",
 };
 
 pub fn BuiltinIndex(comptime builtin: []const u8) u32 {

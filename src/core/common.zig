@@ -139,5 +139,8 @@ pub const CompilerError = error {
     EarlyEval,
     StackOverflow,
     StackUnderflow,
+    ExternComptime,
+    NonExternVariadicFunction,
+    UnnamedVariadic,
     Terminate,
 };

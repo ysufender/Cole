@@ -1,4 +1,4 @@
-// @Note Lowering to C IR is requested by the typechecker,
+// @Note Lowering to C IR is requested by the typechecker,typechecker
 // but it is done by the lowerer.zig, which makes calls to
 // JIR.Builder since JIR.Builder itself doesn't know about
 // untyped AST.
@@ -170,6 +170,7 @@ pub fn typecheck(self: *Typechecker, allocator: Allocator) Error!Resolution {
         .{ .Function = .{
             .mutable = false,
             .isComptime = false,
+            .variadic = false,
             .argTypes = &.{ entryPointID + 1 },
             .returnType = Comptime.Folder.Builtin.Type("i32"),
         }},
@@ -291,8 +292,18 @@ fn typecheckVariableDef(
     blk: switch (self.typeTable.get(initializer)) {
         .Type => {
             const newType = self.folder.getValue(try self.folder.eval(decl.node, expected)).Type;
-
             const typeInfo = self.typeTable.get(newType);
+
+            const prevName = self.builder.getInternedString(switch (typeInfo) {
+                .Struct => |str| str.name,
+                .Union => |uni| uni.name,
+                .Enum => |enm| enm.name,
+                else => return common.debug.ShouldBeImpossible(undefined, @src()),
+            });
+
+            if (!std.mem.startsWith(u8, prevName, "__")) {
+                break :blk;
+            }
 
             const ast = self.context.getAST(self.currentFile);
             const tokens = self.context.getTokens(ast.tokens);
@@ -332,6 +343,7 @@ fn typecheckVariableDef(
                         .definitions = str.definitions,
                         .external = str.external,
                         .scope = str.scope,
+                        .isTuple = str.isTuple,
                     },
                 },
 
@@ -419,6 +431,13 @@ fn typecheckVariableDef(
             }
         },
         .Function => {
+            const val = try self.folder.eval(decl.node, expected);
+            const func = &self.folder.memory.items[val].Function;
+            const prevName = self.builder.getInternedString(func.name);
+            if (!std.mem.startsWith(u8, prevName, "__")) {
+                break :blk;
+            }
+
             const ast = self.context.getAST(self.currentFile);
             const tokens = self.context.getTokens(ast.tokens);
 
@@ -439,7 +458,11 @@ fn typecheckVariableDef(
                 else try self.folder.generateRandomNameString(.Function);
 
             const newName =
-                if (self.hasMetadata(decl.node, "@export") and decl.topLevel) symName
+                if (
+                    self.hasMetadata(func.expr, "@export")
+                    or self.hasMetadata(func.expr, "@extern")
+                    and decl.topLevel
+                ) symName
                 else if (!decl.topLevel) namespace
                 else std.fmt.allocPrint(self.arena.allocator(), "{s}::{s}", .{
                     namespace,
@@ -452,8 +475,6 @@ fn typecheckVariableDef(
                 return Error.ExportOfMainFunction;
             }
 
-            const val = try self.folder.eval(decl.node, expected);
-            const func = &self.folder.memory.items[val].Function;
             self.builder.modifyInternedString(func.name, newName);
             func.name = try self.builder.internString(newName);
 
@@ -616,13 +637,13 @@ fn typecheckSwitchStatementOnUnion(
 
                 if (fieldMap.isSet(enumeration)) {
                     self.report("Duplicate switch case '{s}'.", .{
-                        tag.fields[enumeration],
+                        tag.fields[enumeration].name,
                     });
                     return Error.DuplicateSwitchCase;
                 }
 
                 fieldMap.set(enumeration);
-                break :blk tag.fields[enumeration];
+                break :blk tag.fields[enumeration].name;
             };
 
         const prev = self.currentScope;
@@ -666,7 +687,7 @@ fn typecheckSwitchStatementOnUnion(
         while (iterator.next()) |field| {
             const fieldName = tag.fields[field];
             common.log.err(("." ** 4) ++ " {s}", .{
-                fieldName,
+                fieldName.name,
             });
         }
 
@@ -720,7 +741,7 @@ fn typecheckSwitchStatementOnEnum(
 
             if (fieldMap.isSet(enumeration)) {
                 self.report("Duplicate switch case '{s}'.", .{
-                    enm.fields[enumeration],
+                    enm.fields[enumeration].name,
                 });
                 return Error.DuplicateSwitchCase;
             }
@@ -760,7 +781,7 @@ fn typecheckSwitchStatementOnEnum(
         while (iterator.next()) |field| {
             const fieldName = enm.fields[field];
             common.log.err(("." ** 4) ++ " {s}", .{
-                fieldName,
+                fieldName.name,
             });
         }
 
@@ -1011,7 +1032,53 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
             });
             return Error.IllegalSyntax;
         },
+
+        .TupleDefinition => self.typecheckTupleDefinition(expr.value),
     };
+}
+
+pub fn typecheckTupleDefinition(self: *Typechecker, exprListPtr: defines.OpaquePtr) Error!TypeID {
+    const ast = self.context.getAST(self.currentFile);
+    const allocator = self.arena.allocator();
+
+    const exprList: defines.OpaquePtr = ast.expressions.items(.value)[exprListPtr];
+
+    const range = defines.Range{
+        .start = ast.extra[exprList],
+        .end = ast.extra[exprList + 1],
+    };
+
+    var fields = allocator.alloc(Types.FieldInfo, range.len())
+        catch return Error.AllocatorFailure;
+
+    for (range.start..range.end, 0..) |ptr, idx| {
+        const exprPtr = ast.extra[ptr];
+        const fieldType = try self.typecheckExpression(exprPtr, null);
+
+        const name = std.fmt.allocPrint(allocator, "_{d}", .{idx})
+            catch return Error.AllocatorFailure;
+
+        fields[idx] = .{
+            .name = try self.builder.internString(name),
+            .isComptime = self.typeTable.get(fieldType).isComptime(undefined),
+            .public = true,
+            .valueType = fieldType,
+        };
+    }
+
+    const newType = TypeInfo{
+        .Struct = .{
+            .name = try self.folder.generateRandomName(.Tuple),
+            .fields = fields,
+            .definitions = &.{},
+            .external = false,
+            .mutable = false,
+            .scope = 0,
+            .isTuple = true,
+        },
+    };
+
+    return self.registerType(newType);
 }
 
 pub fn typecheckIfExpression(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID) Error!TypeID {
@@ -1337,7 +1404,7 @@ pub fn typecheckScoping(self: *Typechecker, expr: defines.ExpressionPtr) Error!T
     switch (lhsType) {
         .Enum => |enm| {
             for (enm.fields) |field| {
-                if (std.mem.eql(u8, field, member)) {
+                if (std.mem.eql(u8, field.name, member)) {
                     return lhsTypeID;
                 }
             }
@@ -1413,6 +1480,7 @@ pub fn discoverScopeDef(
                     .fields = str.fields,
                     .external = str.external,
                     .mutable = str.mutable,
+                    .isTuple = str.isTuple,
                 },
             });
         },
@@ -1434,12 +1502,6 @@ pub fn discoverScopeDef(
             });
         },
         else => return common.debug.ShouldBeImpossible(self.context.log, @src()),
-    }
-
-    if (self.typeTable.get(discoveredType) == .Function) {
-        const func = &self.folder.memory.items[try self.folder.evalDecl(decl, discoveredType)].Function;
-        const funcPtr = try self.builder.addFunction(func.*);
-        try self.builder.functionDef(func.name, funcPtr);
     }
 
     return discoveredType;
@@ -1512,15 +1574,7 @@ pub fn typecheckCall(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpec
         ast.extra[exprList + 1]
     ];
 
-    if (args.len != func.argTypes.len) {
-        self.report("Mismatching argument counts in function call. Expected {d}, received {d}.", .{
-            func.argTypes.len,
-            args.len,
-        });
-        return Error.ArgumentCountMismatch;
-    }
-
-    for (func.argTypes, args, 0..) |argType, expr, index| {
+    for (func.argTypes, args[0..func.argTypes.len], 0..) |argType, expr, index| {
         const exprType = try self.typecheckExpression(expr, argType);
 
         self.assertCanCoerce(argType, exprType) catch {
@@ -1533,6 +1587,14 @@ pub fn typecheckCall(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpec
             });
             return Error.TypeMismatch;
         };
+    }
+
+    if (args.len != func.argTypes.len and !func.variadic) {
+        self.report("Mismatching argument counts in function call. Expected {d}, received {d}.", .{
+            func.argTypes.len,
+            args.len,
+        });
+        return Error.ArgumentCountMismatch;
     }
 
     return func.returnType;
@@ -1549,6 +1611,7 @@ pub fn typecheckBuiltinCall(self: *Typechecker, extraPtr: defines.ExpressionPtr,
         BI("compileError") => return self.folder.evalCompileError(extraPtr),
         BI("sizeOf") => return Comptime.Folder.Builtin.Type("u32"),
         BI("typeName") => return Comptime.Folder.Builtin.Type("[]u8"),
+        BI("Tuple") => return Comptime.Folder.Builtin.Type("type"),
         BI("compileLog") => {
             _ = try self.folder.evalCompileLog(extraPtr);
             return Comptime.Folder.Builtin.Type("void");
@@ -1866,6 +1929,14 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
         .Field => self.typecheckField(&decl),
     };
 
+    if (self.hasMetadata(decl.node, "@extern")) {
+        const symName = tokens.get(decl.token).lexeme(self.context, self.currentFile);
+        const name = try self.builder.internString(symName);
+
+        self.symbols.declarations.items(.name)[declPtr] = name;
+        decl.name = name;
+    }
+
     // @Note preventing the caching of declarations when inside a comptime call.
     // Since they'll get their own declarations and scopes, it is fine.
     isPresent.value_ptr.* = .{
@@ -2028,10 +2099,9 @@ pub fn typecheckMark(
 ) Error!TypeID {
     // @Note In case of the mark of a mark, ptr is the marked this, which is the
     // current mark.
-    if (self.getMetadata(ptr)) |_| {
-        self.report("Redundant marking of already marked expression.", .{ });
-        return Error.RedundantMark;
-    }
+    const existingMeta =
+        if (self.getMetadata(ptr)) |meta| meta
+        else &.{};
 
     const ast = self.context.getAST(self.currentFile);
 
@@ -2040,7 +2110,7 @@ pub fn typecheckMark(
         .end = ast.extra[extraPtr + 1], 
     };
 
-    const metadata = self.arena.allocator().alloc(Comptime.Value.Ptr, marks.len())
+    const metadata = self.arena.allocator().alloc(Comptime.Value.Ptr, marks.len() + existingMeta.len)
         catch return Error.AllocatorFailure;
 
     for (0..marks.len()) |index| {
@@ -2050,8 +2120,12 @@ pub fn typecheckMark(
         );
     }
 
+    // @Note @Beware ugly workaround, forward the markings to the inner mark.
+    @memcpy(metadata[marks.len()..], existingMeta);
+
     const marked = ast.extra[extraPtr + 2];
     try self.setMetadata(marked, metadata);
+    try self.setMetadata(ptr, metadata);
     return self.typecheckExpression(marked, maybeExpected);
 }
 
@@ -2372,13 +2446,13 @@ fn typecheckSwitchOnUnion(
 
                 if (fieldMap.isSet(enumeration)) {
                     self.report("Duplicate switch case '{s}'.", .{
-                        tag.fields[enumeration],
+                        tag.fields[enumeration].name,
                     });
                     return Error.DuplicateSwitchCase;
                 }
 
                 fieldMap.set(enumeration);
-                break :blk tag.fields[enumeration];
+                break :blk tag.fields[enumeration].name;
             };
 
         const prev = self.currentScope;
@@ -2433,7 +2507,7 @@ fn typecheckSwitchOnUnion(
         while (iterator.next()) |field| {
             const fieldName = tag.fields[field];
             common.log.err(("." ** 4) ++ " {s}", .{
-                fieldName,
+                fieldName.name,
             });
         }
 
@@ -2493,13 +2567,13 @@ fn typecheckSwitchOnEnum(
 
                 if (fieldMap.isSet(enumeration)) {
                     self.report("Duplicate switch case '{s}'.", .{
-                        enm.fields[enumeration],
+                        enm.fields[enumeration].name,
                     });
                     return Error.DuplicateSwitchCase;
                 }
 
                 fieldMap.set(enumeration);
-                break :blk enm.fields[enumeration];
+                break :blk enm.fields[enumeration].name;
             };
 
         const captureCount = ast.extra[case + 1];
@@ -2545,7 +2619,7 @@ fn typecheckSwitchOnEnum(
         while (iterator.next()) |field| {
             const fieldName = enm.fields[field];
             common.log.err(("." ** 4) ++ " {s}", .{
-                fieldName,
+                fieldName.name,
             });
         }
 
@@ -2639,6 +2713,13 @@ pub fn dumpCallStack(self: *Typechecker) void {
 }
 
 pub fn assertCastable(self: *Typechecker, from: TypeID, to: TypeID, unsafe: bool) Error!void {
+    blk: {
+        self.assertCanCoerce(from, to) catch {
+            break :blk;
+        };
+        return;
+    }
+
     const fromType = self.typeTable.get(from);
     const toType = self.typeTable.get(to);
 
@@ -2658,13 +2739,22 @@ pub fn assertCastable(self: *Typechecker, from: TypeID, to: TypeID, unsafe: bool
             .Integer => |int| {
                 try functional.throwIf(int.range().max < enm.fields.len - 1, Error.IncompatibleTypes);
             },
-            .ComptimeInt => { },
-            else => return Error.IncompatibleTypes,
+            else => try functional.throwIf(!self.isInt(to), Error.IncompatibleTypes),
         },
+        .CChar, .CUChar => try functional.throwIf(!self.isInt(to), Error.IncompatibleTypes),
+        .CUInt, .CInt, .CLong, .CShort, .CUShort, .CULong => switch (toType) {
+            .Integer => |toInt| try functional.throwIf(
+                if (unsafe) !self.isInt(to) and !self.isCPtr(to)
+                else toInt.size < self.sizeOf(to),
+                Error.SizeMismatch
+            ),
+            else => try functional.throwIf(!self.isInt(to) and !self.isFloat(to), Error.IncompatibleTypes),
+        },
+        .CDouble => try functional.throwIf(!self.isInt(to) and !self.isFloat(to), Error.IncompatibleTypes),
         .Union, .Struct => try self.assertStructurallyIdentical(from, to),
         .Bool => switch (toType) {
             .Integer => |int| try functional.throwIf(int.size <= 0, Error.SizeMismatch),
-            else => return Error.IncompatibleTypes,
+            else => try functional.throwIf(!self.isInt(to), Error.IncompatibleTypes)
         },
         .ComptimeInt => try functional.throwIf(!self.isInt(to) and !self.isFloat(to) and !(unsafe and self.isCPtr(to)), Error.IncompatibleTypes),
         .ComptimeFloat => try functional.throwIf(!self.isFloat(to) and !self.isInt(to), Error.IncompatibleTypes),
@@ -2674,14 +2764,9 @@ pub fn assertCastable(self: *Typechecker, from: TypeID, to: TypeID, unsafe: bool
                 else !toInt.canContain(fromInt),
                 Error.SizeMismatch
             ),
-            .ComptimeInt => {},
-            .Float => {},
-            else => return Error.IncompatibleTypes,
+            else => try functional.throwIf(!self.isInt(to), Error.IncompatibleTypes)
         },
-        .Float => switch (toType) {
-            .Integer, .ComptimeInt, .ComptimeFloat => {},
-            else => return Error.IncompatibleTypes,
-        },
+        .Float => try functional.throwIf(!self.isInt(to), Error.IncompatibleTypes),
         .Pointer => |fromPtr| switch (toType) {
             .Pointer => |toPtr| {
                 try self.assertCastablePtr(fromPtr, toPtr, unsafe);
@@ -2760,7 +2845,7 @@ pub fn assertStructurallyIdentical(self: *const Typechecker, this: TypeID, that:
             }
 
             for (fromEnum.fields, toEnum.fields) |fromField, toField| {
-                if (!std.mem.eql(u8, fromField, toField)) {
+                if (!std.mem.eql(u8, fromField.name, toField.name)) {
                     return Error.StructuralMismatch;
                 }
             }
@@ -2869,14 +2954,14 @@ pub fn comparable(self: *const Typechecker, this: TypeID, that: TypeID) bool {
 
 pub fn isInt(self: *const Typechecker, maybeInt: TypeID) bool {
     return switch (self.typeTable.get(maybeInt)) {
-        .ComptimeInt, .Integer => true,
+        .ComptimeInt, .Integer, .CUChar, .CChar, .CInt, .CUInt, .CULong, .CLong, .CShort, .CUShort => true,
         else => false,
     };
 }
 
 pub fn isFloat(self: *const Typechecker, maybeFloat: TypeID) bool {
     return switch (self.typeTable.get(maybeFloat)) {
-        .ComptimeFloat, .Float => true,
+        .ComptimeFloat, .Float, .CDouble => true,
         else => false,
     };
 }
@@ -2885,6 +2970,18 @@ pub fn isCPtr(self: *const Typechecker, maybeCPtr: TypeID) bool {
     return switch (self.typeTable.get(maybeCPtr)) {
         .Pointer => |ptr| switch (ptr.size) {
             .C => true,
+            else => false,
+        },
+        else => false,
+    };
+}
+
+pub fn isCStr(self: *const Typechecker, maybeCStr: TypeID) bool {
+    const info = self.typeTable.get(maybeCStr);
+
+    return switch (info) {
+        .Pointer => |ptr| switch (ptr.size) {
+            .C => self.typeTable.get(ptr.child) == .CChar,
             else => false,
         },
         else => false,
@@ -2971,11 +3068,9 @@ pub fn mutable(self: *const Typechecker, typeID: TypeID) bool {
 
 pub fn canBeMutable(self: *const Typechecker, typeID: TypeID) bool {
     return switch (self.typeTable.get(typeID)) {
-        .Any, .Bool, .Float,
-        .Struct, .Union, .Enum,
-        .Integer, .Pointer, .Array,
-        .Function => !self.mutable(typeID),
-        else => false,
+        .Type, .ComptimeFloat, .EnumLiteral, .ComptimeInt,
+        .Noreturn, .Void => false,
+        else => !self.mutable(typeID),
     };
 }
 
@@ -2998,6 +3093,7 @@ pub fn makeMutable(_: *const Typechecker, info: TypeInfo) TypeInfo {
                 .definitions = str.definitions,
                 .scope = str.scope,
                 .external = str.external,
+                .isTuple = str.isTuple,
             },
         },
         .Union => |uni| .{
@@ -3042,6 +3138,7 @@ pub fn makeMutable(_: *const Typechecker, info: TypeInfo) TypeInfo {
                 .isComptime = func.isComptime,
                 .argTypes = func.argTypes,
                 .returnType = func.returnType,
+                .variadic = func.variadic,
             },
         },
         .Integer => |int| .{
@@ -3051,6 +3148,23 @@ pub fn makeMutable(_: *const Typechecker, info: TypeInfo) TypeInfo {
                 .signed = int.signed,
             },
         },
+        .ComptimeFloat => .{ .Float = true },
+        .ComptimeInt => .{
+            .Integer = .{
+                .mutable = true,
+                .size = 32,
+                .signed = true,
+            },
+        },
+        .CInt => .{ .CInt = true },
+        .CUInt => .{ .CUInt = true },
+        .CChar => .{ .CChar = true },
+        .CUChar => .{ .CUChar = true },
+        .CDouble => .{ .CDouble = true },
+        .CLong => .{ .CLong = true },
+        .CULong => .{ .CULong = true },
+        .CShort => .{ .CShort = true },
+        .CUShort => .{ .CUShort = true },
         else => unreachable,
     };
 }
@@ -3082,6 +3196,11 @@ pub fn sliceOf(self: *Typechecker, of: TypeID) Error!u32 {
 /// In bytes
 pub fn sizeOf(self: *const Typechecker, of: TypeID) u32 {
     return ret: switch (self.typeTable.get(of)) {
+        .CUShort, .CShort => @bitSizeOf(c_ushort),
+        .CULong, .CLong => @bitSizeOf(c_ulong),
+        .CDouble => @bitSizeOf(f64),
+        .CChar, .CUChar => @bitSizeOf(c_char),
+        .CInt, .CUInt => @bitSizeOf(c_uint),
         .Pointer => @bitSizeOf(*void),
         .Function => @bitSizeOf(@TypeOf(&sizeOf)),
         .Enum => @bitSizeOf(u32),
@@ -3154,7 +3273,7 @@ pub fn tryGetFieldIndex(self: *Typechecker, from: TypeID, fieldNamePtr: defines.
         .Union => |uni| uni.fields,
         .Enum => |enm| blk: {
             for (enm.fields, 0..) |field, index| {
-                if (std.mem.eql(u8, field, fieldName)) {
+                if (std.mem.eql(u8, field.name, fieldName)) {
                     return @intCast(index);
                 }
             }
@@ -3213,6 +3332,15 @@ pub fn typeName(self: *Typechecker, allocator: Allocator, typeID: TypeID) Error!
         return self.builder.getInternedString(namePtr);
     }
     else return ret: switch (self.typeTable.get(typeID)) {
+        .CUShort => "c_ushort",
+        .CShort => "c_short",
+        .CULong => "c_ulong",
+        .CLong => "c_long",
+        .CDouble => "c_double",
+        .CUInt => "c_uint",
+        .CInt => "c_int",
+        .CUChar => "c_uchar",
+        .CChar => "c_char",
         .Pointer => {
             const ptr: Types.Pointer = self.typeTable.get(typeID).Pointer;
             const child = try self.typeName(allocator, ptr.child);
@@ -3326,7 +3454,7 @@ pub fn setMetadata(
 pub fn getMetadata(
     self: *const Typechecker,
     value: defines.ExpressionPtr,
-) ?[]const defines.ExpressionPtr {
+) ?[]const Comptime.Value.Ptr{
     return self.metadata.get(.{
         .file = self.currentFile,
         .expr = value,
