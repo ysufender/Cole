@@ -1453,7 +1453,9 @@ pub fn evalNewTuple(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.V
         },
     };
 
-    return self.typechecker.registerType(newType);
+    return self.appendValue(.{
+        .Type = try self.typechecker.registerType(newType),
+    });
 }
 
 pub fn evalTypeName(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {
