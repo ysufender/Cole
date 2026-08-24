@@ -24,31 +24,31 @@
 import std::memory::allocator;
 
 
-let malloc = #(@extern) fn (size: mut c_size) -> mut [@c]mut void { };
-let free = #(@extern) fn (ptr: mut [@c]mut void) -> void { };
-let calloc = #(@extern) fn (nmemb: mut c_size, size: mut c_size) -> mut [@c]mut void { };
+let malloc = #(@extern) fn (size: mut c_size) -> [@c]mut void { };
+let free = #(@extern) fn (ptr: [@c]mut void) -> void { };
+let calloc = #(@extern) fn (nmemb: c_size, size: c_size) -> [@c]mut void { };
 
 // @TODO fix
 let memcpy = #(@extern) fn (dst: mut [@c]mut void, src: mut [@c]void, n: mut c_size) -> mut [@c]mut void { };
 
 pub let Allocator = std::memory::allocator::Allocator(undefined, create, destroy, alloc, dealloc);
 
-let create = fn (ctx: *void, size: u32) -> *void {
+let create = fn (ctx: *mut void, size: u32) -> *mut void {
     return malloc(size);
 };
 
-let destroy = fn (ctx: *void, ptr: *void) -> void {
+let destroy = fn (ctx: *mut void, ptr: *mut void) -> void {
     free(ptr);
 };
 
-let alloc = fn (ctx: *void, count: u32, sizeByteEach: u32) -> []void {
+let alloc = fn (ctx: *mut void, count: u32, sizeByteEach: u32) -> []mut void {
     return calloc(count, sizeByteEach)[0..count];
 };
 
-let dealloc = fn (ctx: *void, ptr: []void) -> void {
+let dealloc = fn (ctx: *mut void, ptr: []mut void) -> void {
     free(ptr.ptr);
 };
 
-pub let memCopy = fn (to: [@c]void, from: [@c]void, n: u32) -> [@c]void {
+pub let memCopy = fn (to: [@c]mut void, from: [@c]mut void, n: u32) -> [@c]mut void {
     return memcpy(to, from, n);
 };

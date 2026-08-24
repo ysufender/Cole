@@ -13,13 +13,15 @@ const tcc = @cImport({
 });
 
 const files = [_]struct{ []const u8, []const u8 }{
-    .{ "stdnoreturn.h", @embedFile("../../res/vendor/tinycc/stdnoreturn.h") },
-    .{ "stdalign.h", @embedFile("../../res/vendor/tinycc/stdalign.h") },
-    .{ "stdarg.h",  @embedFile("../../res/vendor/tinycc/stdarg.h") },
-    .{ "stdatomic.h",  @embedFile("../../res/vendor/tinycc/stdatomic.h") },
-    .{ "stdbool.h",  @embedFile("../../res/vendor/tinycc/stdbool.h") },
-    .{ "stddef.h",  @embedFile("../../res/vendor/tinycc/stddef.h") },
-    .{ "libtcc1.a",  @embedFile("../../res/vendor/tinycc/libtcc1.a") },
+    .{ "stdnoreturn.h", @embedFile("../../res/vendor/tcc/include/stdnoreturn.h") },
+    .{ "stdalign.h", @embedFile("../../res/vendor/tcc/include/stdalign.h") },
+    .{ "stdarg.h",  @embedFile("../../res/vendor/tcc/include/stdarg.h") },
+    .{ "stdatomic.h",  @embedFile("../../res/vendor/tcc/include/stdatomic.h") },
+    .{ "stdbool.h",  @embedFile("../../res/vendor/tcc/include/stdbool.h") },
+    .{ "stddef.h",  @embedFile("../../res/vendor/tcc/include/stddef.h") },
+    .{ "libtcc1.a",  @embedFile("../../res/vendor/tcc/libtcc1.a") },
+    .{ "bt-exe.o",  @embedFile("../../res/vendor/tcc/bt-exe.o") },
+    .{ "bt-log.o",  @embedFile("../../res/vendor/tcc/bt-log.o") },
 };
 
 pub fn compile(outDir: Dir, allocator: std.mem.Allocator, context: *common.CompilerContext) Error!void {
@@ -101,7 +103,7 @@ pub fn compile(outDir: Dir, allocator: std.mem.Allocator, context: *common.Compi
             tcc.tcc_add_library(state, lib.ptr) != -1;
 
         if (!ok) {
-            report("Failed to link library.");
+            report("Failed to link libraies.");
             return Error.BackendError;
         }
     }

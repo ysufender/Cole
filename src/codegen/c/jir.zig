@@ -1016,7 +1016,6 @@ fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool
             },
             .Single, .C => {
                 const info = self.types.get(ptr.child);
-                common.log.debug("{}", .{info.Void});
                 name = std.fmt.allocPrint(self.allocator, "{s}{s}{s}{s}", .{
                     try self.getCName(ptr.child, _name, false, noSymbol),
                     if (info == .Void and noSymbol and !info.Void) "_const"

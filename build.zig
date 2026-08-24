@@ -2,6 +2,18 @@ const std = @import("std");
 
 const resourcePath = "res/";
 
+const files = [_][]const u8{
+    "include/stdnoreturn.h",
+    "include/stdalign.h",
+    "include/stdarg.h",
+    "include/stdatomic.h",
+    "include/stdbool.h",
+    "include/stddef.h",
+    "libtcc1.a",
+    "bt-exe.o",
+    "bt-log.o",
+};
+
 var targets = [_]std.Target.Query{
     .{},
     .{ .os_tag = .windows, .cpu_arch = .x86_64, .abi = .gnu },
@@ -16,9 +28,8 @@ const version = std.SemanticVersion{
 
 var config: struct {
     native: std.Build.ResolvedTarget = undefined,
-    tools: struct {
-        compiler_debugger: bool = false,
-    } = .{ },
+    library_path: ?[]const u8 = null,
+    tools: struct { } = .{ },
 } = .{};
 
 pub fn build(b: *std.Build) void {
@@ -103,12 +114,27 @@ fn addTargets(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
         exe.root_module.addEmbedPath(b.path(resourcePath));
         exe.root_module.addOptions("config", opts);
 
-        if (target.result.os.tag == .linux) {
-            exe.root_module.addSystemIncludePath(.{ .cwd_relative = "/usr/lib/" });
-            exe.root_module.addEmbedPath(.{ .cwd_relative = "/usr/include/" });
-            exe.root_module.linkSystemLibrary("tcc", .{ .preferred_link_mode = .static });
-            // exe.root_module.linkSystemLibrary("mimalloc", .{ .preferred_link_mode = .static });
+        const libPath = config.library_path orelse
+            if (target.result.os.tag == .linux) "/usr/local/lib"
+            else {
+                std.log.err("Failed to add target '{s}', a library path is required. The target won't be available.", .{
+                    targetName,
+                });
+                return;
+            };
+
+        exe.root_module.addSystemIncludePath(.{ .cwd_relative = libPath });
+        exe.root_module.linkSystemLibrary("tcc", .{ .preferred_link_mode = .static });
+
+        const vendorCopy = b.addUpdateSourceFiles();
+
+        for (files) |file| {
+            const srcPath = b.pathJoin(&.{libPath, "tcc", file});
+            const destPath = b.path("src/res/vendor/tcc/")
+                            .join(b.graph.arena, file) catch unreachable;
+            _ = vendorCopy.addCopyFileToSource(.{ .cwd_relative = srcPath }, destPath.src_path.sub_path);
         }
+        exe.step.dependOn(&vendorCopy.step);
 
         const install = b.addInstallArtifact(exe, .{
             .dest_dir = .{ .override = .{ .custom = b.pathJoin(&.{
@@ -168,8 +194,8 @@ fn addDebugTarget(b: *std.Build) void {
 fn configureBuild(b: *std.Build) void {
     config = .{
         .native = b.standardTargetOptions(.{}),
+        .library_path = b.option([]const u8, "lib-path", "The library path to search for dependencies."),
         .tools = .{
-            .compiler_debugger = b.option(bool, "compiler-debugger", "Build the compiler debugger, not to be confused with program debugger.") orelse false,
         },
     };
 }
