@@ -222,6 +222,7 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
     \\
     \\#include <stdint.h>
     \\#include <stdbool.h>
+    \\#include <stddef.h>
     \\
     \\typedef bool cole_bool;
     \\
@@ -899,7 +900,13 @@ fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool
             else if (noSymbol) "unsigned_short_const"
             else "unsigned short const",
 
+        .CSize => |m| return
+            if (m and !noSymbol) "size_t"
+            else if (noSymbol) "size_t_const"
+            else "size_t const",
+
         .Void => return "void",
+
         .Noreturn => return
             if (noSymbol) "noreturn"
             else "void __attribute__((noreturn))",
@@ -1008,16 +1015,16 @@ fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool
                 }) catch return Error.AllocatorFailure;
             },
             .Single, .C => {
-                if (ptr.child == comptime Comptime.Folder.Builtin.Type("u8")) {
-                    name = if (noSymbol) "char_const_ptr" else "char const*";
-                }
-                else {
-                    name = std.fmt.allocPrint(self.allocator, "{s}{s}{s}", .{
-                        try self.getCName(ptr.child, _name, false, noSymbol),
-                        if (noSymbol) "_ptr" else "*",
-                        if (ptr.mutable) "" else " const",
-                    }) catch return Error.AllocatorFailure;
-                }
+                const info = self.types.get(ptr.child);
+                common.log.debug("{}", .{info.Void});
+                name = std.fmt.allocPrint(self.allocator, "{s}{s}{s}{s}", .{
+                    try self.getCName(ptr.child, _name, false, noSymbol),
+                    if (info == .Void and noSymbol and !info.Void) "_const"
+                    else if (info == .Void and !info.Void) " const"
+                    else "",
+                    if (noSymbol) "_ptr" else "*",
+                    if (ptr.mutable) "" else " const",
+                }) catch return Error.AllocatorFailure;
             },
         },
     }

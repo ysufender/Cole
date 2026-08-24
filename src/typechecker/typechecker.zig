@@ -2742,7 +2742,7 @@ pub fn assertCastable(self: *Typechecker, from: TypeID, to: TypeID, unsafe: bool
             else => try functional.throwIf(!self.isInt(to), Error.IncompatibleTypes),
         },
         .CChar, .CUChar => try functional.throwIf(!self.isInt(to), Error.IncompatibleTypes),
-        .CUInt, .CInt, .CLong, .CShort, .CUShort, .CULong => switch (toType) {
+        .CUInt, .CInt, .CLong, .CShort, .CUShort, .CULong, .CSize => switch (toType) {
             .Integer => |toInt| try functional.throwIf(
                 if (unsafe) !self.isInt(to) and !self.isCPtr(to)
                 else toInt.size < self.sizeOf(to),
@@ -2954,7 +2954,7 @@ pub fn comparable(self: *const Typechecker, this: TypeID, that: TypeID) bool {
 
 pub fn isInt(self: *const Typechecker, maybeInt: TypeID) bool {
     return switch (self.typeTable.get(maybeInt)) {
-        .ComptimeInt, .Integer, .CUChar, .CChar, .CInt, .CUInt, .CULong, .CLong, .CShort, .CUShort => true,
+        .ComptimeInt, .Integer, .CUChar, .CChar, .CInt, .CUInt, .CULong, .CLong, .CShort, .CUShort, .CSize => true,
         else => false,
     };
 }
@@ -3069,7 +3069,8 @@ pub fn mutable(self: *const Typechecker, typeID: TypeID) bool {
 pub fn canBeMutable(self: *const Typechecker, typeID: TypeID) bool {
     return switch (self.typeTable.get(typeID)) {
         .Type, .ComptimeFloat, .EnumLiteral, .ComptimeInt,
-        .Noreturn, .Void => false,
+        .Noreturn => false,
+        .Void => true,
         else => !self.mutable(typeID),
     };
 }
@@ -3165,6 +3166,8 @@ pub fn makeMutable(_: *const Typechecker, info: TypeInfo) TypeInfo {
         .CULong => .{ .CULong = true },
         .CShort => .{ .CShort = true },
         .CUShort => .{ .CUShort = true },
+        .CSize => .{ .CSize = true },
+        .Void => .{ .Void = true },
         else => unreachable,
     };
 }
@@ -3196,6 +3199,7 @@ pub fn sliceOf(self: *Typechecker, of: TypeID) Error!u32 {
 /// In bytes
 pub fn sizeOf(self: *const Typechecker, of: TypeID) u32 {
     return ret: switch (self.typeTable.get(of)) {
+        .CSize => @bitSizeOf(usize),
         .CUShort, .CShort => @bitSizeOf(c_ushort),
         .CULong, .CLong => @bitSizeOf(c_ulong),
         .CDouble => @bitSizeOf(f64),
@@ -3341,6 +3345,7 @@ pub fn typeName(self: *Typechecker, allocator: Allocator, typeID: TypeID) Error!
         .CInt => "c_int",
         .CUChar => "c_uchar",
         .CChar => "c_char",
+        .CSize => "c_size",
         .Pointer => {
             const ptr: Types.Pointer = self.typeTable.get(typeID).Pointer;
             const child = try self.typeName(allocator, ptr.child);

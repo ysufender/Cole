@@ -21,30 +21,34 @@
         File operation utilities.
 */
 
-code {
-    #include <stdlib.h>
-}
-
 import std::memory::allocator;
 
-pub let Allocator = std::memory::allocator::RawAllocator(undefined, create, destroy, alloc, free);
+
+let malloc = #(@extern) fn (size: mut c_size) -> mut [@c]mut void { };
+let free = #(@extern) fn (ptr: mut [@c]mut void) -> void { };
+let calloc = #(@extern) fn (nmemb: mut c_size, size: mut c_size) -> mut [@c]mut void { };
+
+// @TODO fix
+let memcpy = #(@extern) fn (dst: mut [@c]mut void, src: mut [@c]void, n: mut c_size) -> mut [@c]mut void { };
+
+pub let Allocator = std::memory::allocator::Allocator(undefined, create, destroy, alloc, dealloc);
 
 let create = fn (ctx: *void, size: u32) -> *void {
-    let res: mut [@c]void = undefined;
-    code { res = malloc(size); }
-    return res;
+    return malloc(size);
 };
 
 let destroy = fn (ctx: *void, ptr: *void) -> void {
-    code { free(ptr); }
+    free(ptr);
 };
 
 let alloc = fn (ctx: *void, count: u32, sizeByteEach: u32) -> []void {
-    let res: mut [@c]void = undefined;
-    code { res = calloc(count, sizeByteEach); }
-    return res[0..count];
+    return calloc(count, sizeByteEach)[0..count];
 };
 
-let free = fn (ctx: *void, ptr: [@c]void) -> void {
-    code { free(ptr); }
+let dealloc = fn (ctx: *void, ptr: []void) -> void {
+    free(ptr.ptr);
+};
+
+pub let memCopy = fn (to: [@c]void, from: [@c]void, n: u32) -> [@c]void {
+    return memcpy(to, from, n);
 };

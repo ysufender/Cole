@@ -1150,7 +1150,7 @@ fn builtinCall(
             })
         ),
         BI("compileLog"), BI("compileError") => 0,
-        else => common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
+        else => common.debug.NotImplemented(self.typechecker.context.log, @src()),
     };
 }
 
@@ -1208,7 +1208,7 @@ fn cast(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR.P
 
                     break :res self.typechecker.builder.construct(ofType, &.{ptr, newSize});
                 }
-                else return common.debug.ShouldBeImpossible(undefined, @src()),
+                else self.typechecker.builder.construct(ofType, &.{rexpr}),
 
                 else => return common.debug.ShouldBeImpossible(undefined, @src()),
         },

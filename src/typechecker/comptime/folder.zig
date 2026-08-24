@@ -1887,7 +1887,8 @@ fn evalIndexing(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value
 }
 
 fn evalMutType(self: *Folder, exprPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {
-    const inner = self.getValue(try self.expectType(exprPtr));
+    const innerType = try self.expectType(exprPtr);
+    const inner = self.getValue(innerType);
 
     if (self.typechecker.canBeMutable(inner.Type)) {
         const typeInfo = self.typechecker.typeTable.get(inner.Type);
@@ -1897,11 +1898,14 @@ fn evalMutType(self: *Folder, exprPtr: defines.OpaquePtr) Error!Comptime.Value.P
             .Type = typeID,
         });
     }
-    else {
+    else if (!self.typechecker.getFlag(.CanCycle)) {
         self.report("Redundant 'mut' specifier on already mutable type '{s}'.", .{
             try self.typechecker.typeName(self.typechecker.arena.allocator(), inner.Type)
         });
         return Error.InvalidSpecifier;
+    }
+    else {
+        return innerType;
     }
 }
 
@@ -2060,7 +2064,13 @@ fn castValue(self: *Folder, valuePtr: Comptime.Value.Ptr, to: TypeID, unsafe: bo
     const value = self.getValue(valuePtr);
 
     const valueType = try self.typechecker.typecheckValueDirect(value, to);
-    try self.typechecker.assertCastable(valueType, to, unsafe);
+    if (!self.typechecker.castable(valueType, to, unsafe)) {
+        self.report("Given value of type {s} can't coerce to '{s}'.", .{
+            try self.typechecker.typeName(undefined, valueType),
+            try self.typechecker.typeName(undefined, to),
+        });
+        return Error.IncompatibleTypes;
+    }
 
     const newValue: Comptime.Value = switch (value) {
         .Pointer => |ptr| .{
@@ -2365,10 +2375,12 @@ pub const builtinTypes = [_]struct {
     .{ .name = "c_short", .info = .{ .CShort = false }, },
     // c_ushort
     .{ .name = "c_ushort", .info = .{ .CUShort = false }, },
+    // c_size
+    .{ .name = "c_size", .info = .{ .CSize = false }, },
     // flaot
     .{ .name = "float", .info = .{ .Float = false } },
     // void
-    .{ .name = "void", .info = .{ .Void = { }, } },
+    .{ .name = "void", .info = .{ .Void = false, } },
     // comptime int
     .{ .name = "comptime_int", .info = .{ .ComptimeInt = { }, } },
     // comptime float

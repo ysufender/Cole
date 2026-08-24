@@ -19,7 +19,7 @@ pub const TypeInfo = union(enum) {
     Integer: Integer,
     Bool: bool, // mutability bool
     Float: bool, // mutability bool
-    Void,
+    Void: bool, // mutability bool
 
     CInt: bool,
     CUInt: bool,
@@ -30,6 +30,7 @@ pub const TypeInfo = union(enum) {
     CULong: bool,
     CShort: bool,
     CUShort: bool,
+    CSize: bool,
 
     Array: Array,
 
@@ -85,6 +86,7 @@ pub const TypeInfo = union(enum) {
             .CULong => |m| m,
             .CShort => |m| m,
             .CUShort => |m| m,
+            .Void => |m| m,
             else => false,
         };
     }
