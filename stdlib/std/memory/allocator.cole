@@ -14,6 +14,10 @@
         std::memory::allocator
     public symbols:
         Allocator
+        create
+        destroy
+        alloc
+        dealloc
     description:
         File operation utilities.
 */
@@ -24,20 +28,25 @@ pub let Allocator = struct {
     destroy: *fn (*mut void, *mut void) -> void,
     alloc: *fn (*mut void, u32, u32) -> []mut void,
     dealloc: *fn (*mut void, []mut void) -> void,
+    realloc: *fn (*mut void, []mut void, u32) -> []mut void,
 };
 
-pub let create = fn (self: Allocator, size: u32) -> *void {
+pub let create = fn (self: Allocator, size: u32) -> *mut void {
     return self.create(self.context, size);
 };
 
-pub let destroy = fn (self: Allocator, ptr: *void) -> void {
+pub let destroy = fn (self: Allocator, ptr: *mut void) -> void {
     return self.destroy(self.context, ptr);
 };
 
-pub let alloc = fn (self: Allocator, count: u32, sizeBytesEach: u32) -> []void {
+pub let alloc = fn (self: Allocator, count: u32, sizeBytesEach: u32) -> []mut void {
     return self.alloc(self.context, count, sizeBytesEach);
 };
 
-pub let dealloc = fn (self: Allocator, arr: []void) -> void {
+pub let dealloc = fn (self: Allocator, arr: []mut void) -> void {
     return self.dealloc(self.context, arr);
+};
+
+pub let realloc = fn (self: Allocator, arr: []mut void, nlen: u32) -> []mut void {
+    return self.realloc(self.context, arr, nlen);
 };

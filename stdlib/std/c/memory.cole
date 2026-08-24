@@ -13,25 +13,25 @@
     name:
         std::memory::c
     public symbols:
-        create
-        destroy
-        alloc
-        free
+        Allocator
+        memCopy
     description:
         File operation utilities.
 */
 
 import std::memory::allocator;
 
+pub let Allocator = std::memory::allocator::Allocator(undefined, create, destroy, alloc, dealloc, _realloc);
+
+pub let memCopy = fn (to: [@c]mut void, from: [@c]mut void, n: u32) -> void {
+    let discard = memcpy(to, from, n);
+};
 
 let malloc = #(@extern) fn (size: mut c_size) -> [@c]mut void { };
 let free = #(@extern) fn (ptr: [@c]mut void) -> void { };
 let calloc = #(@extern) fn (nmemb: c_size, size: c_size) -> [@c]mut void { };
-
-// @TODO fix
+let realloc = #(@extern) fn (ptr: [@c]mut void, nlen: c_size) -> [@c]mut void { };
 let memcpy = #(@extern) fn (dst: mut [@c]mut void, src: mut [@c]void, n: mut c_size) -> mut [@c]mut void { };
-
-pub let Allocator = std::memory::allocator::Allocator(undefined, create, destroy, alloc, dealloc);
 
 let create = fn (ctx: *mut void, size: u32) -> *mut void {
     return malloc(size);
@@ -49,6 +49,6 @@ let dealloc = fn (ctx: *mut void, ptr: []mut void) -> void {
     free(ptr.ptr);
 };
 
-pub let memCopy = fn (to: [@c]mut void, from: [@c]mut void, n: u32) -> [@c]mut void {
-    return memcpy(to, from, n);
+let _realloc = fn (ctx: *mut void, ptr: []mut void, nlen: u32) -> []mut void {
+    return realloc(ptr.ptr, nlen)[0..nlen];
 };

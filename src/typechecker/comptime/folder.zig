@@ -964,11 +964,12 @@ fn evalLiteral(self: *Folder, tokenPtr: defines.TokenPtr, maybeExpected: ?TypeID
     const res = try self.appendValue(value);
     const rest = try self.typechecker.typecheckValue(res, null);
 
+    self.typechecker.assertCanCoerce(rest, maybeExpected orelse rest) catch return res;
+
     if (
         maybeExpected != null
         and maybeExpected.? != Builtin.Type("any")
         and maybeExpected.? != Builtin.Type("mut any")
-        and self.typechecker.castable(rest, maybeExpected orelse rest, false)
     ) {
         return self.castValue(res, maybeExpected orelse rest, false);
     } else {
@@ -2060,17 +2061,17 @@ fn handleScopeDecls(
     return defs.items;
 }
 
-fn castValue(self: *Folder, valuePtr: Comptime.Value.Ptr, to: TypeID, unsafe: bool) Error!Comptime.Value.Ptr {
+fn castValue(self: *Folder, valuePtr: Comptime.Value.Ptr, to: TypeID, _: bool) Error!Comptime.Value.Ptr {
     const value = self.getValue(valuePtr);
 
     const valueType = try self.typechecker.typecheckValueDirect(value, to);
-    if (!self.typechecker.castable(valueType, to, unsafe)) {
+    self.typechecker.assertCanCoerce(valueType, to) catch |err| {
         self.report("Given value of type {s} can't coerce to '{s}'.", .{
             try self.typechecker.typeName(undefined, valueType),
             try self.typechecker.typeName(undefined, to),
         });
-        return Error.IncompatibleTypes;
-    }
+        return err;
+    };
 
     const newValue: Comptime.Value = switch (value) {
         .Pointer => |ptr| .{
