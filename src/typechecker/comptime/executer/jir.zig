@@ -280,6 +280,7 @@ fn literal(self: *JIRExecuter, constPtr: JIR.Ptr) Error!Comptime.Value {
                 .c_ulong => |i| @intCast(i),
                 .c_short => |i| @intCast(i),
                 .c_ushort => |i| @intCast(i),
+                .c_size => |i| @intCast(i),
             },
         },
         .Array => |arr| {

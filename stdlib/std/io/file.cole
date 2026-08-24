@@ -13,95 +13,23 @@
     name:
         std::io::file
     public symbols:
-        openmode
-        file
-        open
-        close
-        ok
-        writeln
-        writeln
     description:
         File operation utilities.
 */
-
 code {
-    #include <stdio.h>
+    int32_t const OFFSET_START   = SEEK_SET;
+    int32_t const OFFSET_CURRENT = SEEK_CUR;
+    int32_t const OFFSET_END     = SEEK_END;
 }
 
-import std::ascii as ASCII;
-import std::debug as Debug;
+import std::io::stream as Stream;
 
-let FILE = #(@extern) struct { };
+let OFFSET_START  : c_int = #(@extern) 0;
+let OFFSET_CURRENT: c_int = #(@extern) 0;
+let OFFSET_END    : c_int = #(@extern) 0;
 
-let InFile = struct {
-    handle: *mut FILE,
-};
-
-let OutFile = struct {
-    handle: *mut FILE,
-};
-
-pub let File = union(enum) {
-    In: InFile,
-    Out: OutFile,
-    Inout: union {
-        in: InFile,
-        out: OutFile,
-    },
-};
-
-pub let openIn = fn (path: []u8) -> File {
-    let file: mut *mut FILE = undefined;
-    code { file = fopen(path.ptr, "r"); }
-    return File(@In, file);
-};
-
-pub let openOut = fn (path: []u8) -> File {
-    let file: mut *mut FILE = undefined;
-    code { file = fopen(path.ptr, "w"); }
-    return File(@Out, file);
-};
-
-pub let openInout = fn (path: []u8) -> File {
-    let file: mut *mut FILE = undefined;
-    code { file = fopen(path.ptr, "w+"); }
-    return File(@Inout, file);
-};
-
-/* Status and File Actions */
-pub let close = fn (file: File) -> void {
-    code { fclose(file.In.handle); }
-};
-
-pub let ok = fn (file: File) -> bool {
-    let status: mut bool = false;
-    code { status = file.In.handle == NULL; }
-    return !status;
-};
-
-/* Writing */
-let writeln = fn (file: *OutFile, line: []u8) -> void {
-    code { fprintf(file.handle, "%s\n", line.ptr); }
-};
-
-let writebuffer = fn (file: *OutFile, line: []u8) -> void {
-    code { fprintf(file.handle, "%s", line.ptr); }
-};
-
-let write = fn (file: *OutFile, byte: u8) -> void {
-    code { fwrite(&byte, 1, 1, file.handle); }
-};
-
-/* Reading */
-let read = fn (file: *InFile) -> i32 {
-    let res: mut i32 = -1;
-    code { res = fgetc(file.handle); }
-    return res;
-};
-
-/* Positioning */
-let seek = fn (file: File, pos: u32) -> bool {
-    let res: mut bool = false;
-    code { res = fseek(file.handle, pos, SEEK_SET) == 0; }
-    return res;
+pub let Base = struct {
+    pub let Start   = OFFSET_START;
+    pub let Current = OFFSET_CURRENT;
+    pub let End     = OFFSET_END;
 };

@@ -115,6 +115,7 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
             .CULong => .{ .Integer = .{ .c_ulong = @intCast(val) } },
             .CShort => .{ .Integer = .{ .c_short = @intCast(val) } },
             .CUShort => .{ .Integer = .{ .c_ushort = @intCast(val) } },
+            .CSize => .{ .Integer = .{ .c_size = @intCast(val) } },
 
             .CDouble => .{ .Float = .{ .f64 = @floatFromInt(val) } },
             .Float, .ComptimeFloat => .{
@@ -1299,8 +1300,8 @@ fn dot(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     const deref = std.mem.eql(u8, member, "*");
 
     const prev = self.typechecker.folder.setFlag(.ComptimeBanned, ref or deref);
-    defer _ = self.typechecker.folder.setFlag(.ComptimeBanned, prev);
     var obj = try self.expression(exprPtr, exprType);
+    _ = self.typechecker.folder.setFlag(.ComptimeBanned, prev);
 
     switch (self.typechecker.typeTable.get(exprType)) {
         .Array => |arr|

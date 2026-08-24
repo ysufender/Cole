@@ -1,0 +1,30 @@
+import std::io::stream as Stream;
+
+pub let OStream = struct {
+    context    : *void,
+    write      : *fn (*void, u8) -> Stream::Result,
+    writeline  : *fn (*void, []u8) -> Stream::Result,
+    writebuffer: *fn (*void, []u8) -> Stream::Result,
+    seek       : *fn (*void, u32) -> Stream::Result,
+    close      : *fn (*void) -> Stream::Result,
+};
+
+pub let write = fn (self: OStream, ch: u8) -> Stream::Result {
+    return self.write(self.context, ch);
+};
+
+pub let writeline = fn (self: OStream, str: []u8) -> Stream::Result {
+    return self.writeline(self.context, str);
+};
+
+pub let writebuffer = fn (self: OStream, buf: []u8) -> Stream::Result {
+    return self.writebuffer(self.context, buf);
+};
+
+pub let seek = fn (self: OStream, off: u32) -> Stream::Result {
+    return self.seek(self.context, off);
+};
+
+pub let close = fn (self: OStream) -> Stream::Result {
+    return self.close(self.context);
+};

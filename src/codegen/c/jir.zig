@@ -104,6 +104,7 @@ pub const Constant = union(enum) {
         c_ulong: c_ulong,
         c_short: c_short,
         c_ushort: c_ushort,
+        c_size: usize,
     },
     String: struct {
         type: enum {
@@ -763,11 +764,11 @@ fn literal(self: *JIR, out: *Writer, ptr: Constant.Ptr) Error!void {
     const cst = self.constants.get(ptr);
 
     try switch (cst) {
-        .Void => try self.write(out, "((void)0)", .{}),
+        .Void => try self.write(out, "{{0}}", .{}),
         .Type => |id| try self.write(out, "{s}", .{try self.getCName(id, null, false, false)}),
         .Undefined => |typeID|
             if (self.types.get(typeID) == .Pointer) self.write(out, "(({s})NULL)", .{ try self.getCName(typeID, null, false, false)})
-            else self.write(out, "({s}){{ }}", .{ try self.getCName(typeID, null, false, false) }),
+            else self.write(out, "{{0}}", .{ }),
         .Integer => |int| switch (int) {
             .i32 => |t| self.write(out, "{d}", .{t}),
             .u32 => |t| self.write(out, "{d}", .{t}),
@@ -781,6 +782,7 @@ fn literal(self: *JIR, out: *Writer, ptr: Constant.Ptr) Error!void {
             .c_ulong => |t| self.write(out, "{d}", .{t}),
             .c_short => |t| self.write(out, "{d}", .{t}),
             .c_ushort => |t| self.write(out, "{d}", .{t}),
+            .c_size => |t| self.write(out, "{d}", .{t}),
         },
         .Float => |fl| switch (fl) {
             .f32 => |f| self.write(out, "{d}", .{f}),

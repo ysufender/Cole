@@ -1,0 +1,95 @@
+code {
+    #include <stdio.h>
+}
+
+import std::memory::allocator as Allocator;
+import std::io::stream as Stream;
+import std::io::file as File;
+import std::ascii as ASCII;
+
+pub let OpenResult = union(enum) {
+    Ok: IFile,
+    Err: void,
+};
+
+pub let IFile = struct {
+    handle: *mut FILE,
+};
+
+/*
+pub let stream = fn (self: IFile) -> Stream::Input::Stream {
+    return (self.handle, read, readline, readbuffer, seek, close);
+};
+*/
+
+pub let read = fn (handle: *mut FILE) -> Stream::Input::ReadResult {
+    let ch: mut u8 = undefined;
+
+    return
+        if (fread(ch.&, 1, 1, handle) == 1) (@Ok, ch)
+        else (@Err, ());
+};
+
+pub let readline = fn (handle: *mut FILE, allocator: Allocator::Allocator) -> Stream::Input::ReadLineResult {
+    let start = ftell(handle);
+
+    let ch: mut c_int = fgetc(handle);
+    while ch != ASCII::NEWLINE and feof(handle) == 0 {
+        if ch < 0 {
+            return (@Err, ());
+        }
+
+        ch = fgetc(handle);
+    }
+    let end = ftell(handle);
+    ch = fgetc(handle);
+
+    let len = end - start;
+
+    if len == 0 {
+        ch = fgetc(handle);
+        return (@Ok, "false");
+    }
+
+    if fseek(handle, start, File::Base::Start) != 0 {
+        return (@Err, ());
+    }
+
+    let buffer: []mut u8 = cast(Allocator::alloc(allocator, len, 1));
+    let res = readbuffer(handle, buffer);
+    ch = fgetc(handle);
+
+    return res;
+};
+
+pub let readbuffer = fn (handle: *mut FILE, buffer: []mut u8) -> Stream::Input::ReadLineResult {
+    buffer[buffer.len - 1] = ASCII::NULL;
+    let ch: mut c_int = undefined;
+    let idx: mut u32 = 0;
+    while idx < buffer.len {
+        ch = fgetc(handle);
+
+        if feof(handle) != 0 or ch < 0 {
+            return (@Err, ());
+        }
+
+        buffer[idx] = ch;
+    }
+
+    return (@Ok, buffer);
+};
+
+pub let open = fn (path: []u8, allocator: Allocator::Allocator, readWrite: bool) -> OpenResult {
+    return
+        if (readWrite) fopen(path.ptr, "r+")
+        else fopen(path.ptr, "r");
+};
+
+let FILE = #(@extern) struct { };
+
+let fopen = #(@extern) fn (path: mut [@c]c_char, mode: mut [@c]c_char) -> mut *mut FILE { };
+let fread = #(@extern) fn (dst: [@c]mut void, size: c_size, count: c_size, file: *mut FILE,) -> mut c_size { };
+let fgetc = #(@extern) fn (stream: mut *mut FILE) -> mut c_int { };
+let ftell = #(@extern) fn (stream: mut *mut FILE) -> mut c_long { };
+let fseek = #(@extern) fn (stream: mut *mut FILE, offset: mut c_long, whence: mut c_int) -> mut c_int { };
+let feof  = #(@extern) fn (stream: mut *mut FILE) -> mut c_int { };

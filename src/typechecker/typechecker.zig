@@ -1193,9 +1193,9 @@ pub fn typecheckExpressionListRange(self: *Typechecker, range: defines.Range, ex
         .Array => |arr| try self.typecheckArrayInitialization(ast, &arr, range),
         .Pointer => |ptr| switch (ptr.size) {
             .Slice, .C => {
-                // try self.typecheckGeneralInitialization(ast, ptr.child, range)
-                self.report("Initialization of slice/cpointer types via expression lists are not allowed. Use addressing instead.", .{ });
-                return Error.SliceInitializationWithExpressionList;
+                try self.typecheckGeneralInitialization(ast, ptr.child, range);
+                // self.report("Initialization of slice/cpointer types via expression lists are not allowed. Use addressing instead.", .{ });
+                // return Error.SliceInitializationWithExpressionList;
             },
             .Single => {
                 if (range.len() != 1) {
@@ -2741,14 +2741,18 @@ pub fn assertCastable(self: *Typechecker, from: TypeID, to: TypeID, unsafe: bool
             },
             else => try functional.throwIf(!self.isInt(to), Error.IncompatibleTypes),
         },
-        .CChar, .CUChar => try functional.throwIf(!self.isInt(to), Error.IncompatibleTypes),
-        .CUInt, .CInt, .CLong, .CShort, .CUShort, .CULong, .CSize => switch (toType) {
+        .CChar, .CUChar, .CUInt, .CInt, .CLong, .CShort, .CUShort, .CULong, .CSize => switch (toType) {
             .Integer => |toInt| try functional.throwIf(
                 if (unsafe) !self.isInt(to) and !self.isCPtr(to)
                 else toInt.size < self.sizeOf(to),
                 Error.SizeMismatch
             ),
-            else => try functional.throwIf(!self.isInt(to) and !self.isFloat(to), Error.IncompatibleTypes),
+            else => try functional.throwIf(
+                !self.isInt(to)
+                and !self.isFloat(to)
+                and toType != .Bool,
+                Error.IncompatibleTypes
+            ),
         },
         .CDouble => try functional.throwIf(!self.isInt(to) and !self.isFloat(to), Error.IncompatibleTypes),
         .Union, .Struct => try self.assertStructurallyIdentical(from, to),
@@ -2892,8 +2896,8 @@ pub fn assertCanCoerce(self: *const Typechecker, this: TypeID, that: TypeID) Err
             else => functional.throwIf(!self.isInt(this), Error.TypeMismatch),
         },
         else => switch (thisType) {
-            .ComptimeInt, .Integer,
-            .ComptimeFloat, .Float => Error.TypeMismatch,
+            .ComptimeInt, .Integer => functional.throwIf(!self.isInt(this) and !self.isFloat(this), Error.TypeMismatch),
+            .ComptimeFloat, .Float => functional.throwIf(!self.isFloat(this) and !self.isInt(this), Error.TypeMismatch),
             .Struct, .Union, .Enum => {
                 try functional.throwIf(std.meta.activeTag(thisType) != std.meta.activeTag(thatType), Error.TypeMismatch);
                 const names: struct { usize, usize } = switch (thisType) {
@@ -2926,11 +2930,15 @@ pub fn assertComparable(self: *const Typechecker, this: TypeID, that: TypeID) Er
         return Error.OperationOnZeroBitSize;
     }
 
+    if (self.isInt(this) and self.isInt(that)) {
+        return;
+    }
+
+    if (self.isFloat(this) and self.isFloat(that)) {
+        return;
+    }
+
     try switch (thisType) {
-        .ComptimeInt => functional.throwIf(!self.isInt(that), Error.ComparisonOnIncompatibleTypes),
-        .ComptimeFloat => functional.throwIf(!self.isFloat(that), Error.ComparisonOnIncompatibleTypes),
-        .Integer => functional.throwIf(!self.isInt(that), Error.ComparisonOnIncompatibleTypes),
-        .Float => functional.throwIf(!self.isFloat(that), Error.ComparisonOnIncompatibleTypes),
         .Array => |thisArr| switch (thatType) {
             .Array => |thatArr| self.assertComparable(thisArr.child, thatArr.child),
             else => Error.ComparisonOnIncompatibleTypes,

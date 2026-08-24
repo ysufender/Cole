@@ -13,121 +13,36 @@
     name:
         std::io::stream
     public symbols:
-        In
-        Out
+        IStream
+        OStream
     description:
         I/O Interfaces
 */
 
-import std::memory::allocator as Allocator;
+import std::io::stream::istream as istream;
+import std::io::stream::ostream as ostream;
 
-/* Common */
 pub let Result = enum {
     Ok,
     Err,
 };
 
-/* In */
-pub let In = struct {
-    context: *void,
-    read: *fn (*void) -> ReadResult,
-    readline: *fn (*void, Allocator::RawAllocator) -> ReadLineResult,
-    readbuffer: *fn (*void, []mut u8) -> ReadLineResult,
-    seek: *fn (*void, u32) -> Result,
-
-    pub let ReadResult = union(enum) {
-        data: u8,
-        err: void,
-    };
-
-    pub let ReadLineResult = union(enum) {
-        data: []u8,
-        err: void,
-    };
-
-    pub let read = fn (self: In) -> ReadResult {
-        return self.read(self.context);
-    };
-
-    pub let readline = fn (self: In, allocator: Allocator::RawAllocator) -> ReadLineResult {
-        return self.readline(self.context, allocator);
-    };
-
-    pub let readbuffer = fn (self: In, buffer: []mut u8) -> ReadLineResult {
-        return self.readbuffer(self.context, buffer);
-    };
-
-    pub let seek = fn (self: In, off: u32) -> Result {
-        return self.seek(self.context, off);
-    };
+pub let Input = struct {
+    pub let Stream         = istream::IStream;
+    pub let ReadResult     = istream::ReadResult;
+    pub let ReadLineResult = istream::ReadLineResult;
+    pub let read           = istream::read;
+    pub let readline       = istream::readline;
+    pub let readbuffer     = istream::readbuffer;
+    pub let seek           = istream::seek;
+    pub let close          = istream::close;
 };
 
-/* Out */
-pub let Out = struct {
-    context: *void,
-    write: *fn (*void, u8) -> Result,
-    writeline: *fn (*void, []u8) -> Result,
-    writebuffer: *fn (*void, []u8) -> Result,
-    seek: *fn (*void, u32) -> Result,
-
-    pub let write = fn (self: Out, ch: u8) -> Result {
-        return self.write(self.context, ch);
-    };
-
-    pub let writeline = fn (self: Out, str: []u8) -> Result {
-        return self.writeline(self.context, str);
-    };
-
-    pub let writebuffer = fn (self: Out, buf: []u8) -> Result {
-        return self.writebuffer(self.context, buf);
-    };
-
-    pub let seek = fn (self: Out, off: u32) -> Result {
-        return self.seek(self.context, off);
-    };
-};
-
-/* Inout */
-pub let Inout = struct {
-    context: *void,
-    read: *fn (*void) -> In::ReadResult,
-    readline: *fn (*void, Allocator::RawAllocator) -> In::ReadLineResult,
-    readbuffer: *fn (*void, []mut u8) -> In::ReadLineResult,
-    write: *fn (*void, u8) -> Result,
-    writeline: *fn (*void, []u8) -> Result,
-    writebuffer: *fn (*void, []u8) -> Result,
-    seek: *fn (*void, u32) -> Result,
-
-    pub let read = fn (self: Inout) -> In::ReadResult {
-        return self.read(self.context);
-    };
-
-    pub let readline = fn (self: Inout, allocator: Allocator::RawAllocator) -> In::ReadLineResult {
-        return self.readline(self.context, allocator);
-    };
-
-    pub let readbuffer = fn (self: Inout, buffer: []mut u8) -> In::ReadLineResult {
-        return self.readbuffer(self.context, buffer);
-    };
-
-    pub let seek = fn (self: Inout, off: u32) -> Result {
-        return self.seek(self.context, off);
-    };
-
-
-    pub let write = fn (self: Inout, ch: u8) -> Result {
-        return self.write(self.context, ch);
-    };
-
-    pub let writeline = fn (self: Inout, str: []u8) -> Result {
-        return self.writeline(self.context, str);
-    };
-
-    pub let writebuffer = fn (self: Inout, buf: []u8) -> Result {
-        return self.writebuffer(self.context, buf);
-    };
-
-    pub let seek = fn (self: Inout, off: u32) -> Result {
-        return self.seek(self.context, off);
-    };
+pub let Output = struct {
+    pub let Stream      = ostream::OStream;
+    pub let write       = ostream::write;
+    pub let writeline   = ostream::writeline;
+    pub let writebuffer = ostream::writebuffer;
+    pub let seek        = ostream::seek;
+    pub let close       = ostream::close;
 };

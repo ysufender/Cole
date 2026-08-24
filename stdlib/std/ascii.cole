@@ -18,10 +18,11 @@
     Description:
         Input/Output utilities.
 */
+code {
+    int32_t const _NULL = NULL;
+}
 
-pub let EOF = -1;
-pub let NULL = 0;
+let _NULL: c_int = #(@extern) 0;
 
-pub let charToStr = fn (ch: u8) -> [2]u8 {
-    return (ch, NULL);
-};
+pub let NEWLINE = 74;
+pub let NULL = _NULL;

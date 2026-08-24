@@ -1614,6 +1614,12 @@ pub fn constructFromList(self: *Folder, typeID: TypeID, _range: defines.Range) E
 
             return self.constructArrayFromList(typeID, arr.child, range);
         },
+
+        .Pointer => |ptr| {
+            assert(ptr.size != .Single);
+            return self.constructArrayFromList(typeID, ptr.child, range);
+        },
+
         .Noreturn,
         .Type, .Function,
         .Bool, .Float, .Integer,
