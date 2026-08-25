@@ -22,7 +22,7 @@ pub let stream = fn (self: IFile) -> Stream::Input::Stream {
 };
 */
 
-pub let read = fn (handle: *mut FILE) -> Stream::Input::ReadResult {
+pub let read = fn (handle: *mut void) -> Stream::Input::ReadResult {
     let ch: mut u8 = undefined;
 
     return
@@ -30,7 +30,7 @@ pub let read = fn (handle: *mut FILE) -> Stream::Input::ReadResult {
         else (@Err, ());
 };
 
-pub let readline = fn (handle: *mut FILE, allocator: Allocator::Allocator) -> Stream::Input::ReadLineResult {
+pub let readline = fn (handle: *mut void, allocator: Allocator::Allocator) -> Stream::Input::ReadLineResult {
     let start = ftell(handle);
 
     let ch: mut c_int = fgetc(handle);
@@ -61,7 +61,7 @@ pub let readline = fn (handle: *mut FILE, allocator: Allocator::Allocator) -> St
     return res;
 };
 
-pub let readbuffer = fn (handle: *mut FILE, buffer: []mut u8) -> Stream::Input::ReadLineResult {
+pub let readbuffer = fn (handle: *mut void, buffer: []mut u8) -> Stream::Input::ReadLineResult {
     buffer[buffer.len - 1] = ASCII::NULL;
     let ch: mut c_int = undefined;
     let idx: mut u32 = 0;
@@ -78,6 +78,18 @@ pub let readbuffer = fn (handle: *mut FILE, buffer: []mut u8) -> Stream::Input::
     return (@Ok, buffer);
 };
 
+pub let seek = fn (handle: *mut void, pos: u32) -> Stream::Result {
+    return
+        if (fseek(handle, pos, File::Base::Start) == 0) @Ok
+        else @Err;
+};
+
+pub let close = fn (handle: *mut void) -> Stream::Result {
+    return
+        if (fclose(handle) == 0) @Ok
+        else @Err;
+};
+
 pub let open = fn (path: []u8, allocator: Allocator::Allocator, readWrite: bool) -> OpenResult {
     let res =
         if (readWrite) fopen(path.ptr, "r+")
@@ -90,9 +102,10 @@ pub let open = fn (path: []u8, allocator: Allocator::Allocator, readWrite: bool)
 
 let FILE = #(@extern) struct { };
 
-let fopen = #(@extern) fn (path: mut [@c]c_char, mode: mut [@c]c_char) -> mut *mut FILE { };
-let fread = #(@extern) fn (dst: [@c]mut void, size: c_size, count: c_size, file: *mut FILE,) -> mut c_size { };
-let fgetc = #(@extern) fn (stream: mut *mut FILE) -> mut c_int { };
-let ftell = #(@extern) fn (stream: mut *mut FILE) -> mut c_long { };
-let fseek = #(@extern) fn (stream: mut *mut FILE, offset: mut c_long, whence: mut c_int) -> mut c_int { };
-let feof  = #(@extern) fn (stream: mut *mut FILE) -> mut c_int { };
+let fclose = #(@extern) fn (stream: mut *mut FILE) -> c_int { };
+let fopen  = #(@extern) fn (path: mut [@c]c_char, mode: mut [@c]c_char) -> mut *mut FILE { };
+let fread  = #(@extern) fn (dst: [@c]mut void, size: c_size, count: c_size, file: *mut FILE,) -> mut c_size { };
+let fgetc  = #(@extern) fn (stream: mut *mut FILE) -> mut c_int { };
+let ftell  = #(@extern) fn (stream: mut *mut FILE) -> mut c_long { };
+let fseek  = #(@extern) fn (stream: mut *mut FILE, offset: mut c_long, whence: mut c_int) -> mut c_int { };
+let feof   = #(@extern) fn (stream: mut *mut FILE) -> mut c_int { };

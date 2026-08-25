@@ -218,26 +218,12 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
                     },
                 }},
                 .Pointer => |ptr|
-                    if (true) {
+                    if (ptr.size != .Slice) {
                         self.report("Pointer types can't be comptime constants.", .{});
                         return Error.ComptimePointer;
                     }
                     else pointer: { 
-                        const implicitArray = JIR.Constant{ .Aggregate = .{
-                            .type = try self.typechecker.registerType(.{
-                                .Array = .{
-                                    .mutable = true,
-                                    .child = ptr.child,
-                                    .len = slice.Size,
-                                },
-                            }),
-                            .data = .{
-                                .start = @intCast(start),
-                                .end = @intCast(self.typechecker.builder.constants.len),
-                            },
-                        }};
- 
-                        break :pointer .{ .Pointer = try self.typechecker.builder.addConstant(implicitArray) };
+                        break :pointer self.typechecker.builder.constants.get(start);
                     },
                     else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
             };

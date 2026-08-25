@@ -95,6 +95,9 @@ pub fn eval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeI
     const ast = typechecker.context.getAST(file);
     const expr = ast.expressions.get(exprPtr);
 
+    const prevcb = self.setFlag(.ComptimeBanned, expr.type != .Literal and self.getFlag(.ComptimeBanned));
+    defer _ = self.setFlag(.ComptimeBanned, prevcb);
+
     if (self.getFlag(.ComptimeBanned)) {
         self.report("Comptime execution is not possible in this context.", .{});
         return Error.ComptimeNotPossible;
@@ -949,7 +952,7 @@ fn evalLiteral(self: *Folder, tokenPtr: defines.TokenPtr, maybeExpected: ?TypeID
                 return Error.InferenceError;
             },
         else => |t| {
-            self.report("'{s}: {s}' not implemented.", .{@tagName(t), lexeme});
+            self.report("'{s}: {s}' can't be comptime.", .{@tagName(t), lexeme});
             return common.debug.ShouldBeImpossible(undefined, @src());
         },
     };
