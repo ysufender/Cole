@@ -25,9 +25,9 @@ and uses the embedded TinyCC to compile the source.
 
 ### Building
 
-Simpl execute ´zig build <target>´ where ´target´ can be:
+Simply execute ´zig build <target>´ where ´target´ can be:
 
-´´´
+```
 debug-linux-x86_64
 debug-windows-x86_64
 releasefast-linux-x86_64
@@ -37,6 +37,15 @@ releasesafe-windows-x86_64
 releasesmall-linux-x86_64
 releasesmall-windows-x86_64
 debug
-´´´
+```
 
-And the Cole compiler will be at ´zig-out/<target>/<version>/cole(.exe)´.
+And the Cole compiler will be at `zig-out/<target>/<version>/cole(.exe)`.
+
+> Note: Keep in mind that building for Windows on Linux might not work well because
+> Cole will be built using the local TCC builds. And because of the same reason,
+> on Windows builds you must provide a library path leading to TCC headers and
+> libraries
+
+## Contributing
+
+Check out the [CONTRIBUTING.md](./CONTRIBUTING.md) and [BUG_REPORT.md](./BUG_REPORT.md)
