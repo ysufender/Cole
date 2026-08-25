@@ -1007,8 +1007,8 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
         .Call => self.typecheckCall(expr.value, maybeExpected),
         .Scoping => return self.typecheckScoping(expressionPtr),
         .ExpressionList => self.typecheckExpressionList(expr.value, maybeExpected),
-        .Literal => self.typecheckValue(try self.folder.eval(expressionPtr, maybeExpected), maybeExpected),
 
+        .Literal,
         .ArrayType, .CPointerType, .FunctionType,
         .MutableType, .PointerType, .SliceType, 
         .EnumDefinition, .UnionDefinition, .StructDefinition,
@@ -2951,6 +2951,7 @@ pub fn assertComparable(self: *const Typechecker, this: TypeID, that: TypeID) Er
         },
         .Bool, .Type => functional.throwIf(std.meta.activeTag(thatType) != std.meta.activeTag(thisType), Error.ComparisonOnIncompatibleTypes),
         .EnumLiteral => { }, // @Maybe TODO: do not allow this
+        .Pointer => |ptr| functional.throwIf(ptr.size == .Slice, Error.ComparisonOnNonComparableType),
         else => Error.ComparisonOnNonComparableType,
     };
 }

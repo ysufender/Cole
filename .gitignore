@@ -9,5 +9,5 @@ tests/corpus/
 **/build
 src/res/vendor
 
-*.out
+*out
 *.massif*

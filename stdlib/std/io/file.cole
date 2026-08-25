@@ -17,19 +17,23 @@
         File operation utilities.
 */
 code {
-    int32_t const OFFSET_START   = SEEK_SET;
-    int32_t const OFFSET_CURRENT = SEEK_CUR;
-    int32_t const OFFSET_END     = SEEK_END;
+    #include <stdio.h>
 }
 
+import std::io::file::ifile as ifile;
 import std::io::stream as Stream;
 
-let OFFSET_START  : c_int = #(@extern) 0;
-let OFFSET_CURRENT: c_int = #(@extern) 0;
-let OFFSET_END    : c_int = #(@extern) 0;
-
 pub let Base = struct {
-    pub let Start   = OFFSET_START;
-    pub let Current = OFFSET_CURRENT;
-    pub let End     = OFFSET_END;
+    pub let Start   = 0;
+    pub let Current = 1;
+    pub let End     = 2;
+};
+
+pub let Input = struct {
+    pub let OpenResult = ifile::OpenResult;
+    pub let File       = ifile::IFile;
+    pub let read       = ifile::read;
+    pub let readline   = ifile::readline;
+    pub let readbuffer = ifile::readbuffer;
+    pub let open       = ifile::open;
 };

@@ -57,9 +57,9 @@ pub const TypeInfo = union(enum) {
             .Noreturn => true,
             .Void => true,
             .Type => true,
-            .Struct => |str| str.fields.len == 0,
-            .Union => |uni| uni.fields.len == 0,
-            .Enum => |enm| enm.fields.len == 0,
+            .Struct => |str| str.fields.len == 0 and !str.external,
+            .Union => |uni| uni.fields.len == 0 and !uni.external,
+            .Enum => |enm| enm.fields.len == 0 and !enm.external,
             else => false,
         };
     }

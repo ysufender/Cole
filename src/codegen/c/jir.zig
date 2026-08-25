@@ -241,6 +241,7 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
         if (std.mem.startsWith(u8, asmc, "#include")) {
             try self.write(out, "{s}\n", .{asmc});
         }
+        try self.write(out, "\n", .{});
     }
     try self.write(out, "\n\n", .{});
 
@@ -509,6 +510,12 @@ fn discoverFunctionsAndTypes(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void 
 }
 
 fn sourceGen(self: *JIR, out: *Writer) Error!void {
+    try self.write(out, @embedFile("../../res/hidden_main.c"), .{});
+    defer out.flush() catch {
+        common.log.err("Failed to flush source file.", .{});
+    };
+    try self.write(out, "\n\n", .{});
+
     try self.write(out, "/* Top-level inserted code */\n", .{});
     for (self.topLevelAsms) |asmn| {
         const asmc = std.mem.trim(u8, self.strings[asmn], " \t\n\r");
@@ -516,13 +523,9 @@ fn sourceGen(self: *JIR, out: *Writer) Error!void {
         if (!std.mem.startsWith(u8, asmc, "#include")) {
             try self.write(out, "{s}", .{asmc});
         }
+        try self.write(out, "\n", .{});
     }
     try self.write(out, "\n\n", .{});
-
-    try self.write(out, @embedFile("../../res/hidden_main.c"), .{});
-    defer out.flush() catch {
-        common.log.err("Failed to flush source file.", .{});
-    };
 
     for (self.keyNodes) |keyNode| {
         const node = self.nodes.get(@intCast(keyNode));

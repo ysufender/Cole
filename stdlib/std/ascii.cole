@@ -18,11 +18,5 @@
     Description:
         Input/Output utilities.
 */
-code {
-    int32_t const _NULL = NULL;
-}
-
-let _NULL: c_int = #(@extern) 0;
-
 pub let NEWLINE = 74;
-pub let NULL = _NULL;
+pub let NULL = 0;

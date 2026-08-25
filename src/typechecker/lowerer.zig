@@ -527,9 +527,11 @@ fn assignment(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     const rexpr = ast.extra[extraPtr + 1];
     const vt = try self.typechecker.typecheckExpression(vexpr, null);
 
-    const prev = self.typechecker.folder.setFlag(.ComptimeBanned, true);
-    const expr = try self.expression(vexpr, vt);
-    _ = self.typechecker.folder.setFlag(.ComptimeBanned, prev);
+    const expr = expr: {
+        const prev = self.typechecker.folder.setFlag(.ComptimeBanned, true);
+        defer _ = self.typechecker.folder.setFlag(.ComptimeBanned, prev);
+        break :expr try self.expression(vexpr, vt);
+    };
 
     const rhs = try self.expression(rexpr, vt);
 
@@ -1299,9 +1301,11 @@ fn dot(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     const ref = std.mem.eql(u8, member, "&");
     const deref = std.mem.eql(u8, member, "*");
 
-    const prev = self.typechecker.folder.setFlag(.ComptimeBanned, ref or deref);
-    var obj = try self.expression(exprPtr, exprType);
-    _ = self.typechecker.folder.setFlag(.ComptimeBanned, prev);
+    var obj = obj: {
+        const prev = self.typechecker.folder.setFlag(.ComptimeBanned, ref or deref);
+        defer _ = self.typechecker.folder.setFlag(.ComptimeBanned, prev);
+        break :obj try self.expression(exprPtr, exprType);
+    };
 
     switch (self.typechecker.typeTable.get(exprType)) {
         .Array => |arr|

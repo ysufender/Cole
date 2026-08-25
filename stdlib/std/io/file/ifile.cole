@@ -80,9 +80,13 @@ pub let readbuffer = fn (handle: *mut FILE, buffer: []mut u8) -> Stream::Input::
 };
 
 pub let open = fn (path: []u8, allocator: Allocator::Allocator, readWrite: bool) -> OpenResult {
-    return
+    let res =
         if (readWrite) fopen(path.ptr, "r+")
         else fopen(path.ptr, "r");
+
+    return
+        if (res == undefined) (@Err, ())
+        else (@Ok, res);
 };
 
 let FILE = #(@extern) struct { };
