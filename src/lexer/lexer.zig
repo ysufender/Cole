@@ -117,6 +117,8 @@ pub const Token = struct {
         last: bool
     ) void {
         // TODO: Optimize
+        const len = token.end - token.start;
+
         const errLine = token.errIdentifier(context, file);
         common.log.err("{s}", .{errLine});
         var locationIdentifier: []const u8 = "";
@@ -127,10 +129,20 @@ pub const Token = struct {
                 .{locationIdentifier}
             ) catch "AllocatorFailure";
         }
+
+        var underscore: []const u8 = "";
+        for (0..len) |_| {
+            underscore = std.fmt.allocPrint(
+                gpa,
+                "{s}^",
+                .{underscore}
+            ) catch "^^^^^^^^^^^^^";
+        }
+
         locationIdentifier = std.fmt.allocPrint(
             gpa,
-            "{s}^ Here.",
-            .{locationIdentifier}
+            "{s}{s}",
+            .{locationIdentifier, underscore}
         ) catch "AllocatorFailure";
         common.log.err("{s}{s}", .{locationIdentifier, if (last) "\n" else ""});
     }

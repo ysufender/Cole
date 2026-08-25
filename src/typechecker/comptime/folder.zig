@@ -93,14 +93,9 @@ pub fn eval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeI
     };
 
     const ast = typechecker.context.getAST(file);
+    const expr = ast.expressions.get(exprPtr);
 
-    if (
-        self.getFlag(.ComptimeBanned)
-        or (
-            ast.expressions.get(exprPtr).type != .FunctionDefinition
-            and typechecker.hasMetadata(exprPtr, "@noComptime")
-        )
-    ) {
+    if (self.getFlag(.ComptimeBanned)) {
         self.report("Comptime execution is not possible in this context.", .{});
         return Error.ComptimeNotPossible;
     }
@@ -108,8 +103,6 @@ pub fn eval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeI
     if (self.cache.get(key)) |cached| {
         return cached;
     }
-
-    const expr = ast.expressions.get(exprPtr);
 
     const addr = switch (expr.type) {
         .Identifier => addr: {

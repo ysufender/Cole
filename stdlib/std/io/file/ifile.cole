@@ -57,7 +57,6 @@ pub let readline = fn (handle: *mut FILE, allocator: Allocator::Allocator) -> St
 
     let buffer: []mut u8 = cast(Allocator::alloc(allocator, len, 1));
     let res = readbuffer(handle, buffer);
-    ch = fgetc(handle);
 
     return res;
 };

@@ -1273,10 +1273,9 @@ pub const builtins = [_][]const u8 {
     "float", "void", "comptime_int", "comptime_float",
     "type", "noreturn", "enum_literal", "any",
 
-    "undefined", "typeInfo", "hasField", "compileError",
-    "bitSizeOf", "unreachable", "enumStr", "typeOf",
-    "field", "fieldIndex", "hasDef", "definitionIndex",
-    "this", "sizeOf", "bitSet", "cast", "unsafeCast",
+    "undefined", "typeInfo", "compileError",
+    "bitSizeOf", "unreachable", "typeOf",
+    "sizeOf", "bitSet", "cast", "unsafeCast",
     "as", "compileLog", "typeName", "Tuple",
 };
 

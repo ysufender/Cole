@@ -75,6 +75,7 @@ pub const Node = struct {
         Construction,
         Code,
         Mod,
+        Discard,
     };
 
     type: Type,
@@ -745,6 +746,13 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
             try self.write(out, "/* Inserted Code */\n{s}\n", .{
                 str,
             });
+        },
+
+        .Discard => {
+            try self.indentf(out);
+            try self.write(out, "(void)(", .{});
+            try self.operation(out, node.value);
+            try self.write(out, ");\n", .{});
         },
     };
 }

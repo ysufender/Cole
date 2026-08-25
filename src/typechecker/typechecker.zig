@@ -65,7 +65,7 @@ const TypecheckStatus = struct {
     result: TypeID,
 };
 
-pub const Resolution = backend.C.JIR;
+pub const JIR = backend.C.JIR;
 
 const Typechecker = @This();
 
@@ -143,7 +143,7 @@ pub fn deinit(self: *Typechecker) void {
     self.arena.deinit();
 }
 
-pub fn typecheck(self: *Typechecker, allocator: Allocator) Error!Resolution {
+pub fn typecheck(self: *Typechecker, allocator: Allocator) Error!JIR {
     if (!self.modules.getItem("root", .symbolPtrs).contains("main")) {
         self.report("Couldn't find an entry point in the root module.", .{});
         return Error.MissingDefinition;
@@ -1745,16 +1745,11 @@ pub fn typecheckIndexing(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!
     };
 
     const maybeIndexPtr = try self.typecheckExpression(ast.extra[extraPtr + 1], null);
-    const maybeIndex = self.typeTable.get(maybeIndexPtr);
-    switch (maybeIndex) {
-        .Integer, .ComptimeInt => {
-        },
-        else => {
-            self.report("Expected an integer type for indexing, received '{s}'.", .{
-                try self.typeName(self.arena.allocator(), maybeIndexPtr),
-            });
-            return Error.NonIntegerIndex;
-        },
+    if (!self.isInt(maybeIndexPtr)) {
+        self.report("Expected an integer type for indexing, received '{s}'.", .{
+            try self.typeName(self.arena.allocator(), maybeIndexPtr),
+        });
+        return Error.NonIntegerIndex;
     }
 
     switch (maybeIndexable) {
