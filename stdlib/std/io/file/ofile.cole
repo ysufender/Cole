@@ -33,9 +33,7 @@ pub let writeline = fn (handle: *mut void, line: []u8) -> Stream::Result {
             if (fwrite(ch.&, 1, 1, handle) == 1) @Ok
             else @Err;
     }
-    else {
-        return @Err;
-    }
+    return @Err;
 };
 
 pub let writebuffer = fn (handle: *mut void, buf: []u8) -> Stream::Result {

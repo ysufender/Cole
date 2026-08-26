@@ -298,7 +298,7 @@ fn typecheckVariableDef(
                 .Struct => |str| str.name,
                 .Union => |uni| uni.name,
                 .Enum => |enm| enm.name,
-                else => return common.debug.ShouldBeImpossible(undefined, @src()),
+                else => break :blk,
             });
 
             if (!std.mem.startsWith(u8, prevName, "__")) {
@@ -1574,7 +1574,7 @@ pub fn typecheckCall(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpec
         ast.extra[exprList + 1]
     ];
 
-    for (func.argTypes, args[0..func.argTypes.len], 0..) |argType, expr, index| {
+    for (func.argTypes[0..args.len], args, 0..) |argType, expr, index| {
         const exprType = try self.typecheckExpression(expr, argType);
 
         self.assertCanCoerce(argType, exprType) catch {

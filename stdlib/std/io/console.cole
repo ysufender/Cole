@@ -1,4 +1,4 @@
-let printf = #(@extern, @variadic) fn (fmt: mut [@c]c_char) -> c_size { };
+let printf = #(@extern, @variadic) fn (fmt: mut [@c]c_char) -> mut c_int { };
 
 pub let log = fn (msg: []u8) -> void {
     printf("%s\n", msg.ptr);
