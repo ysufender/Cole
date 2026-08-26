@@ -12,12 +12,13 @@ pub let ReadLineResult = union(enum) {
 };
 
 pub let IStream = struct {
-    context   : *void,
-    read      : *fn (*void) -> ReadResult,
-    readline  : *fn (*void, Allocator::Allocator) -> ReadLineResult,
-    readbuffer: *fn (*void, []mut u8) -> ReadLineResult,
-    seek      : *fn (*void, u32) -> Stream::Result,
-    close     : *fn (*void) -> Stream::Result,
+    context   : *mut void,
+    read      : *fn (*mut void) -> ReadResult,
+    readline  : *fn (*mut void, Allocator::Allocator) -> ReadLineResult,
+    readbuffer: *fn (*mut void, []mut u8) -> ReadLineResult,
+    seek      : *fn (*mut void, u32) -> Stream::Result,
+    close     : *fn (*mut void) -> Stream::Result,
+    flush     : *fn (*mut void) -> Stream::Result, // @Error
 };
 
 pub let read = fn (self: IStream) -> ReadResult {

@@ -16,15 +16,12 @@ pub let IFile = struct {
     handle: *mut FILE,
 };
 
-/*
 pub let stream = fn (self: IFile) -> Stream::Input::Stream {
-    return (self.handle, read, readline, readbuffer, seek, close);
+    return (cast(self.handle), read, readline, readbuffer, seek, close, flush);
 };
-*/
 
 pub let read = fn (handle: *mut void) -> Stream::Input::ReadResult {
     let ch: mut u8 = undefined;
-
     return
         if (fread(ch.&, 1, 1, handle) == 1) (@Ok, ch)
         else (@Err, ());
@@ -100,6 +97,12 @@ pub let open = fn (path: []u8, allocator: Allocator::Allocator, readWrite: bool)
         else (@Ok, res);
 };
 
+pub let flush = fn (handle: *mut void) -> Stream::Result {
+    return
+        if (fflush(handle) == 0) @Ok
+        else @Err;
+};
+
 let FILE = #(@extern) struct { };
 
 let fclose = #(@extern) fn (stream: mut *mut FILE) -> c_int { };
@@ -109,3 +112,4 @@ let fgetc  = #(@extern) fn (stream: mut *mut FILE) -> mut c_int { };
 let ftell  = #(@extern) fn (stream: mut *mut FILE) -> mut c_long { };
 let fseek  = #(@extern) fn (stream: mut *mut FILE, offset: mut c_long, whence: mut c_int) -> mut c_int { };
 let feof   = #(@extern) fn (stream: mut *mut FILE) -> mut c_int { };
+let fflush = #(@extern) fn (stream: mut *mut FILE) -> mut c_int { };

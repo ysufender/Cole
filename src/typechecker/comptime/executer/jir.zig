@@ -149,7 +149,6 @@ pub fn executeCall(self: *JIRExecuter, func: *JIR.Function, args: []const Compti
     defer self.typechecker.currentScope = pscope;
     self.typechecker.currentScope = func.scope;
 
-    common.log.debug("{s}", .{self.typechecker.builder.getInternedString(func.name)});
     const res = try self.executeBlock(func.body);
 
     try self.cache.put(.{

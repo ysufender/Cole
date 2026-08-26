@@ -335,12 +335,12 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
                         continue;
                     }
 
-                    try self.write(out, "\t{s} {s};\n", .{
+                    try self.write(out, "\t{s}{s}{s};\n", .{
                         try self.getCName(field.valueType, field.name, info == .Function, false),
-                        if (info == .Function)
-                            ""
-                        else
-                            self.strings[field.name],
+                        if (info == .Function) ""
+                        else " ",
+                        if (info == .Function) ""
+                        else self.strings[field.name],
                     });
                 }
                 try self.write(out, "}} {s};\n\n", .{

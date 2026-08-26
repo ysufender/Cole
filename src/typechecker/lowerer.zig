@@ -633,6 +633,15 @@ fn loop(
         ) catch return Error.AllocatorFailure
     );
 
+    const endLabel = try self.typechecker.builder.internString(
+        std.fmt.allocPrint(
+            self.typechecker.arena.allocator(),
+            "{s}_End", .{
+                loopLabel,
+            }
+        ) catch return Error.AllocatorFailure
+    );
+
     const cndLabel = try self.typechecker.builder.internString(
         std.fmt.allocPrint(
             self.typechecker.arena.allocator(),
@@ -648,7 +657,7 @@ fn loop(
     if (self.typechecker.context.settings.canFold()) {
         if (self.typechecker.folder.attemptEval(conditionPtr, Comptime.Folder.Builtin.Type("bool"))) |res| {
             if (self.typechecker.folder.getValue(res).Bool) {
-                var loopData: [3]JIR.Ptr = undefined;
+                var loopData: [4]JIR.Ptr = undefined;
 
                 const bodyPtr = ast.extra[extraPtr + 1];
                 self.lastLoopDepth = self.scopes.index;
@@ -656,6 +665,7 @@ fn loop(
                 loopData[0] = start;
                 loopData[1] = try self.statement(bodyPtr);
                 loopData[2] = try self.typechecker.builder.jump(startLabel);
+                loopData[3] = try self.typechecker.builder.label(endLabel);
 
                 return self.typechecker.builder.scope(
                     try self.typechecker.folder.generateRandomName(.Block),
@@ -670,7 +680,7 @@ fn loop(
 
     const cnd = try self.expression(conditionPtr, Comptime.Folder.Builtin.Type("bool"));
 
-    var loopData: [5]JIR.Ptr = undefined;
+    var loopData: [6]JIR.Ptr = undefined;
 
     loopData[0] = try self.typechecker.builder.jump(cndLabel);
     const bodyPtr = ast.extra[extraPtr + 1];
@@ -680,6 +690,7 @@ fn loop(
     loopData[2] = try self.statement(bodyPtr);
     loopData[3] = try self.typechecker.builder.label(cndLabel);
     loopData[4] = try self.typechecker.builder.cjump(startLabel, cnd);
+    loopData[5] = try self.typechecker.builder.label(endLabel);
 
     return self.typechecker.builder.scope(
         try self.typechecker.folder.generateRandomName(.Block),
