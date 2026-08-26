@@ -818,7 +818,7 @@ pub fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
 
     const expr = ast.expressions.get(exprPtr);
-    return switch (expr.type) {
+    const inner = try switch (expr.type) {
         .Literal => self.literal(exprPtr, ofType),
         .Mark => self.mark(expr.value, ofType),
         .Identifier => self.identifier(exprPtr),
@@ -858,6 +858,7 @@ pub fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID
 
         .Slicing => self.slicing(expr.value, ofType),
     };
+    return inner;
 }
 
 fn tuple(self: *Lowerer, exprListPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR.Ptr {

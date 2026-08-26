@@ -674,7 +674,10 @@ fn typecheckSwitchStatementOnUnion(
             }) catch return Error.AllocatorFailure;
         }
 
+        const prevc = self.setFlag(.CoveredAllPaths, false);
         try self.typecheckStatement(ast.extra[case + 3], expected);
+        const branchCovered = self.getFlag(.CoveredAllPaths);
+        _ = self.setFlag(.CoveredAllPaths, prevc and branchCovered);
     }
 
     if (fieldMap.count() != fieldMap.capacity()) {
@@ -749,6 +752,7 @@ fn typecheckSwitchStatementOnEnum(
             fieldMap.set(enumeration);
         }
 
+        // @TODO These are broken. Fix them.
         const captureCount = ast.extra[case + 1];
         if (captureCount > 1) {
             self.report("Too many captures for context.", .{ });
@@ -768,7 +772,10 @@ fn typecheckSwitchStatementOnEnum(
             }) catch return Error.AllocatorFailure;
         }
 
+        const prevc = self.setFlag(.CoveredAllPaths, false);
         try self.typecheckStatement(ast.extra[case + 3], expected);
+        const branchCovered = self.getFlag(.CoveredAllPaths);
+        _ = self.setFlag(.CoveredAllPaths, prevc and branchCovered);
     }
 
     if (fieldMap.count() != fieldMap.capacity()) {
@@ -866,9 +873,8 @@ fn typecheckIfStatement(self: *Typechecker, extraPtr: defines.OpaquePtr, expecte
     }
 
     try self.typecheckStatement(body, expected);
-    const coveredIf = self.getFlag(.CoveredAllPaths);
+    const coveredIf = self.setFlag(.CoveredAllPaths, false);
 
-    _ = self.setFlag(.CoveredAllPaths, false);
     const coveredElse =
         if (maybeOtherwise) |otherwise| blk: {
             try self.typecheckStatement(otherwise, expected);
@@ -1574,7 +1580,7 @@ pub fn typecheckCall(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpec
         ast.extra[exprList + 1]
     ];
 
-    for (func.argTypes[0..args.len], args, 0..) |argType, expr, index| {
+    for (func.argTypes[0..@min(args.len, func.argTypes.len)], args[0..@min(args.len, func.argTypes.len)], 0..) |argType, expr, index| {
         const exprType = try self.typecheckExpression(expr, argType);
 
         self.assertCanCoerce(argType, exprType) catch {
@@ -2478,7 +2484,10 @@ fn typecheckSwitchOnUnion(
             }) catch return Error.AllocatorFailure;
         }
 
+        const prevc = self.setFlag(.CoveredAllPaths, false);
         const branchType = try self.typecheckExpression(ast.extra[case + 3], expected);
+        const armCovered = self.getFlag(.CoveredAllPaths);
+        _ = self.setFlag(.CoveredAllPaths, prevc and armCovered);
         expected = expected orelse branchType;
 
         if (!self.suitable(expected.?, branchType)) {
@@ -2590,7 +2599,10 @@ fn typecheckSwitchOnEnum(
             }) catch return Error.AllocatorFailure;
         }
 
+        const prevc = self.setFlag(.CoveredAllPaths, false);
         const branchType = try self.typecheckExpression(ast.extra[case + 3], expected);
+        const armCovered = self.getFlag(.CoveredAllPaths);
+        _ = self.setFlag(.CoveredAllPaths, prevc and armCovered);
         expected = expected orelse branchType;
 
         if (!self.suitable(expected.?, branchType)) {

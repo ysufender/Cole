@@ -889,6 +889,8 @@ fn evalBuiltin(self: *Folder, decl: *const Resolver.Declaration, maybeExpected: 
 }
 
 fn evalLiteral(self: *Folder, tokenPtr: defines.TokenPtr, maybeExpected: ?TypeID) Error!Comptime.Value.Ptr {
+    self.typechecker.lastToken = tokenPtr;
+
     const token = self.typechecker.context.getTokens(self.typechecker.currentFile).get(tokenPtr);
     const lexeme = token.lexeme(self.typechecker.context, self.typechecker.currentFile);
     const value: Comptime.Value = switch (token.type) {
