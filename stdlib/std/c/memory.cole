@@ -27,10 +27,10 @@ pub let memCopy = fn (to: [@c]mut void, from: [@c]mut void, n: u32) -> void {
     let discard = memcpy(to, from, n);
 };
 
-let malloc = #(@extern) fn (size: mut c_size) -> [@c]mut void { };
+let malloc = #(@extern) fn (size: mut c_size) -> mut [@c]mut void { };
 let free = #(@extern) fn (ptr: [@c]mut void) -> void { };
-let calloc = #(@extern) fn (nmemb: c_size, size: c_size) -> [@c]mut void { };
-let realloc = #(@extern) fn (ptr: [@c]mut void, nlen: c_size) -> [@c]mut void { };
+let calloc = #(@extern) fn (nmemb: c_size, size: c_size) -> mut [@c]mut void { };
+let realloc = #(@extern) fn (ptr: [@c]mut void, nlen: c_size) -> mut [@c]mut void { };
 let memcpy = #(@extern) fn (dst: mut [@c]mut void, src: mut [@c]void, n: mut c_size) -> mut [@c]mut void { };
 
 let create = fn (ctx: *mut void, size: u32) -> *mut void {

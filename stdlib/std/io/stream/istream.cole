@@ -4,11 +4,13 @@ import std::io::stream as Stream;
 pub let ReadResult = union(enum) {
     Ok: u8,
     Err: void,
+    EOS: void,
 };
 
 pub let ReadLineResult = union(enum) {
     Ok: []u8,
     Err: void,
+    EOS: void,
 };
 
 pub let IStream = struct {

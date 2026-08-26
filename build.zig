@@ -177,12 +177,27 @@ fn addDebugTarget(b: *std.Build) void {
     exe.root_module.addEmbedPath(b.path(resourcePath));
     exe.root_module.addOptions("config", opts);
 
-    if (config.native.result.os.tag == .linux) {
-        exe.root_module.addSystemIncludePath(.{ .cwd_relative = "/usr/lib/" });
-        exe.root_module.addEmbedPath(.{ .cwd_relative = "/usr/include/" });
-        exe.root_module.linkSystemLibrary("tcc", .{ .preferred_link_mode = .static });
-        // exe.root_module.linkSystemLibrary("mimalloc", .{ .preferred_link_mode = .static });
+    const libPath = config.library_path orelse
+        if (config.native.result.os.tag == .linux) "/usr/local/lib"
+        else {
+            std.log.err("Failed to add target '{s}', a library path is required. The target won't be available.", .{
+                targetName,
+            });
+            return;
+        };
+
+    exe.root_module.addSystemIncludePath(.{ .cwd_relative = libPath });
+    exe.root_module.linkSystemLibrary("tcc", .{ .preferred_link_mode = .static });
+
+    const vendorCopy = b.addUpdateSourceFiles();
+
+    for (files) |file| {
+        const srcPath = b.pathJoin(&.{libPath, "tcc", file});
+        const destPath = b.path("src/res/vendor/tcc/")
+                        .join(b.graph.arena, file) catch unreachable;
+        _ = vendorCopy.addCopyFileToSource(.{ .cwd_relative = srcPath }, destPath.src_path.sub_path);
     }
+    exe.step.dependOn(&vendorCopy.step);
 
     const install = b.addInstallArtifact(exe, .{});
 

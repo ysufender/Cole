@@ -848,7 +848,9 @@ fn literal(self: *JIR, out: *Writer, ptr: Constant.Ptr) Error!void {
 }
 
 fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool, noSymbol: bool) Error![]const u8 {
-    if (!noSymbol) {
+    const typeInfo = self.types.get(typeID);
+
+    if (!noSymbol and !(typeInfo == .Function and _name != null)) {
         if (self.cstrings.get(typeID)) |name| {
             return
                 if (mutable and std.mem.endsWith(u8, name, "const")) name[0..name.len - 6]
@@ -856,7 +858,6 @@ fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool
         }
     }
 
-    const typeInfo = self.types.get(typeID);
     var name: []const u8 = "";
     switch (typeInfo) {
         .Type, .Any, .EnumLiteral => {
@@ -1042,7 +1043,7 @@ fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool
     }
 
     if (!noSymbol) {
-        self.cstrings.putNoClobber(self.allocator, typeID, name)
+        self.cstrings.put(self.allocator, typeID, name)
             catch return Error.AllocatorFailure;
     }
 
