@@ -45,4 +45,5 @@ pub let Output = struct {
     pub let writebuffer = ostream::writebuffer;
     pub let seek        = ostream::seek;
     pub let close       = ostream::close;
+    pub let flush       = ostream::flush;
 };

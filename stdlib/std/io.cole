@@ -1,0 +1,55 @@
+code {
+    #include <stdio.h>
+}
+
+import std::io::stream as Stream;
+import std::io::file as File;
+
+let FILE = #(@extern) struct { };
+
+let stdout: mut *mut FILE = #(@extern) undefined;
+let stdin: mut *mut FILE = #(@extern) undefined;
+let stderr: mut *mut FILE = #(@extern) undefined;
+
+pub let StdOut = fn () -> Stream::Output::Stream {
+    return (
+        stdout,
+        File::Output::write,
+        File::Output::writeline,
+        File::Output::writebuffer,
+        noseek,
+        noclose,
+        File::Output::flush
+    );
+};
+
+pub let StdErr = fn () -> Stream::Output::Stream {
+    return (
+        stderr,
+        File::Output::write,
+        File::Output::writeline,
+        File::Output::writebuffer,
+        noseek,
+        noclose,
+        File::Output::flush
+    );
+};
+
+pub let StdIn = fn () -> Stream::Input::Stream {
+    return (
+        stdin,
+        File::Input::read,
+        File::Input::readline,
+        File::Input::readbuffer,
+        noseek,
+        noclose,
+    );
+};
+
+let noseek = fn (stream: *mut void, off: u32) -> Stream::Result {
+    return @Ok;
+};
+
+let noclose = fn (stream: *mut void) -> Stream::Result {
+    return @Ok;
+};

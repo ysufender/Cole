@@ -18,5 +18,5 @@
     Description:
         Input/Output utilities.
 */
-pub let NEWLINE = 74;
+pub let NEWLINE = 10;
 pub let NULL = 0;

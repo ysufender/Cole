@@ -1,39 +1,17 @@
-/*
-    this file is a part of the Cole standard library,
-    and is licensed under mit license.
+let printf = #(@extern, @variadic) fn (fmt: mut [@c]c_char) -> c_size { };
 
-    any user code that imports this module agrees that it
-    will satisfy the specifications stated further.
-
-    disclaimer:
-        the traits and conventions mentioned in this document
-        are to be obeyed, otherwise neither Cole stdlib nor the
-        compiler can guarantee a well defined program.
-
-    name:
-        std::io::console
-    public symbols:
-        println
-        print
-    description:
-        Console I/O utilities.
-*/
-
-/* Output */
-let printf = #(@extern, @variadic) fn (msg: mut [@c]c_char) -> mut c_int {};
-
-pub let println = fn (msg: []u8) -> void {
-    printf(msg.ptr);
-    printf("\n");
+pub let log = fn (msg: []u8) -> void {
+    printf("%s\n", msg.ptr);
 };
 
-pub let print = fn (msg: []u8) -> void {
-    printf(msg.ptr);
+pub let info = fn (msg: []u8) -> void {
+    printf("\e[32minfo:\e[0m %s\n", msg.ptr);
 };
 
-/* Input */
-pub let read = fn () -> i32 {
-    let res: mut i32 = 0;
-    code { res = fgetc(stdin); }
-    return res;
+pub let error = fn (msg: []u8) -> void {
+    printf("\e[31merror:\e[0m %s\n", msg.ptr);
+};
+
+pub let warn = fn (msg: []u8) -> void {
+    printf("\e[33mwarning:\e[0m %s\n", msg.ptr);
 };

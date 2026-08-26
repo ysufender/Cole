@@ -1,0 +1,88 @@
+code {
+    #include <stdio.h>
+}
+
+import std::memory::allocator as Allocator;
+import std::io::stream as Stream;
+import std::io::file as File;
+import std::ascii as ASCII;
+
+pub let OpenResult = union(enum) {
+    Ok: OFile,
+    Err: void,
+};
+
+pub let OFile = struct {
+    handle: *mut FILE,
+};
+
+pub let stream = fn (self: OFile) -> Stream::Output::Stream {
+    return (self.handle, write, writeline, writebuffer, seek, close, flush);
+};
+
+pub let write = fn (handle: *mut void, ch: u8) -> Stream::Result {
+    return
+        if (fwrite(ch.&, 1, 1, handle) == 1) @Ok
+        else @Err;
+};
+
+pub let writeline = fn (handle: *mut void, line: []u8) -> Stream::Result {
+    if writebuffer(handle, line) == @Ok {
+        let ch = ASCII::NEWLINE;
+        return
+            if (fwrite(ch.&, 1, 1, handle) == 1) @Ok
+            else @Err;
+    }
+    else {
+        return @Err;
+    }
+};
+
+pub let writebuffer = fn (handle: *mut void, buf: []u8) -> Stream::Result {
+    return
+        if (fwrite(buf.ptr, 1, buf.len, handle) == buf.len) @Ok
+        else @Err;
+};
+
+pub let seek = fn (handle: *mut void, off: u32) -> Stream::Result {
+    return
+        if (fseek(handle, off, File::Base::Start) != 0) @Err
+        else @Ok;
+};
+
+pub let close = fn (handle: *mut void) -> Stream::Result {
+    return
+        if (fclose(handle) == 0) @Ok
+        else @Err;
+};
+
+pub let open = fn (path: []u8, allocator: Allocator::Allocator, append: bool, readWrite: bool) -> OpenResult {
+    let res =
+        if (readWrite and append) fopen(path.ptr, "a+")
+        else if (readWrite) fopen(path.ptr, "w+")
+        else if (append) fopen(path.ptr, "a")
+        else fopen(path.ptr, "w");
+
+    return
+        if (res == undefined) (@Err, ())
+        else (@Ok, res);
+};
+
+pub let flush = fn (handle: *mut void) -> Stream::Result {
+    return
+        if (fflush(handle) == 0) @Ok
+        else @Err;
+};
+
+let FILE = #(@extern) struct { };
+
+let fwrite = #(@extern) fn (
+    src  : mut [@c]void,
+    size : mut c_size,
+    count: mut c_size,
+    file : mut *mut FILE
+) -> mut c_size { };
+let fseek  = #(@extern) fn (stream: mut *mut FILE, offset: mut c_long, whence: mut c_int) -> mut c_int { };
+let fclose = #(@extern) fn (stream: mut *mut FILE) -> mut c_int { };
+let fopen  = #(@extern) fn (path: mut [@c]c_char, mode: mut [@c]c_char) -> mut *mut FILE { };
+let fflush = #(@extern) fn (stream: mut *mut FILE) -> mut c_int { };
