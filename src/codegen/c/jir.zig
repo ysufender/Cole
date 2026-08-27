@@ -261,6 +261,56 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
         }
 
         switch (typeInfo) {
+            .Struct => |str| {
+                if (str.external) {
+                    continue;
+                }
+
+                const name = try self.getCName(@intCast(typeID), null, true, false);
+                const res = visited.getOrPut(self.allocator, name)
+                    catch return Error.AllocatorFailure;
+                if (res.found_existing) {
+                    continue;
+                }
+                res.key_ptr.* = name;
+                try self.write(out, "struct {s};\n", .{name});
+                try self.write(out, "typedef struct {s} {s};\n\n", .{name, name});
+            },
+
+            .Union => |uni| {
+                if (uni.external) {
+                    continue;
+                }
+
+                const name = try self.getCName(@intCast(typeID), null, true, false);
+                const res = visited.getOrPut(self.allocator, name)
+                    catch return Error.AllocatorFailure;
+                if (res.found_existing) {
+                    continue;
+                }
+                res.key_ptr.* = name;
+                try self.write(out, "struct {s};\n", .{name});
+                try self.write(out, "typedef struct {s} {s};\n\n", .{name, name});
+            },
+            else => {},
+        }
+    }
+
+    visited.clearRetainingCapacity();
+
+    for (0..self.types.len) |typeID| {
+        if (Comptime.Folder.Builtin.isBuiltinType(@intCast(typeID))) {
+            continue;
+        }
+
+        const typeInfo = self.types.get(@intCast(typeID));
+
+        // @Beware I don't like this.
+        if (typeInfo.isZeroBit()) {
+            continue;
+        }
+
+        switch (typeInfo) {
             .Array => |arr| {
                 const childName = switch (self.types.get(arr.child)) {
                     .Type, .Any, .EnumLiteral => continue,
@@ -691,7 +741,7 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
             });
         },
         .Grouping => {
-            try self.write(out, "(", .{});
+            try self.write(out, "{{ ", .{});
             const len = self.data[node.value];
             for (0..self.data[node.value]) |idx| {
                 try self.operation(out, self.data[@intCast(node.value + 1 + idx)]);
@@ -700,7 +750,7 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
                 }
                 try self.write(out, ", ", .{});
             }
-            try self.write(out, ")", .{});
+            try self.write(out, " }}", .{});
         },
         .Call => {
             const func = self.data[node.value + 1];
@@ -779,7 +829,7 @@ fn literal(self: *JIR, out: *Writer, ptr: Constant.Ptr) Error!void {
         .Type => |id| try self.write(out, "{s}", .{try self.getCName(id, null, false, false)}),
         .Undefined => |typeID|
             if (self.types.get(typeID) == .Pointer) self.write(out, "(({s})NULL)", .{ try self.getCName(typeID, null, false, false)})
-            else self.write(out, "{{0}}", .{ }),
+            else self.write(out, "({s}){{}}", .{ try self.getCName(typeID, null, false, false) }),
         .Integer => |int| switch (int) {
             .i32 => |t| self.write(out, "{d}", .{t}),
             .u32 => |t| self.write(out, "{d}", .{t}),

@@ -2258,10 +2258,42 @@ fn setValue(self: *const Folder, address: defines.Offset, new: Comptime.Value) v
     self.memory.items[address] = new;
 }
 
+pub fn isIncomplete(self: *const Folder, typeID: TypeID) bool {
+    return switch (self.typechecker.typeTable.get(typeID)) {
+        .Pointer => |ptr| ptr.child == Builtin.Type("incomplete") 
+                       or self.isIncomplete(ptr.child),
+        else => typeID == Builtin.Type("incomplete"),
+    };
+}
+
+pub fn resolveIncomplete(self: *Folder, typeID: TypeID, resolvedTo: TypeID) Error!TypeID {
+    const info = self.typechecker.typeTable.get(typeID);
+    return switch (info) {
+        .Pointer => |ptr| {
+            self.typechecker.typeTable.set(typeID, .{
+                .Pointer = .{
+                    .size = ptr.size,
+                    .mutable = ptr.mutable,
+                    .child = try self.resolveIncomplete(ptr.child, resolvedTo),
+                },
+            });
+            return typeID;
+        },
+        // else => Comptime.Folder.Builtin.Type("void"),
+        else => resolvedTo,
+    };
+}
+
 fn cacheValue(self: *Folder, ptr: FolderCacheKey, val: Comptime.Value.Ptr) Error!void {
     const value = self.getValue(val);
-    if (value == .Function and self.typechecker.typeTable.get(value.Function.signature).Function.isComptime) {
-        return;
+    switch (value) {
+        .Function => |func| if (self.typechecker.typeTable.get(func.signature).Function.isComptime) {
+            return;
+        },
+        .Type => |t| if (self.isIncomplete(t)) {
+            return;
+        },
+        else => { },
     }
 
     if (!self.getFlag(.InComptimeCall)) {
@@ -2408,9 +2440,9 @@ pub const builtinTypes = [_]struct {
     // mut any
     .{ .name = "mut any", .info = .{ .Any = true } },
     // incomplete
-    .{ .name = "incomplete", .info = .{ .Struct = .{ .mutable = false, .name = Resolver.BuiltinIndex("any") + 3, .fields = &.{}, .definitions = &.{}, .scope = 0, .external = true, .isTuple = false } } },
+    .{ .name = "incomplete", .info = .{ .Struct = .{ .mutable = false, .name = Resolver.BuiltinIndex("any") + 2, .fields = &.{}, .definitions = &.{}, .scope = 0, .external = true, .isTuple = false } } },
     // builtin_metadata
-    .{ .name = "builtin_metadata", .info = .{ .Enum = .{ .mutable = false, .name = Resolver.BuiltinIndex("any") + 5, .fields = &.{}, .definitions = &.{}, .scope = 0, .external = true } } },
+    .{ .name = "builtin_metadata", .info = .{ .Enum = .{ .mutable = false, .name = Resolver.BuiltinIndex("any") + 3, .fields = &.{}, .definitions = &.{}, .scope = 0, .external = true } } },
     // []u8
     .{ .name = "[]u8", .info = .{ .Pointer = .{ .mutable = false, .child = 2, .size = .Slice, }, } },
 };

@@ -1953,6 +1953,26 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
         .result = declType,
     };
 
+    if (self.typeTable.get(declType) == .Type) {
+        const typeID = self.folder.getValue(try self.folder.eval(decl.node, declType)).Type;
+        const node = self.typeTable.get(typeID);
+
+        const fields: []Types.FieldInfo = @constCast(switch (node) {
+            .Struct => |str| str.fields,
+            .Union => |uni| uni.fields,
+            else => &.{},
+        });
+
+        for (fields) |*field| {
+            if (!self.folder.isIncomplete(field.valueType)) {
+                continue;
+            }
+
+            const newType = self.typeTable.get(try self.folder.resolveIncomplete(field.valueType, typeID));
+            self.typeTable.set(field.valueType, newType);
+        }
+    }
+
     if (decl.topLevel and !self.folder.getFlag(.InComptimeCall)) {
         try self.lowerer.topLevelDeclaration(isPresent.key_ptr.*, &decl);
     }

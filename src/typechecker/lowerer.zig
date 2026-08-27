@@ -217,21 +217,16 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
                         .end = @intCast(self.typechecker.builder.constants.len),
                     },
                 }},
-                .Pointer => |ptr|
-                    if (ptr.size != .Slice) {
-                        self.report("Pointer types can't be comptime constants.", .{});
-                        return Error.ComptimePointer;
-                    }
-                    else JIR.Constant{ 
-                        .Aggregate = .{
-                            .type = slice.Type,
-                            .data = .{
-                                .start = @intCast(start),
-                                .end = @intCast(start + slice.Size),
-                            },
+                .Pointer => .{ 
+                    .Aggregate = .{
+                        .type = slice.Type,
+                        .data = .{
+                            .start = @intCast(start),
+                            .end = @intCast(start + slice.Size),
                         },
                     },
-                    else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
+                },
+                else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
             };
         },
 

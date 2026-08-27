@@ -8,15 +8,15 @@ pub let INI = struct {
 
 pub let Section = struct {
     name: []u8,
-    values: Value::Pair,
+    values: Pair,
+};
+
+pub let Pair = struct {
+    name: []u8,
+    value: Value,
 };
 
 pub let Value = union(enum) {
-    pub let Pair = struct {
-        name: []u8,
-        value: Value,
-    };
-
     Integer  : i32,
     Float    : float,
     String   : []u8,
@@ -25,5 +25,4 @@ pub let Value = union(enum) {
 };
 
 pub let loadStream = fn (allocator: Allocator::Allocator, stream: Stream::Input::Stream) -> INI {
-    return (allocator, []Section());
 };
