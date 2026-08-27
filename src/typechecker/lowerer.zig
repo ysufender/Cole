@@ -208,7 +208,7 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
             for (elemConsts) |c| {
                 _ = try self.typechecker.builder.addConstant(self.typechecker.builder.constants.get(c));
             }
- 
+
             break :slice switch (ofType) {
                 .Array => .{ .Array = .{
                     .type = slice.Type,
@@ -222,8 +222,14 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
                         self.report("Pointer types can't be comptime constants.", .{});
                         return Error.ComptimePointer;
                     }
-                    else pointer: { 
-                        break :pointer self.typechecker.builder.constants.get(start);
+                    else JIR.Constant{ 
+                        .Aggregate = .{
+                            .type = slice.Type,
+                            .data = .{
+                                .start = @intCast(start),
+                                .end = @intCast(start + slice.Size),
+                            },
+                        },
                     },
                     else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
             };

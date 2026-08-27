@@ -16,3 +16,16 @@ either garbage named inner struct definitions or caching problems.
 
 All kinds of help is welcome with the AST executer, whether be direct code contribution or
 contributing ideas and thoughts.
+
+# Temporary Expression Caching
+
+To enable `let a = someExpression().fieldAccess`, the generated code should be:
+
+```c
+SomeType const __tmp__1231534283412987 = someExpression();
+int32_t const a = __tmp__1231534283412987.fieldAccess;
+```
+
+# Slice Literals
+
+Self explanatory, we need slice literals.

@@ -1679,7 +1679,8 @@ pub fn typecheckCast(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpec
             Error.MismatchingSliceChildType => self.report("Cast from slice type '{s}' to '{s}' will alter the length of the slice.", rargs),
             Error.InferenceError => self.report("Illegal cast from '{s}' to unknown type '{s}'.", rargs),
             Error.RedundantCast => self.report("Redundant cast from type '{s}' to '{s}'.", rargs),
-            else => return common.debug.ShouldBeImpossible(self.context.log, @src()),
+            Error.CastOfIncastableValue => self.report("Attempt to cast uncastable value of type '{s}' to '{s}'.", rargs),
+            else => return err,
         }
 
         return err;

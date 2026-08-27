@@ -1,0 +1,29 @@
+import std::memory::allocator as Allocator;
+import std::io::stream as Stream;
+
+pub let INI = struct {
+    allocator: Allocator::Allocator,
+    sections: []Section,
+};
+
+pub let Section = struct {
+    name: []u8,
+    values: Value::Pair,
+};
+
+pub let Value = union(enum) {
+    pub let Pair = struct {
+        name: []u8,
+        value: Value,
+    };
+
+    Integer  : i32,
+    Float    : float,
+    String   : []u8,
+    Reference: []u8,
+    List     : []Value,
+};
+
+pub let loadStream = fn (allocator: Allocator::Allocator, stream: Stream::Input::Stream) -> INI {
+    return (allocator, []Section());
+};
