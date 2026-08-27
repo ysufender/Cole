@@ -37,14 +37,12 @@ pub let readline = fn (handle: *mut void, allocator: Allocator::Allocator) -> St
 
     while true {
         let res = read(handle);
-        if res.tag == @EOS {
-            break;
-        }
-        if res.tag == @Err {
-            return (@Err, ());
-        }
-        if res.Ok == ASCII::NEWLINE {
-            break;
+        switch res {
+            @EOS -> break;
+            @Err -> return (@Err, ());
+            @Ok  -> if (res.Ok == ASCII::NEWLINE) {
+                break;
+            }
         }
     }
     let end = ftell(handle);
@@ -69,14 +67,15 @@ pub let readbuffer = fn (handle: *mut void, buffer: []mut u8) -> Stream::Input::
     let idx: mut u32 = 0;
     while idx < buffer.len {
         let res = read(handle);
-        if res.tag == @EOS {
-            return (@EOS, ());
+
+        switch res {
+            @EOS -> return (@EOS, ());
+            @Err -> return (@Err, ());
+            @Ok -> {
+                buffer[idx] = res.Ok;
+                idx = idx + 1;
+            }
         }
-        if res.tag == @Err {
-            return (@Err, ());
-        }
-        buffer[idx] = res.Ok;
-        idx = idx + 1;
     }
 
     return (@Ok, buffer);

@@ -711,6 +711,8 @@ fn typecheckSwitchStatementOnEnum(
     var fieldBuffer: [512]u32 = undefined;
     var bufferAllocator = std.heap.FixedBufferAllocator.init(@ptrCast(&fieldBuffer));
 
+    const tokens = self.context.getTokens(ast.tokens);
+
     var fieldMap = std.DynamicBitSet.initEmpty(bufferAllocator.allocator(), enm.fields.len)
         catch return common.debug.ShouldBeImpossible(self.context.log, @src());
 
@@ -760,6 +762,7 @@ fn typecheckSwitchStatementOnEnum(
         }
         else if (captureCount > 0) {
             const firstCapture = ast.extra[case + 2];
+            const captureToken = ast.expressions.items(.value)[firstCapture];
 
             const captureDecl = self.symbols.findDecl(.{
                 .file = self.currentFile,
@@ -770,6 +773,10 @@ fn typecheckSwitchStatementOnEnum(
                 .status = .Checked,
                 .result = itemTypeID,
             }) catch return Error.AllocatorFailure;
+
+            self.symbols.declarations.items(.name)[captureDecl] = try self.builder.internString(
+                tokens.get(captureToken).lexeme(self.context, ast.tokens),
+            );
         }
 
         const prevc = self.setFlag(.CoveredAllPaths, false);
@@ -2410,6 +2417,8 @@ fn typecheckSwitchOnUnion(
 
     const tag = self.typeTable.get(uni.tag).Enum;
 
+    const tokens = self.context.getTokens(ast.tokens);
+
     var fieldMap = std.DynamicBitSet.initEmpty(bufferAllocator.allocator(), tag.fields.len)
         catch return common.debug.ShouldBeImpossible(self.context.log, @src());
 
@@ -2467,6 +2476,7 @@ fn typecheckSwitchOnUnion(
         else if (captureCount > 0)
         {
             const firstCapture = ast.extra[case + 2];
+            const firstToken = ast.expressions.items(.value)[firstCapture];
 
             const captureDecl = self.symbols.findDecl(.{
                 .file = self.currentFile,
@@ -2482,6 +2492,10 @@ fn typecheckSwitchOnUnion(
                 .status = .Checked,
                 .result = captureType,
             }) catch return Error.AllocatorFailure;
+
+            self.symbols.declarations.items(.name)[captureDecl] = try self.builder.internString(
+                tokens.get(firstToken).lexeme(self.context, ast.tokens),
+            );
         }
 
         const prevc = self.setFlag(.CoveredAllPaths, false);
@@ -2533,6 +2547,8 @@ fn typecheckSwitchOnEnum(
     // @Beware Hardcoded field size, must be kept in sync with parser.(union|struct|enum)Definition
     var fieldBuffer: [512]u32 = undefined;
     var bufferAllocator = std.heap.FixedBufferAllocator.init(@ptrCast(&fieldBuffer));
+
+    const tokens = self.context.getTokens(ast.tokens);
 
     var fieldMap = std.DynamicBitSet.initEmpty(bufferAllocator.allocator(), enm.fields.len)
         catch return common.debug.ShouldBeImpossible(self.context.log, @src());
@@ -2587,6 +2603,7 @@ fn typecheckSwitchOnEnum(
         }
         else if (captureCount > 0) {
             const firstCapture = ast.extra[case + 2];
+            const captureToken = ast.expressions.items(.value)[firstCapture];
 
             const captureDecl = self.symbols.findDecl(.{
                 .file = self.currentFile,
@@ -2597,6 +2614,10 @@ fn typecheckSwitchOnEnum(
                 .status = .Checked,
                 .result = itemTypeID,
             }) catch return Error.AllocatorFailure;
+
+            self.symbols.declarations.items(.name)[captureDecl] = try self.builder.internString(
+                tokens.get(captureToken).lexeme(self.context, ast.tokens),
+            );
         }
 
         const prevc = self.setFlag(.CoveredAllPaths, false);
