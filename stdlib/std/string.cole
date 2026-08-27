@@ -1,0 +1,33 @@
+import std::memory::allocator as Allocator;
+
+pub let intToStr = fn (num: c_long, allocator: Allocator::Allocator) -> []u8 {
+    let tmp: mut any = num;
+    let digitCount: mut u32 = 0;
+    while tmp != 0 {
+        tmp = tmp / 10;
+        digitCount = digitCount + 1;
+    }
+
+    let mem = Allocator::alloc(allocator, digitCount, 1);
+    let result: []mut u8 = cast(mem);
+
+    tmp = num;
+    let index: mut u32 = digitCount;
+    while index > 0 {
+        result[index - 1] = '0' + tmp % 10;
+        tmp = tmp / 10;
+        index = index - 1;
+    }
+
+    return cast(result);
+};
+
+pub let strToInt = fn (str: []u8) -> c_long {
+    let res: mut c_long = 0;
+    let index: mut u32 = 0;
+    while index < str.len {
+        res = (res * 10) + (str[index] - '0');
+        index = index + 1;
+    }
+    return res;
+};

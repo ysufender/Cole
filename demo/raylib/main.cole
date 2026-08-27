@@ -1,4 +1,8 @@
-import raylib as rl;
+import std::memory::allocator as Allocator;
+import std::string as String;
+import std::c as C;
+
+import raylib as RayLib;
 
 /*
  * Types
@@ -8,6 +12,7 @@ let Player = struct {
     y    : mut i32,
     w    : i32,
     h    : i32,
+    score: mut u32,
 };
 
 let Ball = struct {
@@ -22,20 +27,28 @@ let WIDTH  = 640;
 let HEIGHT = 480;
 
 let main = fn (args: [][]u8) -> i32 {
-    let ply: mut Player = (20, 100, 20, 70);
-    let cpu: mut Player = (WIDTH-35, 100, 20, 70);
+    let ply: mut Player = (20, 100, 20, 70, 0);
+    let cpu: mut Player = (WIDTH-35, 100, 20, 70, 0);
     let b: mut Ball = (WIDTH/2.0 - 10.0, 120.0, -5.0, -5.0, 10.0);
 
-    rl::InitWindow(WIDTH, HEIGHT, "Ping pong");
-    rl::SetTargetFPS(60);
+    RayLib::InitWindow(WIDTH, HEIGHT, "Pong");
+    RayLib::SetTargetFPS(60);
 
-    while !rl::WindowShouldClose() {
-    	rl::BeginDrawing();
-    	rl::ClearBackground(rl::Color::Black);
-    	rl::DrawRectangle(0, 0, (WIDTH/2), HEIGHT, rl::Color::Black);
-    	rl::DrawRectangle((WIDTH/2), 0, (WIDTH/2), HEIGHT, rl::Color::White);
-    	rl::DrawRectangle(ply.x, ply.y, ply.w, ply.h, rl::Color::White);
-    	rl::DrawRectangle(cpu.x, cpu.y, cpu.w, cpu.h, rl::Color::Black);
+    while !RayLib::WindowShouldClose() {
+    	RayLib::BeginDrawing();
+    	RayLib::ClearBackground(RayLib::Color::Black);
+    	RayLib::DrawRectangle(0, 0, (WIDTH/2), HEIGHT, RayLib::Color::Black);
+    	RayLib::DrawRectangle((WIDTH/2), 0, (WIDTH/2), HEIGHT, RayLib::Color::White);
+    	RayLib::DrawRectangle(ply.x, ply.y, ply.w, ply.h, RayLib::Color::White);
+    	RayLib::DrawRectangle(cpu.x, cpu.y, cpu.w, cpu.h, RayLib::Color::Black);
+
+        let pscore = String::intToStr(ply.score, C::Allocator);
+        let cscore = String::intToStr(cpu.score, C::Allocator);
+		RayLib::DrawText(pscore.ptr, (WIDTH/2) - 200, 30, 48, RayLib::Color::White);
+		RayLib::DrawText(cscore.ptr, (WIDTH/2) + 200, 30, 48, RayLib::Color::Black);
+
+        Allocator::dealloc(C::Allocator, cast(pscore));
+        Allocator::dealloc(C::Allocator, cast(cscore));
     	
     	if
             checkCollision(ply.x, b.x, ply.y, b.y, ply.w, ply.h, b.r)
@@ -45,20 +58,22 @@ let main = fn (args: [][]u8) -> i32 {
 
     	cpu.y = unsafeCast(b.y * 0.8);
 
-    	if b.x < (WIDTH/2) { rl::DrawCircle(cast(b.x), cast(b.y), b.r, rl::Color::White); }
-    	else { rl::DrawCircle(cast(b.x), cast(b.y), b.r, rl::Color::Black); }
-    	rl::EndDrawing();
+    	if b.x < (WIDTH/2) { RayLib::DrawCircle(cast(b.x), cast(b.y), b.r, RayLib::Color::White); }
+    	else { RayLib::DrawCircle(cast(b.x), cast(b.y), b.r, RayLib::Color::Black); }
+    	RayLib::EndDrawing();
 
     	b.x = b.bx + b.x;
     	b.y = b.by + b.y;
 
     	if b.x < 5 {
+            cpu.score = cpu.score + 1;
     		b.x = (as(float, cast(WIDTH))/2.0) - b.r;
     		b.y = 120;
     		b.bx = -5;
     		
     	}
         else if b.x > WIDTH - 5 {
+            ply.score = ply.score + 1;
     		b.x = (as(float, cast(WIDTH))/2.0) - b.r;
     		b.y = 120;
     		b.bx = 5;
@@ -71,19 +86,19 @@ let main = fn (args: [][]u8) -> i32 {
     	}
     	
 
-    	if rl::IsKeyDown(cast(rl::KeyboardKey(@W))) or rl::IsKeyDown(cast(rl::KeyboardKey(@UP))) {
+    	if RayLib::IsKeyDown(RayLib::KeyboardKey::W) or RayLib::IsKeyDown(RayLib::KeyboardKey::UP) {
     		if ply.y >= 5 {
     		    ply.y = ply.y - 5;
             }
     	}
-        else if rl::IsKeyDown(cast(rl::KeyboardKey(@S))) or rl::IsKeyDown(cast(rl::KeyboardKey(@DOWN))) {
+        else if RayLib::IsKeyDown(RayLib::KeyboardKey::S) or RayLib::IsKeyDown(RayLib::KeyboardKey::DOWN) {
     		if ply.y <= (as(i32, cast(HEIGHT))-ply.h) {
     		    ply.y = ply.y + 5;
             }
     	}
     }
 
-    rl::CloseWindow();
+    RayLib::CloseWindow();
     return 0;
 };
 

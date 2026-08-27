@@ -577,7 +577,7 @@ pub fn evalBinary(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Ty
             });
 
         },
-        .Plus, .Minus, .Slash, .Star => |arithmetic| {
+        .Plus, .Minus, .Slash, .Star, .Modulo => |arithmetic| {
             const lhs = self.getValue(try self.expectDefined(ast.extra[extraPtr], lhsType));
             const rhs = self.getValue(try self.expectDefined(ast.extra[extraPtr + 2], null));
 
@@ -613,6 +613,11 @@ pub fn evalBinary(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Ty
                             break :blk lhs.Float / rhs.Float;
                         }
                     },
+                    else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
+                },
+                .Modulo => switch (lhs) {
+                    .Int => .{ .Int = @mod(lhs.Int, rhs.Int) },
+                    .Float => .{ .Float = @mod(lhs.Float, rhs.Float) },
                     else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
                 },
                 .Star => switch (lhs) {
@@ -1618,7 +1623,8 @@ pub fn constructFromList(self: *Folder, typeID: TypeID, _range: defines.Range) E
             return self.constructArrayFromList(typeID, ptr.child, range);
         },
 
-        .Noreturn,
+        .Noreturn, .CChar, .CUChar, .CDouble, .CInt, .CLong,
+        .CShort, .CSize, .CUInt, .CULong, .CUShort,
         .Type, .Function,
         .Bool, .Float, .Integer,
         .ComptimeInt, .ComptimeFloat => self.expectDefined(ast.extra[range.at(0)], typeID),
