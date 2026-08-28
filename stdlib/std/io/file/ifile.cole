@@ -47,7 +47,7 @@ pub let readline = fn (handle: *mut void, allocator: Allocator::Allocator) -> St
     }
     let end = ftell(handle);
 
-    let len = end - start;
+    let len = end - start - 1;
 
     if len == 0 {
         return (@EOS, ());
@@ -59,6 +59,10 @@ pub let readline = fn (handle: *mut void, allocator: Allocator::Allocator) -> St
 
     let buffer = Allocator::alloc(allocator, len, 1);
     let res = readbuffer(handle, cast(buffer));
+
+    if fseek(handle, end, File::Base::Start) != 0 {
+        return (@Err, ());
+    }
 
     return res;
 };

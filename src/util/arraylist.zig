@@ -256,7 +256,7 @@ fn StructMultiArrayList(comptime T: type) type {
         /// before use.
         pub fn toOwnedSlice(self: *Self) Slice {
             defer {
-                self.len = 1;
+                self.len = 0;
 
                 inline for (fields) |field| {
                     @field(self.inner, field.name) = &.{};

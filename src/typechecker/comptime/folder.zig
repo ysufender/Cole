@@ -1433,7 +1433,7 @@ pub fn evalSizeOf(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Val
     };
 
     if (args.len() != 1) {
-        self.report("'compileError' expects a single expression argument, received {d}.", .{
+        self.report("'sizeOf' expects a single expression argument, received {d}.", .{
             args.len(),
         });
         return Error.ArgumentCountMismatch;
@@ -1813,6 +1813,10 @@ pub fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Type
         .Function => &maybeFunction.Function,
         else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
     };
+
+    if (true) {
+        return Error.NotImplemented;
+    }
 
     _ = try self.typechecker.typecheckCall(extraPtr, maybeExpected);
         

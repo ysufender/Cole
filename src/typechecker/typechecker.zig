@@ -151,7 +151,6 @@ pub fn typecheck(self: *Typechecker, allocator: Allocator) Error!JIR {
 
     self.builder = try backend.C.JIR.Builder.init(self.arena.child_allocator, self.context.counts, self);
     self.folder = try Comptime.Folder.init(self, allocator);
-    self.folder = try Comptime.Folder.init(self, allocator);
     self.executer = try Comptime.Executer.init(self, allocator);
     self.lowerer = try Lowerer.init(self);
 

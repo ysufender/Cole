@@ -1151,9 +1151,41 @@ fn builtinCall(
                 }
             })
         ),
+        BI("sizeOf") => self.sizeOf(extraPtr, ofType),
         BI("compileLog"), BI("compileError") => 0,
         else => common.debug.NotImplemented(self.typechecker.context.log, @src()),
     };
+}
+
+fn sizeOf(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR.Ptr {
+    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+    const exprList = ast.expressions.items(.value)[ast.extra[extraPtr]];
+    const args = defines.Range{
+        .start = ast.extra[exprList],
+        .end = ast.extra[exprList + 1],
+    };
+
+    const t = try self.typechecker.typecheckExpression(ast.extra[args.at(0)], null);
+
+
+    if (self.typechecker.folder.attemptEval(ast.extra[args.at(0)], t)) |res| blk: {
+        return self.typechecker.builder.literal(
+            try self.addConstant(
+                try self.typechecker.folder.appendValue(.{ .Int = switch (self.typechecker.folder.getValue(res)) {
+                    .Type => |typeID| self.typechecker.sizeOf(typeID) / @bitSizeOf(c_char),
+                    else => break :blk, 
+                }}),
+                ofType
+            ),
+        );
+    }
+
+    return self.typechecker.builder.literal(
+        try self.addConstant(
+            try self.typechecker.folder.appendValue(.{ .Int = self.typechecker.sizeOf(t) / @bitSizeOf(c_char) }),
+            ofType
+        ),
+    );
 }
 
 fn cast(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR.Ptr {

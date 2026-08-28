@@ -4,6 +4,7 @@ import std::ascii as ASCII;
 
 import std::io::console as Console;
 import std::string as String;
+import std::io as IO;
 
 pub let INI = struct {
     pub let LoadResult = union(enum) {
@@ -43,6 +44,11 @@ pub let loadStream = fn (allocator: Allocator::Allocator, stream: Stream::Input:
     while true {
         let token = tokenize(allocator, stream);
 
+        let idx = as(u32, cast(token.tokenType));
+        _ = Stream::Output::writebuffer(IO::StdOut(), Type::Name[idx]);
+        _ = Stream::Output::write(IO::StdOut(), ':');
+        _ = Stream::Output::writeline(IO::StdOut(), token.value);
+
         switch token.tokenType {
             @Err -> return (@Err, ());
             @EOF -> break;
@@ -52,8 +58,23 @@ pub let loadStream = fn (allocator: Allocator::Allocator, stream: Stream::Input:
     }
 
     _ = Stream::Input::seek(stream, 0);
-    let _sections = Allocator::alloc(allocator, sectionCount, sizeOf(Section));
-    let sections: []mut Section = cast(_sections);
+
+    let SectionList = struct {
+        items: mut []mut Section,
+        capacity: mut u32,
+
+        pub let empty: SectionList = (undefined, 0);
+    };
+
+    let append = fn (list: *mut SectionList, elem: Section) -> bool {
+        if list.capacity.* >= list.items.*.len {
+            return false;
+        }
+        return false;
+    };
+
+    let list = SectionList::empty;
+    append(list.&, undefined);
 
     return (@Err, ());
 };
@@ -72,6 +93,22 @@ let Type = enum {
     EOF,
     Newline,
     Err,
+
+    pub let Name = [13][]u8(
+        "Section",
+        "Integer",
+        "String",
+        "Float",
+        "ListStart",
+        "ListEnd",
+        "Comma",
+        "Equal",
+        "Identifier",
+        "Dot",
+        "EOF",
+        "Newline",
+        "Err",
+    );
 };
 
 let Token = struct {

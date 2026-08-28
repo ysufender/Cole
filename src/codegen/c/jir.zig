@@ -827,12 +827,14 @@ fn literal(self: *JIR, out: *Writer, ptr: Constant.Ptr) Error!void {
     try switch (cst) {
         .Void => try self.write(out, "{{0}}", .{}),
         .Type => |id| try self.write(out, "{s}", .{try self.getCName(id, null, false, false)}),
-        .Undefined => |typeID|
-            if (self.types.get(typeID) == .Pointer) self.write(out, "(({s})NULL)", .{ try self.getCName(typeID, null, false, false)})
-            else switch (self.types.get(typeID)) {
-                .Struct, .Union, .Enum => self.write(out, "({s}){{}}", .{ try self.getCName(typeID, null, false, false)}),
-                else => self.write(out, "{{0}}", .{ }),
+        .Undefined => |typeID| switch (self.types.get(typeID)) {
+            .Pointer => |pointer| switch (pointer.size) {
+                .Single, .C => self.write(out, "(({s})NULL)", .{ try self.getCName(typeID, null, false, false)}),
+                .Slice => self.write(out, "({s}){{NULL, 0}}", .{ try self.getCName(typeID, null, false, false)}),
             },
+            .Struct, .Union, .Enum => self.write(out, "({s}){{}}", .{ try self.getCName(typeID, null, false, false)}),
+            else => self.write(out, "{{0}}", .{ }),
+        },
         .Integer => |int| switch (int) {
             .i32 => |t| self.write(out, "{d}", .{t}),
             .u32 => |t| self.write(out, "{d}", .{t}),
