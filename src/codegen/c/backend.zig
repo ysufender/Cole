@@ -1,7 +1,6 @@
 const std = @import("std");
 const common = @import("../../core/common.zig");
 const platform = @import("../../core/platform.zig");
-
 pub const JIR = @import("jir.zig");
 
 const Error = @import("../../core/common.zig").CompilerError;

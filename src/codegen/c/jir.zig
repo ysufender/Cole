@@ -741,7 +741,7 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
             });
         },
         .Grouping => {
-            try self.write(out, "{{ ", .{});
+            try self.write(out, "(", .{});
             const len = self.data[node.value];
             for (0..self.data[node.value]) |idx| {
                 try self.operation(out, self.data[@intCast(node.value + 1 + idx)]);
@@ -750,7 +750,7 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
                 }
                 try self.write(out, ", ", .{});
             }
-            try self.write(out, " }}", .{});
+            try self.write(out, ")", .{});
         },
         .Call => {
             const func = self.data[node.value + 1];
@@ -829,7 +829,10 @@ fn literal(self: *JIR, out: *Writer, ptr: Constant.Ptr) Error!void {
         .Type => |id| try self.write(out, "{s}", .{try self.getCName(id, null, false, false)}),
         .Undefined => |typeID|
             if (self.types.get(typeID) == .Pointer) self.write(out, "(({s})NULL)", .{ try self.getCName(typeID, null, false, false)})
-            else self.write(out, "({s}){{}}", .{ try self.getCName(typeID, null, false, false) }),
+            else switch (self.types.get(typeID)) {
+                .Struct, .Union, .Enum => self.write(out, "({s}){{}}", .{ try self.getCName(typeID, null, false, false)}),
+                else => self.write(out, "{{0}}", .{ }),
+            },
         .Integer => |int| switch (int) {
             .i32 => |t| self.write(out, "{d}", .{t}),
             .u32 => |t| self.write(out, "{d}", .{t}),

@@ -35,6 +35,7 @@ pub let Input = struct {
     pub let readline       = istream::readline;
     pub let readbuffer     = istream::readbuffer;
     pub let seek           = istream::seek;
+    pub let tell           = istream::tell;
     pub let close          = istream::close;
 };
 

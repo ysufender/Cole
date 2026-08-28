@@ -1,7 +1,14 @@
 import std::memory::allocator as Allocator;
+import std::io::console as Console;
 import std::io::stream as Stream;
+import std::ascii as ASCII;
 
 pub let INI = struct {
+    pub let LoadResult = union(enum) {
+        Ok: INI,
+        Err: void,
+    };
+
     allocator: Allocator::Allocator,
     sections: []Section,
 };
@@ -16,13 +23,163 @@ pub let Pair = struct {
     value: Value,
 };
 
+pub let Reference = struct {
+    Section: []u8,
+    Field: []u8,
+};
+
 pub let Value = union(enum) {
     Integer  : i32,
     Float    : float,
     String   : []u8,
-    Reference: []u8,
+    Ref      : Reference, 
     List     : []Value,
 };
 
-pub let loadStream = fn (allocator: Allocator::Allocator, stream: Stream::Input::Stream) -> INI {
+pub let loadStream = fn (allocator: Allocator::Allocator, stream: Stream::Input::Stream) -> INI::LoadResult {
+    while true {
+        let token = tokenize(allocator, stream);
+
+        Console::log(token.value);
+
+        if token.tokenType == @Err {
+            return (@Err, ());
+        }
+        else if token.tokenType == @EOF {
+            return (@Err, ());
+        }
+    }
+
+    return (@Err, ());
+};
+
+let Type = enum {
+    Section,
+    Integer,
+    String,
+    Float,
+    ListStart,
+    ListEnd,
+    Comma,
+    Equal,
+    Identifier,
+    Dot,
+    EOF,
+    Newline,
+    Err,
+};
+
+let Token = struct {
+    tokenType: Type,
+    value: []u8,
+};
+
+let tokenize = fn (allocator: Allocator::Allocator, stream: Stream::Input::Stream) -> Token {
+    while true {
+        let _ch: mut any = Stream::Input::read(stream);
+
+        switch _ch {
+            @Err -> return (@Err, "Stream Read Error");
+            @EOS -> return (@EOF, "EOF");
+            else -> { }
+        }
+
+        let ch: mut any = _ch.Ok;
+
+        if ch == '[' {
+            let sectionName = identifier(allocator, stream);
+            if sectionName.tokenType == @Err {
+                return sectionName;
+            }
+
+            _ch = Stream::Input::read(stream);
+
+            switch _ch {
+                @Err -> return (@Err, "Stream Read Error");
+                @EOS -> return (@EOF, "EOF in section");
+                else -> { }
+            }
+
+            let ch: mut any = _ch.Ok;
+
+            if ch != ']' {
+                return (@Err, "Expected section name closing.");
+            }
+
+            return (@Section, sectionName.value);
+        }
+        else if ASCII::isDigit(ch) {
+        }
+        else if ASCII::isAlpha(ch) {
+            _ = Stream::Input::seek(stream, Stream::Input::tell(stream) - 1);
+            return identifier(allocator, stream);
+        }
+        else if ch == '{' {
+            return (@ListStart, "list start");
+        }
+        else if ch == '}' {
+            return (@ListEnd, "list end");
+        }
+        else if ch == ',' {
+            return (@Comma, "comma");
+        }
+        else if ch == '=' {
+            return (@Equal, "equal");
+        }
+        else if ch == '.' {
+            return (@Dot, "dot");
+        }
+        else if ASCII::isWhitespace(ch) {
+            continue;
+        }
+        else {
+            return (@Err, "Unexpected Token in tokenize");
+        }
+
+        return (@EOF, "Not implemented.");
+    }
+
+    return (@EOF, "Unreachable.");
+};
+
+let number = fn (allocator: Allocator::Allocator, stream: Stream::Input::Stream) -> Token {
+};
+
+let identifier = fn (allocator: Allocator::Allocator, stream: Stream::Input::Stream) -> Token {
+    let start = Stream::Input::tell(stream);
+
+    while true {
+        let ch = Stream::Input::read(stream);
+
+        switch ch {
+            @Ok -> if !ASCII::isAlpha(ch.Ok) {
+                break;
+            }
+            @Err -> return (@Err, "Stream Error in identifier count.");
+            @EOS -> return (@EOF, "EOF in identifier count");
+        }
+    }
+
+    let end = Stream::Input::tell(stream);
+
+    let len = end - start - 1;
+    _ = Stream::Input::seek(stream, start);
+
+    let _value = Allocator::alloc(allocator, len, 1);
+    let value: []mut u8 = cast(_value);
+
+    let index: mut u32 = 0;
+    while index < len {
+        let res = Stream::Input::read(stream);
+
+        switch res {
+            @Ok -> value[index] = res.Ok;
+            @Err -> return (@Err, "Stream Error in identifier.");
+            @EOS -> return (@EOF, "EOF in identifier");
+        }
+
+        index = index + 1;
+    }
+
+    return (@Integer, value);
 };

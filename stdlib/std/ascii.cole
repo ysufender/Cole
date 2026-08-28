@@ -1,22 +1,18 @@
-/*
-    This file is a part of the Cole Standard Library,
-    and is licensed under MIT License.
-
-    Any user code that imports this module agrees that it
-    will satisfy the specifications stated further.
-
-    DISCLAIMER:
-        The traits and conventions mentioned in this document
-        are to be obeyed, otherwise neither Cole STDLib nor the
-        compiler can guarantee a well defined program.
-
-    Name:
-        std::ascii
-    Public Symbols:
-        NULL
-        EOF
-    Description:
-        Input/Output utilities.
-*/
 pub let NEWLINE = 10;
 pub let NULL = 0;
+
+pub let isDigit = fn (ch: u8) -> bool {
+    return '0' <= ch and ch <= '9';
+};
+
+pub let isAlpha = fn (ch: u8) -> bool {
+    return
+        ('a' <= ch and ch <= 'z')
+        or ('A' <= ch and ch <= 'Z');
+};
+
+pub let isWhitespace = fn (ch: u8) -> bool {
+    return
+        ch == ' '
+        or ch == NEWLINE;
+};

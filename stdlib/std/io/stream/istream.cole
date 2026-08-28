@@ -19,6 +19,7 @@ pub let IStream = struct {
     readline  : *fn (*mut void, Allocator::Allocator) -> ReadLineResult,
     readbuffer: *fn (*mut void, []mut u8) -> ReadLineResult,
     seek      : *fn (*mut void, u32) -> Stream::Result,
+    tell      : *fn (*mut void) -> i32,
     close     : *fn (*mut void) -> Stream::Result,
 };
 
@@ -36,6 +37,10 @@ pub let readbuffer = fn (self: IStream, buffer: []mut u8) -> ReadLineResult {
 
 pub let seek = fn (self: IStream, off: u32) -> Stream::Result {
     return self.seek(self.context, off);
+};
+
+pub let tell = fn (self: IStream) -> i32 {
+    return self.tell(self.context);
 };
 
 pub let close = fn (self: IStream) -> Stream::Result {
