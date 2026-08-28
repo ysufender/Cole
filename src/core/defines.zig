@@ -18,21 +18,21 @@ pub const Range = struct {
     start: u32,
     end: u32,
 
-    pub fn len(self: Range) u32 {
+    pub inline fn len(self: Range) u32 {
         assert(self.end >= self.start);
         return self.end - self.start;
     }
 
-    pub fn at(self: Range, index: u32) u32 {
+    pub inline fn at(self: Range, index: u32) u32 {
         assert(self.start + index < self.end);
         return self.start + index;
     }
 
-    pub fn subRange(self: Range, from: u32) Range {
+    pub inline fn subRange(self: Range, from: u32) Range {
         return self.subRangeN(from, self.len() - from);
     }
 
-    pub fn subRangeN(self: Range, from: u32, count: u32) Range {
+    pub inline fn subRangeN(self: Range, from: u32, count: u32) Range {
         assert(from < self.len() and from + count <= self.len());
         const start = self.start + from;
         return .{

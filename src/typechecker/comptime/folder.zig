@@ -845,6 +845,7 @@ fn evalBuiltinCall(self: *Folder, extraPtr: defines.OpaquePtr, declPtr: defines.
         BI("compileError") => self.evalCompileError(extraPtr),
         BI("typeName") => self.evalTypeName(extraPtr),
         BI("Tuple") => self.evalNewTuple(extraPtr),
+        BI("sizeOf") => self.evalSizeOf(extraPtr),
         BI("unreachable") => {
             self.report("Reached unreachable code.", .{});
             return Error.UnreachableCodePath;
@@ -1420,6 +1421,34 @@ pub fn evalCompileLog(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime
     });
     token.printLocationInfo(self.arena.allocator(), self.typechecker.context, self.typechecker.currentFile, position, self.typechecker.callstack.size == 1);
     return @intFromEnum(Comptime.Value.Implicit.Void);
+}
+
+pub fn evalSizeOf(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {
+    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+
+    const expressionList = ast.expressions.items(.value)[ast.extra[extraPtr + 1]];
+    const args = defines.Range{
+        .start = ast.extra[expressionList],
+        .end = ast.extra[expressionList + 1],
+    };
+
+    if (args.len() != 1) {
+        self.report("'compileError' expects a single expression argument, received {d}.", .{
+            args.len(),
+        });
+        return Error.ArgumentCountMismatch;
+    }
+
+    const t = try self.typechecker.typecheckExpression(ast.extra[args.at(0)], null);
+
+    if (self.attemptEval(ast.extra[args.at(0)], t)) |res| blk: {
+        return self.appendValue(.{ .Int = switch (self.getValue(res)) {
+            .Type => |typeID| self.typechecker.sizeOf(typeID) / @bitSizeOf(c_char),
+            else => break :blk, 
+        }});
+    }
+
+    return self.appendValue(.{ .Int = self.typechecker.sizeOf(t) / @bitSizeOf(c_char) });
 }
 
 pub fn evalNewTuple(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {

@@ -1,7 +1,9 @@
 import std::memory::allocator as Allocator;
-import std::io::console as Console;
 import std::io::stream as Stream;
 import std::ascii as ASCII;
+
+import std::io::console as Console;
+import std::string as String;
 
 pub let INI = struct {
     pub let LoadResult = union(enum) {
@@ -37,18 +39,21 @@ pub let Value = union(enum) {
 };
 
 pub let loadStream = fn (allocator: Allocator::Allocator, stream: Stream::Input::Stream) -> INI::LoadResult {
+    let sectionCount: mut u32 = 0;
     while true {
         let token = tokenize(allocator, stream);
 
-        Console::log(token.value);
-
-        if token.tokenType == @Err {
-            return (@Err, ());
-        }
-        else if token.tokenType == @EOF {
-            return (@Err, ());
+        switch token.tokenType {
+            @Err -> return (@Err, ());
+            @EOF -> break;
+            @Section -> sectionCount = sectionCount + 1;
+            else -> { }
         }
     }
+
+    _ = Stream::Input::seek(stream, 0);
+    let _sections = Allocator::alloc(allocator, sectionCount, sizeOf(Section));
+    let sections: []mut Section = cast(_sections);
 
     return (@Err, ());
 };
@@ -109,6 +114,8 @@ let tokenize = fn (allocator: Allocator::Allocator, stream: Stream::Input::Strea
             return (@Section, sectionName.value);
         }
         else if ASCII::isDigit(ch) {
+            _ = Stream::Input::seek(stream, Stream::Input::tell(stream) - 1);
+            return number(allocator, stream);
         }
         else if ASCII::isAlpha(ch) {
             _ = Stream::Input::seek(stream, Stream::Input::tell(stream) - 1);
@@ -143,6 +150,45 @@ let tokenize = fn (allocator: Allocator::Allocator, stream: Stream::Input::Strea
 };
 
 let number = fn (allocator: Allocator::Allocator, stream: Stream::Input::Stream) -> Token {
+    let isFloat: mut bool = false;
+    let start = Stream::Input::tell(stream);
+
+    while true {
+        let ch = Stream::Input::read(stream);
+
+        switch ch {
+            @Ok -> if !ASCII::isDigit(ch.Ok) {
+                if ch.Ok == '.' {
+                    return (@Err, "Float literals are not supported yet.");
+                }
+                break;
+            }
+            @Err -> return (@Err, "Stream Error in number.");
+            @EOS -> return (@EOF, "EOF in number.");
+        }
+    }
+
+    let end = Stream::Input::tell(stream);
+    let len = end - start - 1;
+    _ = Stream::Input::seek(stream, start);
+
+    let _value = Allocator::alloc(allocator, len, 1);
+    let value: []mut u8 = cast(_value);
+
+    let index: mut u32 = 0;
+    while index < len {
+        let res = Stream::Input::read(stream);
+
+        switch res {
+            @Ok -> value[index] = res.Ok;
+            @Err -> return (@Err, "Stream Error in identifier.");
+            @EOS -> return (@EOF, "EOF in identifier");
+        }
+
+        index = index + 1;
+    }
+
+    return (@Integer, value);
 };
 
 let identifier = fn (allocator: Allocator::Allocator, stream: Stream::Input::Stream) -> Token {
@@ -181,5 +227,5 @@ let identifier = fn (allocator: Allocator::Allocator, stream: Stream::Input::Str
         index = index + 1;
     }
 
-    return (@Integer, value);
+    return (@Identifier, value);
 };
