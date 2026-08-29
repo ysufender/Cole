@@ -101,10 +101,13 @@ pub let close = fn (handle: *mut void) -> Stream::Result {
         else @Err;
 };
 
-pub let open = fn (path: []u8, allocator: Allocator::Allocator, readWrite: bool) -> OpenResult {
-    let res =
-        if (readWrite) fopen(path.ptr, "r+")
-        else fopen(path.ptr, "r");
+pub let open = fn (_path: []u8, allocator: Allocator::Allocator, readWrite: bool) -> OpenResult {
+    let path: mut any = _path;
+    let mode: mut any =
+        if (readWrite) "r+"
+        else "r";
+
+    let res = fopen(cast(path.ptr), cast(mode.ptr));
 
     return
         if (res == undefined) (@Err, ())

@@ -34,11 +34,11 @@ let realloc = #(@extern) fn (ptr: [@c]mut void, nlen: c_size) -> mut [@c]mut voi
 let memcpy = #(@extern) fn (dst: mut [@c]mut void, src: mut [@c]void, n: mut c_size) -> mut [@c]mut void { };
 
 let create = fn (ctx: *mut void, size: u32) -> *mut void {
-    return malloc(size);
+    return cast(malloc(size));
 };
 
 let destroy = fn (ctx: *mut void, ptr: *mut void) -> void {
-    free(ptr);
+    free(cast(ptr));
 };
 
 let alloc = fn (ctx: *mut void, count: u32, sizeByteEach: u32) -> []mut void {

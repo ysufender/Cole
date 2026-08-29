@@ -18,7 +18,7 @@ pub let INI = struct {
 
 pub let Section = struct {
     name: []u8,
-    values: Pair,
+    values: []Pair,
 };
 
 pub let Pair = struct {
@@ -57,9 +57,20 @@ pub let loadStream = fn (allocator: Allocator::Allocator, stream: Stream::Input:
         }
     }
 
+
     _ = Stream::Input::seek(stream, 0);
 
-    return (@Err, ());
+    let list: mut any = SectionList::empty;
+
+    return (@Ok, allocator, list.items);
+};
+
+
+let SectionList = struct {
+    items: mut []mut Section,
+    capacity: mut u32,
+
+    pub let empty: SectionList = (undefined, 0);
 };
 
 let Type = enum {
@@ -193,7 +204,7 @@ let number = fn (allocator: Allocator::Allocator, stream: Stream::Input::Stream)
     _ = Stream::Input::seek(stream, start);
 
     let _value = Allocator::alloc(allocator, len, 1);
-    let value: []mut u8 = cast(_value);
+    let value: []mut u8 = unsafeCast(_value);
 
     let index: mut u32 = 0;
     while index < len {
@@ -232,7 +243,7 @@ let identifier = fn (allocator: Allocator::Allocator, stream: Stream::Input::Str
     _ = Stream::Input::seek(stream, start);
 
     let _value = Allocator::alloc(allocator, len, 1);
-    let value: []mut u8 = cast(_value);
+    let value: []mut u8 = unsafeCast(_value);
 
     let index: mut u32 = 0;
     while index < len {

@@ -1357,18 +1357,15 @@ fn dot(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
                 obj = try self.typechecker.builder.dot(obj, data);
             },
 
-        // @TODO dot on pointers to slices and pointers to arrays.
-        .Pointer => |ptr| switch (self.typechecker.typeTable.get(ptr.child)) {
-            .Struct, .Union => return
-                if (ref) self.typechecker.builder.reference(obj)
-                else if (deref) self.typechecker.builder.dereference(obj)
-                else self.typechecker.builder.reference(
-                    try self.typechecker.builder.dot(
-                        try self.typechecker.builder.dereference(obj),
-                        try self.typechecker.builder.internString(member)
-                    )
-                ),
-            else => { },
+        .Pointer => |ptr|
+            if (ptr.size != .Slice) {
+                switch (self.typechecker.typeTable.get(ptr.child)) {
+                .Struct, .Union, .Array =>
+                    if (ref) { return self.typechecker.builder.reference(obj); }
+                    else if (deref) { return self.typechecker.builder.dereference(obj); }
+                    else { obj = try self.typechecker.builder.dereference(obj); },
+                else => { },
+            }
         },
         else => { },
     }

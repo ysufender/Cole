@@ -405,7 +405,10 @@ pub fn evalDot(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.
 
             return uni.Value;
         },
-        else => common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
+        else => {
+            self.report("Attempt to operate on pointer at comptime.", .{});
+            return Error.ExistentialDilemma;
+        },
     };
 }
 
@@ -970,15 +973,7 @@ fn evalLiteral(self: *Folder, tokenPtr: defines.TokenPtr, maybeExpected: ?TypeID
 
     self.typechecker.assertCanCoerce(rest, maybeExpected orelse rest) catch return res;
 
-    if (
-        maybeExpected != null
-        and maybeExpected.? != Builtin.Type("any")
-        and maybeExpected.? != Builtin.Type("mut any")
-    ) {
-        return self.castValue(res, maybeExpected orelse rest, false);
-    } else {
-        return res;
-    }
+    return res;
 }
 
 fn evalPtrType(

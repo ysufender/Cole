@@ -442,7 +442,7 @@ fn resolveStatement(self: *Resolver, stmt: defines.StatementPtr, topLevel: bool)
                 .name = self.dataIndex(),
                 .kind = .Namespace,
                 .scope = self.currentScope,
-                .public = false,
+                .public = true,
                 .token = if (isAlias) alias else ast.extra[statement.value],
                 .node = moduleID,
                 .type = ast.extra[statement.value],

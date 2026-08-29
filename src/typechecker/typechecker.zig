@@ -478,7 +478,7 @@ fn typecheckVariableDef(
             func.name = try self.builder.internString(newName);
 
             // @Note See folder.zig:evalFunction
-            if (!self.folder.getFlag(.InComptimeCall) and decl.parent == null) {
+            if (!self.folder.getFlag(.InComptimeCall)) {
                 const fun = try self.builder.addFunction(func.*);
                 try self.builder.functionDef(func.name, fun);
             }
@@ -1205,7 +1205,7 @@ pub fn typecheckExpressionListRange(self: *Typechecker, range: defines.Range, ex
         .Array => |arr| try self.typecheckArrayInitialization(ast, &arr, range),
         .Pointer => |ptr| switch (ptr.size) {
             .Slice, .C => {
-                try self.typecheckGeneralInitialization(ast, ptr.child, range);
+                try self.typecheckGeneralInitialization(ast, expected, range);
                 // self.report("Initialization of slice/cpointer types via expression lists are not allowed. Use addressing instead.", .{ });
                 // return Error.SliceInitializationWithExpressionList;
             },
@@ -1447,6 +1447,13 @@ pub fn discoverScopeDef(
     scope: defines.ScopePtr,
     expr: defines.ExpressionPtr
 ) Error!TypeID {
+    if (!member.public) {
+        self.report("{s} is inaccessible due to its visibility level.", .{
+            self.builder.getInternedString(member.name),
+        });
+        return Error.AccessSpecifierMismatch;
+    }
+
     if (member.valueType != Comptime.Folder.Builtin.Type("incomplete")) {
         return member.valueType;
     }
@@ -1463,6 +1470,10 @@ pub fn discoverScopeDef(
 
     const discoveredType = try self.typecheckDecl(decl, null);
     const memberIndex = try self.definitionIndex(from, member.name);
+
+    if (!self.symbols.getDecl(decl).public) {
+        self.report("'{s}' is inaccessible due to its visibility level.", .{self.builder.getInternedString(member.name)});
+    }
 
     switch (self.typeTable.get(from)) {
         .Enum => |enm| {
@@ -2022,13 +2033,56 @@ pub fn typecheckFieldAccess(self: *Typechecker, on: TypeID, field: []const u8) E
         .Pointer => |ptr| switch (ptr.size) {
             // @TODO dot on pointers to slices and pointers to arrays.
             .Single, .C => switch (self.typeTable.get(ptr.child)) {
-                .Struct, .Union => return self.registerType(.{
-                    .Pointer = .{
-                        .size = ptr.size,
-                        .child = try self.typecheckFieldAccess(ptr.child, field),
-                        .mutable = true,
+                .Struct, .Union => return self.typecheckFieldAccess(ptr.child, field),
+                .Pointer => |childPtr| switch (childPtr.size) {
+                    .Slice => 
+                        if (std.mem.eql(u8, field, "len")) {
+                            return Comptime.Folder.Builtin.Type("u32");
+                        }
+                        else if (std.mem.eql(u8, field, "ptr")) {
+                            return self.registerType(.{
+                                .Pointer = .{
+                                    .size = .C,
+                                    .mutable = childPtr.mutable,
+                                    .child = childPtr.child,
+                                },
+                            });
+                        }
+                        else {
+                            self.report("Couldn't find field '{s}' in type '{s}'.", .{
+                                field,
+                                try self.typeName(self.arena.allocator(), on),
+                            });
+                            return Error.FieldNotFound;
+                        },
+                    else => {
+                        self.report("Couldn't find field '{s}' in type '{s}'.", .{
+                            field,
+                            try self.typeName(self.arena.allocator(), on),
+                        });
+                        return Error.FieldNotFound;
                     },
-                }),
+                },
+                .Array => |arr| 
+                    if (std.mem.eql(u8, field, "len")) {
+                        return Comptime.Folder.Builtin.Type("u32");
+                    }
+                    else if (std.mem.eql(u8, field, "ptr")) {
+                        return self.registerType(.{
+                            .Pointer = .{
+                                .size = .C,
+                                .mutable = arr.mutable,
+                                .child = arr.child,
+                            },
+                        });
+                    }
+                    else {
+                        self.report("Couldn't find field '{s}' in type '{s}'.", .{
+                            field,
+                            try self.typeName(self.arena.allocator(), on),
+                        });
+                        return Error.FieldNotFound;
+                    },
                 else => {
                     self.report("Couldn't find field '{s}' in type '{s}'.", .{
                         field,
@@ -2036,6 +2090,7 @@ pub fn typecheckFieldAccess(self: *Typechecker, on: TypeID, field: []const u8) E
                     });
                     return Error.FieldNotFound;
                 },
+
             },
             else => {
                 self.report("Couldn't find field '{s}' in type '{s}'.", .{
@@ -2823,7 +2878,7 @@ pub fn assertCastable(self: *Typechecker, from: TypeID, to: TypeID, unsafe: bool
         .Pointer => |fromPtr| switch (toType) {
             .Pointer => |toPtr| {
                 try self.assertCastablePtr(fromPtr, toPtr, unsafe);
-                try functional.throwIf((toPtr.mutable and !fromPtr.mutable) and !unsafe, Error.MutabilityViolation);
+                // try functional.throwIf((toPtr.mutable and !fromPtr.mutable) and !unsafe, Error.MutabilityViolation);
             },
             else => try functional.throwIf(!unsafe or !self.isInt(to), Error.IncompatibleTypes),
         },
@@ -2914,13 +2969,13 @@ pub fn structurallyIdentical(self: *const Typechecker, this: TypeID, that: TypeI
 }
 
 /// Check if 'this' can be assigned to 'that'
-pub fn suitable(self: *const Typechecker, this: TypeID, that: TypeID) bool {
+pub fn suitable(self: *Typechecker, this: TypeID, that: TypeID) bool {
     self.assertCanCoerce(this, that) catch return false;
     return true;
 }
 
 /// Assert that 'that' can coerce to 'this'
-pub fn assertCanCoerce(self: *const Typechecker, this: TypeID, that: TypeID) Error!void {
+pub fn assertCanCoerce(self: *Typechecker, this: TypeID, that: TypeID) Error!void {
     const thisType = self.typeTable.get(this);
     const thatType = self.typeTable.get(that);
 
@@ -2943,6 +2998,38 @@ pub fn assertCanCoerce(self: *const Typechecker, this: TypeID, that: TypeID) Err
             .Integer => |i2type| functional.throwIf(itype.size > i2type.size, Error.TypeMismatch),
             .Float => { },
             else => functional.throwIf(!self.isInt(this), Error.TypeMismatch),
+        },
+        .Pointer => |fromPtr| switch (thisType) {
+            .Pointer => |toPtr| {
+                if (fromPtr.size != toPtr.size) {
+                    if (fromPtr.size != .C and toPtr.size != .C) {
+                        return Error.SizeViolation;
+                    }
+                }
+
+                if (fromPtr.child == toPtr.child) {
+                    return;
+                }
+
+                if (self.mutable(toPtr.child) and !self.mutable(fromPtr.child)) {
+                    return Error.MutabilityViolation;
+                }
+
+                const toMut = try self.registerType(self.makeMutable(self.typeTable.get(toPtr.child)));
+                const fromMut = try self.registerType(self.makeMutable(self.typeTable.get(fromPtr.child)));
+                const mutVoid = try self.registerType(.{ .Void = true });
+
+                if (toMut == fromMut) {
+                    return;
+                }
+
+                if (toMut == mutVoid or fromMut == mutVoid) {
+                    return; 
+                }
+
+                return Error.IncompatibleTypes;
+            },
+            else => return Error.IncompatibleTypes,
         },
         else => switch (thisType) {
             .ComptimeInt, .Integer => functional.throwIf(!self.isInt(this) and !self.isFloat(this), Error.TypeMismatch),
@@ -3101,6 +3188,7 @@ pub fn coerce(self: *Typechecker, this: TypeID, that: TypeID) Error!TypeID {
         .ComptimeFloat =>
             if (self.isInt(that)) that
             else this,
+        .Pointer => this,
         else => switch (thisType) {
             .Integer => switch (thatType) {
                 .Integer =>

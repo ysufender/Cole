@@ -22,7 +22,7 @@ pub let stream = fn (self: OFile) -> Stream::Output::Stream {
 
 pub let write = fn (handle: *mut void, ch: u8) -> Stream::Result {
     return
-        if (fwrite(ch.&, 1, 1, handle) == 1) @Ok
+        if (fwrite(cast(ch.&), 1, 1, cast(handle)) == 1) @Ok
         else @Err;
 };
 
@@ -30,7 +30,7 @@ pub let writeline = fn (handle: *mut void, line: []u8) -> Stream::Result {
     if writebuffer(handle, line) == @Ok {
         let ch = ASCII::NEWLINE;
         return
-            if (fwrite(ch.&, 1, 1, handle) == 1) @Ok
+            if (fwrite(cast(ch.&), 1, 1, cast(handle)) == 1) @Ok
             else @Err;
     }
     return @Err;
@@ -38,7 +38,7 @@ pub let writeline = fn (handle: *mut void, line: []u8) -> Stream::Result {
 
 pub let writebuffer = fn (handle: *mut void, buf: []u8) -> Stream::Result {
     return
-        if (fwrite(buf.ptr, 1, buf.len, handle) == buf.len) @Ok
+        if (fwrite(cast(buf.ptr), 1, buf.len, cast(handle)) == buf.len) @Ok
         else @Err;
 };
 
@@ -68,7 +68,7 @@ pub let open = fn (path: []u8, allocator: Allocator::Allocator, append: bool, re
 
 pub let flush = fn (handle: *mut void) -> Stream::Result {
     return
-        if (fflush(handle) == 0) @Ok
+        if (fflush(cast(handle)) == 0) @Ok
         else @Err;
 };
 
