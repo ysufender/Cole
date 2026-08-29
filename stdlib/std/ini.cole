@@ -59,23 +59,6 @@ pub let loadStream = fn (allocator: Allocator::Allocator, stream: Stream::Input:
 
     _ = Stream::Input::seek(stream, 0);
 
-    let SectionList = struct {
-        items: mut []mut Section,
-        capacity: mut u32,
-
-        pub let empty: SectionList = (undefined, 0);
-    };
-
-    let append = fn (list: *mut SectionList, elem: Section) -> bool {
-        if list.capacity.* >= list.items.*.len {
-            return false;
-        }
-        return false;
-    };
-
-    let list = SectionList::empty;
-    append(list.&, undefined);
-
     return (@Err, ());
 };
 

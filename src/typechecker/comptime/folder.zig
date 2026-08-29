@@ -1783,6 +1783,7 @@ fn evalScoping(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Value.
 
 pub fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID) Error!Comptime.Value.Ptr {
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+    _ = try self.typechecker.typecheckCall(extraPtr, maybeExpected);
 
     if (self.typechecker.symbols.resolutionMap.get(.{
         .file = self.typechecker.currentFile,
@@ -1804,7 +1805,6 @@ pub fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Type
     var maybeFunction = &self.memory.items[(try self.expectDefined(ast.extra[extraPtr], null))];
     const function = switch (maybeFunction.*) {
         .Type => |id| {
-            _ = try self.typechecker.typecheckCall(extraPtr, maybeExpected);
             return self.evalExpressionList(
                 ast.expressions.items(.value)[ast.extra[extraPtr + 1]],
                 id,
@@ -1813,12 +1813,6 @@ pub fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Type
         .Function => &maybeFunction.Function,
         else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
     };
-
-    if (true) {
-        return Error.NotImplemented;
-    }
-
-    _ = try self.typechecker.typecheckCall(extraPtr, maybeExpected);
         
     const signature = self.typechecker.typeTable.get(function.signature).Function;
 

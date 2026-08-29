@@ -2020,6 +2020,7 @@ pub fn typecheckFieldAccess(self: *Typechecker, on: TypeID, field: []const u8) E
         .Union => |uni| uni.fields,
         .Struct => |str| str.fields,
         .Pointer => |ptr| switch (ptr.size) {
+            // @TODO dot on pointers to slices and pointers to arrays.
             .Single, .C => switch (self.typeTable.get(ptr.child)) {
                 .Struct, .Union => return self.registerType(.{
                     .Pointer = .{
