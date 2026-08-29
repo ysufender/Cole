@@ -917,7 +917,11 @@ fn evalLiteral(self: *Folder, tokenPtr: defines.TokenPtr, maybeExpected: ?TypeID
         }},
         .String => .{
             .String = .{
-                .type = .Cole,
+                .type =
+                    if (maybeExpected) |expected|
+                        if (self.typechecker.isCStr(expected)) .C
+                        else .Cole
+                    else .Cole,
                 .str = lexeme,
             },
         },

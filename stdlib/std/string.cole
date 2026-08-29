@@ -8,6 +8,7 @@ pub let intToStr = fn (num: c_long, allocator: Allocator::Allocator) -> []u8 {
         digitCount = digitCount + 1;
     }
 
+    digitCount = if (digitCount == 0) 1 else digitCount;
     let mem = Allocator::alloc(allocator, digitCount, 1);
     let result: []mut u8 = cast(mem);
 

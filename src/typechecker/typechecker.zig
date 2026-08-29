@@ -1150,12 +1150,15 @@ pub fn typecheckValueDirect(self: *Typechecker, val: Comptime.Value, maybeExpect
         .Void => Comptime.Folder.Builtin.Type("void"),
         .Undefined => |undef| undef,
         .Slice => |slice| slice.Type,
-        .String => Comptime.Folder.Builtin.Type("[]u8"),
-    };
-
-    self.assertCanCoerce(valType, expected) catch |err| switch (err) {
-        Error.TypeMismatch => return valType,
-        else => return err,
+        .String => |str|
+            if (str.type == .Cole) Comptime.Folder.Builtin.Type("[]u8")
+            else try self.registerType(.{
+                .Pointer = .{
+                    .mutable = false,
+                    .child = Comptime.Folder.Builtin.Type("c_char"),
+                    .size = .C,
+                }
+            }),
     };
 
     return self.coerce(expected, valType);
