@@ -44,8 +44,8 @@ let main = fn (args: [][]u8) -> i32 {
 
         let pscore = String::intToStr(ply.score, C::Allocator);
         let cscore = String::intToStr(cpu.score, C::Allocator);
-		RayLib::DrawText(pscore.ptr, (WIDTH/2) - 200, 30, 48, RayLib::Color::White);
-		RayLib::DrawText(cscore.ptr, (WIDTH/2) + 200, 30, 48, RayLib::Color::Black);
+		RayLib::DrawText(cast(pscore.ptr), (WIDTH/2) - 200, 30, 48, RayLib::Color::White);
+		RayLib::DrawText(cast(cscore.ptr), (WIDTH/2) + 200, 30, 48, RayLib::Color::Black);
 
         Allocator::dealloc(C::Allocator, cast(pscore));
         Allocator::dealloc(C::Allocator, cast(cscore));

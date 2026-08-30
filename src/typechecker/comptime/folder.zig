@@ -977,8 +977,7 @@ fn evalLiteral(self: *Folder, tokenPtr: defines.TokenPtr, maybeExpected: ?TypeID
     const rest = try self.typechecker.typecheckValue(res, null);
 
     self.typechecker.assertCanCoerce(rest, maybeExpected orelse rest) catch return res;
-
-    return res;
+    return self.castValue(res, maybeExpected orelse rest, false);
 }
 
 fn evalPtrType(
@@ -2128,6 +2127,10 @@ fn handleScopeDecls(
 
 fn castValue(self: *Folder, valuePtr: Comptime.Value.Ptr, to: TypeID, _: bool) Error!Comptime.Value.Ptr {
     const value = self.getValue(valuePtr);
+
+    if (Typechecker.determineExpected(to) == null) {
+        return valuePtr;
+    }
 
     const valueType = try self.typechecker.typecheckValueDirect(value, to);
     self.typechecker.assertCanCoerce(valueType, to) catch |err| {

@@ -2877,9 +2877,9 @@ pub fn assertCastable(self: *Typechecker, from: TypeID, to: TypeID, unsafe: bool
                 else !toInt.canContain(fromInt),
                 Error.SizeMismatch
             ),
-            else => try functional.throwIf(!self.isInt(to), Error.IncompatibleTypes)
+            else => try functional.throwIf(!self.isInt(to) and !self.isFloat(to), Error.IncompatibleTypes)
         },
-        .Float => try functional.throwIf(!self.isInt(to), Error.IncompatibleTypes),
+        .Float => try functional.throwIf(!self.isInt(to) and !self.isFloat(to), Error.IncompatibleTypes),
         .Pointer => |fromPtr| switch (toType) {
             .Pointer => |toPtr| {
                 try self.assertCastablePtr(fromPtr, toPtr, unsafe);
@@ -3032,9 +3032,9 @@ pub fn assertCanCoerce(self: *Typechecker, this: TypeID, that: TypeID) Error!voi
                     return; 
                 }
 
-                return Error.IncompatibleTypes;
+                return Error.TypeMismatch;
             },
-            else => return Error.IncompatibleTypes,
+            else => return Error.TypeMismatch,
         },
         else => switch (thisType) {
             .ComptimeInt, .Integer => functional.throwIf(!self.isInt(this) and !self.isFloat(this), Error.TypeMismatch),
@@ -3051,8 +3051,8 @@ pub fn assertCanCoerce(self: *Typechecker, this: TypeID, that: TypeID) Error!voi
             },
             .Function => |f1| {
                 try functional.throwIf(std.meta.activeTag(thisType) != std.meta.activeTag(thatType), Error.TypeMismatch);
-                try functional.throwIf(!std.mem.eql(u32, f1.argTypes, thatType.Function.argTypes), Error.IncompatibleTypes);
-                try functional.throwIf(f1.returnType != thatType.Function.returnType, Error.IncompatibleTypes);
+                try functional.throwIf(!std.mem.eql(u32, f1.argTypes, thatType.Function.argTypes), Error.TypeMismatch);
+                try functional.throwIf(f1.returnType != thatType.Function.returnType, Error.TypeMismatch);
             },
             else => functional.throwIf(std.meta.activeTag(thisType) != std.meta.activeTag(thatType), Error.TypeMismatch),
         },

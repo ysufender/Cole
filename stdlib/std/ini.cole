@@ -49,6 +49,7 @@ pub let Value = union(enum) {
         _ = Stream::Output::writebuffer(stream, switch self.tag {
             @Integer -> String::intToStr(self.Integer, allocator),
             @String -> self.String,
+            @Float -> String::floatToStr(self.Float, allocator),
             else -> "<unreachable>",
         });
     };
@@ -107,6 +108,7 @@ pub let loadStream = fn (allocator: Allocator::Allocator, stream: Stream::Input:
                 switch val.tokenType {
                     @Integer -> value = (@Integer, String::strToInt(val.value));
                     @String -> value = (@String, val.value);
+                    @Float -> value = (@Float, String::strToFloat(val.value));
                     @Identifier -> {
                         let section = val.value;
 
@@ -390,8 +392,12 @@ let number = fn (allocator: Allocator::Allocator, stream: Stream::Input::Stream)
 
         switch ch {
             @Ok -> if !ASCII::isDigit(ch.Ok) {
-                if ch.Ok == '.' {
-                    return (@Err, "Float literals are not supported yet.");
+                if ch.Ok == '.' and !isFloat {
+                    isFloat = true;
+                    continue;
+                }
+                else if ch.Ok == '.' {
+                    return (@Err, "Trailing dots are not permitted.");
                 }
                 break;
             }
@@ -420,7 +426,9 @@ let number = fn (allocator: Allocator::Allocator, stream: Stream::Input::Stream)
         index = index + 1;
     }
 
-    return (@Integer, value);
+    return
+        if (isFloat) (@Float, value)
+        else (@Integer, value);
 };
 
 let identifier = fn (allocator: Allocator::Allocator, stream: Stream::Input::Stream) -> Token {
