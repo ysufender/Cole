@@ -23,7 +23,7 @@ import std::memory::allocator;
 
 pub let Allocator = std::memory::allocator::Allocator(undefined, create, destroy, alloc, dealloc, _realloc);
 
-pub let memCopy = fn (to: [@c]mut void, from: [@c]mut void, n: u32) -> void {
+pub let copy = fn (to: [@c]mut void, from: [@c]mut void, n: u32) -> void {
     _ = memcpy(to, from, n);
 };
 

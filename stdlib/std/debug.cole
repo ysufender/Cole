@@ -12,14 +12,17 @@ code {
 #endif
 }
 
+import std::io::console as Console;
+
 pub let assert = fn (cnd: bool, msg: []u8) -> void {
     if !cnd {
-        // TODO: Message error when IO is implemented
+        Console::error(msg);
+        // @TODO: Message error when IO is implemented
         unreachable();
     }
 };
 
-// TODO: function tags for force comptime
+// @TODO: function tags for force comptime
 pub let staticAssert = #(@comptime) fn (cnd: bool) -> void {
     if !cnd {
         compileError("Assertion failed.", ());

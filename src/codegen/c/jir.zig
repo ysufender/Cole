@@ -778,16 +778,82 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
         .Construction => {
             const typeToCtor = self.data[node.value];
             const len = self.data[node.value + 1];
+            const typeInfo = self.types.get(typeToCtor);
 
             try self.write(out, "({s}){{", .{
                 try self.getCName(typeToCtor, null, true, false),
             });
-            for (0..len) |idx| {
-                try self.operation(out, self.data[@intCast(node.value + 2 + idx)]);
-                if (idx != len - 1) {
-                    try self.write(out, ", ", .{});
-                }
+
+            switch (typeInfo) {
+                .Union => |uni| {
+                    if (uni.isTagged and len > 0) {
+                        // Emit tag field
+                        const tagNodePtr = self.data[@intCast(node.value + 2)];
+                        try self.write(out, ".{s} = ", .{self.strings[uni.fields[0].name]});
+                        try self.operation(out, tagNodePtr);
+
+                        // Resolve tag value to find the active payload field
+                        if (len > 1) {
+                            const tagNode = self.nodes.get(tagNodePtr);
+                            const tagConst = self.constants.get(tagNode.value);
+                            const tagValue: u32 = switch (tagConst) {
+                                .Integer => |i| switch (i) {
+                                    .u32    => |v| v,
+                                    .i32    => |v| @intCast(v),
+                                    .u8     => |v| v,
+                                    .i8     => |v| @intCast(v),
+                                    .c_int  => |v| @intCast(v),
+                                    .c_uint => |v| @intCast(v),
+                                    .c_long => |v| @intCast(v),
+                                    else    => 0,
+                                },
+                                .Aggregate => |agg| self.constants.get(agg.data.start).Integer.u32,
+                                else => 0,
+                            };
+                            const payloadField = uni.fields[1 + tagValue];
+                            if (!self.types.get(payloadField.valueType).isZeroBit()) {
+                                try self.write(out, ", .{s} = ", .{self.strings[payloadField.name]});
+                                try self.operation(out, self.data[@intCast(node.value + 3)]);
+                            }
+                        }
+                    } else {
+                        // Untagged union: emit first non-zero-bit field only
+                        var dataIdx: usize = 0;
+                        for (uni.fields) |field| {
+                            if (self.types.get(field.valueType).isZeroBit()) continue;
+                            if (dataIdx >= len) break;
+                            try self.write(out, ".{s} = ", .{self.strings[field.name]});
+                            try self.operation(out, self.data[@intCast(node.value + 2 + dataIdx)]);
+                            dataIdx += 1;
+                        }
+                    }
+                },
+                .Struct => |str| {
+                    var fieldIdx: usize = 0;
+                    var dataIdx: usize = 0;
+                    while (dataIdx < len) : (dataIdx += 1) {
+                        // Skip zero-bit fields
+                        while (fieldIdx < str.fields.len and
+                               self.types.get(str.fields[fieldIdx].valueType).isZeroBit())
+                        {
+                            fieldIdx += 1;
+                        }
+                        if (fieldIdx >= str.fields.len) break;
+                        if (dataIdx != 0) try self.write(out, ", ", .{});
+                        try self.write(out, ".{s} = ", .{self.strings[str.fields[fieldIdx].name]});
+                        try self.operation(out, self.data[@intCast(node.value + 2 + dataIdx)]);
+                        fieldIdx += 1;
+                    }
+                },
+                else => {
+                    // Primitive or pointer reinterpret: emit positionally
+                    for (0..len) |idx| {
+                        if (idx != 0) try self.write(out, ", ", .{});
+                        try self.operation(out, self.data[@intCast(node.value + 2 + idx)]);
+                    }
+                },
             }
+
             try self.write(out, "}}", .{});
         },
 
@@ -860,15 +926,79 @@ fn literal(self: *JIR, out: *Writer, ptr: Constant.Ptr) Error!void {
             try self.write(out, "{s}", .{str});
         },
         .Aggregate => |agg| {
+            const aggTypeInfo = self.types.get(agg.type);
+            const dataLen = agg.data.end - agg.data.start;
+
             try self.write(out, "({s}){{", .{
                 try self.getCName(agg.type, null, true, false),
             });
-            for (agg.data.start..agg.data.end) |idx| {
-                try self.literal(out, @intCast(idx));
-                if (idx != agg.data.end - 1) {
-                    try self.write(out, ", ", .{});
-                }
+
+            switch (aggTypeInfo) {
+                .Union => |uni| {
+                    if (uni.isTagged and dataLen > 0) {
+                        // Emit tag field
+                        try self.write(out, ".{s} = ", .{self.strings[uni.fields[0].name]});
+                        try self.literal(out, @intCast(agg.data.start));
+
+                        // Resolve tag value to find the active payload field
+                        if (dataLen > 1) {
+                            const tagConst = self.constants.get(@intCast(agg.data.start));
+                            const tagValue: u32 = switch (tagConst) {
+                                .Integer => |i| switch (i) {
+                                    .u32    => |v| v,
+                                    .i32    => |v| @intCast(v),
+                                    .u8     => |v| v,
+                                    .i8     => |v| @intCast(v),
+                                    .c_int  => |v| @intCast(v),
+                                    .c_uint => |v| @intCast(v),
+                                    .c_long => |v| @intCast(v),
+                                    else    => 0,
+                                },
+                                .Aggregate => |inner| self.constants.get(inner.data.start).Integer.u32,
+                                else => 0,
+                            };
+                            const payloadField = uni.fields[1 + tagValue];
+                            if (!self.types.get(payloadField.valueType).isZeroBit()) {
+                                try self.write(out, ", .{s} = ", .{self.strings[payloadField.name]});
+                                try self.literal(out, @intCast(agg.data.start + 1));
+                            }
+                        }
+                    } else {
+                        var dataIdx: usize = 0;
+                        for (uni.fields) |field| {
+                            if (self.types.get(field.valueType).isZeroBit()) continue;
+                            if (dataIdx >= dataLen) break;
+                            if (dataIdx != 0) try self.write(out, ", ", .{});
+                            try self.write(out, ".{s} = ", .{self.strings[field.name]});
+                            try self.literal(out, @intCast(agg.data.start + dataIdx));
+                            dataIdx += 1;
+                        }
+                    }
+                },
+                .Struct => |str| {
+                    var fieldIdx: usize = 0;
+                    var dataIdx: usize = 0;
+                    while (dataIdx < dataLen) : (dataIdx += 1) {
+                        while (fieldIdx < str.fields.len and
+                               self.types.get(str.fields[fieldIdx].valueType).isZeroBit())
+                        {
+                            fieldIdx += 1;
+                        }
+                        if (fieldIdx >= str.fields.len) break;
+                        if (dataIdx != 0) try self.write(out, ", ", .{});
+                        try self.write(out, ".{s} = ", .{self.strings[str.fields[fieldIdx].name]});
+                        try self.literal(out, @intCast(agg.data.start + dataIdx));
+                        fieldIdx += 1;
+                    }
+                },
+                else => {
+                    for (agg.data.start..agg.data.end) |idx| {
+                        if (idx != agg.data.start) try self.write(out, ", ", .{});
+                        try self.literal(out, @intCast(idx));
+                    }
+                },
             }
+
             try self.write(out, "}}", .{});
         },
         .Array => |arr| {

@@ -32,3 +32,19 @@ pub let strToInt = fn (str: []u8) -> c_long {
     }
     return res;
 };
+
+pub let equals = fn (str1: []u8, str2: []u8) -> bool {
+    if str1.len != str2.len {
+        return false;
+    }
+
+    let idx: mut u32 = 0;
+    while idx < str1.len {
+        if str1[idx] != str2[idx] {
+            return false;
+        }
+        idx = idx + 1;
+    }
+
+    return true;
+};

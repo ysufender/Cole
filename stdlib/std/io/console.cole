@@ -1,17 +1,17 @@
 let printf = #(@extern, @variadic) fn (fmt: mut [@c]c_char) -> mut c_int { };
 
 pub let log = fn (msg: []u8) -> void {
-    printf("%s\n", msg.ptr);
+    _ = printf("%s\n", msg.ptr);
 };
 
 pub let info = fn (msg: []u8) -> void {
-    printf("\e[32minfo:\e[0m %s\n", msg.ptr);
+    _ = printf("\e[32minfo:\e[0m %s\n", msg.ptr);
 };
 
 pub let error = fn (msg: []u8) -> void {
-    printf("\e[31merror:\e[0m %s\n", msg.ptr);
+    _ = printf("\e[31merror:\e[0m %s\n", msg.ptr);
 };
 
 pub let warn = fn (msg: []u8) -> void {
-    printf("\e[33mwarning:\e[0m %s\n", msg.ptr);
+    _ = printf("\e[33mwarning:\e[0m %s\n", msg.ptr);
 };

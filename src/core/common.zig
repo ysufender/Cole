@@ -141,6 +141,7 @@ pub const CompilerError = error {
     StackUnderflow,
     ExternComptime,
     NonExternVariadicFunction,
+    UnhandledReturnValue,
     UnnamedVariadic,
     Terminate,
 };

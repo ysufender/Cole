@@ -1027,6 +1027,8 @@ fn switchExpr(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error
         conds[written] = cnd;
         vals[written] = try self.expression(bodyPtr, ofType);
         written += 1;
+
+        defaultVal = vals[written - 1];
     }
 
     var result = defaultVal orelse
@@ -1108,7 +1110,10 @@ fn call(
                 try self.expression(func, funcType),
                 args
             ),
-        else => common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
+        else => |t| {
+            self.report("Unreachable branch: {s}", .{@tagName(t)});
+            return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
+        },
     };
 }
 
@@ -1152,6 +1157,7 @@ fn builtinCall(
             })
         ),
         BI("sizeOf") => self.sizeOf(extraPtr, ofType),
+        BI("alignOf") => self.alignOf(extraPtr, ofType),
         BI("compileLog"), BI("compileError") => 0,
         else => common.debug.NotImplemented(self.typechecker.context.log, @src()),
     };
@@ -1188,6 +1194,37 @@ fn sizeOf(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR
     );
 }
 
+fn alignOf(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR.Ptr {
+    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+    const exprList = ast.expressions.items(.value)[ast.extra[extraPtr]];
+    const args = defines.Range{
+        .start = ast.extra[exprList],
+        .end = ast.extra[exprList + 1],
+    };
+
+    const t = try self.typechecker.typecheckExpression(ast.extra[args.at(0)], null);
+
+
+    if (self.typechecker.folder.attemptEval(ast.extra[args.at(0)], t)) |res| blk: {
+        return self.typechecker.builder.literal(
+            try self.addConstant(
+                try self.typechecker.folder.appendValue(.{ .Int = switch (self.typechecker.folder.getValue(res)) {
+                    .Type => |typeID| self.typechecker.alignOf(typeID),
+                    else => break :blk, 
+                }}),
+                ofType
+            ),
+        );
+    }
+
+    return self.typechecker.builder.literal(
+        try self.addConstant(
+            try self.typechecker.folder.appendValue(.{ .Int = self.typechecker.alignOf(t) }),
+            ofType
+        ),
+    );
+}
+
 fn cast(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR.Ptr {
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
 
@@ -1217,28 +1254,27 @@ fn cast(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR.P
                         try self.typechecker.builder.internString("len"),
                     );
 
-                    const itemSize = try self.typechecker.builder.literal(
-                        try self.typechecker.builder.addConstant(.{
-                            .Integer = .{ .u32 = blk: {
-                                const newLen = self.typechecker.sizeOf(rptr.child) / 8;
-                                break :blk if (newLen == 0) 1 else newLen;
-                            } },
-                        })
-                    );
+                    const srcElemSize = self.typechecker.sizeOf(rptr.child) / 8;
+                    const dstElemSize = self.typechecker.sizeOf(tptr.child) / 8;
 
-                    const newItemSize = try self.typechecker.builder.literal(
-                        try self.typechecker.builder.addConstant(.{
-                            .Integer = .{ .u32 = blk: {
-                                const newItemSize = self.typechecker.sizeOf(tptr.child) / 8;
-                                break :blk if (newItemSize == 0) 1 else newItemSize;
-                            } },
-                        })
-                    );
-
-                    const newSize = try self.typechecker.builder.div(
-                        try self.typechecker.builder.mul(len, itemSize),
-                        newItemSize,
-                    );
+                    const newSize = if (srcElemSize == dstElemSize or srcElemSize == 0)
+                        len
+                    else blk: {
+                        const itemSize = try self.typechecker.builder.literal(
+                            try self.typechecker.builder.addConstant(.{
+                                .Integer = .{ .u32 = if (srcElemSize == 0) 1 else srcElemSize },
+                            })
+                        );
+                        const newItemSize = try self.typechecker.builder.literal(
+                            try self.typechecker.builder.addConstant(.{
+                                .Integer = .{ .u32 = if (dstElemSize == 0) 1 else dstElemSize },
+                            })
+                        );
+                        break :blk try self.typechecker.builder.div(
+                            try self.typechecker.builder.mul(len, itemSize),
+                            newItemSize,
+                        );
+                    };
 
                     break :res self.typechecker.builder.construct(ofType, &.{ptr, newSize});
                 }
@@ -1274,7 +1310,20 @@ fn expressionList(self: *Lowerer, extraPtr: defines.OpaquePtr, expected: TypeID)
         const t = try self.typechecker.typecheckExpression(ast.extra[@intCast(exprPtr)], switch (eti) {
             .Array => |arr| arr.child,
             .Struct => |str| str.fields[i].valueType,
-            .Union => |uni| uni.fields[i].valueType,
+            .Union => |uni| blk: {
+                if (uni.isTagged and i > 0) {
+                    const tagExprPtr = ast.extra[@intCast(exprs.start)];
+                    if (self.typechecker.folder.attemptEval(tagExprPtr, uni.fields[0].valueType)) |tagVal| {
+                        const tagValue = self.typechecker.folder.getValue(tagVal).Enum.Value;
+                        const payloadTypeID = uni.fields[1 + tagValue].valueType;
+                        const payloadTypeInfo = self.typechecker.typeTable.get(payloadTypeID);
+                        if (payloadTypeInfo == .Struct) {
+                            break :blk payloadTypeInfo.Struct.fields[i - 1].valueType;
+                        }
+                    }
+                }
+                break :blk uni.fields[i].valueType;
+            },
             .Function => |func| func.argTypes[i],
             else => expected,
         });
@@ -1282,8 +1331,20 @@ fn expressionList(self: *Lowerer, extraPtr: defines.OpaquePtr, expected: TypeID)
     }
 
     return switch (eti) {
-        .Array, .Struct, .Union => self.typechecker.builder.construct(expected, exs),
-        else => self.typechecker.builder.grouping(exs)
+        .Array, .Struct => self.typechecker.builder.construct(expected, exs),
+        .Union => |uni| blk: {
+            if (uni.isTagged and exs.len > 2) {
+                const tagExprPtr = ast.extra[@intCast(exprs.start)];
+                const tagVal = self.typechecker.folder.attemptEval(tagExprPtr, uni.fields[0].valueType)
+                    orelse break :blk self.typechecker.builder.construct(expected, exs);
+                const tagValue = self.typechecker.folder.getValue(tagVal).Enum.Value;
+                const payloadTypeID = uni.fields[1 + tagValue].valueType;
+                const payloadNode = try self.typechecker.builder.construct(payloadTypeID, exs[1..]);
+                break :blk self.typechecker.builder.construct(expected, &.{ exs[0], payloadNode });
+            }
+            break :blk self.typechecker.builder.construct(expected, exs);
+        },
+        else => self.typechecker.builder.grouping(exs),
     };
 }
 

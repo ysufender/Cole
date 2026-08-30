@@ -1,5 +1,7 @@
 import std::memory::allocator as Allocator;
 import std::io::stream as Stream;
+import std::c::memory as Memory;
+import std::io::file as File;
 import std::ascii as ASCII;
 
 import std::io::console as Console;
@@ -39,27 +41,147 @@ pub let Value = union(enum) {
     List     : []Value,
 };
 
+pub let loadFile = fn (allocator: Allocator::Allocator, path: []u8) -> INI::LoadResult {
+    let file = File::Input::open(path, allocator, false);
+
+    return switch file {
+        @Ok -> loadStream(allocator, File::Input::stream(file.Ok)),
+        @Err -> (@Err, ()),
+    };
+};
+
 pub let loadStream = fn (allocator: Allocator::Allocator, stream: Stream::Input::Stream) -> INI::LoadResult {
-    let sectionCount: mut u32 = 0;
+    let list = SectionList::init(allocator);
+    let section: mut *mut Section = undefined;
+    let values = PairList::init(allocator);
+
     while true {
         let token = tokenize(allocator, stream);
 
         switch token.tokenType {
-            @Err -> return (@Err, ());
+            @Err -> {
+                _ = Stream::Output::writebuffer(IO::StdErr(), "Error while tokenizing: ");
+                _ = Stream::Output::writeline(IO::StdErr(), token.value);
+                return (@Err, ());
+            }
             @EOF -> break;
-            @Section -> sectionCount = sectionCount + 1;
-            else -> { }
+            @Section -> {
+                if section != undefined {
+                    section.* = (section.name, PairList::slice(values.&, allocator));
+                }
+
+                section = SectionList::append(list.&, allocator, token.value);
+
+                if section == undefined {
+                    _ = Stream::Output::writebuffer(IO::StdErr(), "Multiple initialization of section: ");
+                    _ = Stream::Output::writeline(IO::StdErr(), token.value);
+                    return (@Err, ());
+                }
+            }
+            @Identifier -> {
+                let key = token.value;
+
+                let eq = tokenize(allocator, stream);
+                if eq.tokenType != @Equal {
+                    _ = Stream::Output::writebuffer(IO::StdErr(), "Expected '=' after identifier: ");
+                    _ = Stream::Output::writeline(IO::StdErr(), key);
+                    return (@Err, ());
+                }
+
+                let val = tokenize(allocator, stream);
+                let value: mut Value = undefined;
+
+                switch val.tokenType {
+                    @Integer -> value = (@Integer, String::strToInt(val.value));
+                    @String -> value = (@String, val.value);
+                    @Identifier -> {
+                        let section = val.value;
+
+                        let dot = tokenize(allocator, stream);
+                        if dot.tokenType != @Dot {
+                            _ = Stream::Output::writebuffer(IO::StdErr(), "Expected '.' after identifier: ");
+                            _ = Stream::Output::writeline(IO::StdErr(), section);
+                            return (@Err, ());
+                        }
+
+                        let fieldToken = tokenize(allocator, stream);
+                        if fieldToken.tokenType != @Identifier {
+                            _ = Stream::Output::writebuffer(IO::StdErr(), "Expected an identifier after '.'.");
+                            return (@Err, ());
+                        }
+
+                        let field = fieldToken.value;
+
+                        value = (@Ref, section, field);
+                    }
+                    else -> {
+                        _ = Stream::Output::writebuffer(IO::StdErr(), "Expected value after '=', got: ");
+                        _ = Stream::Output::writeline(IO::StdErr(), val.value);
+                        return (@Err, ());
+                    }
+                }
+
+                PairList::append(values.&, allocator, key, value);
+            }
+            else -> {
+                _ = Stream::Output::writebuffer(IO::StdErr(), "Unexpected token: ");
+                _ = Stream::Output::writebuffer(IO::StdErr(), token.value);
+                _ = Stream::Output::write(IO::StdErr(), ASCII::NEWLINE);
+                return (@Err, ());
+            }
         }
     }
 
+    if section != undefined {
+        section.* = (section.name, PairList::slice(values.&, allocator));
+    }
 
-    _ = Stream::Input::seek(stream, 0);
+    return (@Ok, allocator, SectionList::slice(list.&, allocator));
+};
 
-    let list: mut any = SectionList::empty;
-    SectionList::append(list.&, allocator, undefined);
-    SectionList::append(list.&, allocator, undefined);
+pub let get = fn (self: *INI, section: []u8, field: []u8) -> *Value {
+    let idx: mut u32 = 0;
+    while idx < self.sections.len {
+        let section = self.sections[idx].&;
+    }
+};
 
-    return (@Ok, allocator, list.items);
+let PairList = struct {
+    items: mut []mut Pair,
+    capacity: mut u32,
+
+    let initial = 8;
+
+    pub let init = fn (allocator: Allocator::Allocator) -> mut PairList {
+        let _new = Allocator::alloc(allocator, initial, sizeOf(Pair));
+        let new: mut []mut Pair = cast(_new);
+        new = new[0..0];
+        return (new, initial);
+    };
+
+    pub let grow = fn (self: *mut PairList, allocator: Allocator::Allocator) -> void {
+        self.capacity = self.capacity * 2;
+        let _new = Allocator::realloc(allocator, cast(self.items), self.capacity * sizeOf(Pair));
+        let new: []mut Pair = cast(_new);
+        self.items = new[0..self.items.len];
+    };
+
+    pub let append = fn (self: *mut PairList, allocator: Allocator::Allocator, name: []u8, value: Value) -> void {
+        if self.items.len >= self.capacity {
+            grow(self, allocator);
+        }
+
+        let idx = self.items.len;
+        self.items = self.items[0..self.items.len + 1];
+        self.items[idx] = (name, value);
+    };
+
+    pub let slice = fn (self: *mut PairList, allocator: Allocator::Allocator) -> []Pair {
+        let slice = Allocator::alloc(allocator, self.items.len, sizeOf(Pair));
+        Memory::copy(cast(slice.ptr), self.items.ptr, self.items.len * sizeOf(Pair));
+        self.items = self.items[0..0];
+        return unsafeCast(slice);
+    };
 };
 
 
@@ -67,30 +189,48 @@ let SectionList = struct {
     items: mut []mut Section,
     capacity: mut u32,
 
-    let initial = 1;
+    let initial = 32;
 
-    pub let empty: SectionList = (undefined, 0);
-
-    pub let grow = fn (self: *mut SectionList, allocator: Allocator::Allocator) -> void {
-        if self.items.ptr == undefined {
-            self.capacity = initial;
-            let new = Allocator::alloc(allocator, initial, sizeOf(Section));
-            self.items = cast(new[0..0]);
-        }
-        else {
-            self.capacity = self.capacity * 2;
-            let new = Allocator::realloc(allocator, cast(self.items), self.capacity);
-            self.items = cast(new[0..self.items.len]);
-        }
+    pub let init = fn (allocator: Allocator::Allocator) -> mut SectionList {
+        let _new = Allocator::alloc(allocator, initial, sizeOf(Section));
+        let new: mut []mut Section = cast(_new);
+        new = new[0..0];
+        return (new, initial);
     };
 
-    pub let append = fn (self: *mut SectionList, allocator: Allocator::Allocator, section: Section) -> void {
+    pub let grow = fn (self: *mut SectionList, allocator: Allocator::Allocator) -> void {
+        self.capacity = self.capacity * 2;
+        let _new = Allocator::realloc(allocator, cast(self.items), self.capacity * sizeOf(Section));
+        let new: []mut Section = cast(_new);
+        self.items = new[0..self.items.len];
+    };
+
+    pub let append = fn (self: *mut SectionList, allocator: Allocator::Allocator, section: []u8) -> *mut Section {
+        {
+            let idx: mut u32 = 0;
+            while idx < self.items.len {
+                if String::equals(self.items[idx].name, section) {
+                    return undefined;
+                }
+                idx = idx + 1;
+            }
+        }
+
         if self.items.len >= self.capacity {
             grow(self, allocator);
         }
 
+        let idx = self.items.len;
         self.items = self.items[0..self.items.len + 1];
-        self.items[self.items.len - 1] = section;
+        self.items[idx] = (section, undefined);
+        return self.items[idx].&;
+    };
+
+    pub let slice = fn (self: *mut SectionList, allocator: Allocator::Allocator) -> []Section {
+        let slice = Allocator::alloc(allocator, self.items.len, sizeOf(Section));
+        Memory::copy(cast(slice.ptr), self.items.ptr, self.items.len * sizeOf(Section));
+        self.items = self.items[0..0];
+        return unsafeCast(slice);
     };
 };
 

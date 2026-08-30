@@ -949,6 +949,7 @@ fn typecheckExpressionStatement(self: *Typechecker, exprPtr: defines.OpaquePtr) 
         self.report("Unhandled return value of type '{s}', consider using an explicit discard '_' instead.", .{
             try self.typeName(self.arena.allocator(), resultType),
         });
+        return Error.UnhandledReturnValue;
     }
 }
 
@@ -1636,6 +1637,7 @@ pub fn typecheckBuiltinCall(self: *Typechecker, extraPtr: defines.ExpressionPtr,
         BI("typeOf") => Comptime.Folder.Builtin.Type("type"),
         BI("compileError") => return self.folder.evalCompileError(extraPtr),
         BI("sizeOf") => return Comptime.Folder.Builtin.Type("u32"),
+        BI("alignOf") => return Comptime.Folder.Builtin.Type("u32"),
         BI("typeName") => return Comptime.Folder.Builtin.Type("[]u8"),
         BI("Tuple") => return Comptime.Folder.Builtin.Type("type"),
         BI("compileLog") => {
@@ -3345,7 +3347,7 @@ pub fn sliceOf(self: *Typechecker, of: TypeID) Error!u32 {
     };
 }
 
-/// In bytes
+/// In bits
 pub fn sizeOf(self: *const Typechecker, of: TypeID) u32 {
     return ret: switch (self.typeTable.get(of)) {
         .CSize => @bitSizeOf(usize),
@@ -3354,7 +3356,10 @@ pub fn sizeOf(self: *const Typechecker, of: TypeID) u32 {
         .CDouble => @bitSizeOf(f64),
         .CChar, .CUChar => @bitSizeOf(c_char),
         .CInt, .CUInt => @bitSizeOf(c_uint),
-        .Pointer => @bitSizeOf(*void),
+        .Pointer => |ptr| switch (ptr.size) {
+            .Slice => @bitSizeOf(*void) + @bitSizeOf(u32),
+            .Single, .C => @bitSizeOf(*void),
+        },
         .Function => @bitSizeOf(@TypeOf(&sizeOf)),
         .Enum => @bitSizeOf(u32),
         .Float, .ComptimeFloat => @bitSizeOf(f32),
@@ -3365,21 +3370,71 @@ pub fn sizeOf(self: *const Typechecker, of: TypeID) u32 {
         .ComptimeInt => @bitSizeOf(i64),
         .Struct => |str| {
             var size: u32 = 0;
+            var max_align: u32 = 8;
             for (str.fields) |field| {
-                size += self.sizeOf(field.valueType);
+                const fieldSize = self.sizeOf(field.valueType);
+                const fieldAlign = self.alignOf(field.valueType) * 8;
+                size = (size + fieldAlign - 1) & ~(fieldAlign - 1);
+                size += fieldSize;
+                max_align = @max(max_align, fieldAlign);
             }
-
-            return size;
+            size = (size + max_align - 1) & ~(max_align - 1);
+            break :ret size;
         },
         .Union => |uni| {
-            const fields = uni.fields;
-
-            var size: u32 = 0;
-            for (fields) |field| {
-                size = @max(size, self.sizeOf(field.valueType));
+            var max_size: u32 = 0;
+            var max_align: u32 = 8;
+            for (uni.fields) |field| {
+                const fieldSize = self.sizeOf(field.valueType);
+                const fieldAlign = self.alignOf(field.valueType) * 8;
+                max_size = @max(max_size, (fieldSize + fieldAlign - 1) & ~(fieldAlign - 1));
+                max_align = @max(max_align, fieldAlign);
             }
+            if (uni.isTagged) {
+                const tagSize: u32 = @bitSizeOf(u32);
+                const tagAlign: u32 = @alignOf(u32) * 8;
+                max_align = @max(max_align, tagAlign);
+                const payload_offset = (tagSize + max_align - 1) & ~(max_align - 1);
+                const total = payload_offset + max_size;
+                break :ret (total + max_align - 1) & ~(max_align - 1);
+            } else {
+                break :ret (max_size + max_align - 1) & ~(max_align - 1);
+            }
+        },
+    };
+}
 
-            break :ret size + @as(u32, if (uni.isTagged) @bitSizeOf(u32) else 0);
+pub fn alignOf(self: *const Typechecker, of: TypeID) u32 {
+    return switch (self.typeTable.get(of)) {
+        .CSize => @alignOf(usize),
+        .CUShort, .CShort => @alignOf(c_ushort),
+        .CULong, .CLong => @alignOf(c_ulong),
+        .CDouble => @alignOf(f64),
+        .CChar, .CUChar => @alignOf(c_char),
+        .CInt, .CUInt => @alignOf(c_uint),
+        .Pointer => @alignOf(*void),
+        .Function => @alignOf(@TypeOf(&alignOf)),
+        .Enum => @alignOf(u32),
+        .Float, .ComptimeFloat => @alignOf(f32),
+        .Integer => |int| int.size / 8, // assuming int.size is in bits
+        .Bool => @alignOf(bool),
+        .Void, .Noreturn, .EnumLiteral, .Type, .Any => 1,
+        .Array => |arr| self.alignOf(arr.child),
+        .ComptimeInt => @alignOf(i64),
+        .Struct => |str| {
+            var max_align: u32 = 1;
+            for (str.fields) |field| {
+                max_align = @max(max_align, self.alignOf(field.valueType));
+            }
+            return max_align;
+        },
+        .Union => |uni| {
+            var max_align: u32 = 1;
+            for (uni.fields) |field| {
+                max_align = @max(max_align, self.alignOf(field.valueType));
+            }
+            if (uni.isTagged) max_align = @max(max_align, @alignOf(u32));
+            return max_align;
         },
     };
 }
