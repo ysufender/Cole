@@ -173,8 +173,8 @@ pub inline fn typeDef(self: *Builder, typeID: TypeID) Error!JIR.Ptr {
     return res;
 }
 
-pub inline fn @"return"(self: *Builder, expr: JIR.Ptr) Error!JIR.Ptr {
-    const res = try self.commonSingle(.Return, expr);
+pub inline fn @"return"(self: *Builder, withRet: bool, expr: JIR.Ptr) Error!JIR.Ptr {
+    const res = try self.commonBinary(.Return, @intFromBool(withRet), expr);
     return res;
 }
 

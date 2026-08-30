@@ -765,7 +765,7 @@ fn @"return"(self: *Lowerer, _expr: defines.ExpressionPtr) Error!JIR.Ptr {
     const expr =
         if (_expr == 0) 0
         else try self.expression(_expr, self.lastReturnType);
-    const start = try self.typechecker.builder.@"return"(expr);
+    const start = try self.typechecker.builder.@"return"(expr == 0, expr);
     return start;
 }
 

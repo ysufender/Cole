@@ -62,6 +62,8 @@ fn innerMain(allocator: std.mem.Allocator, init: std.process.Init) common.Compil
     context.log.context = &context;
     errdefer context.deinit();
 
+    var cOut = try createBuildDir(&context);
+
     var lexer = try Lexer.init(
         allocator,
         &context,
@@ -139,8 +141,36 @@ fn innerMain(allocator: std.mem.Allocator, init: std.process.Init) common.Compil
     // output from now on. Also it shouldn't error too. Validation
     // has ended.
 
-    const outDir = try loweredIR.codegen(&context);
-    try backend.C.compile(outDir, allocator, &context);
+    try loweredIR.codegen(&context, &cOut);
+    try backend.C.compile(cOut, allocator, &context);
+}
+
+const CreateDirError = std.Io.Dir.CreateDirError;
+
+fn createBuildDir(context: *common.CompilerContext) Error!std.Io.Dir {
+    std.Io.Dir.cwd().createDir(context.io, "build", .default_dir) catch |err| switch (err) {
+        CreateDirError.PathAlreadyExists => { },
+        else => {
+            common.log.err("Failed to create output directory.", .{});
+            return Error.IOError;
+        },
+    };
+
+    const buildDir = std.Io.Dir.cwd().openDir(context.io, "build", .{})
+        catch return Error.IOError;
+
+    buildDir.createDir(context.io, "c/", .default_dir) catch |err| switch (err) {
+        CreateDirError.PathAlreadyExists => { },
+        else => {
+            common.log.err("Failed to create output directory.", .{});
+            return Error.IOError;
+        },
+    };
+
+    const cOut = buildDir.openDir(context.io, "c", .{})
+        catch return Error.IOError;
+
+    return cOut;
 }
 
 pub var MainProcInit: std.process.Init = undefined;

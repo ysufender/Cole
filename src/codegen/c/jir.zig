@@ -169,31 +169,8 @@ pub fn dump(self: *const JIR) void {
     }
 }
 
-pub fn codegen(self: *JIR, context: *Context) Error!std.Io.Dir {
+pub fn codegen(self: *JIR, context: *Context, cOut: *std.Io.Dir) Error!void {
     self.allocator = context.arena.allocator();
-
-    std.Io.Dir.cwd().createDir(context.io, "build", .default_dir) catch |err| switch (err) {
-        CreateDirError.PathAlreadyExists => { },
-        else => {
-            common.log.err("Failed to create output directory.", .{});
-            return Error.IOError;
-        },
-    };
-
-    const buildDir = std.Io.Dir.cwd().openDir(context.io, "build", .{})
-        catch return Error.IOError;
-
-    buildDir.createDir(context.io, "c/", .default_dir) catch |err| switch (err) {
-        CreateDirError.PathAlreadyExists => { },
-        else => {
-            common.log.err("Failed to create output directory.", .{});
-            return Error.IOError;
-        },
-    };
-
-    const cOut = buildDir.openDir(context.io, "c", .{})
-        catch return Error.IOError;
-
     self.cstrings = .empty;
 
     var wbuf = std.mem.zeroes([512]u8);
@@ -208,8 +185,6 @@ pub fn codegen(self: *JIR, context: *Context) Error!std.Io.Dir {
     defer sourceFile.close(context.io);
     var sourceWriter = sourceFile.writer(context.io, &wbuf);
     try self.sourceGen(&sourceWriter.interface);
-
-    return cOut;
 }
 
 fn forwardDecls(self: *JIR, out: *Writer) Error!void {
@@ -711,8 +686,8 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
         },
         .Return => {
             try self.writeln(out, "return ", .{});
-            if (node.value != 0) {
-                try self.operation(out, node.value);
+            if (self.data[node.value] != 0) {
+                try self.operation(out, self.data[node.value + 1]);
             }
             try self.write(out, ";\n", .{});
         },
