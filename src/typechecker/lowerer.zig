@@ -305,7 +305,7 @@ pub fn statement(self: *Lowerer, statementPtr: defines.StatementPtr) Error!JIR.P
             else try self.call(true, stmt.value, ast.expressions.get(stmt.value).value, try self.typechecker.typecheckExpression(stmt.value, null)),
         .Conditional => try self.conditional(stmt.value, ast),
         .While => try self.loop(.While, stmt.value, ast),
-        .Return => try self.@"return"(try self.expression(stmt.value, self.lastReturnType)),
+        .Return => try self.@"return"(stmt.value),
         .Break => try self.@"break"(),
         .Continue => try self.@"continue"(),
         .Discard => try self.typechecker.builder.discard(try self.expressionStmt(stmt.value)),
@@ -580,7 +580,7 @@ fn @"defer"(self: *Lowerer, stmtPtr: defines.StatementPtr) Error!JIR.Ptr {
 fn @"continue"(self: *Lowerer) Error!JIR.Ptr {
     const startLabel = std.fmt.allocPrint(
         self.typechecker.arena.allocator(),
-        "{s}_Start", .{
+        "{s}_Check", .{
             self.lastLoop,
         },
     ) catch return Error.AllocatorFailure;
@@ -681,13 +681,12 @@ fn loop(
 
     const cnd = try self.expression(conditionPtr, Comptime.Folder.Builtin.Type("bool"));
 
-    var loopData: [6]JIR.Ptr = undefined;
-
-    loopData[0] = try self.typechecker.builder.jump(cndLabel);
     const bodyPtr = ast.extra[extraPtr + 1];
     self.lastLoopDepth = self.scopes.index;
-    const start = try self.typechecker.builder.label(startLabel);
-    loopData[1] = start;
+
+    var loopData: [6]JIR.Ptr = undefined;
+    loopData[0] = try self.typechecker.builder.jump(cndLabel);
+    loopData[1] = try self.typechecker.builder.label(startLabel);
     loopData[2] = try self.statement(bodyPtr);
     loopData[3] = try self.typechecker.builder.label(cndLabel);
     loopData[4] = try self.typechecker.builder.cjump(startLabel, cnd);
@@ -761,8 +760,11 @@ fn expressionStmt(self: *Lowerer, expr: defines.ExpressionPtr) Error!JIR.Ptr {
     return self.expression(expr, exprType);
 }
 
-fn @"return"(self: *Lowerer, expr: JIR.Ptr) Error!JIR.Ptr {
+fn @"return"(self: *Lowerer, _expr: defines.ExpressionPtr) Error!JIR.Ptr {
     // const end = try self.unwindDefers(self.scopes.index);
+    const expr =
+        if (_expr == 0) 0
+        else try self.expression(_expr, self.lastReturnType);
     const start = try self.typechecker.builder.@"return"(expr);
     return start;
 }

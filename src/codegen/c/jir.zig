@@ -711,7 +711,9 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
         },
         .Return => {
             try self.writeln(out, "return ", .{});
-            try self.operation(out, node.value);
+            if (node.value != 0) {
+                try self.operation(out, node.value);
+            }
             try self.write(out, ";\n", .{});
         },
         .Ternary => {

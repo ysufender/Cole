@@ -405,7 +405,9 @@ fn inlineC(self: *Parser) StatementResult {
 }
 
 fn returnStatement(self: *Parser) StatementResult {
-    const expr = try self.ifExpression();
+    const expr =
+        if (self.check(.Semicolon)) 0
+        else try self.ifExpression();
     _ = try self.consume(.Semicolon, error.MissingSemicolon, "Expected semicolon after statement.");
 
     const result = try self.alloc(Statement);
