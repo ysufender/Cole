@@ -42,6 +42,7 @@ pub let StdIn = fn () -> Stream::Input::Stream {
         File::Input::readline,
         File::Input::readbuffer,
         noseek,
+        notell,
         noclose,
     );
 };
@@ -52,4 +53,8 @@ let noseek = fn (stream: *mut void, off: u32) -> Stream::Result {
 
 let noclose = fn (stream: *mut void) -> Stream::Result {
     return @Ok;
+};
+
+let notell = fn (stream: *mut void) -> i32 {
+    return 0;
 };

@@ -1,7 +1,8 @@
 // cpu.jasl
 
 import std::io::console as Console;
-import std::ascii as ASCII;
+import std::io::stream as Stream;
+import std::io as IO;
 
 pub let maxBytecode: u32 = 15000;
 pub let maxMemory: u32 = 15000;
@@ -18,53 +19,53 @@ pub let init = fn (bytecode: []u8) -> CPU {
 };
 
 pub let cycle = fn (cpu: *mut CPU) -> bool {
-    if cpu.ip.* >= cpu.bytecode.*.len {
+    if cpu.ip >= cpu.bytecode.len {
         return false;
     }
 
-    let op = cpu.*.bytecode[cpu.*.ip];
+    let op = cpu.bytecode[cpu.ip];
 
     if op == '<' {
-        cpu.dp.* = cpu.dp.* - 1;
+        cpu.dp = cpu.dp - 1;
     }
     else if op == '>' {
-        cpu.dp.* = cpu.dp.* + 1;
+        cpu.dp = cpu.dp + 1;
     }
     else if op == '+' {
-        cpu.memory.*[cpu.dp.*] = cpu.memory.*[cpu.dp.*] + 1;
+        cpu.memory[cpu.dp] = cpu.memory[cpu.dp] + 1;
     }
     else if op == '-' {
-        cpu.memory.*[cpu.dp.*] = cpu.memory.*[cpu.dp.*] - 1;
+        cpu.memory[cpu.dp] = cpu.memory[cpu.dp] - 1;
     }
     else if op == '.' {
-        Console::print(ASCII::charToStr(cpu.memory.*[cpu.dp.*])[0..2]);
+        _ = Stream::Output::write(IO::StdOut(),  cpu.memory[cpu.dp]);
     }
     else if op == ',' {
-        let input = Console::read();
-        if input <= 0 {
-            Console::println("Unexpected input.");
+        let input = Stream::Input::read(IO::StdIn());
+        if input.Ok <= 0 {
+            Console::log("Unexpected input.");
             return false;
         }
 
-        cpu.memory.*[cpu.dp.*] = unsafeCast(input);
+        cpu.memory[cpu.dp] = unsafeCast(input.Ok);
     }
-    else if op == '[' and cpu.memory.*[cpu.dp.*] == 0 {
+    else if op == '[' and cpu.memory[cpu.dp] == 0 {
         skipForward(cpu);
     }
-    else if op == ']' and cpu.memory.*[cpu.dp.*] != 0 {
+    else if op == ']' and cpu.memory[cpu.dp] != 0 {
         skipBackward(cpu);
     }
 
-    cpu.ip.* = cpu.ip.* + 1;
+    cpu.ip = cpu.ip + 1;
     return true;
 };
 
 let skipForward = fn (cpu: *mut CPU) -> void {
     let count: mut u32 = 1;
     while count > 0 {
-        cpu.ip.* = cpu.ip.* + 1;
+        cpu.ip = cpu.ip + 1;
 
-        let ch = cpu.bytecode.*[cpu.ip.*];
+        let ch = cpu.bytecode[cpu.ip];
         if ch == '[' {
             count = count + 1;
         }
@@ -77,9 +78,9 @@ let skipForward = fn (cpu: *mut CPU) -> void {
 let skipBackward = fn (cpu: *mut CPU) -> void {
     let count: mut u32 = 1;
     while count > 0 {
-        cpu.ip.* = cpu.ip.* - 1;
+        cpu.ip = cpu.ip - 1;
 
-        let ch = cpu.bytecode.*[cpu.ip.*];
+        let ch = cpu.bytecode[cpu.ip];
         if ch == '[' {
             count = count - 1;
         }

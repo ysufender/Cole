@@ -64,6 +64,40 @@ pub let loadFile = fn (allocator: Allocator::Allocator, path: []u8) -> INI::Load
     };
 };
 
+pub let get = fn (self: *INI, sectionName: mut []u8, fieldName: mut []u8) -> *Value {
+    let idx: mut u32 = 0;
+    while idx < self.sections.len {
+        let section = self.sections[idx].&;
+        idx = idx + 1;
+
+        if !String::equals(section.name, sectionName) {
+            continue;
+        }
+
+        let jdx: mut u32 = 0;
+        while jdx < section.values.len {
+            let pair = section.values[jdx].&;
+            jdx = jdx + 1;
+
+            if !String::equals(pair.name, fieldName) {
+                continue;
+            }
+
+            if pair.value.tag == @Ref {
+                sectionName = pair.value.Ref.Section;
+                fieldName = pair.value.Ref.Field;
+                jdx = section.values.len;
+                idx = 0;
+                continue;
+            }
+
+            return pair.value.&;
+        }
+    }
+
+    return undefined;
+};
+
 pub let loadStream = fn (allocator: Allocator::Allocator, stream: Stream::Input::Stream) -> INI::LoadResult {
     let list = SectionList::init(allocator);
     let section: mut *mut Section = undefined;
@@ -152,40 +186,6 @@ pub let loadStream = fn (allocator: Allocator::Allocator, stream: Stream::Input:
     }
 
     return (@Ok, allocator, SectionList::slice(list.&, allocator));
-};
-
-pub let get = fn (self: *INI, sectionName: mut []u8, fieldName: mut []u8) -> *Value {
-    let idx: mut u32 = 0;
-    while idx < self.sections.len {
-        let section = self.sections[idx].&;
-        idx = idx + 1;
-
-        if !String::equals(section.name, sectionName) {
-            continue;
-        }
-
-        let jdx: mut u32 = 0;
-        while jdx < section.values.len {
-            let pair = section.values[jdx].&;
-            jdx = jdx + 1;
-
-            if !String::equals(pair.name, fieldName) {
-                continue;
-            }
-
-            if pair.value.tag == @Ref {
-                sectionName = pair.value.Ref.Section;
-                fieldName = pair.value.Ref.Field;
-                jdx = section.values.len;
-                idx = 0;
-                continue;
-            }
-
-            return pair.value.&;
-        }
-    }
-
-    return undefined;
 };
 
 let PairList = struct {
@@ -438,7 +438,7 @@ let identifier = fn (allocator: Allocator::Allocator, stream: Stream::Input::Str
         let ch = Stream::Input::read(stream);
 
         switch ch {
-            @Ok -> if !ASCII::isAlpha(ch.Ok) {
+            @Ok -> if !ASCII::isAlpha(ch.Ok) and ch.Ok != '_' {
                 break;
             }
             @Err -> return (@Err, "Stream Error in identifier count.");

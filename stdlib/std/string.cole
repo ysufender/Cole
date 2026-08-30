@@ -113,6 +113,9 @@ pub let floatToStr = fn (num: float, allocator: Allocator::Allocator) -> []u8 {
     return cast(result);
 };
 
+pub let charToStr = fn (ch: u8, allocator: Allocator::Allocator) -> []u8 {
+};
+
 pub let equals = fn (str1: []u8, str2: []u8) -> bool {
     if str1.len != str2.len {
         return false;

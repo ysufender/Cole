@@ -905,7 +905,7 @@ fn typecheckAssignment(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!vo
 
     if (ast.expressions.get(expr).type == .Indexing) {
         const indexable = ast.extra[ast.expressions.get(expr).value];
-        const indexableType = try self.typecheckExpression(indexable, null);
+        const indexableType = try self.typecheckExpression(indexable, vtype);
 
         if (
             self.typeTable.get(indexableType) == .Array

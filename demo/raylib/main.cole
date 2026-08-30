@@ -1,6 +1,9 @@
 import std::memory::allocator as Allocator;
 import std::string as String;
 import std::c as C;
+import std::ini as INI;
+import std::io::console as Console;
+import std::math as Math;
 
 import raylib as RayLib;
 
@@ -8,10 +11,10 @@ import raylib as RayLib;
  * Types
  */
 let Player = struct {
-    x    : mut i32,
-    y    : mut i32,
-    w    : i32,
-    h    : i32,
+    x    : mut float,
+    y    : mut float,
+    w    : float,
+    h    : float,
     score: mut u32,
 };
 
@@ -23,30 +26,41 @@ let Ball = struct {
     r: float,
 }; 
 
-let WIDTH  = 640;
-let HEIGHT = 480;
-
 let main = fn (args: [][]u8) -> i32 {
+    let _ini: mut any = INI::loadFile(C::Allocator, "demo/raylib/settings.ini");
+    if _ini.tag != @Ok {
+        Console::error("Failed to load settings.");
+        return 1;
+    }
+    let ini: mut any = _ini.Ok;
+
+    let WIDTH : mut float = getSettingOrelse(ini.&, "window", "width", 640);
+    let HEIGHT: mut float = getSettingOrelse(ini.&, "window", "height", 480);
+
     let ply: mut Player = (20, 100, 20, 70, 0);
-    let cpu: mut Player = (WIDTH-35, 100, 20, 70, 0);
+    let cpu: mut Player = (cast(WIDTH-35), 100, 20, 70, 0);
     let b: mut Ball = (WIDTH/2.0 - 10.0, 120.0, -5.0, -5.0, 10.0);
 
-    RayLib::InitWindow(WIDTH, HEIGHT, "Pong");
+    RayLib::InitWindow(cast(WIDTH), cast(HEIGHT), "Pong");
     RayLib::SetTargetFPS(60);
 
     while !RayLib::WindowShouldClose() {
+        _ini = INI::loadFile(C::Allocator, "demo/raylib/settings.ini");
+        if _ini.tag == @Ok {
+            ini = _ini.Ok;
+        }
+
     	RayLib::BeginDrawing();
     	RayLib::ClearBackground(RayLib::Color::Black);
-    	RayLib::DrawRectangle(0, 0, (WIDTH/2), HEIGHT, RayLib::Color::Black);
-    	RayLib::DrawRectangle((WIDTH/2), 0, (WIDTH/2), HEIGHT, RayLib::Color::White);
-    	RayLib::DrawRectangle(ply.x, ply.y, ply.w, ply.h, RayLib::Color::White);
-    	RayLib::DrawRectangle(cpu.x, cpu.y, cpu.w, cpu.h, RayLib::Color::Black);
+    	RayLib::DrawRectangle(0, 0, cast(WIDTH/2), cast(HEIGHT), RayLib::Color::Black);
+    	RayLib::DrawRectangle(cast(WIDTH/2), 0, cast(WIDTH/2), cast(HEIGHT), RayLib::Color::White);
+    	RayLib::DrawRectangle(cast(ply.x), cast(ply.y), cast(ply.w), cast(ply.h), RayLib::Color::White);
+    	RayLib::DrawRectangle(cast(cpu.x), cast(cpu.y), cast(cpu.w), cast(cpu.h), RayLib::Color::Black);
 
         let pscore = String::intToStr(ply.score, C::Allocator);
         let cscore = String::intToStr(cpu.score, C::Allocator);
-		RayLib::DrawText(cast(pscore.ptr), (WIDTH/2) - 200, 30, 48, RayLib::Color::White);
-		RayLib::DrawText(cast(cscore.ptr), (WIDTH/2) + 200, 30, 48, RayLib::Color::Black);
-
+		RayLib::DrawText(cast(pscore.ptr), as(u32, cast(WIDTH))/2 - 200, 30, 48, RayLib::Color::White);
+		RayLib::DrawText(cast(cscore.ptr), as(u32, cast(WIDTH))/2 + 200, 30, 48, RayLib::Color::Black);
         Allocator::dealloc(C::Allocator, cast(pscore));
         Allocator::dealloc(C::Allocator, cast(cscore));
     	
@@ -56,25 +70,29 @@ let main = fn (args: [][]u8) -> i32 {
     		b.bx = as(float, -1.0) * b.bx;
     	}
 
-    	cpu.y = unsafeCast(b.y * 0.8);
+        let bToCpu = b.y - cpu.y;
+        let bToCpuDiffSign = Math::sign(bToCpu);
+        let cpuSpeed = getSettingOrelse(ini.&, "cpu", "speed", 5);
+        let vel: float = bToCpuDiffSign * cast(cpuSpeed);
+        cpu.y = cpu.y + cast(vel);
 
     	if b.x < (WIDTH/2) { RayLib::DrawCircle(cast(b.x), cast(b.y), b.r, RayLib::Color::White); }
     	else { RayLib::DrawCircle(cast(b.x), cast(b.y), b.r, RayLib::Color::Black); }
     	RayLib::EndDrawing();
 
-    	b.x = b.bx + b.x;
-    	b.y = b.by + b.y;
+    	b.x = b.x + Math::sign(b.bx) * getSettingOrelse(ini.&, "ball", "velocity_x", cast(b.x));
+    	b.y = b.y + Math::sign(b.by) * getSettingOrelse(ini.&, "ball", "velocity_y", cast(b.y));
 
     	if b.x < 5 {
             cpu.score = cpu.score + 1;
-    		b.x = (as(float, cast(WIDTH))/2.0) - b.r;
-    		b.y = 120;
+    		b.x = ((WIDTH)/2.0) - b.r;
+    		b.y = getSettingOrelse(ini.&, "ball", "start_y", 120);
     		b.bx = -5;
     		
     	}
         else if b.x > WIDTH - 5 {
             ply.score = ply.score + 1;
-    		b.x = (as(float, cast(WIDTH))/2.0) - b.r;
+    		b.x = (WIDTH/2.0) - b.r;
     		b.y = 120;
     		b.bx = 5;
     	}
@@ -92,7 +110,7 @@ let main = fn (args: [][]u8) -> i32 {
             }
     	}
         else if RayLib::IsKeyDown(RayLib::KeyboardKey::S) or RayLib::IsKeyDown(RayLib::KeyboardKey::DOWN) {
-    		if ply.y <= (as(i32, cast(HEIGHT))-ply.h) {
+    		if ply.y <= (as(float, cast(HEIGHT))-ply.h) {
     		    ply.y = ply.y + 5;
             }
     	}
@@ -102,17 +120,30 @@ let main = fn (args: [][]u8) -> i32 {
     return 0;
 };
 
+let getSettingOrelse = fn (ini: *INI::INI, section: []u8, value: []u8, orelse: u32) -> u32 {
+    let _value = INI::get(ini, section, value);
+
+    if _value != undefined {
+        switch _value.tag {
+            @Integer -> return _value.Integer;
+            else -> return orelse; 
+        }
+    }
+
+    return orelse;
+};
+
 /*
  * Helpers
  */
 
 let checkCollision = fn (
-    x1: i32,
+    x1: float,
     x2: float,
-    y1: i32,
+    y1: float,
     y2: float,
-    w1: i32,
-    h1: i32,
+    w1: float,
+    h1: float,
     r: float
 ) -> bool {
     if
