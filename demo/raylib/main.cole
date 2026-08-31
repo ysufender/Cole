@@ -37,83 +37,93 @@ let main = fn (args: [][]u8) -> i32 {
     let WIDTH : mut float = getSettingOrelse(ini.&, "window", "width", 640);
     let HEIGHT: mut float = getSettingOrelse(ini.&, "window", "height", 480);
 
-    let ply: mut Player = (20, 100, 20, 70, 0);
+    let player: mut Player = (20, 100, 20, 70, 0);
     let cpu: mut Player = (cast(WIDTH-35), 100, 20, 70, 0);
-    let b: mut Ball = (WIDTH/2.0 - 10.0, 120.0, -5.0, -5.0, 10.0);
+    let ball: mut Ball = (WIDTH/2.0 - 10.0, 120.0, -1.0, -1.0, 10.0);
 
     RayLib::InitWindow(cast(WIDTH), cast(HEIGHT), "Pong");
     RayLib::SetTargetFPS(60);
 
     while !RayLib::WindowShouldClose() {
+        // Load INI
         _ini = INI::loadFile(C::Allocator, "demo/raylib/settings.ini");
         if _ini.tag == @Ok {
             ini = _ini.Ok;
         }
 
-    	RayLib::BeginDrawing();
-    	RayLib::ClearBackground(RayLib::Color::Black);
-    	RayLib::DrawRectangle(0, 0, cast(WIDTH/2), cast(HEIGHT), RayLib::Color::Black);
-    	RayLib::DrawRectangle(cast(WIDTH/2), 0, cast(WIDTH/2), cast(HEIGHT), RayLib::Color::White);
-    	RayLib::DrawRectangle(cast(ply.x), cast(ply.y), cast(ply.w), cast(ply.h), RayLib::Color::White);
-    	RayLib::DrawRectangle(cast(cpu.x), cast(cpu.y), cast(cpu.w), cast(cpu.h), RayLib::Color::Black);
+        // Poll Events
+        let direction = 
+            if (RayLib::IsKeyDown(RayLib::KeyboardKey::W) or RayLib::IsKeyDown(RayLib::KeyboardKey::UP)) -1.0
+            else if (RayLib::IsKeyDown(RayLib::KeyboardKey::S) or RayLib::IsKeyDown(RayLib::KeyboardKey::DOWN)) 1.0
+            else 0.0;
 
-        let pscore = String::intToStr(ply.score, C::Allocator);
-        let cscore = String::intToStr(cpu.score, C::Allocator);
-		RayLib::DrawText(cast(pscore.ptr), as(u32, cast(WIDTH))/2 - 200, 30, 48, RayLib::Color::White);
-		RayLib::DrawText(cast(cscore.ptr), as(u32, cast(WIDTH))/2 + 200, 30, 48, RayLib::Color::Black);
-        Allocator::dealloc(C::Allocator, cast(pscore));
-        Allocator::dealloc(C::Allocator, cast(cscore));
-    	
+        // Calculate Physics
     	if
-            checkCollision(ply.x, b.x, ply.y, b.y, ply.w, ply.h, b.r)
-            or checkCollision(cpu.x, b.x, cpu.y, b.y, cpu.w,cpu.h,b.r) {
-    		b.bx = as(float, -1.0) * b.bx;
+            checkCollision(player.x, ball.x, player.y, ball.y, player.w, player.h, ball.r)
+            or checkCollision(cpu.x, ball.x, cpu.y, ball.y, cpu.w, cpu.h, ball.r
+        ) {
+    		ball.bx = -1.0 * ball.bx;
     	}
 
-        let bToCpu = b.y - cpu.y;
+    	if ball.x < 5 {
+            cpu.score = cpu.score + 1;
+    		ball.x = ((WIDTH)/2.0) - ball.r;
+    		ball.y = getSettingOrelse(ini.&, "ball", "start_y", 120);
+    		ball.bx = -5;
+    		
+    	}
+        else if ball.x > WIDTH - 5 {
+            player.score = player.score + 1;
+    		ball.x = (WIDTH/2.0) - ball.r;
+    		ball.y = 120;
+    		ball.bx = 5;
+    	}
+    	if ball.y < 5 {
+    		ball.by = -ball.by;
+    	}
+        else if ball.y > HEIGHT - 5 {
+    		ball.by = -(ball.by);
+    	}
+
+    	ball.x = ball.x + Math::sign(ball.bx) * getSettingOrelse(ini.&, "ball", "velocity_x", cast(ball.x));
+    	ball.y = ball.y + Math::sign(ball.by) * getSettingOrelse(ini.&, "ball", "velocity_y", cast(ball.y));
+
+        let bToCpu = ball.y - cpu.y;
         let bToCpuDiffSign = Math::sign(bToCpu);
         let cpuSpeed = getSettingOrelse(ini.&, "cpu", "speed", 5);
         let vel: float = bToCpuDiffSign * cast(cpuSpeed);
         cpu.y = cpu.y + cast(vel);
 
-    	if b.x < (WIDTH/2) { RayLib::DrawCircle(cast(b.x), cast(b.y), b.r, RayLib::Color::White); }
-    	else { RayLib::DrawCircle(cast(b.x), cast(b.y), b.r, RayLib::Color::Black); }
+        let pVel = direction * cast(getSettingOrelse(ini.&, "player", "speed", 4));
+        player.y = player.y + pVel;
+
+        // Draw
+        let pscore = String::intToStr(player.score, C::Allocator);
+        let cscore = String::intToStr(cpu.score, C::Allocator);
+
+    	RayLib::BeginDrawing();
+            RayLib::ClearBackground(RayLib::Color::Black);
+
+            RayLib::DrawRectangle(0, 0, cast(WIDTH/2), cast(HEIGHT), RayLib::Color::Black);
+            RayLib::DrawRectangle(cast(WIDTH/2), 0, cast(WIDTH/2), cast(HEIGHT), RayLib::Color::White);
+            RayLib::DrawRectangle(cast(player.x), cast(player.y), cast(player.w), cast(player.h), RayLib::Color::White);
+            RayLib::DrawRectangle(cast(cpu.x), cast(cpu.y), cast(cpu.w), cast(cpu.h), RayLib::Color::Black);
+
+            RayLib::DrawText(cast(pscore.ptr), as(u32, cast(WIDTH))/2 - 200, 30, 48, RayLib::Color::White);
+            RayLib::DrawText(cast(cscore.ptr), as(u32, cast(WIDTH))/2 + 200, 30, 48, RayLib::Color::Black);
+
+            RayLib::DrawCircle(
+                cast(ball.x),
+                cast(ball.y),
+                ball.r,
+                if (ball.x < (WIDTH/2)) RayLib::Color::White
+                else RayLib::Color::Black
+            );
+                
     	RayLib::EndDrawing();
 
-    	b.x = b.x + Math::sign(b.bx) * getSettingOrelse(ini.&, "ball", "velocity_x", cast(b.x));
-    	b.y = b.y + Math::sign(b.by) * getSettingOrelse(ini.&, "ball", "velocity_y", cast(b.y));
-
-    	if b.x < 5 {
-            cpu.score = cpu.score + 1;
-    		b.x = ((WIDTH)/2.0) - b.r;
-    		b.y = getSettingOrelse(ini.&, "ball", "start_y", 120);
-    		b.bx = -5;
-    		
-    	}
-        else if b.x > WIDTH - 5 {
-            ply.score = ply.score + 1;
-    		b.x = (WIDTH/2.0) - b.r;
-    		b.y = 120;
-    		b.bx = 5;
-    	}
-    	if b.y < 5 {
-    		b.by = -b.by;
-    	}
-        else if b.y > HEIGHT - 5 {
-    		b.by = -(b.by);
-    	}
-    	
-
-    	if RayLib::IsKeyDown(RayLib::KeyboardKey::W) or RayLib::IsKeyDown(RayLib::KeyboardKey::UP) {
-    		if ply.y >= 5 {
-    		    ply.y = ply.y - 5;
-            }
-    	}
-        else if RayLib::IsKeyDown(RayLib::KeyboardKey::S) or RayLib::IsKeyDown(RayLib::KeyboardKey::DOWN) {
-    		if ply.y <= (as(float, cast(HEIGHT))-ply.h) {
-    		    ply.y = ply.y + 5;
-            }
-    	}
+        Allocator::dealloc(C::Allocator, cast(pscore));
+        Allocator::dealloc(C::Allocator, cast(cscore));
     }
 
     RayLib::CloseWindow();
@@ -146,12 +156,7 @@ let checkCollision = fn (
     h1: float,
     r: float
 ) -> bool {
-    if
-        x1 <= x2 + r and y1 <= y2 + r
-        and
-    	x2 <= x1 + w1 and y2 <= y1 + h1 {
-    		return true;
-    	}
-
-    return false;
+    return
+        (x1 <= x2 + r and y1 <= y2 + r)
+        and (x2 <= x1 + w1 and y2 <= y1 + h1);
 };

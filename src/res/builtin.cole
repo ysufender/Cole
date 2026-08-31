@@ -123,6 +123,6 @@ pub let Function = struct {
 pub let Integer = struct {
     mutable: bool,
     size: u8,
-    signed: bool,
+    isSigned: bool,
 };
 

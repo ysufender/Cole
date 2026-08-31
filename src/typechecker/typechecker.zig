@@ -181,10 +181,19 @@ pub fn typecheck(self: *Typechecker, allocator: Allocator) Error!JIR {
             .mutable = false,
         }}
     };
+    const complexBuiltinNames = [_][]const u8{
+        "*fn ([][]u8) -> i32",
+        "[][]u8",
+    };
 
     inline for (complexBuiltinTypes, 0..) |builtin, id| {
+        const typeID = self.typeTable.len;
         self.typeTable.appendAssumeCapacity(builtin);
         self.typeMap.putAssumeCapacityNoClobber(builtin, @intCast(id + entryPointID));
+        self.typenameMap.putAssumeCapacityNoClobber(
+            @intCast(typeID),
+            try self.builder.internString(complexBuiltinNames[id])
+        );
     }
 
     defer self.arena.deinit();
@@ -1056,7 +1065,7 @@ pub fn typecheckTupleDefinition(self: *Typechecker, exprListPtr: defines.OpaqueP
 
         fields[idx] = .{
             .name = try self.builder.internString(name),
-            .isComptime = self.typeTable.get(fieldType).isComptime(undefined),
+            .isComptime = self.typeTable.get(fieldType).isComptime(&self.typeTable.slice()),
             .public = true,
             .valueType = fieldType,
         };
@@ -1614,8 +1623,6 @@ pub fn typecheckBuiltinCall(self: *Typechecker, extraPtr: defines.ExpressionPtr,
     const ast = self.context.getAST(self.currentFile);
 
     const funcToken = ast.expressions.get(ast.extra[extraPtr]).value;
-    const prevt = self.lastToken;
-    defer self.lastToken = prevt;
     self.lastToken = funcToken;
 
     return switch (declPtr) {
@@ -1626,16 +1633,24 @@ pub fn typecheckBuiltinCall(self: *Typechecker, extraPtr: defines.ExpressionPtr,
         BI("src") => {
             const infoDecl = self.symbols.lookup.get(.{
                 .scope = 0, // @Note builtin is hardcoded to be zero
+                .name = "builtin::SourceInfo",
+            }) orelse self.symbols.lookup.get(.{
+                .scope = 0, // @Note builtin is hardcoded to be zero
                 .name = "SourceInfo",
-            }).?;
+            }) orelse return common.debug.ShouldBeImpossible(undefined, @src());
+
             const builtinInfo = try self.folder.evalDecl(infoDecl, comptime Comptime.Folder.Builtin.Type("type"));
             return builtinInfo;
         },
         BI("typeInfo") => {
             const infoDecl = self.symbols.lookup.get(.{
                 .scope = 0, // @Note builtin is hardcoded to be zero
+                .name = "builtin::TypeInfo",
+            }) orelse self.symbols.lookup.get(.{
+                .scope = 0, // @Note builtin is hardcoded to be zero
                 .name = "TypeInfo",
-            }).?;
+            }) orelse return common.debug.ShouldBeImpossible(undefined, @src());
+
             const builtinInfo = try self.typecheckDecl(infoDecl, comptime Comptime.Folder.Builtin.Type("type"));
             return builtinInfo;
         },
@@ -1895,6 +1910,7 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
     }
 
     const tokens = self.context.getTokens(self.currentFile);
+    const symName = tokens.get(decl.token).lexeme(self.context, self.currentFile);
 
     self.symbols.declarations.set(declPtr, .{
         .type = decl.type,
@@ -1906,8 +1922,6 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
         .public = decl.public,
         .parent = decl.parent,
         .name = res: {
-            const symName = tokens.get(decl.token).lexeme(self.context, self.currentFile);
-
             if (decl.kind != .Variable) {
                 break :res try self.builder.internString(symName);
             }
@@ -1941,6 +1955,15 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
     });
     decl = self.symbols.declarations.get(declPtr);
 
+    assert(self.symbols.lookup.remove(.{
+        .scope = decl.scope,
+        .name = symName,
+    }));
+    self.symbols.lookup.putAssumeCapacityNoClobber(.{
+        .scope = decl.scope,
+        .name = self.builder.getInternedString(decl.name),
+    }, declPtr);
+
     isPresent.value_ptr.* = .{
         .status = .InProgress,
         .result = comptime Comptime.Folder.Builtin.Type("incomplete"),
@@ -1959,7 +1982,6 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
     };
 
     if (self.hasMetadata(decl.node, "@extern")) {
-        const symName = tokens.get(decl.token).lexeme(self.context, self.currentFile);
         const name = try self.builder.internString(symName);
 
         self.symbols.declarations.items(.name)[declPtr] = name;

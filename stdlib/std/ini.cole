@@ -185,6 +185,7 @@ pub let loadStream = fn (allocator: Allocator::Allocator, stream: Stream::Input:
         section.* = (section.name, PairList::slice(values.&, allocator));
     }
 
+    _ = Stream::Input::close(stream);
     return (@Ok, allocator, SectionList::slice(list.&, allocator));
 };
 

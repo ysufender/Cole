@@ -231,7 +231,7 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
         const typeInfo = self.types.get(@intCast(typeID));
 
         // @Beware I don't like this.
-        if (typeInfo.isZeroBit()) {
+        if (typeInfo.isZeroBit() or typeInfo.isComptime(&self.types)) {
             continue;
         }
 
@@ -281,7 +281,7 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
         const typeInfo = self.types.get(@intCast(typeID));
 
         // @Beware I don't like this.
-        if (typeInfo.isZeroBit()) {
+        if (typeInfo.isZeroBit() or typeInfo.isComptime(&self.types)) {
             continue;
         }
 
@@ -486,6 +486,10 @@ fn discoverFunctionsAndTypes(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void 
             if (info == .Void) {
                 return;
             }
+
+            if (info.isComptime(&self.types)) {
+                return;
+            }
  
             if (info == .Function) {
                 _ = std.mem.replace(u8, self.strings[self.data[node.value + 2]], "::", "__", @constCast(self.strings[self.data[node.value + 2]]));
@@ -606,8 +610,7 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
                 return;
             }
 
-            // @Beware @Note Remove the false if you want constants to not be declared.
-            if (false and info.isComptime(undefined)) {
+            if (info.isComptime(&self.types)) {
                 return;
             }
 

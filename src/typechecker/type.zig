@@ -39,10 +39,24 @@ pub const TypeInfo = union(enum) {
 
     /// Like type, comptime_int, comptime_float, enum_literal
     // @CompilerOnly
-    pub fn isComptime(self: TypeInfo, _: *const Typechecker.TypeTable) bool {
+    pub fn isComptime(self: TypeInfo, types: *const Typechecker.TypeTable.Slice) bool {
         return switch (self) {
             .Function => |func| func.isComptime,
-            .Type, .ComptimeInt, .ComptimeFloat, .EnumLiteral => true,
+            .Type, .EnumLiteral => true,
+            .Struct => |str| {
+                for (str.fields) |field| {
+                    if (field.isComptime) return true;
+                } 
+                return false;
+            },
+            .Union => |uni| {
+                for (uni.fields) |field| {
+                    if (field.isComptime) return true;
+                } 
+                return false;
+            },
+            .Array => |arr| types.get(arr.child).isComptime(types),
+            .Pointer => |ptr| types.get(ptr.child).isComptime(types),
             else => false,
         };
     }
