@@ -27,9 +27,17 @@ pub const FolderCacheKey = struct {
     file: defines.FilePtr,
     expr: defines.ExpressionPtr,
 };
+
 const Cache = collections.HashMap(FolderCacheKey, Comptime.Value.Ptr);
+
 const DeclCache = collections.HashMap(defines.DeclPtr, Comptime.Value.Ptr);
 const Memory = std.ArrayList(Comptime.Value);
+
+pub const BuiltinEntry = struct {
+    name: []const u8,
+    info: TypeID,
+};
+pub const BuiltinList = std.ArrayList(BuiltinEntry);
 
 pub const Flags = enum(u3) {
     ComptimeBanned = 0,
@@ -791,7 +799,7 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
     defer self.typechecker.currentScope = prevScope;
 
     const res = try switch (decl.kind) {
-        .Builtin => try self.evalBuiltin(&decl, maybeExpected),
+        .Builtin => try self.evalBuiltin(declPtr, &decl, maybeExpected),
         .Variable => blk: {
             if (
                 !decl.topLevel
@@ -840,30 +848,43 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
 fn evalBuiltinCall(self: *Folder, extraPtr: defines.OpaquePtr, declPtr: defines.DeclPtr, maybeExpected: ?TypeID) Error!Comptime.Value.Ptr {
     const BI = Resolver.BuiltinIndex;
 
+    _ = try self.typechecker.typecheckBuiltinCall(extraPtr, declPtr, maybeExpected);
+
     return switch (declPtr) {
         BI("cast") => self.evalCast(extraPtr, maybeExpected, false),
         BI("unsafeCast") => self.evalCast(extraPtr, maybeExpected, true),
         BI("as") => self.evalTypeForwarding(extraPtr, maybeExpected),
         BI("typeOf") => self.evalTypeOf(extraPtr),
+        BI("src") => self.evalSourceInfo(extraPtr),
+        BI("typeInfo") => self.evalTypeInfo(extraPtr),
         BI("compileError") => self.evalCompileError(extraPtr),
         BI("typeName") => self.evalTypeName(extraPtr),
         BI("Tuple") => self.evalNewTuple(extraPtr),
         BI("sizeOf") => self.evalSizeOf(extraPtr),
         BI("alignOf") => self.evalAlignOf(extraPtr),
+        BI("compileBreak") => {
+            @breakpoint();
+            return @intFromEnum(Comptime.Value.Implicit.Void);
+        },
         BI("unreachable") => {
             self.report("Reached unreachable code.", .{});
             return Error.UnreachableCodePath;
         },
         BI("compileLog") => self.evalCompileLog(extraPtr),
         else => {
-            self.report("Builtin '{s}' is not suitable in this context.", .{Resolver.builtins[declPtr]});
+            self.report("Builtin '{s}' is not usable in this context.", .{Resolver.builtins[declPtr]});
             return Error.ComptimeNotPossible;
         },
     };
 }
 
-fn evalBuiltin(self: *Folder, decl: *const Resolver.Declaration, maybeExpected: ?TypeID) Error!Comptime.Value.Ptr {
+fn evalBuiltin(self: *Folder, ptr: defines.DeclPtr, decl: *const Resolver.Declaration, maybeExpected: ?TypeID) Error!Comptime.Value.Ptr {
     const BI = Resolver.BuiltinIndex;
+
+    if (decl.topLevel) {
+        const declType = try self.typechecker.typecheckDecl(ptr, maybeExpected);
+        return self.expectDefined(decl.node, declType);
+    }
 
     return
         if (Builtin.isBuiltinType(decl.type)) self.appendValue( .{ .Type = decl.type })
@@ -1586,6 +1607,160 @@ pub fn evalCompileError(self: *Folder, extraPtr: defines.OpaquePtr) Error {
 
     self.report("USERSPACE ERROR: {s}", .{message.str});
     return Error.UserspaceError;
+}
+
+pub fn evalSourceInfo(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {
+    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+
+    const expressionList = ast.expressions.items(.value)[ast.extra[extraPtr + 1]];
+    const args = defines.Range{
+        .start = ast.extra[expressionList],
+        .end = ast.extra[expressionList + 1],
+    };
+    
+    if (args.len() != 0) {
+        self.report("'src' expects no arguments, received {d}.", .{
+            args.len(),
+        });
+        return Error.ArgumentCountMismatch;
+    }
+
+    const typeID = self.typechecker.findType("builtin::SourceInfo")
+        orelse return common.debug.ShouldBeImpossible(undefined, @src());
+
+    return self.appendValue(.{
+        .Struct = .{
+            .Type = typeID,
+            .Fields = Fields: {
+                const tokens = self.typechecker.context.getTokens(self.typechecker.currentFile);
+
+                const lastToken = self.typechecker.lastToken;
+                const position = tokens.get(lastToken).position(self.typechecker.context, self.typechecker.currentFile);
+
+                const start: u32 = @intCast(self.memory.items.len);
+                _ = try self.appendValue(.{
+                    .String = .{
+                        .type = .Cole,
+                        .str = self.typechecker.context.filenameMap.items[self.typechecker.currentFile],
+                    }
+                });
+                _ = try self.appendValue(.{ .Int = position.line });
+                _ = try self.appendValue(.{ .Int = position.column });
+
+                break :Fields .{
+                    .start = start,
+                    .end = start + 3,
+                };
+            },
+        }
+    });
+}
+
+pub fn evalTypeInfo(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {
+    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+
+    const expressionList = ast.expressions.items(.value)[ast.extra[extraPtr + 1]];
+    const args = defines.Range{
+        .start = ast.extra[expressionList],
+        .end = ast.extra[expressionList + 1],
+    };
+    
+    if (args.len() != 1) {
+        self.report("'typeOf' expects a single expression argument, received {d}.", .{
+            args.len(),
+        });
+        return Error.ArgumentCountMismatch;
+    }
+
+    const typeToGetInfoOf = self.typechecker.typeTable.get(self.getValue(try self.expectType(ast.extra[args.at(0)])).Type);
+
+    const typeInfo = Comptime.Value{
+        .Union = .{
+            .Type = self.typechecker.findType("builtin::TypeInfo")
+                        orelse return common.debug.ShouldBeImpossible(undefined, @src()),
+            .Tag = @intFromEnum(typeToGetInfoOf),
+            .Value = Value: {
+                break :Value try self.appendValue(switch (typeToGetInfoOf) {
+                    .Type, .Noreturn,
+                    .EnumLiteral, .ComptimeFloat,
+                    .ComptimeInt => break :Value @intFromEnum(Comptime.Value.Implicit.Void),
+
+                    .Bool, .Float, .Void, .CInt, .CUInt,
+                    .CChar, .CUChar, .CDouble, .CLong,
+                    .CULong, .CShort, .CUShort, .CSize,
+                    .Any => .{ .Bool = typeToGetInfoOf.isMutable() },
+
+                    .Pointer => |ptr| Comptime.Value{
+                        .Struct = .{
+                            .Type = self.typechecker.findType("builtin::Pointer")
+                                        orelse return common.debug.ShouldBeImpossible(undefined, @src()),
+                            .Fields = range: {
+                                const ptrType = self.typechecker.typeTable.get(
+                                    self.typechecker.findType("builtin::Pointer")
+                                        orelse return common.debug.ShouldBeImpossible(undefined, @src())
+                                ).Struct;
+
+                                const start: u32 = @intCast(self.memory.items.len);
+                                _ = try self.appendValue(.{ .Bool = ptr.mutable });
+                                _ = try self.appendValue(.{ .Type = ptr.child });
+                                _ = try self.appendValue(.{
+                                    .Enum = .{
+                                        .Type = ptrType.fields[2].valueType,
+                                        .Value = @intFromEnum(ptr.size),
+                                    },
+                                });
+
+                                break :range .{
+                                    .start = start,
+                                    .end = start + 3,
+                                };
+                            },
+                        }
+                    },
+
+                    .Array => |arr| Comptime.Value{
+                        .Struct = .{
+                            .Type = self.typechecker.findType("builtin::Array")
+                                        orelse return common.debug.ShouldBeImpossible(undefined, @src()),
+                            .Fields = range: {
+                                const start: u32 = @intCast(self.memory.items.len);
+                                _ = try self.appendValue(.{ .Bool = arr.mutable });
+                                _ = try self.appendValue(.{ .Type = arr.child });
+                                _ = try self.appendValue(.{ .Int = arr.len });
+
+                                break :range .{
+                                    .start = start,
+                                    .end = start + 3,
+                                };
+                            },
+                        }
+                    },
+
+                    .Integer => |int| Comptime.Value{
+                        .Struct = .{
+                            .Type = self.typechecker.findType("builtin::Integer")
+                                        orelse return common.debug.ShouldBeImpossible(undefined, @src()),
+                            .Fields = range: {
+                                const start: u32 = @intCast(self.memory.items.len);
+                                _ = try self.appendValue(.{ .Bool = int.mutable });
+                                _ = try self.appendValue(.{ .Int = int.size });
+                                _ = try self.appendValue(.{ .Bool = int.signed });
+
+                                break :range .{
+                                    .start = start,
+                                    .end = start + 3,
+                                };
+                            },
+                        },
+                    },
+
+                    else => return common.debug.NotImplemented(self.typechecker.context.log, @src()),
+                });
+            },
+        },
+    };
+
+    return self.appendValue(typeInfo);
 }
 
 pub fn evalTypeOf(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {
@@ -2337,7 +2512,6 @@ pub fn resolveIncomplete(self: *Folder, typeID: TypeID, resolvedTo: TypeID) Erro
             });
             return typeID;
         },
-        // else => Comptime.Folder.Builtin.Type("void"),
         else => resolvedTo,
     };
 }
@@ -2399,12 +2573,15 @@ pub const Builtin = struct {
     }
 
     pub fn TypeName(btype: TypeID) []const u8 {
-        assert(btype < builtinTypes.len);
-        return builtinTypes[btype].name;
+        if (btype < builtinTypes.len) {
+            return builtinTypes[btype].name;
+        }
+        return builtinTypes.items[btype].name;
     }
 
     pub fn Type(btype: []const u8) TypeID {
-        if (@typeInfo(@TypeOf(.{btype})).@"struct".fields[0].is_comptime) comptime {
+        if (@inComptime()) comptime {
+            @setEvalBranchQuota(5000);
             for (builtinTypes, 0..) |item, index| {
                 if (std.mem.eql(u8, item.name, btype)) {
                     return index;
@@ -2424,7 +2601,8 @@ pub const Builtin = struct {
     }
 
     pub fn Metadata(metadata: []const u8) ?defines.Offset {
-        comptime if (@typeInfo(@TypeOf(.{metadata})).@"struct".fields[0].is_comptime) {
+        if (@inComptime()) comptime {
+            @setEvalBranchQuota(5000);
             for (builtinMetadata, 0..) |item, index| {
                 if (std.mem.eql(u8, item, metadata)) {
                     return index;

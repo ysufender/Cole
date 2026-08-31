@@ -223,11 +223,9 @@ pub fn init(base: std.mem.Allocator, context: *common.CompilerContext, file: []c
     const fileHandle = try context.openRead(file);
 
     const src = context.getFile(fileHandle);
-    const len: u32 = @intCast(src.len);
-
     var arena = std.heap.ArenaAllocator.init(base);
     errdefer arena.deinit();
-    var tokens = try TokenList.init(arena.allocator(), len + 2);
+    var tokens = try TokenList.init(arena.allocator(), src.len + 2);
 
     tokens.appendAssumeCapacity(.{
         .type = .Identifier,
@@ -238,9 +236,37 @@ pub fn init(base: std.mem.Allocator, context: *common.CompilerContext, file: []c
     var self = Lexer{
         .start = 0,
         .current = 0,
-        .end = len,
+        .end = @intCast(src.len),
         .file = fileHandle,
         .source = src,
+        .arena = arena,
+        .tokens = tokens,
+        .context = context,
+    };
+
+    self.skipWhitespace();
+    return self;
+}
+
+pub fn initFromSource(base: std.mem.Allocator, context: *common.CompilerContext, source: []const u8, name: []const u8) common.CompilerError!Lexer {
+    const fileHandle = try context.openSource(source, name);
+
+    var arena = std.heap.ArenaAllocator.init(base);
+    errdefer arena.deinit();
+    var tokens = try TokenList.init(arena.allocator(), source.len + 2);
+
+    tokens.appendAssumeCapacity(.{
+        .type = .Identifier,
+        .start = fileHandle,
+        .end = fileHandle,
+    });
+    
+    var self = Lexer{
+        .start = 0,
+        .current = 0,
+        .end = @intCast(source.len),
+        .file = fileHandle,
+        .source = source,
         .arena = arena,
         .tokens = tokens,
         .context = context,

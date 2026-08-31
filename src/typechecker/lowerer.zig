@@ -762,10 +762,14 @@ fn expressionStmt(self: *Lowerer, expr: defines.ExpressionPtr) Error!JIR.Ptr {
 
 fn @"return"(self: *Lowerer, _expr: defines.ExpressionPtr) Error!JIR.Ptr {
     // const end = try self.unwindDefers(self.scopes.index);
+    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+
+    const noValue = ast.expressions.get(_expr).value == 0;
+
     const expr =
-        if (_expr == 0) 0
+        if (noValue) 0
         else try self.expression(_expr, self.lastReturnType);
-    const start = try self.typechecker.builder.@"return"(expr == 0, expr);
+    const start = try self.typechecker.builder.@"return"(!noValue, expr);
     return start;
 }
 

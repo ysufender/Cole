@@ -1023,7 +1023,7 @@ fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool
     var name: []const u8 = "";
     switch (typeInfo) {
         .Type, .Any, .EnumLiteral => {
-            common.log.err("Unsupported {s}", .{@tagName(typeInfo)});
+            common.log.err("Value of type '{s}' can't leak into runtime.", .{self.strings[self.typeNames.get(typeID) orelse 0]});
             return common.debug.ShouldBeImpossible(self.context.log, @src());
         },
 

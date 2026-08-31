@@ -116,16 +116,8 @@ pub fn init(context: *Context, initial: defines.ASTPtr, allocator: std.mem.Alloc
 pub fn prepass(self: *Prepass, allocator: std.mem.Allocator) Error!ModuleList {
     defer self.arena.deinit();
 
-    const bname: []const u8 = "builtin";
-    const builtin = try self.modules.modules.addOne(allocator);
-    self.modules.modules.set(builtin, .{
-        .name = try collections.deepCopy(bname, allocator), 
-        .dataIndex = 0,
-        .dependencies = .empty,
-        .symbolPtrs = .empty,
-        .symbols = try .init(allocator, 0),
-    });
-    self.modules.ids.putAssumeCapacityNoClobber(bname, builtin);
+    const builtinSource = @embedFile("../res/builtin.cole");
+    try self.prepassBuiltins(builtinSource, allocator);
 
     try self.prepassImpl(self.initial, "root");
 
@@ -137,6 +129,16 @@ pub fn prepass(self: *Prepass, allocator: std.mem.Allocator) Error!ModuleList {
     }
 
     return collections.deepCopy(self.modules, allocator);
+}
+
+fn prepassBuiltins(self: *Prepass, source: []const u8, allocator: std.mem.Allocator) Error!void {
+    var lexer = try Lexer.initFromSource(allocator, self.context, source, "builtin");
+    const tokens = try lexer.lex();
+
+    var parser = try Parser.init(allocator, self.context, tokens);
+    const ast = try parser.parse();
+
+    try self.prepassImpl(self.context.getAST(ast), "builtin");
 }
 
 /// Threaded recursive prepassing. Uses mutexes.
@@ -232,6 +234,10 @@ fn prepassImport(
     const module = getModuleName(stmt, ast, self.context);
     file.dependencies.append(self.arena.allocator(), module)
         catch return Error.AllocatorFailure;
+
+    if (self.modules.ids.contains(module)) {
+        return;
+    }
 
     const path = getModulePathWithExtension(self.arena.allocator(), stmt, ast, self.context) catch |err| {
         self.report("Couldn't get module path for {s}: {s}.",

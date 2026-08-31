@@ -146,6 +146,23 @@ pub fn openRead(self: *Context, file: []const u8) Error!defines.FilePtr {
     return @intCast(self.fileMap.items.len - 1);
 }
 
+pub fn openSource(self: *Context, source: []const u8, name: []const u8) Error!defines.FilePtr {
+    if (self.resolved.get(name)) |id| {
+        return id;
+    }
+
+    self.filenameMap.append(self.arena.allocator(), name)
+        catch return Error.AllocatorFailure;
+
+    self.fileMap.append(self.arena.allocator(), source)
+        catch return Error.AllocatorFailure;
+
+    self.resolved.putNoClobber(self.arena.allocator(), name, @intCast(self.fileMap.items.len - 1))
+        catch return Error.AllocatorFailure;
+
+    return @intCast(self.fileMap.items.len - 1);
+}
+
 pub fn openWrite(self: *Context, file: []const u8) Error!std.fs.File {
     return std.Io.Dir.createFileAbsolute(self.io, file, .{ .truncate = true }) catch {
         Log.err("Couldn't open target file {s}", .{file});

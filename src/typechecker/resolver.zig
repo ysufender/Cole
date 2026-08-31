@@ -161,7 +161,7 @@ pub fn init(gpa: Allocator, context: *Context, modules: *const ModuleList) Error
     const builtin = try scopes.addOne(allocator);
     scopes.set(builtin, .{
         .parent = null,
-        .module = modules.ids.get("builtin").?,
+        .module = modules.ids.get("builtin") orelse return common.debug.ShouldBeImpossible(undefined, @src()),
         .kind = .Module,
     });
 
@@ -175,10 +175,33 @@ pub fn init(gpa: Allocator, context: *Context, modules: *const ModuleList) Error
             .token = 0,
             .node = @intCast(i),
             .type = @intCast(i),
-            .topLevel = true,
+            .topLevel = false,
         });
 
         lookup.putNoClobber(allocator, .{ .name = b, .scope = builtin }, decl)
+            catch return Error.AllocatorFailure;
+    }
+
+    const builtinModuleIdx = modules.ids.get("builtin").?;
+    const builtinSymbols = modules.modules.items(.symbols)[builtinModuleIdx];
+    const builtinDataIndex = modules.modules.items(.dataIndex)[builtinModuleIdx];
+    const builtinTokens = context.getTokens(builtinDataIndex);
+
+    var sit = builtinSymbols.iterator();
+    while (sit.next()) |sym| {
+        const name = builtinTokens.get(sym.name).lexeme(context, builtinDataIndex);
+        const decl = try decls.addOne(allocator);
+        decls.set(decl, .{
+            .name = sym.name,
+            .kind = .Variable,
+            .scope = builtin,
+            .public = sym.public,
+            .token = sym.name,
+            .node = sym.value,
+            .type = sym.type,
+            .topLevel = true,
+        });
+        lookup.putNoClobber(allocator, .{ .name = name, .scope = builtin }, decl)
             catch return Error.AllocatorFailure;
     }
 
@@ -237,7 +260,7 @@ pub fn resolve(self: *Resolver, allocator: Allocator) Error!Resolution {
     var lastErr: common.CompilerError = undefined;
 
     const modules = self.scopes.len;
-    for (1..modules) |i| {
+    for (0..modules) |i| {
         self.currentScope = @intCast(i);
         self.resolveModule() catch |err| {
             errCount += 1;
@@ -1273,11 +1296,12 @@ pub const builtins = [_][]const u8 {
     "float", "void", "comptime_int", "comptime_float",
     "type", "noreturn", "enum_literal", "any",
 
-    "undefined", "typeInfo", "compileError",
+    "undefined", "compileError",
     "bitSizeOf", "unreachable", "typeOf",
     "sizeOf", "bitSet", "cast", "unsafeCast",
     "as", "compileLog", "typeName", "Tuple",
-    "alignOf",
+    "alignOf", "compileBreak", "typeInfo",
+    "src",
 };
 
 pub fn BuiltinIndex(comptime builtin: []const u8) u32 {

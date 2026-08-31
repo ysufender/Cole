@@ -11,16 +11,14 @@ pub const TypeInfo = union(enum) {
     Struct: Struct,
     Union: Union,
     Enum: Enum,
-
-    ComptimeInt, // Must be const
-    ComptimeFloat, // Must be const
-    EnumLiteral, // Must be const and comptime
-
+    Array: Array,
+    Function: Function,
+    Pointer: Pointer,
     Integer: Integer,
+
     Bool: bool, // mutability bool
     Float: bool, // mutability bool
     Void: bool, // mutability bool
-
     CInt: bool,
     CUInt: bool,
     CChar: bool,
@@ -31,13 +29,12 @@ pub const TypeInfo = union(enum) {
     CShort: bool,
     CUShort: bool,
     CSize: bool,
-
-    Array: Array,
-
-    Pointer: Pointer,
-    Function: Function,
-    Noreturn,
     Any: bool, // mutability bool
+
+    ComptimeInt, // Must be const
+    ComptimeFloat, // Must be const
+    EnumLiteral, // Must be const and comptime
+    Noreturn,
     Type,
 
     /// Like type, comptime_int, comptime_float, enum_literal

@@ -171,13 +171,13 @@ pub fn typecheck(self: *Typechecker, allocator: Allocator) Error!JIR {
             .isComptime = false,
             .variadic = false,
             .argTypes = &.{ entryPointID + 1 },
-            .returnType = Comptime.Folder.Builtin.Type("i32"),
+            .returnType = comptime Comptime.Folder.Builtin.Type("i32"),
         }},
 
         // [][]u8
         .{ .Pointer = .{
             .size = .Slice,
-            .child = Comptime.Folder.Builtin.Type("[]u8"),
+            .child = comptime Comptime.Folder.Builtin.Type("[]u8"),
             .mutable = false,
         }}
     };
@@ -262,15 +262,12 @@ pub fn typecheckStatement(self: *Typechecker, statementPtr: defines.StatementPtr
     };
 }
 
-fn typecheckVariableDef(
-    self: *Typechecker,
-    decl: *const Resolver.Declaration,
-) Error!TypeID {
+fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) Error!TypeID {
     const expected = try self.expectType(decl.type);
 
     // @TODO Statements always fall to comptime path. Fix it.
     const initializer =
-        if (decl.topLevel or expected == Comptime.Folder.Builtin.Type("type"))
+        if (decl.topLevel or expected == comptime Comptime.Folder.Builtin.Type("type"))
             try self.typecheckValue(try self.folder.eval(decl.node, expected), expected)
         else
             try self.typecheckExpression(decl.node, expected);
@@ -506,7 +503,7 @@ fn typecheckDefer(self: *Typechecker, stmtPtr: defines.StatementPtr) Error!void 
 
     _ = self.setFlag(.InDefer, true);
     defer _ = self.setFlag(.InDefer, false);
-    try self.typecheckStatement(stmtPtr, Comptime.Folder.Builtin.Type("void"));
+    try self.typecheckStatement(stmtPtr, comptime Comptime.Folder.Builtin.Type("void"));
 }
 
 fn typecheckLoopControl(self: *Typechecker, _: defines.OpaquePtr) Error!void {
@@ -528,13 +525,13 @@ fn typecheckWhileStatement(self: *Typechecker, extraPtr: defines.OpaquePtr, expe
     const conditionPtr = ast.extra[extraPtr];
     const bodyPtr = ast.extra[extraPtr + 1];
 
-    const condition = try self.typecheckExpression(conditionPtr, Comptime.Folder.Builtin.Type("bool"));
-    if (!self.suitable(Comptime.Folder.Builtin.Type("bool"), condition)) {
+    const condition = try self.typecheckExpression(conditionPtr, comptime Comptime.Folder.Builtin.Type("bool"));
+    if (!self.suitable(comptime Comptime.Folder.Builtin.Type("bool"), condition)) {
         self.report("Expected a boolean for condition.", .{});
         return Error.TypeMismatch;
     }
 
-    if (self.folder.attemptEval(conditionPtr, Comptime.Folder.Builtin.Type("bool"))) |_cnd| {
+    if (self.folder.attemptEval(conditionPtr, comptime Comptime.Folder.Builtin.Type("bool"))) |_cnd| {
         const cnd = self.folder.getValue(_cnd).Bool;
 
         if (cnd) {
@@ -815,21 +812,7 @@ fn typecheckReturn(self: *Typechecker, exprPtr: defines.ExpressionPtr, expected:
 
     const returnType =
         if (exprPtr != 0) try self.typecheckExpression(exprPtr, expected)
-        else Comptime.Folder.Builtin.Type("void");
-
-    if (std.mem.eql(u8, "comptime_int", try self.typeName(undefined, returnType))) {
-        var iter = self.builder.functions.iterator();
-        common.log.debug("{s} expected {s}", .{
-            try self.typeName(undefined, returnType),
-            try self.typeName(undefined, expected),
-        });
-        while (iter.next()) |func| {
-            if (func.scope == self.currentScope) {
-                common.log.debug("{s}", .{self.builder.getInternedString(func.name)});
-                break;
-            }
-        }
-    }
+        else comptime Comptime.Folder.Builtin.Type("void");
 
     if (!self.suitable(expected, returnType)) {
         self.report("Unsuitable return type, expected '{s}', received '{s}'", .{
@@ -851,13 +834,13 @@ fn typecheckIfStatement(self: *Typechecker, extraPtr: defines.OpaquePtr, expecte
         if (ast.extra[extraPtr + 2] == 1) ast.extra[extraPtr + 3]
         else null;
 
-    const conditionType = try self.typecheckExpression(conditionExpr, Comptime.Folder.Builtin.Type("bool"));
-    if (!self.suitable(conditionType, Comptime.Folder.Builtin.Type("bool"))) {
+    const conditionType = try self.typecheckExpression(conditionExpr, comptime Comptime.Folder.Builtin.Type("bool"));
+    if (!self.suitable(conditionType, comptime Comptime.Folder.Builtin.Type("bool"))) {
         self.report("Expected a boolean for condition.", .{});
         return Error.TypeMismatch;
     }
 
-    if (self.folder.attemptEval(conditionExpr, Comptime.Folder.Builtin.Type("bool"))) |_cnd| {
+    if (self.folder.attemptEval(conditionExpr, comptime Comptime.Folder.Builtin.Type("bool"))) |_cnd| {
         const cnd = self.folder.getValue(_cnd).Bool;
 
         if (cnd) {
@@ -991,7 +974,7 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
 
     const maybeExpected =
         if (_maybeExpected) |ex| ex
-        else Comptime.Folder.Builtin.Type("any");
+        else comptime Comptime.Folder.Builtin.Type("any");
 
     const expr = ast.expressions.get(expressionPtr);
     defer _ = self.setFlag(.ConcreteValue, switch (expr.type) {
@@ -1103,8 +1086,8 @@ pub fn typecheckIfExpression(self: *Typechecker, extraPtr: defines.OpaquePtr, ma
         .otherwise = ast.extra[extraPtr + 2],
     };
 
-    const condition = try self.typecheckExpression(conditional.condition, Comptime.Folder.Builtin.Type("bool"));
-    if (!self.suitable(Comptime.Folder.Builtin.Type("bool"), condition)) {
+    const condition = try self.typecheckExpression(conditional.condition, comptime Comptime.Folder.Builtin.Type("bool"));
+    if (!self.suitable(comptime Comptime.Folder.Builtin.Type("bool"), condition)) {
         self.report("Expected a boolean for condition.", .{});
         return Error.TypeMismatch;
     }
@@ -1136,27 +1119,27 @@ pub fn typecheckValueDirect(self: *Typechecker, val: Comptime.Value, maybeExpect
             self.report("Expected a known target type for comptime typechecking.", .{});
             return Error.InferenceError;
         }
-        else Comptime.Folder.Builtin.Type("any");
+        else comptime Comptime.Folder.Builtin.Type("any");
 
     const valType = switch (val) {
-        .Int => Comptime.Folder.Builtin.Type("comptime_int"),
-        .Float => Comptime.Folder.Builtin.Type("comptime_float"),
-        .Bool => Comptime.Folder.Builtin.Type("bool"),
+        .Int => comptime Comptime.Folder.Builtin.Type("comptime_int"),
+        .Float => comptime Comptime.Folder.Builtin.Type("comptime_float"),
+        .Bool => comptime Comptime.Folder.Builtin.Type("bool"),
         .Enum => |enumeration| enumeration.Type,
         .Union => |uni| uni.Type,
         .Struct => |str| str.Type,
-        .Type => Comptime.Folder.Builtin.Type("type"),
+        .Type => comptime Comptime.Folder.Builtin.Type("type"),
         .Pointer => |ptr| ptr.Type,
         .Function => |func| func.signature,
-        .Void => Comptime.Folder.Builtin.Type("void"),
+        .Void => comptime Comptime.Folder.Builtin.Type("void"),
         .Undefined => |undef| undef,
         .Slice => |slice| slice.Type,
         .String => |str|
-            if (str.type == .Cole) Comptime.Folder.Builtin.Type("[]u8")
+            if (str.type == .Cole) comptime Comptime.Folder.Builtin.Type("[]u8")
             else try self.registerType(.{
                 .Pointer = .{
                     .mutable = false,
-                    .child = Comptime.Folder.Builtin.Type("c_char"),
+                    .child = comptime Comptime.Folder.Builtin.Type("c_char"),
                     .size = .C,
                 }
             }),
@@ -1177,10 +1160,10 @@ pub fn typecheckExpressionList(self: *Typechecker, extra: defines.OpaquePtr, _ma
     if (
         range.len() == 0
         and (
-            maybeExpected orelse Comptime.Folder.Builtin.Type("void") == Comptime.Folder.Builtin.Type("void")
+            (maybeExpected orelse (comptime Comptime.Folder.Builtin.Type("void"))) == (comptime Comptime.Folder.Builtin.Type("void"))
         )
     ) {
-        return Comptime.Folder.Builtin.Type("void");
+        return comptime Comptime.Folder.Builtin.Type("void");
     }
 
     const expected =
@@ -1458,7 +1441,7 @@ pub fn discoverScopeDef(
         return Error.AccessSpecifierMismatch;
     }
 
-    if (member.valueType != Comptime.Folder.Builtin.Type("incomplete")) {
+    if (member.valueType != comptime Comptime.Folder.Builtin.Type("incomplete")) {
         return member.valueType;
     }
 
@@ -1537,23 +1520,21 @@ pub fn discoverScopeDef(
 pub fn typecheckCall(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID) Error!TypeID {
     const ast = self.context.getAST(self.currentFile);
 
-    if (ast.expressions.items(.type)[ast.extra[extraPtr]] == .Identifier) blk: {
-        if (self.symbols.resolutionMap.get(.{
-            .file = self.currentFile,
-            .expr = ast.extra[extraPtr], 
-        })) |builtinPtr| {
-            const decl = self.symbols.declarations.get(builtinPtr);
+    if (self.symbols.resolutionMap.get(.{
+        .file = self.currentFile,
+        .expr = ast.extra[extraPtr], 
+    })) |builtinPtr| blk: {
+        const decl = self.symbols.declarations.get(builtinPtr);
 
-            if (decl.kind != .Builtin) {
-                break :blk;
-            }
-
-            if (Comptime.Folder.Builtin.isBuiltinType(decl.type)) {
-                break :blk;
-            }
-
-            return self.typecheckBuiltinCall(extraPtr, decl.type, maybeExpected);
+        if (decl.kind != .Builtin) {
+            break :blk;
         }
+
+        if (Comptime.Folder.Builtin.isBuiltinType(decl.type)) {
+            break :blk;
+        }
+
+        return self.typecheckBuiltinCall(extraPtr, decl.type, maybeExpected);
     }
 
     const lhsType = try self.typecheckExpression(ast.extra[extraPtr], null);
@@ -1630,23 +1611,47 @@ pub fn typecheckCall(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpec
 pub fn typecheckBuiltinCall(self: *Typechecker, extraPtr: defines.ExpressionPtr, declPtr: defines.DeclPtr, maybeExpected: ?TypeID) Error!TypeID {
     const BI = Resolver.BuiltinIndex;
 
+    const ast = self.context.getAST(self.currentFile);
+
+    const funcToken = ast.expressions.get(ast.extra[extraPtr]).value;
+    const prevt = self.lastToken;
+    defer self.lastToken = prevt;
+    self.lastToken = funcToken;
+
     return switch (declPtr) {
         BI("cast") => self.typecheckCast(extraPtr, maybeExpected, false),
         BI("unsafeCast") => self.typecheckCast(extraPtr, maybeExpected, true),
         BI("as") => self.typecheckTypeForwarding(extraPtr, maybeExpected),
-        BI("typeOf") => Comptime.Folder.Builtin.Type("type"),
+        BI("typeOf") => comptime Comptime.Folder.Builtin.Type("type"),
+        BI("src") => {
+            const infoDecl = self.symbols.lookup.get(.{
+                .scope = 0, // @Note builtin is hardcoded to be zero
+                .name = "SourceInfo",
+            }).?;
+            const builtinInfo = try self.folder.evalDecl(infoDecl, comptime Comptime.Folder.Builtin.Type("type"));
+            return builtinInfo;
+        },
+        BI("typeInfo") => {
+            const infoDecl = self.symbols.lookup.get(.{
+                .scope = 0, // @Note builtin is hardcoded to be zero
+                .name = "TypeInfo",
+            }).?;
+            const builtinInfo = try self.typecheckDecl(infoDecl, comptime Comptime.Folder.Builtin.Type("type"));
+            return builtinInfo;
+        },
         BI("compileError") => return self.folder.evalCompileError(extraPtr),
-        BI("sizeOf") => return Comptime.Folder.Builtin.Type("u32"),
-        BI("alignOf") => return Comptime.Folder.Builtin.Type("u32"),
-        BI("typeName") => return Comptime.Folder.Builtin.Type("[]u8"),
-        BI("Tuple") => return Comptime.Folder.Builtin.Type("type"),
+        BI("sizeOf") => return comptime Comptime.Folder.Builtin.Type("u32"),
+        BI("alignOf") => return comptime Comptime.Folder.Builtin.Type("u32"),
+        BI("typeName") => return comptime Comptime.Folder.Builtin.Type("[]u8"),
+        BI("Tuple") => return comptime Comptime.Folder.Builtin.Type("type"),
+        BI("compileBreak") => return comptime Comptime.Folder.Builtin.Type("void"),
         BI("compileLog") => {
             _ = try self.folder.evalCompileLog(extraPtr);
-            return Comptime.Folder.Builtin.Type("void");
+            return comptime Comptime.Folder.Builtin.Type("void");
         },
-        BI("unreachable") => Comptime.Folder.Builtin.Type("noreturn"),
+        BI("unreachable") => comptime Comptime.Folder.Builtin.Type("noreturn"),
         else => {
-            self.report("Builtin '{s}' is not suitable in this context.", .{Resolver.builtins[declPtr]});
+            self.report("Builtin '{s}' is not usable in this context.", .{Resolver.builtins[declPtr]});
             return Error.ComptimeNotPossible;
         },
     };
@@ -1824,7 +1829,7 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
     var decl = self.symbols.declarations.get(declPtr);
 
     if (decl.kind == .Builtin) {
-        return if (Comptime.Folder.Builtin.isBuiltinType(decl.type)) Comptime.Folder.Builtin.Type("type")
+        return if (Comptime.Folder.Builtin.isBuiltinType(decl.type)) comptime Comptime.Folder.Builtin.Type("type")
         else switch (decl.type) {
             BuiltinIndex("undefined") => blk: {
                 const expected =
@@ -1845,7 +1850,7 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
                     else => break :blk expected,
                 }
             },
-            BuiltinIndex("unreachable") => return Comptime.Folder.Builtin.Type("noreturn"),
+            BuiltinIndex("unreachable") => return comptime Comptime.Folder.Builtin.Type("noreturn"),
             else => {
                 self.report("Builtin '{s}' is not implemented.", .{Resolver.builtins[decl.type]});
                 return Error.NotImplemented;
@@ -1873,7 +1878,7 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
     if (isPresent.found_existing) {
         switch (isPresent.value_ptr.status) {
             .Checked => {
-                if (isPresent.value_ptr.result != Comptime.Folder.Builtin.Type("incomplete")) {
+                if (isPresent.value_ptr.result != comptime Comptime.Folder.Builtin.Type("incomplete")) {
                     return isPresent.value_ptr.result;
                 }
             },
@@ -1938,7 +1943,7 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
 
     isPresent.value_ptr.* = .{
         .status = .InProgress,
-        .result = Comptime.Folder.Builtin.Type("incomplete"),
+        .result = comptime Comptime.Folder.Builtin.Type("incomplete"),
     };
     errdefer isPresent.value_ptr.status = .NotChecked;
 
@@ -1968,7 +1973,7 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
         .result = declType,
     };
 
-    if (self.typeTable.get(declType) == .Type) {
+    if (declType == comptime Comptime.Folder.Builtin.Type("type")) {
         const typeID = self.folder.getValue(try self.folder.eval(decl.node, declType)).Type;
         const node = self.typeTable.get(typeID);
 
@@ -2001,7 +2006,7 @@ pub fn typecheckFieldAccess(self: *Typechecker, on: TypeID, field: []const u8) E
     switch (objectType) {
         .Pointer => |ptr| if (ptr.size == .Slice) {
             if (std.mem.eql(u8, field, "len")) {
-                return Comptime.Folder.Builtin.Type("u32");
+                return comptime Comptime.Folder.Builtin.Type("u32");
             }
             else if (std.mem.eql(u8, field, "ptr")) {
                 return self.registerType(.{
@@ -2015,7 +2020,7 @@ pub fn typecheckFieldAccess(self: *Typechecker, on: TypeID, field: []const u8) E
         },
         .Array => |arr| {
             if (std.mem.eql(u8, field, "len")) {
-                return Comptime.Folder.Builtin.Type("u32");
+                return comptime Comptime.Folder.Builtin.Type("u32");
             }
             else if (std.mem.eql(u8, field, "ptr")) {
                 return self.registerType(.{
@@ -2042,7 +2047,7 @@ pub fn typecheckFieldAccess(self: *Typechecker, on: TypeID, field: []const u8) E
                 .Pointer => |childPtr| switch (childPtr.size) {
                     .Slice => 
                         if (std.mem.eql(u8, field, "len")) {
-                            return Comptime.Folder.Builtin.Type("u32");
+                            return comptime Comptime.Folder.Builtin.Type("u32");
                         }
                         else if (std.mem.eql(u8, field, "ptr")) {
                             return self.registerType(.{
@@ -2070,7 +2075,7 @@ pub fn typecheckFieldAccess(self: *Typechecker, on: TypeID, field: []const u8) E
                 },
                 .Array => |arr| 
                     if (std.mem.eql(u8, field, "len")) {
-                        return Comptime.Folder.Builtin.Type("u32");
+                        return comptime Comptime.Folder.Builtin.Type("u32");
                     }
                     else if (std.mem.eql(u8, field, "ptr")) {
                         return self.registerType(.{
@@ -2205,7 +2210,7 @@ pub fn typecheckMark(
     for (0..marks.len()) |index| {
         metadata[index] = try self.folder.eval(
             ast.extra[marks.at(@intCast(index))],
-            Comptime.Folder.Builtin.Type("builtin_metadata")
+            comptime Comptime.Folder.Builtin.Type("builtin_metadata")
         );
     }
 
@@ -2319,7 +2324,7 @@ pub fn typecheckBinary(self: *Typechecker, extraPtr: defines.OpaquePtr, _: ?Type
                 });
                 break :res Error.ComparisonOnNonComparableType;
             };
-            break :res Comptime.Folder.Builtin.Type("bool");
+            break :res comptime Comptime.Folder.Builtin.Type("bool");
         },
         .Pipe, .Xor, .Ampersand => {
             if (!self.isInt(lhs)) {
@@ -2370,7 +2375,7 @@ pub fn typecheckBinary(self: *Typechecker, extraPtr: defines.OpaquePtr, _: ?Type
                 break :res Error.ArithmeticOnNonNumericType;
             }
 
-            break :res Comptime.Folder.Builtin.Type("bool");
+            break :res comptime Comptime.Folder.Builtin.Type("bool");
         },
         .Plus, .Minus, .Slash, .Star, .Modulo => {
             // @Important TODO: allow pointer arithmetic on C style pointers.
@@ -2833,8 +2838,8 @@ pub fn assertCastable(self: *Typechecker, from: TypeID, to: TypeID, unsafe: bool
     const toType = self.typeTable.get(to);
 
     switch (to) {
-        Comptime.Folder.Builtin.Type("any"),
-        Comptime.Folder.Builtin.Type("mut any") => return Error.InferenceError,
+        comptime Comptime.Folder.Builtin.Type("any"),
+        comptime Comptime.Folder.Builtin.Type("mut any") => return Error.InferenceError,
         else => { },
     }
 
@@ -3517,6 +3522,18 @@ pub fn fieldIndex(self: *Typechecker, from: TypeID, fieldNamePtr: defines.String
     return Error.MissingDefinition;
 }
 
+pub fn findType(self: *Typechecker, name: []const u8) ?TypeID {
+    for (0..self.typeTable.len) |idx| {
+        const tn = self.typeName(undefined, @intCast(idx))
+            catch unreachable;
+        if (std.mem.eql(u8, tn, name)) {
+            return @intCast(idx);
+        }
+    }
+
+    return null;
+}
+
 pub fn typeName(self: *Typechecker, allocator: Allocator, typeID: TypeID) Error![]const u8 {
     const typename = struct {
         fn typename(this: *Typechecker, alc: Allocator, tid: TypeID) Error![]const u8 {
@@ -3626,8 +3643,8 @@ pub fn determineExpected(maybeExpected: ?TypeID) ?TypeID {
     return
         if (maybeExpected) |expected|
             if (
-                expected == Comptime.Folder.Builtin.Type("any")
-                or expected == Comptime.Folder.Builtin.Type("mut any")
+                expected == (comptime Comptime.Folder.Builtin.Type("any"))
+                or expected == (comptime Comptime.Folder.Builtin.Type("mut any"))
             ) null
             else expected
         else null;
@@ -3693,7 +3710,7 @@ pub fn hasMetadata(
                 switch (meval) {
                     .Enum => |enm|
                         if (
-                            enm.Type == Comptime.Folder.Builtin.Type("builtin_metadata")
+                            enm.Type == (comptime Comptime.Folder.Builtin.Type("builtin_metadata"))
                             and enm.Value == Comptime.Folder.Builtin.Metadata(_meta)
                         ) break :blk true,
 

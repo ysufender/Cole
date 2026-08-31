@@ -1,0 +1,128 @@
+pub let SourceInfo = struct {
+    file: []u8,
+    line: u32,
+    col: u32,
+};
+
+pub let ColeInfo: struct {
+    name: []u8,
+    description: []u8,
+    versionString: []u8,
+    versionMajor: u8,
+    versionMinor: u8,
+    versionPatch: u8,
+    contributors: [1][]u8,
+} = (
+    "Cole",
+    "A statically typed, ahead of time compiled language with powerful metaprogramming.",
+    "0.0.1",
+    0, 0, 1,
+    (
+        "Yusuf Ender Osmanoğlu <yusufenderosmanoglu@gmail.com>",
+    )
+);
+
+pub let TypeInfo = union(enum) {
+    Struct: Struct,
+    Union: Union,
+    Enum: Enum,
+    Array: Array,
+    Function: Function,
+    Pointer: Pointer,
+    Integer: Integer,
+
+    Bool: bool, // mutability bool
+    Float: bool, // mutability bool
+    Void: bool, // mutability bool
+    CInt: bool,
+    CUInt: bool,
+    CChar: bool,
+    CUChar: bool,
+    CDouble: bool,
+    CLong: bool,
+    CULong: bool,
+    CShort: bool,
+    CUShort: bool,
+    CSize: bool,
+    Any: bool, // mutability bool
+
+    ComptimeInt: void, // Must be const
+    ComptimeFloat: void, // Must be const
+    EnumLiteral: void, // Must be const and comptime
+    Noreturn: void,
+    Type: void,
+};
+
+pub let FieldInfo = struct {
+    public: bool,
+    name: []u8,
+    valueType: type,
+    isComptime: bool,
+};
+
+pub let Struct = struct {
+    mutable: bool,
+    name: []u8,
+    fields: []FieldInfo,
+    definitions: []FieldInfo,
+    external: bool,
+    isTuple: bool,
+};
+
+pub let Union = struct {
+    isTagged: bool,
+    /// All unions must have field tags, but only
+    /// tagged unions contain them in their layout.
+    /// So runtime safety is only present for tagged
+    /// unions.
+    tag: type,
+    mutable: bool,
+    name: []u8,
+    fields: []FieldInfo,
+    definitions: []FieldInfo,
+    external: bool,
+};
+
+pub let EnumField = struct {
+    name: []u8,
+    value: u32,
+};
+
+pub let Enum = struct {
+    mutable: bool,
+    name: []u8,
+    fields: []EnumField,
+    definitions: []FieldInfo,
+    external: bool,
+};
+
+pub let Pointer = struct {
+    mutable: bool,
+    child: type,
+    size: enum {
+        Slice,
+        Single,
+        C,
+    },
+};
+
+pub let Array = struct {
+    mutable: bool,
+    child: type,
+    len: u32,
+};
+
+pub let Function = struct {
+    mutable: bool,
+    isComptime: bool, 
+    variadic: bool,
+    argTypes: []type,
+    returnType: type,
+};
+
+pub let Integer = struct {
+    mutable: bool,
+    size: u8,
+    signed: bool,
+};
+
