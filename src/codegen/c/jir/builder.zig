@@ -168,8 +168,23 @@ pub inline fn functionDef(self: *Builder, name: defines.StringPtr, function: JIR
 }
 
 pub inline fn typeDef(self: *Builder, typeID: TypeID) Error!JIR.Ptr {
+    const typeInfo = self.typechecker.typeTable.get(typeID);
+
     const res = try self.commonSingle(.TypeDef, typeID);
     try self.addKeyNode(res);
+
+    const _expr: ?*defines.ExpressionPtr = switch (typeInfo) {
+        .Struct => &self.typechecker.typeTable.items(.data)[typeID].Struct.expr,
+        .Union => &self.typechecker.typeTable.items(.data)[typeID].Union.expr,
+        .Enum => &self.typechecker.typeTable.items(.data)[typeID].Enum.expr,
+        else => null,
+    };
+
+    if (_expr) |expr| {
+        try self.typechecker.lowerer.addMetadata(res, expr.*);
+        expr.* = res;
+    }
+
     return res;
 }
 

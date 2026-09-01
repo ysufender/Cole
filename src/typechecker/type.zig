@@ -68,9 +68,9 @@ pub const TypeInfo = union(enum) {
             .Noreturn => true,
             .Void => true,
             .Type => true,
-            .Struct => |str| str.fields.len == 0 and !str.external,
-            .Union => |uni| uni.fields.len == 0 and !uni.external,
-            .Enum => |enm| enm.fields.len == 0 and !enm.external,
+            .Struct => |str| str.fields.len == 0,
+            .Union => |uni| uni.fields.len == 0,
+            .Enum => |enm| enm.fields.len == 0,
             else => false,
         };
     }
@@ -128,11 +128,11 @@ pub const Struct = struct {
     name: defines.StringPtr,
     fields: []const FieldInfo,
     definitions: []const FieldInfo,
-    external: bool,
     isTuple: bool,
 
     // @CompilerOnly
     scope: defines.ScopePtr,
+    expr: defines.ExpressionPtr,
 };
 
 pub const Union = struct {
@@ -146,10 +146,10 @@ pub const Union = struct {
     name: defines.StringPtr,
     fields: []const FieldInfo,
     definitions: []const FieldInfo,
-    external: bool,
 
     // @CompilerOnly
     scope: defines.ScopePtr,
+    expr: defines.ExpressionPtr,
 };
 
 pub const EnumField = struct {
@@ -162,10 +162,10 @@ pub const Enum = struct {
     name: defines.StringPtr,
     fields: []const EnumField,
     definitions: []const FieldInfo,
-    external: bool,
 
     // @CompilerOnly
     scope: defines.ScopePtr,
+    expr: defines.ExpressionPtr,
 };
 
 pub const Pointer = struct {

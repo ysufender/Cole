@@ -72,7 +72,7 @@ pub fn init(typechecker: *Typechecker, gpa: Allocator) Error!Folder {
 
     var memory = Memory.initCapacity(allocator, 512) catch return Error.AllocatorFailure;
     memory.appendAssumeCapacity(.{ .Type = Builtin.Type("any") });
-    memory.appendAssumeCapacity(.{ .Type = Builtin.Type("incomplete") });
+    memory.appendAssumeCapacity(.{ .Type = Builtin.Type("__incomplete") });
     memory.appendAssumeCapacity(.{ .Void = { } });
 
     return .{
@@ -857,10 +857,12 @@ fn evalBuiltinCall(self: *Folder, extraPtr: defines.OpaquePtr, declPtr: defines.
         BI("typeOf") => self.evalTypeOf(extraPtr),
         BI("src") => self.evalSourceInfo(extraPtr),
         BI("typeInfo") => self.evalTypeInfo(extraPtr),
+        BI("buildInfo") => self.evalBuildInfo(extraPtr),
         BI("compileError") => self.evalCompileError(extraPtr),
         BI("typeName") => self.evalTypeName(extraPtr),
         BI("Tuple") => self.evalNewTuple(extraPtr),
         BI("sizeOf") => self.evalSizeOf(extraPtr),
+        BI("bitSizeOf") => self.evalBitSizeOf(extraPtr),
         BI("alignOf") => self.evalAlignOf(extraPtr),
         BI("compileBreak") => {
             @breakpoint();
@@ -1155,7 +1157,7 @@ fn evalEnumType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Value
             .fields = fields,
             .definitions = try self.handleScopeDecls(oldScope, scope, ast, tokens, defRange),
             .scope = scope,
-            .external = self.typechecker.hasMetadata(expr, "@extern"),
+            .expr = expr,
         },
     };
 
@@ -1224,7 +1226,7 @@ fn evalStructType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Val
             .fields = fields,
             .definitions = try self.handleScopeDecls(oldScope, scope, ast, tokens, defRange),
             .scope = scope,
-            .external = self.typechecker.hasMetadata(expr, "@extern"),
+            .expr = expr,
             .isTuple = false,
         },
     };
@@ -1295,7 +1297,7 @@ fn evalUnionType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Valu
                 .file = self.typechecker.currentFile,
                 .expr = expr,
             }),
-            .external = self.typechecker.hasMetadata(expr, "@extern"),
+            .expr = expr,
         },
     };
 
@@ -1365,7 +1367,7 @@ fn evalUnionType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Valu
             .fields = fields,
             .definitions = try self.handleScopeDecls(oldScope, scope, ast, tokens, defRange),
             .scope = scope,
-            .external = self.typechecker.hasMetadata(expr, "@extern"),
+            .expr = expr,
         }
     };
 
@@ -1471,6 +1473,34 @@ pub fn evalAlignOf(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Va
     return self.appendValue(.{ .Int = self.typechecker.alignOf(t) });
 }
 
+pub fn evalBitSizeOf(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {
+    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+
+    const expressionList = ast.expressions.items(.value)[ast.extra[extraPtr + 1]];
+    const args = defines.Range{
+        .start = ast.extra[expressionList],
+        .end = ast.extra[expressionList + 1],
+    };
+
+    if (args.len() != 1) {
+        self.report("'sizeOf' expects a single expression argument, received {d}.", .{
+            args.len(),
+        });
+        return Error.ArgumentCountMismatch;
+    }
+
+    const t = try self.typechecker.typecheckExpression(ast.extra[args.at(0)], null);
+
+    if (self.attemptEval(ast.extra[args.at(0)], t)) |res| blk: {
+        return self.appendValue(.{ .Int = switch (self.getValue(res)) {
+            .Type => |typeID| self.typechecker.sizeOf(typeID),
+            else => break :blk, 
+        }});
+    }
+
+    return self.appendValue(.{ .Int = self.typechecker.sizeOf(t) });
+}
+
 pub fn evalSizeOf(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
 
@@ -1531,7 +1561,7 @@ pub fn evalNewTuple(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.V
             .name = try self.generateRandomName(.Tuple),
             .fields = fields,
             .definitions = &.{},
-            .external = false,
+            .expr = 0,
             .mutable = false,
             .scope = 0,
             .isTuple = true,
@@ -1654,6 +1684,59 @@ pub fn evalSourceInfo(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime
             },
         }
     });
+}
+
+pub fn evalBuildInfo(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {
+    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+
+    const expressionList = ast.expressions.items(.value)[ast.extra[extraPtr + 1]];
+    const args = defines.Range{
+        .start = ast.extra[expressionList],
+        .end = ast.extra[expressionList + 1],
+    };
+    
+    if (args.len() != 0) {
+        self.report("'buildInfo' expects no arguments, received {d}.", .{args.len()});
+        return Error.ArgumentCountMismatch;
+    }
+
+    const typeID = self.typechecker.findType("builtin::BuildInfo")
+        orelse return common.debug.ShouldBeImpossible(undefined, @src());
+    const typeInfo = self.typechecker.typeTable.get(typeID).Struct;
+
+    return self.appendValue(.{
+        .Struct = .{
+            .Type = typeID,
+            .Fields = Fields: {
+                const start: u32 = @intCast(self.memory.items.len);
+                _ = try self.appendValue(.{
+                    .Enum = .{
+                        .Type = typeInfo.fields[0].valueType,
+                        .Value = @intFromEnum(self.typechecker.context.settings.buildInfo.optimization),
+                    },
+                });
+                _ = try self.appendValue(.{
+                    .Enum = .{
+                        .Type = typeInfo.fields[1].valueType,
+                        .Value = @intFromEnum(self.typechecker.context.settings.buildInfo.backend),
+                    },
+                });
+                _ = try self.appendValue(.{
+                    .Enum = .{
+                        .Type = typeInfo.fields[2].valueType,
+                        .Value = @intFromEnum(self.typechecker.context.settings.buildInfo.platform),
+                    },
+                });
+
+
+                break :Fields .{
+                    .start = start,
+                    .end = start + 3,
+                };
+            },
+        }
+    });
+
 }
 
 pub fn evalTypeInfo(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {
@@ -1860,9 +1943,8 @@ pub fn evalTypeInfo(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.V
                                     },
                                 });
 
-                                _ = try self.appendValue(.{ .Bool = str.external });
                                 _ = try self.appendValue(.{ .Bool = str.isTuple });
-                                break :range .{ .start = start, .end = start + 6 };
+                                break :range .{ .start = start, .end = start + 5 };
                             },
                         },
                     },
@@ -1912,8 +1994,7 @@ pub fn evalTypeInfo(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.V
                                     },
                                 });
 
-                                _ = try self.appendValue(.{ .Bool = uni.external });
-                                break :range .{ .start = start, .end = start + 7 };
+                                break :range .{ .start = start, .end = start + 6 };
                             },
                         },
                     },
@@ -2471,7 +2552,7 @@ fn handleScopeDecls(
 
         const valueType =
             if (self.getFlag(.InComptimeCall)) try self.typechecker.typecheckDecl(newDecl, null)
-            else Builtin.Type("incomplete");
+            else Builtin.Type("__incomplete");
 
         const newName = try self.typechecker.builder.internString(symbolName);
         defs.appendAssumeCapacity(.{
@@ -2678,9 +2759,9 @@ fn setValue(self: *const Folder, address: defines.Offset, new: Comptime.Value) v
 
 pub fn isIncomplete(self: *const Folder, typeID: TypeID) bool {
     return switch (self.typechecker.typeTable.get(typeID)) {
-        .Pointer => |ptr| ptr.child == Builtin.Type("incomplete") 
+        .Pointer => |ptr| ptr.child == Builtin.Type("__incomplete") 
                        or self.isIncomplete(ptr.child),
-        else => typeID == Builtin.Type("incomplete"),
+        else => typeID == Builtin.Type("__incomplete"),
     };
 }
 
@@ -2860,10 +2941,10 @@ pub const builtinTypes = [_]struct {
 
     // mut any
     .{ .name = "mut any", .info = .{ .Any = true } },
-    // incomplete
-    .{ .name = "incomplete", .info = .{ .Struct = .{ .mutable = false, .name = Resolver.BuiltinIndex("any") + 2, .fields = &.{}, .definitions = &.{}, .scope = 0, .external = true, .isTuple = false } } },
-    // builtin_metadata
-    .{ .name = "builtin_metadata", .info = .{ .Enum = .{ .mutable = false, .name = Resolver.BuiltinIndex("any") + 3, .fields = &.{}, .definitions = &.{}, .scope = 0, .external = true } } },
+    // __incomplete
+    .{ .name = "__incomplete", .info = .{ .Struct = .{ .mutable = false, .name = Resolver.BuiltinIndex("any") + 2, .fields = &.{}, .definitions = &.{}, .scope = 0, .isTuple = false, .expr = 0 } } },
+    // __builtin_metadata
+    .{ .name = "__builtin_metadata", .info = .{ .Enum = .{ .mutable = false, .name = Resolver.BuiltinIndex("any") + 3, .fields = &.{ types.EnumField{ .name = "__placeholder", .value = 0, } }, .definitions = &.{}, .scope = 0, .expr = 0 } } },
     // []u8
     .{ .name = "[]u8", .info = .{ .Pointer = .{ .mutable = false, .child = 2, .size = .Slice, }, } },
 };
@@ -2874,4 +2955,5 @@ pub const builtinMetadata = [_][]const u8 {
     "@export",
     "@extern",
     "@variadic",
+    "@opaque",
 };

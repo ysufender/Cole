@@ -7,11 +7,23 @@ const Backend = @import("../codegen/backend.zig").Backend;
 
 pub const FlagSet = hashmap.HashMap([]const u8, void);
 
+pub const BuildInfo = struct {
+    isDebug: bool,
+    optimization: Optimize,
+    backend: Backend,
+    platform: Platform,
+};
+
 pub const Optimize = enum(u3) {
     Og = 0,
     O1 = 1,
     O2 = 2,
     O3 = 3,
+};
+
+pub const Platform = enum(u2) {
+    Windows,
+    Unix,
 };
 
 const Self = @This();
@@ -22,30 +34,33 @@ workingDir: []const u8,
 includeDirs: []const []const u8,
 linkDirs: []const []const u8,
 libraries: []const []const u8,
-optimize: Optimize,
+buildInfo: BuildInfo,
 maxErr: u32,
-backend: Backend,
 flags: FlagSet,
 
 pub fn print(self: *const Self, allocator: std.mem.Allocator) void {
     log.info(
         "Compilation settings:"
+        ++ "\n\tBuild       : {s}"
         ++ "\n\tInput File  : {s}"
         ++ "\n\tOutput File : {s}"
         ++ "\n\tWorking Dir : {s}"
         ++ "\n\tMax Errors  : {d}"
         ++ "\n\tOptimize    : {s}"
         ++ "\n\tBackend     : {s}"
+        ++ "\n\tTarget      : {s}"
         ++ "\n\tInclude Dirs: [{s}]"
         ++ "\n\tLink Dirs   : [{s}]"
         ++ "\n\tLibraries   : [{s}]\n",
         .{
+            if (self.buildInfo.isDebug) "Debug" else "Release",
             self.inputFile,
             self.outputFile,
             self.workingDir,
             self.maxErr,
-            @tagName(self.optimize),
-            @tagName(self.backend),
+            @tagName(self.buildInfo.optimization),
+            @tagName(self.buildInfo.backend),
+            @tagName(self.buildInfo.platform),
             std.mem.join(allocator, ", ", self.includeDirs) catch "",
             std.mem.join(allocator, ", ", self.linkDirs) catch "",
             std.mem.join(allocator, ", ", self.libraries) catch "",
@@ -68,6 +83,6 @@ pub fn hasFlag(self: *const Self, flag: []const u8) bool {
 
 pub fn canFold(self: *const Self) bool {
     return
-        self.optimize != Optimize.Og
+        self.buildInfo.optimization != .Og
         and !self.hasFlag("--debug");
 }

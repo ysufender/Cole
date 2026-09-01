@@ -47,6 +47,18 @@ pub fn compile(outDir: Dir, allocator: std.mem.Allocator, context: *common.Compi
         }
     }
 
+    tcc.tcc_define_symbol(
+        state,
+        if (context.settings.buildInfo.platform == .Windows) "COLE_WIN32" else "COLE_UNIX",
+        "1"
+    );
+
+    tcc.tcc_define_symbol(
+        state,
+        if (context.settings.buildInfo.isDebug) "COLE_DEBUG" else "COLE_NDEBUG",
+        "1"
+    );
+
     // Set output type
     if (tcc.tcc_set_output_type(state, tcc.TCC_OUTPUT_EXE) == -1) {
         report("Failed to set output type.");
@@ -109,7 +121,7 @@ pub fn compile(outDir: Dir, allocator: std.mem.Allocator, context: *common.Compi
 
     var flags = std.mem.zeroes([512]u8);
     const res = std.fmt.bufPrint(&flags, "-Wall -Werror -{s} {s}", .{
-        @tagName(context.settings.optimize),
+        @tagName(context.settings.buildInfo.optimization),
         if (context.settings.hasFlag("--debug")) " -g" else "",
     }) catch unreachable;
     if (tcc.tcc_set_options(state, res.ptr) == -1) {

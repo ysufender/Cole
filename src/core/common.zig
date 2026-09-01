@@ -143,5 +143,6 @@ pub const CompilerError = error {
     NonExternVariadicFunction,
     UnhandledReturnValue,
     UnnamedVariadic,
+    UnsupportedTarget,
     Terminate,
 };

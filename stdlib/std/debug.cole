@@ -1,14 +1,14 @@
 code {
-#ifdef DEBUG
-#if defined(WIN32)
-#include <intrin.h>
-#define BREAKPOINT __debugbreak()
+#ifdef COLE_DEBUG
+#   ifdef COLE_WIN32
+#       include <intrin.h>
+#       define BREAKPOINT __debugbreak()
+#   else
+#       include <signal.h>
+#       define BREAKPOINT raise(SIGTRAP)
+#   endif
 #else
-#include <signal.h>
-#define BREAKPOINT raise(SIGTRAP)
-#endif
-#else
-#define BREAKPOINT
+#   define BREAKPOINT
 #endif
 }
 

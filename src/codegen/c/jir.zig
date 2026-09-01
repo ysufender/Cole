@@ -237,7 +237,7 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
 
         switch (typeInfo) {
             .Struct => |str| {
-                if (str.external) {
+                if (self.hasMetadata(str.expr, "@extern")) {
                     continue;
                 }
 
@@ -253,7 +253,7 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
             },
 
             .Union => |uni| {
-                if (uni.external) {
+                if (self.hasMetadata(uni.expr, "@extern")) {
                     continue;
                 }
 
@@ -341,7 +341,7 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
             },
 
             .Struct => |str| {
-                if (str.external) {
+                if (self.hasMetadata(str.expr, "@extern")) {
                     continue;
                 }
 
@@ -374,7 +374,7 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
             },
 
             .Union => |uni| {
-                if (uni.external) {
+                if (self.hasMetadata(uni.expr, "@extern")) {
                     continue;
                 }
 
@@ -438,7 +438,7 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
             },
 
             .Enum => |enm| {
-                if (enm.external) {
+                if (self.hasMetadata(enm.expr, "@extern")) {
                     continue;
                 }
 
@@ -471,11 +471,11 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
     }
 
     for (0..self.nodes.len) |node| {
-        try self.discoverFunctionsAndTypes(out, @intCast(node));
+        try self.discoverFunctionsAndVars(out, @intCast(node));
     }
 }
 
-fn discoverFunctionsAndTypes(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
+fn discoverFunctionsAndVars(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
     const node = self.nodes.get(nodePtr);
 
     switch (node.type) {
@@ -1003,7 +1003,7 @@ fn literal(self: *JIR, out: *Writer, ptr: Constant.Ptr) Error!void {
             .Cole => {
                 const rstr = self.strings[str.str];
                 try self.write(out, "({s}){{(uint8_t*)\"{s}\", {d}}}", .{
-                    try self.getCName(Comptime.Folder.Builtin.Type("[]u8"), null, true, false),
+                    try self.getCName(comptime Comptime.Folder.Builtin.Type("[]u8"), null, true, false),
                     rstr,
                     rstr.len,
                 });
@@ -1126,6 +1126,11 @@ fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool
                 else if (typeInfo == .Union) typeInfo.Union.name
                 else typeInfo.Enum.name;
 
+            const nodePtr =
+                if (typeInfo == .Struct) typeInfo.Struct.expr
+                else if (typeInfo == .Union) typeInfo.Union.expr
+                else typeInfo.Enum.expr;
+
             name = self.strings[namePtr];
 
             _ = std.mem.replace(u8, name, "::", "__", @constCast(name));
@@ -1135,7 +1140,11 @@ fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool
                 else if (typeInfo == .Union) typeInfo.Union.mutable
                 else typeInfo.Enum.mutable;
 
-            name = std.fmt.allocPrint(self.allocator, "{s}{s}", .{
+            name = std.fmt.allocPrint(self.allocator, "{s}{s}{s}", .{
+                if (self.hasMetadata(nodePtr, "@opaque"))
+                    if (noSymbol) "struct_"
+                    else "struct "
+                else "",
                 name,
                 if (mut) ""
                 else if (noSymbol) "_const"
@@ -1259,7 +1268,7 @@ pub fn hasMetadata(
                 const constant = self.constants.get(meta);
                 switch (constant) {
                     .Aggregate => |agg|
-                        if (agg.type == Comptime.Folder.Builtin.Type("builtin_metadata")) {
+                        if (agg.type == comptime Comptime.Folder.Builtin.Type("__builtin_metadata")) {
                             const enumValue = self.constants.get(agg.data.start).Integer.u32;
                             if (enumValue == Comptime.Folder.Builtin.Metadata(_meta)) break :blk true;
                         },

@@ -346,7 +346,7 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
                         .name = new,
                         .fields = str.fields,
                         .definitions = str.definitions,
-                        .external = str.external,
+                        .expr = str.expr,
                         .scope = str.scope,
                         .isTuple = str.isTuple,
                     },
@@ -358,7 +358,7 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
                         .name = new,
                         .definitions = enm.definitions,
                         .fields = enm.fields,
-                        .external = enm.external,
+                        .expr = enm.expr,
                         .scope = enm.scope,
                     },
                 },
@@ -371,7 +371,7 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
                         .mutable = uni.mutable,
                         .definitions = uni.definitions,
                         .fields = uni.fields,
-                        .external = uni.external,
+                        .expr = uni.expr,
                         .scope = uni.scope,
                     },
                 },
@@ -1076,7 +1076,7 @@ pub fn typecheckTupleDefinition(self: *Typechecker, exprListPtr: defines.OpaqueP
             .name = try self.folder.generateRandomName(.Tuple),
             .fields = fields,
             .definitions = &.{},
-            .external = false,
+            .expr = 0,
             .mutable = false,
             .scope = 0,
             .isTuple = true,
@@ -1450,7 +1450,7 @@ pub fn discoverScopeDef(
         return Error.AccessSpecifierMismatch;
     }
 
-    if (member.valueType != comptime Comptime.Folder.Builtin.Type("incomplete")) {
+    if (member.valueType != comptime Comptime.Folder.Builtin.Type("__incomplete")) {
         return member.valueType;
     }
 
@@ -1482,7 +1482,7 @@ pub fn discoverScopeDef(
                     .definitions = defs,
                     .scope = enm.scope,
                     .fields = enm.fields,
-                    .external = enm.external,
+                    .expr = enm.expr,
                     .mutable = enm.mutable,
                 },
             });
@@ -1497,7 +1497,7 @@ pub fn discoverScopeDef(
                     .definitions = defs,
                     .scope = str.scope,
                     .fields = str.fields,
-                    .external = str.external,
+                    .expr = str.expr,
                     .mutable = str.mutable,
                     .isTuple = str.isTuple,
                 },
@@ -1515,7 +1515,7 @@ pub fn discoverScopeDef(
                     .definitions = defs,
                     .scope = uni.scope,
                     .fields = uni.fields,
-                    .external = uni.external,
+                    .expr = uni.expr,
                     .mutable = uni.mutable,
                 },
             });
@@ -1654,8 +1654,21 @@ pub fn typecheckBuiltinCall(self: *Typechecker, extraPtr: defines.ExpressionPtr,
             const builtinInfo = try self.typecheckDecl(infoDecl, comptime Comptime.Folder.Builtin.Type("type"));
             return builtinInfo;
         },
+        BI("buildInfo") => {
+            const infoDecl = self.symbols.lookup.get(.{
+                .scope = 0, // @Note builtin is hardcoded to be zero
+                .name = "builtin::BuildInfo",
+            }) orelse self.symbols.lookup.get(.{
+                .scope = 0, // @Note builtin is hardcoded to be zero
+                .name = "BuildInfo",
+            }) orelse return common.debug.ShouldBeImpossible(undefined, @src());
+
+            const builtinInfo = try self.typecheckDecl(infoDecl, comptime Comptime.Folder.Builtin.Type("type"));
+            return builtinInfo;
+        },
         BI("compileError") => return self.folder.evalCompileError(extraPtr),
         BI("sizeOf") => return comptime Comptime.Folder.Builtin.Type("u32"),
+        BI("bitSizeOf") => return comptime Comptime.Folder.Builtin.Type("u32"),
         BI("alignOf") => return comptime Comptime.Folder.Builtin.Type("u32"),
         BI("typeName") => return comptime Comptime.Folder.Builtin.Type("[]u8"),
         BI("Tuple") => return comptime Comptime.Folder.Builtin.Type("type"),
@@ -1893,7 +1906,7 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
     if (isPresent.found_existing) {
         switch (isPresent.value_ptr.status) {
             .Checked => {
-                if (isPresent.value_ptr.result != comptime Comptime.Folder.Builtin.Type("incomplete")) {
+                if (isPresent.value_ptr.result != comptime Comptime.Folder.Builtin.Type("__incomplete")) {
                     return isPresent.value_ptr.result;
                 }
             },
@@ -1955,18 +1968,9 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
     });
     decl = self.symbols.declarations.get(declPtr);
 
-    assert(self.symbols.lookup.remove(.{
-        .scope = decl.scope,
-        .name = symName,
-    }));
-    self.symbols.lookup.putAssumeCapacityNoClobber(.{
-        .scope = decl.scope,
-        .name = self.builder.getInternedString(decl.name),
-    }, declPtr);
-
     isPresent.value_ptr.* = .{
         .status = .InProgress,
-        .result = comptime Comptime.Folder.Builtin.Type("incomplete"),
+        .result = comptime Comptime.Folder.Builtin.Type("__incomplete"),
     };
     errdefer isPresent.value_ptr.status = .NotChecked;
 
@@ -2232,7 +2236,7 @@ pub fn typecheckMark(
     for (0..marks.len()) |index| {
         metadata[index] = try self.folder.eval(
             ast.extra[marks.at(@intCast(index))],
-            comptime Comptime.Folder.Builtin.Type("builtin_metadata")
+            comptime Comptime.Folder.Builtin.Type("__builtin_metadata")
         );
     }
 
@@ -3271,7 +3275,7 @@ pub fn makeMutable(_: *const Typechecker, info: TypeInfo) TypeInfo {
                 .fields = str.fields,
                 .definitions = str.definitions,
                 .scope = str.scope,
-                .external = str.external,
+                .expr = str.expr,
                 .isTuple = str.isTuple,
             },
         },
@@ -3284,7 +3288,7 @@ pub fn makeMutable(_: *const Typechecker, info: TypeInfo) TypeInfo {
                 .fields = uni.fields,
                 .definitions = uni.definitions,
                 .scope = uni.scope,
-                .external = uni.external,
+                .expr = uni.expr,
             },
         },
         .Enum => |enm| .{
@@ -3294,7 +3298,7 @@ pub fn makeMutable(_: *const Typechecker, info: TypeInfo) TypeInfo {
                 .fields = enm.fields,
                 .definitions = enm.definitions,
                 .scope = enm.scope,
-                .external = enm.external,
+                .expr = enm.expr,
             },
         },
         .Pointer => |ptr| .{
@@ -3732,7 +3736,7 @@ pub fn hasMetadata(
                 switch (meval) {
                     .Enum => |enm|
                         if (
-                            enm.Type == (comptime Comptime.Folder.Builtin.Type("builtin_metadata"))
+                            enm.Type == (comptime Comptime.Folder.Builtin.Type("__builtin_metadata"))
                             and enm.Value == Comptime.Folder.Builtin.Metadata(_meta)
                         ) break :blk true,
 

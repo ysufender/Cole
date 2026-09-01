@@ -1,0 +1,159 @@
+/*
+ * Works on Directories and Files,
+ * For directories, the modification notification includes child files (non-recursive).
+ */
+
+code {
+#include <stdio.h>
+#ifdef COLE_UNIX
+#   include <sys/stat.h>
+#else
+#   include <windows.h>
+#endif
+}
+
+import std::io::stream as Stream;
+import std::string as String;
+import std::memory::allocator as Allocator;
+
+pub let Watcher = struct {
+    file: []u8,
+    fileInfo: mut FileInfo,
+};
+
+pub let Signal = struct {
+    pub let Modified = 1;
+};
+
+pub let FileInfo = struct {
+    modify: c_long,
+
+    pub let print = fn (self: *FileInfo, stream: Stream::Output::Stream, allocator: Allocator::Allocator) -> void {
+        _ = Stream::Output::writebuffer(stream, "( size = ");
+        _ = Stream::Output::writebuffer(stream, String::intToStr(self.size, allocator));
+        _ = Stream::Output::writebuffer(stream, ", modify_time = ");
+        _ = Stream::Output::writebuffer(stream, String::intToStr(self.modify, allocator));
+        _ = Stream::Output::writebuffer(stream, " )");
+    };
+};
+
+pub let createWatcher = fn (path: []u8) -> Watcher {
+    return (path, getInfo(path));
+};
+
+pub let poll = fn (self: *mut Watcher) -> bool {
+    let current = getInfo(self.file);
+
+    if current.modify > self.fileInfo.modify {
+        self.fileInfo = current;
+        return true;
+    }
+
+    return false;
+};
+
+pub let print = fn (self: *Watcher, stream: Stream::Output::Stream, allocator: Allocator::Allocator) -> void {
+    _ = Stream::Output::writebuffer(stream, "( file = ");
+    _ = Stream::Output::writebuffer(stream, self.file);
+    _ = Stream::Output::writebuffer(stream, ", info = ");
+    FileInfo::print(self.fileInfo.&, stream, allocator);
+    _ = Stream::Output::writebuffer(stream, " )");
+};
+
+/*
+ * POSIX
+ */
+let timespec = #(@extern) struct {
+    tv_sec: c_long,
+};
+
+let stat = #(@extern, @opaque) struct {
+    st_mtim: timespec,  /* Time of last modification */
+
+    pub let toFileInfo = fn (self: *stat) -> FileInfo {
+        return (self.st_mtim.tv_sec);
+    };
+};
+
+let fstat = #(@extern) fn (fd: mut c_int, statbuf: mut *mut stat) -> mut c_int { };
+let fileno = #(@extern) fn (file: mut *mut FILE) -> mut c_int { };
+let fopen = #(@extern) fn (pathname: mut [@c]c_char,  mode: mut [@c]c_char) -> mut *mut FILE { };
+let fclose = #(@extern) fn (file: mut *mut FILE) -> mut c_int { };
+
+let FILE = #(@extern) struct { };
+
+/*
+ * WIN32
+ */
+
+let HANDLE = #(@extern) struct { };
+let DWORD  = c_ulong;
+let BOOL   = c_int;
+
+let FILETIME = #(@extern) struct {
+    dwLowDateTime:  DWORD,
+    dwHighDateTime: DWORD,
+};
+
+let BY_HANDLE_FILE_INFORMATION = #(@extern, @opaque) struct {
+    ftLastWriteTime: FILETIME,  /* Time of last modification */
+    pub let toFileInfo = fn (self: *BY_HANDLE_FILE_INFORMATION) -> FileInfo {
+        let ft: c_long = ((self.ftLastWriteTime.dwHighDateTime) << 32)
+                       |  (self.ftLastWriteTime.dwLowDateTime);
+        let mtime = (ft - 116444736000000000) / 10000000;
+        return mtime;
+    };
+};
+
+let CreateFileA = #(@extern) fn (
+    lpFileName:            mut [@c]c_char,
+    dwDesiredAccess:       DWORD,
+    dwShareMode:           DWORD,
+    lpSecurityAttributes:  mut *mut void,
+    dwCreationDisposition: DWORD,
+    dwFlagsAndAttributes:  DWORD,
+    hTemplateFile:         mut *mut HANDLE,
+) -> mut *mut HANDLE { };
+
+let GetFileInformationByHandle = #(@extern) fn (
+    hFile:             mut *mut HANDLE,
+    lpFileInformation: mut *mut BY_HANDLE_FILE_INFORMATION,
+) -> BOOL { };
+
+let CloseHandle = #(@extern) fn (hObject: mut *mut HANDLE) -> BOOL { };
+
+let getInfo = fn (path: []u8) -> FileInfo {
+    let BI = buildInfo();
+
+    if BI.platform == @Unix {
+        let file = fopen(cast(path.ptr), "r");
+
+        if file == undefined {
+            return (0);
+        }
+
+        let status: mut stat = undefined;
+        let fd = fileno(file);
+        _ = fstat(fd, status.&);
+        _ = fclose(file);
+        return stat::toFileInfo(status.&);
+    }
+    else {
+        let file = CreateFileA(
+            cast(path.ptr),
+            2147483648,
+            1,
+            undefined,
+            3,
+            128,
+            undefined,
+        );
+        if file == undefined {
+            return (0);
+        }
+        let info: mut BY_HANDLE_FILE_INFORMATION = undefined;
+        _ = GetFileInformationByHandle(file, info.&);
+        _ = CloseHandle(file);
+        return BY_HANDLE_FILE_INFORMATION::toFileInfo(info.&);
+    }
+};

@@ -1298,14 +1298,15 @@ pub const builtins = [_][]const u8 {
 
     "undefined", "compileError",
     "bitSizeOf", "unreachable", "typeOf",
-    "sizeOf", "bitSet", "cast", "unsafeCast",
+    "sizeOf", "cast", "unsafeCast",
     "as", "compileLog", "typeName", "Tuple",
     "alignOf", "compileBreak", "typeInfo",
-    "src",
+    "src", "buildInfo",
 };
 
 pub fn BuiltinIndex(comptime builtin: []const u8) u32 {
     var index: u32 = 0;
+    @setEvalBranchQuota(5000);
     inline for (builtins) |b| {
         defer index += 1;
         if (std.mem.eql(u8, b, builtin)) {

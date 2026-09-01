@@ -1,3 +1,25 @@
+pub let Optimization = enum {
+    Og,
+    O1,
+    O2,
+    O3,
+};
+
+pub let Backend = enum {
+    C,
+};
+
+pub let Platform = enum {
+    Windows,
+    Unix,
+};
+
+pub let BuildInfo = struct {
+    optimization: Optimization,
+    backend: Backend,
+    platform: Platform,
+};
+
 pub let SourceInfo = struct {
     file: []u8,
     line: u32,

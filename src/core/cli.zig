@@ -19,6 +19,7 @@ const Flag = enum {
     Flag,
     Output,
     Optimize,
+    Target,
 };
 
 const flags = std.StaticStringMap(Flag).initComptime(&(.{
@@ -250,14 +251,27 @@ pub fn parseCLI(allocator: std.mem.Allocator, _args: std.process.Args, io: std.I
                 libraries.keyIterator(),
                 allocator
             ),
-            .optimize = @enumFromInt(
-                if (cliFlags.contains("--debug")) 0
-                else if (std.mem.eql(u8, optimize orelse "0", "g")) 0
-                else std.fmt.parseInt(u3, optimize orelse "0", 10) catch unreachable,
-            ),
+            .buildInfo = .{
+                .backend = targetBackend,
+                .isDebug = cliFlags.contains("--debug"),
+                .optimization = @enumFromInt(
+                    if (cliFlags.contains("--debug")) 0
+                    else if (std.mem.eql(u8, optimize orelse "1", "g")) 0
+                    else std.fmt.parseInt(u3, optimize orelse "1", 10) catch unreachable,
+                ),
+                .platform = switch (@import("builtin").os.tag) {
+                    .windows => .Windows,
+                    .freebsd, .netbsd, .openbsd,
+                    .macos, .linux, .dragonfly,
+                    .illumos, .haiku => .Unix,
+                    else => |platform| {
+                        common.log.err("Unsupported target platform '{s}' detected.", .{@tagName(platform)});
+                        return Error.UnsupportedTarget;
+                    },
+                },
+            },
             .maxErr = maxErr,
             .flags = cliFlags,
-            .backend = targetBackend,
         }
         else {
             common.log.err("cole expects an input file.", .{});

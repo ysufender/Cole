@@ -102,7 +102,7 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
                     .u8 = @intFromBool(ofType.Bool),
                 } },
                 else => |t| {
-                    common.log.err("Integer with size: {d}", .{t});
+                    self.report("Integer with size '{d}' is unsupported.", .{t});
                     return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
                 },
             },
@@ -127,7 +127,7 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
             },
 
             else => |t| {
-                common.log.err("addConstant: {s}", .{@tagName(t)});
+                self.report("Can't add constant of type '{s}'", .{@tagName(t)});
                 return common.debug.ShouldBeImpossible(undefined, @src());
             },
         },
@@ -1163,10 +1163,42 @@ fn builtinCall(
             })
         ),
         BI("sizeOf") => self.sizeOf(extraPtr, ofType),
+        BI("bitSizeOf") => self.bitSizeOf(extraPtr, ofType),
         BI("alignOf") => self.alignOf(extraPtr, ofType),
         BI("compileLog"), BI("compileError") => 0,
         else => common.debug.NotImplemented(self.typechecker.context.log, @src()),
     };
+}
+
+fn bitSizeOf(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR.Ptr {
+    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+    const exprList = ast.expressions.items(.value)[ast.extra[extraPtr]];
+    const args = defines.Range{
+        .start = ast.extra[exprList],
+        .end = ast.extra[exprList + 1],
+    };
+
+    const t = try self.typechecker.typecheckExpression(ast.extra[args.at(0)], null);
+
+
+    if (self.typechecker.folder.attemptEval(ast.extra[args.at(0)], t)) |res| blk: {
+        return self.typechecker.builder.literal(
+            try self.addConstant(
+                try self.typechecker.folder.appendValue(.{ .Int = switch (self.typechecker.folder.getValue(res)) {
+                    .Type => |typeID| self.typechecker.sizeOf(typeID),
+                    else => break :blk, 
+                }}),
+                ofType
+            ),
+        );
+    }
+
+    return self.typechecker.builder.literal(
+        try self.addConstant(
+            try self.typechecker.folder.appendValue(.{ .Int = self.typechecker.sizeOf(t) }),
+            ofType
+        ),
+    );
 }
 
 fn sizeOf(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR.Ptr {
@@ -1533,7 +1565,7 @@ pub fn addMetadata(self: *Lowerer, to: JIR.Ptr, from: defines.ExpressionPtr) Err
     for (expressions, 0..) |valuePtr, idx| {
         const constant = try self.addConstant(
             valuePtr,
-            try self.typechecker.typecheckValue(valuePtr, comptime Comptime.Folder.Builtin.Type("builtin_metadata"))
+            try self.typechecker.typecheckValue(valuePtr, comptime Comptime.Folder.Builtin.Type("__builtin_metadata"))
         );
         metadata[idx] = constant;
     }
