@@ -622,14 +622,26 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
                 _ = std.mem.replace(u8, self.strings[self.data[node.value + 2]], "::", "__", @constCast(self.strings[self.data[node.value + 2]]));
                 try self.writeln(out, "{s}{s}", .{
                     try self.getCName(typeID, self.data[node.value + 2], false, false),
-                    if (self.data[node.value + 3] == 1) ";\n" else " = ",
+                    if (self.data[node.value + 3] == 1) " = NULL;\n" else " = ",
                 });
             }
             else {
+                const zeroInit: []const u8 = switch (info) {
+                    .Pointer => " = NULL",
+                    .Bool, .Integer, .CInt, .CUInt, .CLong, .CULong,
+                    .CShort, .CUShort, .CSize, .CChar, .CUChar => " = 0",
+                    .Float, .CDouble => " = 0",
+                    .Struct, .Union, .Enum => " = {0}",
+                    .Array => " = {0}",
+                    else => "",
+                };
                 try self.writeln(out, "{s} {s}{s}", .{
                     try self.getCName(typeID, null, false, false),
                     self.strings[self.data[node.value + 2]],
-                    if (self.data[node.value + 3] == 1) ";\n" else " = ",
+                    if (self.data[node.value + 3] == 1)
+                        try std.fmt.allocPrint(self.allocator, "{s};\n", .{zeroInit})
+                    else
+                        " = ",
                 });
             }
 

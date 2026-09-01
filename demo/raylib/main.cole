@@ -4,6 +4,7 @@ import std::c as C;
 import std::ini as INI;
 import std::io::console as Console;
 import std::math as Math;
+import std::filewatch as FW;
 
 import raylib as RayLib;
 
@@ -34,6 +35,8 @@ let main = fn (args: [][]u8) -> i32 {
     }
     let ini: mut any = _ini.Ok;
 
+    let iniWatcher: mut any = FW::createWatcher("demo/raylib/settings.ini");
+
     let WIDTH : mut float = getSettingOrelse(ini.&, "window", "width", 640);
     let HEIGHT: mut float = getSettingOrelse(ini.&, "window", "height", 480);
 
@@ -46,9 +49,11 @@ let main = fn (args: [][]u8) -> i32 {
 
     while !RayLib::WindowShouldClose() {
         // Load INI
-        _ini = INI::loadFile(C::Allocator, "demo/raylib/settings.ini");
-        if _ini.tag == @Ok {
-            ini = _ini.Ok;
+        if FW::poll(iniWatcher.&) {
+            _ini = INI::loadFile(C::Allocator, "demo/raylib/settings.ini");
+            if _ini.tag == @Ok {
+                ini = _ini.Ok;
+            }
         }
 
         // Poll Events
