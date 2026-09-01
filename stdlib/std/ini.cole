@@ -47,9 +47,9 @@ pub let Value = union(enum) {
         }
 
         _ = Stream::Output::writebuffer(stream, switch self.tag {
-            @Integer -> String::intToStr(self.Integer, allocator),
-            @String -> self.String,
-            @Float -> String::floatToStr(self.Float, allocator),
+            @Integer -> |i| String::intToStr(i, allocator),
+            @String -> |s| s,
+            @Float -> |f| String::floatToStr(f, allocator),
             else -> "<unreachable>",
         });
     };
@@ -59,7 +59,7 @@ pub let loadFile = fn (allocator: Allocator::Allocator, path: []u8) -> INI::Load
     let file = File::Input::open(path, allocator, false);
 
     return switch file {
-        @Ok -> loadStream(allocator, File::Input::stream(file.Ok)),
+        @Ok -> |f| loadStream(allocator, File::Input::stream(f)),
         @Err -> (@Err, ()),
     };
 };
@@ -389,15 +389,15 @@ let number = fn (allocator: Allocator::Allocator, stream: Stream::Input::Stream)
     let start = Stream::Input::tell(stream);
 
     while true {
-        let ch = Stream::Input::read(stream);
+        let _ch = Stream::Input::read(stream);
 
-        switch ch {
-            @Ok -> if !ASCII::isDigit(ch.Ok) {
-                if ch.Ok == '.' and !isFloat {
+        switch _ch {
+            @Ok -> |ch| if !ASCII::isDigit(ch) {
+                if ch == '.' and !isFloat {
                     isFloat = true;
                     continue;
                 }
-                else if ch.Ok == '.' {
+                else if ch == '.' {
                     return (@Err, "Trailing dots are not permitted.");
                 }
                 else {
@@ -438,10 +438,10 @@ let identifier = fn (allocator: Allocator::Allocator, stream: Stream::Input::Str
     let start = Stream::Input::tell(stream);
 
     while true {
-        let ch = Stream::Input::read(stream);
+        let _ch = Stream::Input::read(stream);
 
-        switch ch {
-            @Ok -> if !ASCII::isAlpha(ch.Ok) and ch.Ok != '_' {
+        switch _ch {
+            @Ok -> |ch| if !ASCII::isAlpha(ch) and ch != '_' {
                 break;
             }
             @Err -> return (@Err, "Stream Error in identifier count.");
@@ -462,7 +462,7 @@ let identifier = fn (allocator: Allocator::Allocator, stream: Stream::Input::Str
         let res = Stream::Input::read(stream);
 
         switch res {
-            @Ok -> value[index] = res.Ok;
+            @Ok -> |rok| value[index] = rok;
             @Err -> return (@Err, "Stream Error in identifier.");
             @EOS -> return (@EOF, "EOF in identifier");
         }

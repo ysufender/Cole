@@ -202,6 +202,20 @@ pub inline fn jump(self: *Builder, lbl: StringPtr) Error!JIR.Ptr { return self.c
 pub inline fn cjump(self: *Builder, lbl: StringPtr, cnd: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.JumpIf, lbl, cnd); }
 pub inline fn exit(self: *Builder) Error!JIR.Ptr { return self.commonSingle(.Exit, 0); }
 
+pub inline fn stmtExpr(self: *Builder, expr: JIR.Ptr, stmts: []const JIR.Ptr) Error!JIR.Ptr {
+    const start: u32 = @intCast(self.data.items.len);
+    self.data.append(self.allocator, expr) catch return Error.AllocatorFailure;
+    self.data.append(self.allocator, @intCast(stmts.len)) catch return Error.AllocatorFailure;
+    self.data.appendSlice(self.allocator, stmts) catch return Error.AllocatorFailure;
+
+    const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
+    self.nodes.set(res, .{
+        .type = .StatementExpr,
+        .value = start,
+    });
+    return res;
+}
+
 pub inline fn scope(self: *Builder, name: defines.StringPtr, args: []const JIR.Ptr) Error!JIR.Ptr {
     const start: u32 = @intCast(self.data.items.len);
     self.data.append(self.allocator, name) catch return Error.AllocatorFailure;

@@ -58,10 +58,10 @@ pub let floatToStr = fn (num: float, allocator: Allocator::Allocator) -> []u8 {
     let whole: c_long = cast(num);
     let frac: float = num - cast(whole);
 
-    let PRECISION: u32 = 9;
+    let precision: u32 = 9;
     let multiplier: mut float = 1.0;
     let i: mut u32 = 0;
-    while i < PRECISION {
+    while i < precision {
         multiplier = multiplier * 10.0;
         i = i + 1;
     }
@@ -70,7 +70,7 @@ pub let floatToStr = fn (num: float, allocator: Allocator::Allocator) -> []u8 {
     let wholeStr: []u8 = intToStr(whole, allocator);
     let fracStr: []u8 = intToStr(fracInt, allocator);
 
-    let padding: u32 = PRECISION - fracStr.len;
+    let padding: u32 = precision - fracStr.len;
     let fracSigLen: mut u32 = fracStr.len;
     while fracSigLen > 1 {
         if fracStr[fracSigLen - 1] != '0' {
@@ -111,9 +111,6 @@ pub let floatToStr = fn (num: float, allocator: Allocator::Allocator) -> []u8 {
     }
 
     return cast(result);
-};
-
-pub let charToStr = fn (ch: u8, allocator: Allocator::Allocator) -> []u8 {
 };
 
 pub let equals = fn (str1: []u8, str2: []u8) -> bool {

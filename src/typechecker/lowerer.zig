@@ -389,18 +389,21 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
 
         const caseJump = try typechecker.builder.cjump(caseEnd, cnd);
 
-        const captureCount = ast.extra[caseRange.at(idx + 1)];
+        const hasCapture = ast.extra[caseRange.at(idx + 1)] == 1;
         const bodyPtr = ast.extra[caseRange.at(idx + 3)];
 
         const switchFull = res: {
-            if (captureCount == 1) {
+            if (hasCapture) {
+                const captureExpr = ast.extra[caseRange.at(idx + 2)];
+
+                const captureDeclPtr = self.typechecker.symbols.findDecl(.{
+                    .file = self.typechecker.currentFile,
+                    .expr = captureExpr,
+                });
+                const name = self.typechecker.symbols.declarations.items(.name)[captureDeclPtr];
+
                 const caseField = typeInfo.Union.fields[caseValue + 1];
 
-                const nameStr = tokens
-                                .get(ast.expressions.get(ast.extra[caseRange.at(idx + 2)]).value)
-                                .lexeme(typechecker.context, ast.tokens);
-
-                const name = try typechecker.builder.internString(nameStr);
                 const capture = try typechecker.builder.variableDef(
                     false,
                     caseField.valueType,
@@ -1012,9 +1015,9 @@ fn switchExpr(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error
     while (idx < caseRange.len()) : (idx += 4) {
         const caseIndex = ast.extra[caseRange.at(idx)];
         const bodyPtr = ast.extra[caseRange.at(idx + 3)];
-        const captureCount = ast.extra[caseRange.at(idx + 1)];
+        const hasCapture = ast.extra[caseRange.at(idx + 1)] == 1;
 
-        if (captureCount != 0) {
+        if (hasCapture) {
             return common.debug.NotImplemented(self.typechecker.context.log, @src());
         }
 

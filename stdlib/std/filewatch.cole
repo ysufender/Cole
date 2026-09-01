@@ -99,7 +99,7 @@ let BY_HANDLE_FILE_INFORMATION = #(@extern, @opaque) struct {
     ftLastWriteTime: FILETIME,  /* Time of last modification */
     pub let toFileInfo = fn (self: *BY_HANDLE_FILE_INFORMATION) -> FileInfo {
         let ft: c_long = ((self.ftLastWriteTime.dwHighDateTime) << 32)
-                       |  (self.ftLastWriteTime.dwLowDateTime);
+                         | cast(self.ftLastWriteTime.dwLowDateTime);
         let mtime = (ft - 116444736000000000) / 10000000;
         return mtime;
     };

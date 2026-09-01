@@ -25,9 +25,10 @@
 
 pub let Integer = struct {
     pub let Check = fn (T: type) -> bool {
-        return
-            T == i32 or T == i8 or T == u8 or T == u32
-            or T == mut i32 or T == mut i8 or T == mut u8 or T == mut u32;
+        return switch typeInfo(T) {
+            @Integer -> true,
+            else -> false,
+        };
     };
     
     pub let Trait = fn (T: type) -> type {

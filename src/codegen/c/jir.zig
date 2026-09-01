@@ -76,6 +76,7 @@ pub const Node = struct {
         Code,
         Mod,
         Discard,
+        StatementExpr,
     };
 
     type: Type,
