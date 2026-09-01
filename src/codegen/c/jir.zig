@@ -671,6 +671,21 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
             self.indent -= 1;
             try self.writeln(out, "}}\n\n", .{ });
         },
+        .StatementExpr => {
+            try self.write(out, "({{\n", .{});
+            self.indent += 1;
+            const len = self.data[node.value + 1];
+
+            for (0..len) |idx| {
+                try self.operation(out, self.data[node.value + 2 + idx]);
+            }
+            try self.indentf(out);
+            try self.operation(out, self.data[node.value]);
+
+            self.indent -= 1;
+            try self.write(out, ";\n", .{});
+            try self.writeln(out, "}})", .{});
+        },
 
         .Exit => common.debug.ShouldBeImpossible(self.context.log, @src()),
 

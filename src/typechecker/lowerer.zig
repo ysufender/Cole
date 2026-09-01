@@ -329,7 +329,6 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     var exec = typechecker.folder;
 
     const ast = typechecker.context.getAST(self.typechecker.currentFile);
-    const tokens = typechecker.context.getTokens(ast.tokens);
 
     const enumOrUnionType = try typechecker.typecheckExpression(ast.extra[extraPtr], null);
     const enumOrUnion = try self.expression(ast.extra[extraPtr], enumOrUnionType);
@@ -353,8 +352,10 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
         .end = ast.extra[extraPtr + 2],
     };
 
-    var ptrs = typechecker.arena.allocator().alloc(JIR.Ptr, @divFloor(caseRange.len(), 4) + 1)
-        catch return Error.AllocatorFailure;
+    var ptrs =
+        if (maybeComptimeEnumOrUnion) |_| @constCast(&.{}) 
+        else typechecker.arena.allocator().alloc(JIR.Ptr, @divFloor(caseRange.len(), 4) + 1)
+            catch return Error.AllocatorFailure;
 
     var idx: u32 = 0;
     while (idx < caseRange.len()) : (idx += 4) {
@@ -362,19 +363,19 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
 
         if (caseIndex == Parser.AnyType) {
             const bodyPtr = ast.extra[caseRange.at(idx + 3)];
-            const body = try self.statement(bodyPtr);
 
             if (maybeComptimeEnumOrUnion) |_| {
+                const body = try self.statement(bodyPtr);
                 return body;
             }
             else {
+                const body = try self.statement(bodyPtr);
                 ptrs[@divFloor(idx, 4)] = body;
                 continue;
             }
         }
 
         const caseValue = exec.getValue(try exec.eval(caseIndex, tag.type)).Enum.Value;
-
 
         const case = try self.expression(caseIndex, tag.type);
 
@@ -413,7 +414,6 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
                     null,
                 );
 
-                const body = try self.statement(bodyPtr);
 
                 if (maybeComptimeEnumOrUnion) |val| {
                     switch (val) {
@@ -422,7 +422,7 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
                                 return typechecker.builder.scope(
                                     try exec.generateRandomName(.Case), &.{
                                         capture,
-                                        body,
+                                        try self.statement(bodyPtr),
                                     },
                                 );
                             },
@@ -432,15 +432,17 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
                                 return typechecker.builder.scope(
                                     try exec.generateRandomName(.Case), &.{
                                         capture,
-                                        body,
+                                        try self.statement(bodyPtr),
                                     },
                                 );
                             },
 
                         else => return common.debug.ShouldBeImpossible(undefined, @src()),
                     }
+                    continue;
                 }
 
+                const body = try self.statement(bodyPtr);
                 const caseEndLbl = try typechecker.builder.label(caseEnd);
 
                 break :res try typechecker.builder.scope(
@@ -454,24 +456,16 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
                 );
             }
             else {
-                const body = try self.statement(bodyPtr);
-
                 if (maybeComptimeEnumOrUnion) |val| {
                     switch (val) {
-                        .Union => |uni|
-                            if (uni.Tag == caseValue) {
-                                return body;
-                            },
-
-                        .Enum => |enm| {
-                            if (enm.Value == caseValue)
-                                return body;
-                        },
-
+                        .Union => |uni| if (uni.Tag == caseValue) return try self.statement(bodyPtr),
+                        .Enum => |enm| if (enm.Value == caseValue) return try self.statement(bodyPtr),
                         else => return common.debug.ShouldBeImpossible(undefined, @src()),
                     }
+                    continue;
                 }
 
+                const body = try self.statement(bodyPtr);
                 const caseEndLbl = try typechecker.builder.label(caseEnd);
 
                 break :res try typechecker.builder.scope(
@@ -991,6 +985,12 @@ fn switchExpr(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error
 
     const enumOrUnionType = try typechecker.typecheckExpression(ast.extra[extraPtr], null);
     const enumOrUnion = try self.expression(ast.extra[extraPtr], enumOrUnionType);
+    const maybeComptimeEnumOrUnion =
+        if (self.typechecker.context.settings.canFold())
+            if (typechecker.folder.attemptEval(ast.extra[extraPtr], enumOrUnionType))
+                |ptr| typechecker.folder.getValue(ptr)
+            else null
+        else null;
     const typeInfo = typechecker.typeTable.get(enumOrUnionType);
     const tag: struct { type: TypeID, fields: []const types.EnumField } = switch (typeInfo) {
         .Enum => |enm| .{ .type = enumOrUnionType, .fields = enm.fields },
@@ -1004,53 +1004,142 @@ fn switchExpr(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error
     };
     const numCases = @divFloor(caseRange.len(), 4);
 
-    var conds = typechecker.arena.allocator().alloc(JIR.Ptr, numCases)
-        catch return Error.AllocatorFailure;
-    var vals = typechecker.arena.allocator().alloc(JIR.Ptr, numCases)
-        catch return Error.AllocatorFailure;
-    var defaultVal: ?JIR.Ptr = null;
-    var written: u32 = 0;
+    var ops =
+        if (maybeComptimeEnumOrUnion) |_| @constCast(&.{})
+        else typechecker.builder.allocator.alloc(JIR.Ptr, numCases + 2)
+            catch return Error.AllocatorFailure;
+    var ptrs = ops[@min(1, ops.len)..];
+
+    const resName = try typechecker.folder.generateRandomName(.SwitchResult);
+    const resIdent = try typechecker.builder.identifier(resName);
+
+    if (maybeComptimeEnumOrUnion == null) {
+        const ti = typechecker.typeTable.get(ofType);
+        const newT = try typechecker.registerType(typechecker.makeMutable(ti));
+        ops[0] = try typechecker.builder.variableDef(false, newT, resName, true, 0, null);
+    }
+
+    const switchEnd = try typechecker.folder.generateRandomName(.SwitchEnd);
 
     var idx: u32 = 0;
     while (idx < caseRange.len()) : (idx += 4) {
         const caseIndex = ast.extra[caseRange.at(idx)];
-        const bodyPtr = ast.extra[caseRange.at(idx + 3)];
-        const hasCapture = ast.extra[caseRange.at(idx + 1)] == 1;
-
-        if (hasCapture) {
-            return common.debug.NotImplemented(self.typechecker.context.log, @src());
-        }
+        const caseEnd = try typechecker.folder.generateRandomName(.CaseEnd);
 
         if (caseIndex == Parser.AnyType) {
-            defaultVal = try self.expression(bodyPtr, ofType);
-            continue;
+            const bodyPtr = ast.extra[caseRange.at(idx + 3)];
+
+            if (maybeComptimeEnumOrUnion) |_| {
+                const body = try self.expression(bodyPtr, ofType); 
+                return body;
+            }
+            else {
+                const body = try self.expression(bodyPtr, ofType); 
+                const placeholder = try typechecker.builder.label(try typechecker.folder.generateRandomName(.Placeholder));
+                const result = try typechecker.builder.assignment(resIdent, body);
+
+                ptrs[@divFloor(idx, 4)] = placeholder;
+                ptrs[@divFloor(idx, 4) + 1] = result;
+                ptrs[@divFloor(idx, 4) + 2] = try typechecker.builder.jump(switchEnd);
+                continue;
+            }
         }
 
+        const caseValue = typechecker.folder.getValue(try typechecker.folder.eval(caseIndex, tag.type)).Enum.Value;
         const case = try self.expression(caseIndex, tag.type);
 
-        const cnd = if (typeInfo == .Union) res: {
-            const tagFieldName = try typechecker.builder.internString("tag");
-            const tagField = try typechecker.builder.dot(enumOrUnion, tagFieldName);
-            break :res try typechecker.builder.equal(tagField, case);
-        } else try typechecker.builder.equal(enumOrUnion, case);
+        const cnd =
+            if (typeInfo == .Union) cnd: {
+                const tagFieldName = try typechecker.builder.internString("tag");
+                const tagField = try typechecker.builder.dot(enumOrUnion, tagFieldName);
+                break :cnd try typechecker.builder.notEqual(tagField, case);
+            }
+            else try typechecker.builder.notEqual(enumOrUnion, case);
 
-        conds[written] = cnd;
-        vals[written] = try self.expression(bodyPtr, ofType);
-        written += 1;
+        const caseSkipJump = try typechecker.builder.cjump(caseEnd, cnd);
 
-        defaultVal = vals[written - 1];
+        const hasCapture = ast.extra[caseRange.at(idx + 1)] == 1;
+        const bodyPtr = ast.extra[caseRange.at(idx + 3)];
+
+        const switchFull = switchFull: {
+            if (hasCapture) {
+                const captureExpr = ast.extra[caseRange.at(idx + 2)];
+
+                const captureDeclPtr = self.typechecker.symbols.findDecl(.{
+                    .file = self.typechecker.currentFile,
+                    .expr = captureExpr,
+                });
+                const name = self.typechecker.symbols.declarations.items(.name)[captureDeclPtr];
+
+                const caseField = typeInfo.Union.fields[caseValue + 1];
+
+                const capture = try typechecker.builder.variableDef(
+                    false,
+                    caseField.valueType,
+                    name,
+                    false,
+                    try typechecker.builder.dot(enumOrUnion, caseField.name),
+                    null,
+                );
+
+                if (maybeComptimeEnumOrUnion) |val| {
+                    switch (val) {
+                        .Union => |uni| if (uni.Tag == caseValue) {
+                            return try typechecker.builder.stmtExpr(try self.expression(bodyPtr, ofType), &.{capture});
+                        },
+                        .Enum => |enm| if (enm.Value == caseValue) {
+                            return try typechecker.builder.stmtExpr(try self.expression(bodyPtr, ofType), &.{capture});
+                        },
+                        else => return common.debug.ShouldBeImpossible(undefined, @src()),
+                    }
+                    continue;
+                }
+
+                const body = try self.expression(bodyPtr, ofType);
+                const caseEndLbl = try typechecker.builder.label(caseEnd);
+
+                break :switchFull try typechecker.builder.scope(
+                    try typechecker.folder.generateRandomName(.Case), &.{
+                        caseSkipJump,
+                        capture,
+                        try typechecker.builder.assignment(resIdent, body),
+                        try typechecker.builder.jump(switchEnd),
+                        caseEndLbl,
+                    },
+                );
+            }
+            else {
+                const body = try self.expression(bodyPtr, ofType);
+
+                if (maybeComptimeEnumOrUnion) |val| {
+                    switch (val) {
+                        .Union => |uni| if (uni.Tag == caseValue) return body,
+                        .Enum => |enm| if (enm.Value == caseValue) return body,
+                        else => return common.debug.ShouldBeImpossible(undefined, @src()),
+                    }
+                    continue;
+                }
+
+                const caseEndLbl = try typechecker.builder.label(caseEnd);
+
+                break :switchFull try typechecker.builder.scope(
+                    try typechecker.folder.generateRandomName(.Case), &.{
+                        caseSkipJump,
+                        try typechecker.builder.assignment(resIdent, body),
+                        try typechecker.builder.jump(switchEnd),
+                        caseEndLbl,
+                    },
+                );
+            }
+        };
+
+        ptrs[@divFloor(idx, 4)] = switchFull;
     }
 
-    var result = defaultVal orelse
-        return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
+    const switchEndLabel = try typechecker.builder.label(switchEnd); 
+    ptrs[@divFloor(caseRange.len(), 4)] = switchEndLabel;
 
-    var j: u32 = written;
-    while (j > 0) {
-        j -= 1;
-        result = try typechecker.builder.ternary(conds[j], vals[j], result);
-    }
-
-    return result;
+    return try typechecker.builder.stmtExpr(resIdent, ops);
 }
 
 fn call(
