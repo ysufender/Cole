@@ -1053,11 +1053,10 @@ fn resolveSwitch(
         defer self.currentScope = previous;
         self.currentScope = caseScope;
 
-        const captureCount = ast.extra[case + 1];
+        const captured = ast.extra[case + 1] == 1;
         const firstCapture = ast.extra[case + 2];
-        const firstCaptureToken: defines.TokenPtr = ast.expressions.items(.value)[firstCapture];
-        for (0..captureCount) |captureIndex| {
-            const captureToken: u32 = @intCast(firstCaptureToken + 2 * captureIndex);
+        const captureToken: defines.TokenPtr = ast.expressions.items(.value)[firstCapture];
+        if (captured) {
             self.lastToken = captureToken;
 
             const decl = try self.decls.addOne(allocator);
@@ -1072,8 +1071,6 @@ fn resolveSwitch(
                 .topLevel = false,
             });
 
-            // @Beware must be kept in sync with the typechecker,
-            // destructuring is not supported yet
             self.resolved.put(allocator, .{
                 .file = self.dataIndex(),
                 .expr = firstCapture,

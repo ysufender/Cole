@@ -654,12 +654,8 @@ fn typecheckSwitchStatementOnUnion(
         const prev = self.currentScope;
         defer self.currentScope = prev;
 
-        const captureCount = ast.extra[case + 1];
-        if (captureCount > 1) {
-            self.report("Value destruction is not supported.", .{ });
-            return Error.IllegalSyntax;
-        }
-        else if (captureCount > 0)
+        const hasCapture = ast.extra[case + 1] == 1;
+        if (hasCapture)
         {
             const firstCapture = ast.extra[case + 2];
 
@@ -673,10 +669,7 @@ fn typecheckSwitchStatementOnUnion(
                 self.fieldIndex(itemTypeID, field) catch return common.debug.ShouldBeImpossible(self.context.log, @src())
             ].valueType;
 
-            self.lookup.putNoClobber(self.arena.allocator(), captureDecl, .{
-                .status = .Checked,
-                .result = captureType,
-            }) catch return Error.AllocatorFailure;
+            _ = try self.typecheckDecl(captureDecl, captureType);
         }
 
         const prevc = self.setFlag(.CoveredAllPaths, false);
@@ -715,8 +708,6 @@ fn typecheckSwitchStatementOnEnum(
     // @Beware Hardcoded field size, must be kept in sync with parser.(union|struct|enum)Definition
     var fieldBuffer: [512]u32 = undefined;
     var bufferAllocator = std.heap.FixedBufferAllocator.init(@ptrCast(&fieldBuffer));
-
-    const tokens = self.context.getTokens(ast.tokens);
 
     var fieldMap = std.DynamicBitSet.initEmpty(bufferAllocator.allocator(), enm.fields.len)
         catch return common.debug.ShouldBeImpossible(self.context.log, @src());
@@ -760,28 +751,16 @@ fn typecheckSwitchStatementOnEnum(
         }
 
         // @TODO These are broken. Fix them.
-        const captureCount = ast.extra[case + 1];
-        if (captureCount > 1) {
-            self.report("Too many captures for context.", .{ });
-            return Error.IllegalSyntax;
-        }
-        else if (captureCount > 0) {
-            const firstCapture = ast.extra[case + 2];
-            const captureToken = ast.expressions.items(.value)[firstCapture];
+        const hasCapture = ast.extra[case + 1] == 1;
+        if (hasCapture) {
+            const capture = ast.extra[case + 2];
 
             const captureDecl = self.symbols.findDecl(.{
                 .file = self.currentFile,
-                .expr = firstCapture,
+                .expr = capture,
             });
 
-            self.lookup.putNoClobber(self.arena.allocator(), captureDecl, .{
-                .status = .Checked,
-                .result = itemTypeID,
-            }) catch return Error.AllocatorFailure;
-
-            self.symbols.declarations.items(.name)[captureDecl] = try self.builder.internString(
-                tokens.get(captureToken).lexeme(self.context, ast.tokens),
-            );
+            _ = try self.typecheckDecl(captureDecl, itemTypeID);
         }
 
         const prevc = self.setFlag(.CoveredAllPaths, false);
@@ -1199,23 +1178,16 @@ pub fn typecheckExpressionListRange(self: *Typechecker, range: defines.Range, ex
         .Struct => |str| try self.typecheckStructInitialization(ast, &str, range),
         .Union => |uni| try self.typecheckUnionInitialization(ast, &uni, range),
         .Array => |arr| try self.typecheckArrayInitialization(ast, &arr, range),
-        .Pointer => |ptr| switch (ptr.size) {
-            .Slice, .C => {
-                try self.typecheckGeneralInitialization(ast, expected, range);
-                // self.report("Initialization of slice/cpointer types via expression lists are not allowed. Use addressing instead.", .{ });
-                // return Error.SliceInitializationWithExpressionList;
-            },
-            .Single => {
-                if (range.len() != 1) {
-                    self.report("Can't initialize '{s}' with {d} values.", .{
-                        try self.typeName(self.arena.allocator(), expected),
-                        range.len(),
-                    });
-                    return Error.InitializerCountMismatch;
-                }
+        .Pointer => {
+            if (range.len() != 1) {
+                self.report("Can't initialize '{s}' with {d} values.", .{
+                    try self.typeName(self.arena.allocator(), expected),
+                    range.len(),
+                });
+                return Error.InitializerCountMismatch;
+            }
 
-                try self.typecheckGeneralInitialization(ast, expected, range);
-            },
+            _ = try self.typecheckExpression(ast.extra[range.at(0)], expected);
         },
         .Void => try self.typecheckGeneralInitialization(ast, expected, range),
         .Noreturn,
@@ -1980,7 +1952,11 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
             self.report("Operations on namespaces are not allowed.", .{});
             return Error.NamespaceAsValue;
         },
-        .Builtin, .Capture => return common.debug.ShouldBeImpossible(self.context.log, @src()),
+        .Capture => determineExpected(maybeExpected) orelse {
+            self.report("Failed to infer the type of capture '{s}'", .{self.builder.getInternedString(decl.name)});
+            return Error.InferenceError;
+        },
+        .Builtin => return common.debug.ShouldBeImpossible(self.context.log, @src()),
         .Parameter => self.typecheckParameter(&decl, declPtr),
         .Field => self.typecheckField(&decl),
     };
@@ -2529,8 +2505,6 @@ fn typecheckSwitchOnUnion(
 
     const tag = self.typeTable.get(uni.tag).Enum;
 
-    const tokens = self.context.getTokens(ast.tokens);
-
     var fieldMap = std.DynamicBitSet.initEmpty(bufferAllocator.allocator(), tag.fields.len)
         catch return common.debug.ShouldBeImpossible(self.context.log, @src());
 
@@ -2580,15 +2554,10 @@ fn typecheckSwitchOnUnion(
         const prev = self.currentScope;
         defer self.currentScope = prev;
 
-        const captureCount = ast.extra[case + 1];
-        if (captureCount > 1) {
-            self.report("Value destruction is not supported.", .{ });
-            return Error.IllegalSyntax;
-        }
-        else if (captureCount > 0)
+        const hasCapture = ast.extra[case + 1] == 1;
+        if (hasCapture)
         {
             const firstCapture = ast.extra[case + 2];
-            const firstToken = ast.expressions.items(.value)[firstCapture];
 
             const captureDecl = self.symbols.findDecl(.{
                 .file = self.currentFile,
@@ -2600,14 +2569,7 @@ fn typecheckSwitchOnUnion(
                 self.fieldIndex(itemTypeID, field) catch return common.debug.ShouldBeImpossible(self.context.log, @src())
             ].valueType;
 
-            self.lookup.putNoClobber(self.arena.allocator(), captureDecl, .{
-                .status = .Checked,
-                .result = captureType,
-            }) catch return Error.AllocatorFailure;
-
-            self.symbols.declarations.items(.name)[captureDecl] = try self.builder.internString(
-                tokens.get(firstToken).lexeme(self.context, ast.tokens),
-            );
+            _ = try self.typecheckDecl(captureDecl, captureType);
         }
 
         const prevc = self.setFlag(.CoveredAllPaths, false);
@@ -2660,8 +2622,6 @@ fn typecheckSwitchOnEnum(
     var fieldBuffer: [512]u32 = undefined;
     var bufferAllocator = std.heap.FixedBufferAllocator.init(@ptrCast(&fieldBuffer));
 
-    const tokens = self.context.getTokens(ast.tokens);
-
     var fieldMap = std.DynamicBitSet.initEmpty(bufferAllocator.allocator(), enm.fields.len)
         catch return common.debug.ShouldBeImpossible(self.context.log, @src());
 
@@ -2708,28 +2668,16 @@ fn typecheckSwitchOnEnum(
                 break :blk enm.fields[enumeration].name;
             };
 
-        const captureCount = ast.extra[case + 1];
-        if (captureCount > 1) {
-            self.report("Too many captures for context.", .{ });
-            return Error.IllegalSyntax;
-        }
-        else if (captureCount > 0) {
+        const hasCapture = ast.extra[case + 1] == 1;
+        if (hasCapture) {
             const firstCapture = ast.extra[case + 2];
-            const captureToken = ast.expressions.items(.value)[firstCapture];
 
             const captureDecl = self.symbols.findDecl(.{
                 .file = self.currentFile,
                 .expr = firstCapture,
             });
 
-            self.lookup.putNoClobber(self.arena.allocator(), captureDecl, .{
-                .status = .Checked,
-                .result = itemTypeID,
-            }) catch return Error.AllocatorFailure;
-
-            self.symbols.declarations.items(.name)[captureDecl] = try self.builder.internString(
-                tokens.get(captureToken).lexeme(self.context, ast.tokens),
-            );
+            _ = try self.typecheckDecl(captureDecl, itemTypeID);
         }
 
         const prevc = self.setFlag(.CoveredAllPaths, false);

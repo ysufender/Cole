@@ -1545,11 +1545,6 @@ fn commonSwitch(
 
         // @Note Multi-captures in case I add destruction
         if (self.match(&.{.Pipe})) {
-            if (switchType == .Expression) {
-                self.report("Capture on switch expressions are not allowed.", .{});
-                return Error.CaptureOnSwitchExpression;
-            }
-
             if (generic) {
                 self.report("Capture on else prong are not allowed.", .{});
                 return Error.CaptureOnElseProng;
@@ -1558,27 +1553,12 @@ fn commonSwitch(
             const firstCapture = try self.alloc(Expression);
             self.expressionMap.set(firstCapture, .{
                 .type = .Identifier,
-                .value = self.current,
+                .value = self.advance(),
             });
 
-            var captureCount: u32 = 0;
-            while (!self.check(.Pipe)) {
-                if (!self.match(&.{.Identifier, .Discard})) {
-                    self.report("Expected a capture name.", .{});
-                    return error.MissingIdentifier;
-                }
-
-                captureCount += 1;
-                if (!self.match(&.{.Comma})) break;
-            }
             _ = try self.consume(.Pipe, error.MissingPipe, "Expected an enclosing pipe '|' at case capture.");
 
-            if (captureCount == 0) {
-                self.report("Redundant empty capture list.", .{});
-                return error.RedundantEmptyCaptureList;
-            }
-
-            self.scratch.append(self.allocator(), captureCount) catch return error.AllocatorFailure;
+            self.scratch.append(self.allocator(), 1) catch return error.AllocatorFailure;
             self.scratch.append(self.allocator(), firstCapture) catch return error.AllocatorFailure;
         }
         else {
@@ -1617,13 +1597,13 @@ fn commonSwitch(
     
     // Captured Case layout:
     // 0 case
-    // 1 captureCount
+    // 1 has capture
     // 2 firstCapture
     // 3 body
     //
     // Case Layout:
     // 0 case
-    // 1 captureCount
+    // 1 has capture
     // 2 dummy
     // 3 body 
 

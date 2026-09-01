@@ -82,7 +82,5 @@ pub fn hasFlag(self: *const Self, flag: []const u8) bool {
 }
 
 pub fn canFold(self: *const Self) bool {
-    return
-        self.buildInfo.optimization != .Og
-        and !self.hasFlag("--debug");
+    return !self.hasFlag("--debug");
 }
