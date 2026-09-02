@@ -256,18 +256,13 @@ pub fn typecheckStatement(self: *Typechecker, statementPtr: defines.StatementPtr
         .Return => self.typecheckReturn(stmt.value, expected),
         .Discard => self.typecheckDiscard(stmt.value),
         .Switch => self.typecheckSwitchStatement(stmt.value, expected),
+        .For => self.typecheckFor(stmt.value, expected),
         .While => self.typecheckWhileStatement(stmt.value, expected),
         .Break, .Continue => self.typecheckLoopControl(stmt.value),
         .Import => common.debug.ShouldBeImpossible(self.context.log, @src()),
         .Defer => self.typecheckDefer(stmt.value),
         .VariableDefinition => try self.typecheckVarDefStatement(stmt.value),
         .InlineC => { }, // @Note allow direct C code insertion
-        else => |t| {
-            self.report("Typechecking of '{s}' statements is not implemented.", .{
-                @tagName(t),
-            });
-            return common.debug.NotImplemented(self.context.log, @src());
-        },
     };
 }
 
@@ -523,6 +518,96 @@ fn typecheckLoopControl(self: *Typechecker, _: defines.OpaquePtr) Error!void {
     else if (self.getFlag(.InDefer)) {
         self.report("Defer statements can't have loop control statements.", .{});
         return Error.DeferOutsideDeferrableScope;
+    }
+}
+
+fn typecheckFor(self: *Typechecker, extraPtr: defines.OpaquePtr, expected: TypeID) Error!void {
+    const ast = self.context.getAST(self.currentFile);
+    defer _ = self.setFlag(.CoveredAllPaths, false);
+
+    const isRange = ast.extra[extraPtr + 1] == 1;
+
+    if (isRange) {
+        const range = defines.Range{
+            .start = ast.extra[extraPtr],
+            .end = ast.extra[extraPtr + 2],
+        };
+
+        const captureExpr = ast.extra[extraPtr + 3];
+        const body = ast.extra[extraPtr + 4];
+
+        const rstartT = try self.typecheckExpression(range.start, null);
+        if (!self.isInt(rstartT)) {
+            self.report("Expected an integer type for range expression, received '{s}'.", .{
+                try self.typeName(self.arena.allocator(), rstartT),
+            });
+            return Error.NonIntegerRange;
+        }
+
+        const rendT = try self.typecheckExpression(range.end, null);
+        if (!self.isInt(rendT)) {
+            self.report("Expected an integer type for range expression, received '{s}'.", .{
+                try self.typeName(self.arena.allocator(), rendT),
+            });
+            return Error.NonIntegerRange;
+        }
+
+        const captureDecl = self.symbols.findDecl(.{
+            .file = self.currentFile,
+            .expr = captureExpr,
+        });
+        _ = try self.typecheckDecl(captureDecl, comptime Comptime.Folder.Builtin.Type("u32"));
+
+        const prev = self.setFlag(.InLoop, true);
+        defer _ = self.setFlag(.InLoop, prev);
+
+        try self.typecheckStatement(body, expected);
+    }
+    else {
+        const loopExpr = ast.extra[extraPtr];
+
+        const captureExpr = ast.extra[extraPtr + 3];
+        const body = ast.extra[extraPtr + 4];
+
+        const exprT = try self.typecheckExpression(loopExpr, null);
+        const exprInfo = self.typeTable.get(exprT);
+        const innerCaptureType = switch (exprInfo) {
+            .Array => |arr| arr.child,
+            .Pointer => |ptr| switch (ptr.size) {
+                .Slice => ptr.child,
+                else => {
+                    self.report("Attempt to loop over non-ranged pointer type '{s}'", .{
+                        try self.typeName(undefined, exprT),
+                    });
+                    return Error.LoopOverNonRange;
+                },
+            },
+            else => {
+                self.report("Attempt to loop over non-ranged type '{s}'", .{
+                    try self.typeName(undefined, exprT),
+                });
+                return Error.LoopOverNonRange;
+            },
+        };
+
+        const captureType = try self.registerType(.{
+            .Pointer = .{
+                .size = .Single,
+                .child = innerCaptureType,
+                .mutable = false,
+            },
+        });
+
+        const captureDecl = self.symbols.findDecl(.{
+            .file = self.currentFile,
+            .expr = captureExpr,
+        });
+        _ = try self.typecheckDecl(captureDecl, captureType);
+
+        const prev = self.setFlag(.InLoop, true);
+        defer _ = self.setFlag(.InLoop, prev);
+
+        try self.typecheckStatement(body, expected);
     }
 }
 
@@ -996,7 +1081,7 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
         .ArrayType, .CPointerType, .FunctionType,
         .MutableType, .PointerType, .SliceType, 
         .EnumDefinition, .UnionDefinition, .StructDefinition,
-        .FunctionDefinition, .Lambda => self.typecheckValue(try self.folder.eval(expressionPtr, maybeExpected), maybeExpected),
+        .FunctionDefinition => self.typecheckValue(try self.folder.eval(expressionPtr, maybeExpected), maybeExpected),
 
         .Conditional => self.typecheckIfExpression(expr.value, maybeExpected),
         .Switch => self.typecheckSwitchExpression(expr.value, maybeExpected),

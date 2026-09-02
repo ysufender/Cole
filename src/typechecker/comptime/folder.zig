@@ -162,7 +162,6 @@ pub fn eval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeI
 
         .Dot => try self.evalDot(expr.value),
         
-        .Lambda => return common.debug.NotImplemented(self.typechecker.context.log, @src()),
         .FunctionDefinition => try self.evalFunction(exprPtr, expr.value),
 
         // @Note should be handled with the statements.
@@ -2939,6 +2938,8 @@ pub const builtinTypes = [_]struct {
     // any
     .{ .name = "any", .info = .{ .Any = false } },
 
+    // mut u32
+    .{ .name = "mut u32", .info = .{ .Integer = .{ .mutable = true, .size = 32, .signed = false, } } },
     // mut any
     .{ .name = "mut any", .info = .{ .Any = true } },
     // __incomplete

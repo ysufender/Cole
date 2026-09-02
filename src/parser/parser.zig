@@ -37,7 +37,6 @@ pub const Expression = struct {
         FunctionDefinition,
         TupleDefinition,
         Mark,
-        Lambda,
         Call,
         Conditional,
         Switch,
@@ -460,34 +459,31 @@ fn conditional(self: *Parser) StatementResult {
 }
 
 fn forLoop(self: *Parser) StatementResult {
-    if (true) {
-        self.report("Unsupported", .{});
-        return Error.NotImplemented;
-    }
+    const rangeStartOrLoopExpr = try self.ifExpression();
+    const isRange = self.match(&.{.Range});
+    const rangeEndOrGarbage = 
+        if (isRange) try self.ifExpression()
+        else AnyType;
 
-    const loopVar = try self.statement();
-    if (self.statementMap.get(loopVar).type != .VariableDefinition) {
-        self.report("Expected a loop variable definition, received '{s}' instead.", .{
-            @tagName(self.statementMap.get(loopVar).type),
+    _ = try self.consume(.Comma, Error.MissingCapture, "Expected comma.");
+    _ = try self.consume(.Pipe, Error.MissingCapture, "Expected a capture variable.");
+    const capture = capture: {
+        const ptr = try self.alloc(Expression);
+        self.expressionMap.set(ptr, .{
+            .type = .Identifier,
+            .value = try self.consume(.Identifier, Error.MissingIdentifier, "Expected a capture name."),
         });
-        return Error.IllegalSyntax;
-    }
-    _ = try self.consume(.Comma, error.MissingSemicolon, "Expected comma after loop variable.");
-    const condition = try self.ifExpression();
-    _ = try self.consume(.Comma, error.MissingSemicolon, "Expected comma after loop condition.");
-    const end = try self.statement();
-
-    if (!self.check(.LBrace)) {
-        self.report("Expected loop body.", .{});
-        return error.MissingBrace;
-    }
+        break :capture ptr;
+    };
+    _ = try self.consume(.Pipe, Error.MissingCapture, "Expected an enclosing pipe.");
 
     const body = try self.statement();
 
     const start: defines.OpaquePtr = @intCast(self.extra.items.len);
-    self.extra.append(self.allocator(), loopVar) catch return error.AllocatorFailure;
-    self.extra.append(self.allocator(), condition) catch return error.AllocatorFailure;
-    self.extra.append(self.allocator(), end) catch return error.AllocatorFailure;
+    self.extra.append(self.allocator(), rangeStartOrLoopExpr) catch return error.AllocatorFailure;
+    self.extra.append(self.allocator(), @intFromBool(isRange)) catch return error.AllocatorFailure;
+    self.extra.append(self.allocator(), rangeEndOrGarbage) catch return error.AllocatorFailure;
+    self.extra.append(self.allocator(), capture) catch return error.AllocatorFailure;
     self.extra.append(self.allocator(), body) catch return error.AllocatorFailure;
 
     const result = try self.alloc(Statement);
@@ -1077,38 +1073,6 @@ fn function(self: *Parser) ExpressionResult {
             self.stats.functions += 1;
 
             return expr;
-        },
-        .Pipe => {
-            self.report("Lambda functions are not (yet) supported.", .{});
-
-            if (false) {
-                const paramsStart = self.scratch.items.len;
-                while (!self.check(.Pipe)) {
-                    self.scratch.append(self.allocator(), self.advance()) catch return error.AllocatorFailure;
-                    if (!self.match(&.{.Comma})) break;
-                }
-                _ = try self.consume(.Pipe, error.MissingParenthesis, "Expected closing pipe '|' after capture list.");
-                const params = try self.commitScratch(paramsStart);
-
-                const body = try self.ifExpression();
-
-                const start: defines.OpaquePtr = @intCast(self.extra.items.len);
-                self.extra.append(self.allocator(), params.start) catch return error.AllocatorFailure;
-                self.extra.append(self.allocator(), params.end) catch return error.AllocatorFailure;
-                self.extra.append(self.allocator(), body) catch return error.AllocatorFailure;
-
-                self.stats.functions += 1;
-
-                const expr = try self.alloc(Expression);
-                self.expressionMap.set(expr, .{
-                    .type = .Lambda,
-                    .value = start,
-                });
-
-                return expr;
-            }
-
-            return Error.NotImplemented;
         },
         else => {
             self.report("Expected a parameter list or lambda capture.", .{});

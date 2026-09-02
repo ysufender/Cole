@@ -22,13 +22,11 @@ const Executer = @import("../executer.zig");
 
 const JIRExecuter = @This();
 
-typechecker: *Typechecker,
 allocator: Allocator,
 executer: *Executer,
 
-pub fn init(typechecker: *Typechecker, allocator: Allocator) Error!JIRExecuter {
+pub fn init(allocator: Allocator) Error!JIRExecuter {
     return .{
-        .typechecker = typechecker,
         .allocator = allocator,
         .executer = undefined,
 
@@ -36,5 +34,5 @@ pub fn init(typechecker: *Typechecker, allocator: Allocator) Error!JIRExecuter {
 }
 
 pub fn executeCall(self: *JIRExecuter, _: *JIR.Function, _: []const Comptime.Value.Ptr) Error!Comptime.Value {
-    return common.debug.NotImplemented(self.typechecker.context.log, @src());
+    return common.debug.NotImplemented(self.executer.typechecker.context.log, @src());
 }

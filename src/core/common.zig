@@ -144,5 +144,8 @@ pub const CompilerError = error {
     UnhandledReturnValue,
     UnnamedVariadic,
     UnsupportedTarget,
+    MissingCapture,
+    NonIntegerRange,
+    LoopOverNonRange,
     Terminate,
 };

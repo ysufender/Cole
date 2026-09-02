@@ -382,16 +382,42 @@ fn resolveStatement(self: *Resolver, stmt: defines.StatementPtr, topLevel: bool)
             defer self.currentScope = previous;
             self.currentScope = forBlock;
 
-            const signature = ast.extra[statement.value];
-            try self.resolveStatement(signature, false);
+            const rangeOrExpr = ast.extra[statement.value];
+            try self.resolveExpression(rangeOrExpr);
 
-            const condition = ast.extra[statement.value + 1];
-            try self.resolveExpression(condition);
+            const isRange = ast.extra[statement.value + 1] == 1;
+            if (isRange) {
+                const rangeEnd = ast.extra[statement.value + 2];
+                try self.resolveExpression(rangeEnd);
+            }
 
-            const end = ast.extra[statement.value + 2];
-            try self.resolveStatement(end, false);
+            // Capture
+            const capture = ast.extra[statement.value + 3];
+            const captureToken: defines.TokenPtr = ast.expressions.items(.value)[capture];
+            self.lastToken = captureToken;
 
-            const body = ast.extra[statement.value + 3];
+            const decl = try self.decls.addOne(allocator);
+            self.decls.set(decl, .{
+                .name = self.dataIndex(),
+                .scope = self.currentScope,
+                .kind = .Capture,
+                .public = false,
+                .token = captureToken,
+                .node = capture,
+                .type = capture,
+                .topLevel = false,
+            });
+
+            self.resolved.put(allocator, .{
+                .file = self.dataIndex(),
+                .expr = capture,
+            }, decl) catch return Error.AllocatorFailure;
+
+            const lexeme = tokens.get(captureToken).lexeme(self.context, self.dataIndex());
+            self.lookup.putNoClobber(allocator, .{ .name = lexeme, .scope = self.currentScope }, decl)
+                catch return Error.AllocatorFailure;
+
+            const body = ast.extra[statement.value + 4];
             try self.resolveStatement(body, false);
         },
         .While => {
@@ -738,58 +764,6 @@ fn resolveExpression(self: *Resolver, exprPtr: defines.ExpressionPtr) Error!void
 
             const marked = ast.extra[expr.value + 2];
             try self.resolveExpression(marked);
-        },
-        .Lambda => {
-            const captures = defines.Range{
-                .start = ast.extra[expr.value],
-                .end = ast.extra[expr.value + 1],
-            };
-
-            const lambda = try self.scopes.addOne(allocator);
-            self.scopes.set(lambda, .{
-                .module = self.scopes.items(.module)[self.currentScope],
-                .parent = self.currentScope,
-                .kind = .Block,
-            });
-
-            const previous = self.currentScope;
-            defer self.currentScope = previous;
-            self.currentScope = lambda;
-
-            self.resolved.putNoClobber(allocator, .{
-                .file = self.dataIndex(),
-                .expr = exprPtr,
-            }, lambda) catch return Error.AllocatorFailure;
-
-            for (captures.start..captures.end, 0..) |capturePtrPtr, i| {
-                const name = ast.extra[capturePtrPtr];
-                const lexeme = tokens.get(name).lexeme(self.context, self.dataIndex());
-
-                const decl = try self.decls.addOne(allocator);
-                self.decls.set(decl, .{
-                    .name = self.dataIndex(),
-                    .kind = .Parameter,
-                    .scope = self.currentScope,
-                    .public = false,
-                    .token = name,
-                    .node = @intCast(i),
-                    .type = @intCast(i),
-                    .topLevel = false,
-                });
-
-                const isPresent = self.lookup.getOrPut(allocator, .{ .name = lexeme, .scope = self.currentScope })
-                    catch return Error.AllocatorFailure;
-
-                if (isPresent.found_existing) {
-                    self.report("Duplicate capture '{s}'.", .{lexeme});
-                    return Error.DuplicateSymbol;
-                }
-
-                isPresent.value_ptr.* = decl;
-            }
-
-            const body = ast.extra[expr.value + 2];
-            try self.resolveExpression(body);
         },
         .Call => {
             const function = ast.extra[expr.value];

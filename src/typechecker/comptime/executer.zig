@@ -36,7 +36,7 @@ pub fn init(typechecker: *Typechecker, allocator: Allocator) Error!Executer {
     return Executer{
         .arena = arena,
         .typechecker = typechecker,
-        .jir = try JIRExecuter.init(typechecker, arena.allocator()),
+        .jir = try JIRExecuter.init(arena.allocator()),
         .ast = try ASTExecuter.init(typechecker, arena.allocator()),
     };
 }

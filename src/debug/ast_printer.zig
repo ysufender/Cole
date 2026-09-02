@@ -284,17 +284,6 @@ pub const PrintContext = struct {
                 printer.write("}");
             },
 
-            .Lambda => {
-                const capture_start = ex[val];
-                const capture_end   = ex[val + 1];
-                const body          = ex[val + 2];
-                printer.write("Lambda ");
-                for (ex[capture_start..capture_end]) |tok| {
-                    printer.print("capture: {s} ", .{printer.tokenLexeme(@intCast(tok))});
-                }
-                printer.printExpr(@intCast(body), depth + 2);
-            },
-
             .StructDefinition => {
                 const field_start = ex[val];
                 const field_end   = ex[val + 1];

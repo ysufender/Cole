@@ -314,7 +314,7 @@ pub fn statement(self: *Lowerer, statementPtr: defines.StatementPtr) Error!JIR.P
 
         .Defer => try self.@"defer"(stmt.value),
 
-        .For => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
+        .For => try self.loop(.For, stmt.value, ast),
 
         .InlineC => try self.inlineC(stmt.value),
 
@@ -608,6 +608,227 @@ fn @"break"(self: *Lowerer) Error!JIR.Ptr {
     return end;
 }
 
+fn rangeForLoop(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.AST) Error!JIR.Ptr {
+    const range = defines.Range{
+        .start = try self.expression(ast.extra[extraPtr], try self.typechecker.typecheckExpression(ast.extra[extraPtr], null)),
+        .end = try self.expression(ast.extra[extraPtr + 2], try self.typechecker.typecheckExpression(ast.extra[extraPtr + 2], null)),
+    };
+
+    const rangeStartName = try self.typechecker.folder.generateRandomName(.RangeStart);
+    const rangeEndName = try self.typechecker.folder.generateRandomName(.RangeEnd);
+
+    const captureExpr = ast.extra[extraPtr + 3];
+    const rangeStart = try self.typechecker.builder.variableDef(
+        false,
+        try self.typechecker.typecheckExpression(ast.extra[extraPtr + 2], null),
+        rangeStartName,
+        false,
+        range.start,
+        null
+    );
+    const rangeStartIdent = try self.typechecker.builder.identifier(rangeStartName);
+
+    const captureDeclPtr = self.typechecker.symbols.findDecl(.{
+        .file = self.typechecker.currentFile,
+        .expr = captureExpr,
+    });
+    const name = self.typechecker.symbols.declarations.items(.name)[captureDeclPtr];
+
+    const capture = try self.typechecker.builder.variableDef(
+        false,
+        (comptime Comptime.Folder.Builtin.Type("mut u32")),
+        name,
+        false,
+        rangeStartIdent,
+        null,
+    );
+    const captureIdent = try self.typechecker.builder.identifier(name);
+
+    const rangeEnd = try self.typechecker.builder.variableDef(
+        false,
+        try self.typechecker.typecheckExpression(ast.extra[extraPtr + 2], null),
+        rangeEndName,
+        false,
+        range.end,
+        null
+    );
+    const rangeEndIdent = try self.typechecker.builder.identifier(rangeEndName);
+
+    const forStart = try self.typechecker.folder.generateRandomName(.ForStart);
+    const forEnd = try self.typechecker.folder.generateRandomName(.ForEnd);
+    const forStartLabel = try self.typechecker.builder.label(forStart);
+    const forEndLabel = try self.typechecker.builder.label(forEnd);
+
+    const cnd = try self.typechecker.builder.greaterEqual(captureIdent, rangeEndIdent);
+    const cjump = try self.typechecker.builder.cjump(forEnd, cnd);
+    const increment = try self.typechecker.builder.assignment(
+        captureIdent,
+        try self.typechecker.builder.add(
+            captureIdent,
+            try self.typechecker.builder.literal(
+                try self.typechecker.builder.addConstant(.{
+                    .Integer = .{ .u8 = 1 },
+                }),
+            ),
+        ),
+    );
+    const sjump = try self.typechecker.builder.jump(forStart);
+
+    const body = try self.statement(ast.extra[extraPtr + 4]);
+
+    if (self.typechecker.context.settings.buildInfo.isDebug) {
+        const safetyCnd = try self.typechecker.builder.lesserEqual(rangeStartIdent, rangeEndIdent);
+        const safetyEnd = try self.typechecker.folder.generateRandomName(.ForSafetyEnd);
+        const safetyCheck = try self.typechecker.builder.cjump(safetyEnd, safetyCnd); 
+        const panic = try self.typechecker.builder.call(
+            true,
+            try self.typechecker.builder.identifier(try self.typechecker.builder.internString("raise")),
+            &.{try self.typechecker.builder.identifier(try self.typechecker.builder.internString("SIGABRT"))}
+        );
+        const safetyEndLabel = try self.typechecker.builder.label(safetyEnd);
+
+        return self.typechecker.builder.scope(
+            try self.typechecker.folder.generateRandomName(.For), &.{
+                rangeStart,
+                rangeEnd,
+                safetyCheck,
+                panic,
+                safetyEndLabel,
+                capture,
+                forStartLabel,
+                cjump,
+                body,
+                increment,
+                sjump,
+                forEndLabel,
+            },
+        );
+    }
+    else {
+        return self.typechecker.builder.scope(
+            try self.typechecker.folder.generateRandomName(.For), &.{
+                rangeStart,
+                rangeEnd,
+                capture,
+                forStartLabel,
+                cjump,
+                body,
+                increment,
+                sjump,
+                forEndLabel,
+            },
+        );
+    }
+}
+
+fn forLoop(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.AST) Error!JIR.Ptr {
+    const isRange = ast.extra[extraPtr + 1] == 1;
+
+    if (isRange) {
+        return self.rangeForLoop(extraPtr, ast);
+    }
+
+    const expr = ast.extra[extraPtr];
+    const captureExpr = ast.extra[extraPtr + 3];
+
+    const rangeType = try self.typechecker.typecheckExpression(expr, null);
+    const rangeName = try self.typechecker.folder.generateRandomName(.RangePtr);
+    const range = try self.typechecker.builder.variableDef(
+        false,
+        try self.typechecker.typecheckExpression(expr, null),
+        rangeName,
+        false,
+        try self.expression(expr, rangeType),
+        null
+    );
+    const rangeIdent = try self.typechecker.builder.identifier(rangeName);
+    
+    const rangePtr = try self.typechecker.builder.dot(
+        rangeIdent,
+        switch (self.typechecker.typeTable.get(rangeType)) {
+            .Pointer => try self.typechecker.builder.internString("ptr"),
+            .Array => try self.typechecker.builder.internString("data"),
+            else => return common.debug.ShouldBeImpossible(undefined, @src()),
+        },
+    );
+    const rangeLen = switch (self.typechecker.typeTable.get(rangeType)) {
+        .Pointer => try self.typechecker.builder.dot(
+            rangeIdent,
+            try self.typechecker.builder.internString("len"),
+        ),
+        .Array => |arr| try self.typechecker.builder.literal(
+            try self.typechecker.builder.addConstant(.{ .Integer = .{ .u32 = arr.len } }),
+        ),
+        else => return common.debug.ShouldBeImpossible(undefined, @src()),
+    };
+
+    const idxName = try self.typechecker.folder.generateRandomName(.RangeIdx);
+    const idx = try self.typechecker.builder.variableDef(
+        false,
+        (comptime Comptime.Folder.Builtin.Type("mut u32")),
+        idxName,
+        false,
+        try self.typechecker.builder.literal(
+            try self.typechecker.builder.addConstant(.{ .Integer = .{ .u32 = 0 } }),
+        ),
+        null,
+    );
+    const idxIdent = try self.typechecker.builder.identifier(idxName);
+
+    const forStart = try self.typechecker.folder.generateRandomName(.ForStart);
+    const forEnd = try self.typechecker.folder.generateRandomName(.ForEnd);
+    const forStartLabel = try self.typechecker.builder.label(forStart);
+    const forEndLabel = try self.typechecker.builder.label(forEnd);
+
+    const captureDeclPtr = self.typechecker.symbols.findDecl(.{
+        .file = self.typechecker.currentFile,
+        .expr = captureExpr,
+    });
+    const name = self.typechecker.symbols.declarations.items(.name)[captureDeclPtr];
+
+    const captureType = try self.typechecker.typecheckDecl(captureDeclPtr, null);
+
+    const capture = try self.typechecker.builder.variableDef(
+        false,
+        captureType,
+        name,
+        false,
+        try self.typechecker.builder.add(rangePtr, idxIdent),
+        null,
+    );
+
+    const cnd = try self.typechecker.builder.greaterEqual(idxIdent, rangeLen);
+    const cjump = try self.typechecker.builder.cjump(forEnd, cnd);
+    const increment = try self.typechecker.builder.assignment(
+        idxIdent,
+        try self.typechecker.builder.add(
+            idxIdent,
+            try self.typechecker.builder.literal(
+                try self.typechecker.builder.addConstant(.{
+                    .Integer = .{ .u8 = 1 },
+                }),
+            ),
+        ),
+    );
+    const sjump = try self.typechecker.builder.jump(forStart);
+
+    const body = try self.statement(ast.extra[extraPtr + 4]);
+
+    return self.typechecker.builder.scope(
+        try self.typechecker.folder.generateRandomName(.For), &.{
+            range,
+            idx,
+            forStartLabel,
+            cjump,
+            capture,
+            body,
+            increment,
+            sjump,
+            forEndLabel,
+        },
+    );
+}
+
 fn loop(
     self: *Lowerer,
     loopType: enum {
@@ -617,7 +838,7 @@ fn loop(
     extraPtr: defines.OpaquePtr,
     ast: *const Parser.AST,
 ) Error!JIR.Ptr {
-    if (loopType == .For) return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
+    if (loopType == .For) return self.forLoop(extraPtr, ast);
 
     const loopLabel = try self.typechecker.folder.generateRandomNameString(.Loop);
     self.lastLoop = loopLabel;
@@ -830,7 +1051,7 @@ pub fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID
 
         .Scoping => self.scoping(expr.value),
 
-        .Lambda, .FunctionDefinition,
+        .FunctionDefinition,
         .EnumDefinition, .StructDefinition, .UnionDefinition,
         .FunctionType, .ArrayType,
         .CPointerType, .MutableType, .PointerType,
@@ -1238,8 +1459,12 @@ fn builtinCall(
         BI("typeOf") =>
             self.literal(ast.extra[args.at(0)], ofType),
         BI("unreachable") => blk: {
-            const builtinUnreach = try self.identifier(try self.typechecker.builder.internString("__builtin_unreachable"));
-            break :blk self.typechecker.builder.call(true, builtinUnreach, &.{});
+            const builtinUnreach = try self.identifier(try self.typechecker.builder.internString("raise"));
+            break :blk self.typechecker.builder.call(true, builtinUnreach, &.{
+                try self.typechecker.builder.identifier(
+                    try self.typechecker.builder.internString("SIGABRT"),
+                ),
+            });
         },
         BI("typeName") => self.typechecker.builder.literal(
             try self.typechecker.builder.addConstant(.{
