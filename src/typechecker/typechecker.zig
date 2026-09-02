@@ -2262,11 +2262,6 @@ pub fn typecheckDot(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!TypeI
         else => { },
     }
 
-    if (!self.getFlag(.ConcreteValue)) {
-        self.report("Field access on non-concrete (temporary) values are not (yet) supported.", .{ });
-        return Error.NotImplemented;
-    }
-
     const memberName = memberToken.lexeme(self.context, ast.tokens);
 
     return self.typecheckFieldAccess(objectTypeID, memberName);

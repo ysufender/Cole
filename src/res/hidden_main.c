@@ -48,8 +48,9 @@ void __attribute__((noreturn)) __panic_handler(int const addr) {{
         free(sym);
         SymCleanup(process);
 #   else
-        void *frames[64];
-        int n = backtrace(frames, 64);
+        const framec = 128;
+        void *frames[framec];
+        int n = backtrace(frames, framec);
         backtrace_symbols_fd(frames, n, STDERR_FILENO);
 #   endif
 #else

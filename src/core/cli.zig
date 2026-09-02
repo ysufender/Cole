@@ -27,7 +27,6 @@ const flags = std.StaticStringMap(Flag).initComptime(&(.{
     .{ "-h", .Help },
 
     .{ "--debug", .Flag },
-    .{ "-D", .Flag },
 
     .{ "--output", .Output },
     .{ "-o", .Output },
@@ -62,6 +61,8 @@ const flags = std.StaticStringMap(Flag).initComptime(&(.{
 
     .{ "--supress-warnings", .Flag },
     .{ "-s", .Flag },
+
+    .{ "--no-comptime", .Flag },
 
 } ++ if (common.debug.isDebug) .{
 

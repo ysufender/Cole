@@ -25,10 +25,8 @@ pub let intToStr = fn (num: c_long, allocator: Allocator::Allocator) -> []u8 {
 
 pub let strToInt = fn (str: []u8) -> c_long {
     let res: mut c_long = 0;
-    let index: mut u32 = 0;
-    while index < str.len {
+    for 0..str.len, |index| {
         res = (res * 10) + (str[index] - '0');
-        index = index + 1;
     }
     return res;
 };
@@ -45,10 +43,9 @@ pub let strToFloat = fn (str: []u8) -> float {
 
     let decimal: mut float = 0;
     let divisor: mut float = 10;
-    while index < str.len {
-        decimal = decimal + as(float, cast(str[index] - '0')) / divisor;
+    for 0..str.len, |idx| {
+        decimal = decimal + as(float, cast(str[idx] - '0')) / divisor;
         divisor = divisor * 10;
-        index = index + 1;
     }
 
     return as(float, cast(base)) + decimal;
@@ -60,10 +57,8 @@ pub let floatToStr = fn (num: float, allocator: Allocator::Allocator) -> []u8 {
 
     let precision: u32 = 9;
     let multiplier: mut float = 1.0;
-    let i: mut u32 = 0;
-    while i < precision {
+    for 0..precision, |i| {
         multiplier = multiplier * 10.0;
-        i = i + 1;
     }
     let fracInt: c_long = cast(frac * multiplier);
 
@@ -85,29 +80,22 @@ pub let floatToStr = fn (num: float, allocator: Allocator::Allocator) -> []u8 {
     let result: []mut u8 = cast(mem);
 
     let pos: mut u32 = 0;
-
-    let wi: mut u32 = 0;
-    while wi < wholeStr.len {
+    for 0..wholeStr.len, |wi| {
         result[pos] = wholeStr[wi];
         pos = pos + 1;
-        wi = wi + 1;
     }
 
     result[pos] = '.';
     pos = pos + 1;
 
-    let pi: mut u32 = 0;
-    while pi < padding {
+    for 0..padding, |pi| {
         result[pos] = '0';
         pos = pos + 1;
-        pi = pi + 1;
     }
 
-    let fi: mut u32 = 0;
-    while fi < fracSigLen {
+    for 0..fracSigLen, |fi| {
         result[pos] = fracStr[fi];
         pos = pos + 1;
-        fi = fi + 1;
     }
 
     return cast(result);
@@ -118,12 +106,10 @@ pub let equals = fn (str1: []u8, str2: []u8) -> bool {
         return false;
     }
 
-    let idx: mut u32 = 0;
-    while idx < str1.len {
+    for 0..str1.len, |idx| {
         if str1[idx] != str2[idx] {
             return false;
         }
-        idx = idx + 1;
     }
 
     return true;

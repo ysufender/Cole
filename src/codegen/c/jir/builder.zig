@@ -250,7 +250,6 @@ pub inline fn inlineC(self: *Builder, code: defines.StringPtr) Error!JIR.Ptr { r
 pub inline fn discard(self: *Builder, expr: JIR.Ptr) Error!JIR.Ptr { return self.commonSingle(.Discard, expr); }
 
 pub inline fn reference(self: *Builder, decl: JIR.Ptr) Error!JIR.Ptr { return self.commonSingle(.Reference, decl); }
-pub inline fn dereference(self: *Builder, expr: JIR.Ptr) Error!JIR.Ptr { return self.commonSingle(.Dereference, expr); }
 pub inline fn literal(self: *Builder, constant: JIR.Constant.Ptr) Error!JIR.Ptr { return self.commonSingle(.Literal, constant); }
 pub inline fn add(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.Add, lhs, rhs); }
 pub inline fn sub(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.Sub, lhs, rhs); }
@@ -262,7 +261,6 @@ pub inline fn rshift(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr {
 pub inline fn @"and"(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.And, lhs, rhs); }
 pub inline fn @"or"(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.Or, lhs, rhs); }
 pub inline fn label(self: *Builder, name: StringPtr) Error!JIR.Ptr { return self.commonSingle(.Label, name); }
-pub inline fn dot(self: *Builder, object: JIR.Ptr, field: StringPtr) Error!JIR.Ptr { return self.commonBinary(.Dot, object, field); }
 pub inline fn lesser(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.Lesser, lhs, rhs); }
 pub inline fn lesserEqual(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.LesserEqual, lhs, rhs); }
 pub inline fn greater(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.Greater, lhs, rhs); }
@@ -275,6 +273,48 @@ pub inline fn bitwiseOr(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Pt
 pub inline fn bitwiseAnd(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.BitwiseAnd, lhs, rhs); }
 pub inline fn not(self: *Builder, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonSingle(.Not, rhs); }
 pub inline fn negate(self: *Builder, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonSingle(.Negation, rhs); }
+
+pub inline fn dot(self: *Builder, object: JIR.Ptr, field: StringPtr, objType: TypeID) Error!JIR.Ptr {
+    const objName = try self.typechecker.folder.generateRandomName(.Obj);
+    const objDef = try self.variableDef(false, objType, objName, false, object, null);
+    const objIdent = try self.identifier(objName);
+
+    const access = try self.commonBinary(.Dot, objIdent, field);
+
+    return self.stmtExpr(access, &.{objDef});
+}
+
+pub inline fn dereference(self: *Builder, expr: JIR.Ptr, exprType: TypeID) Error!JIR.Ptr {
+    if (self.typechecker.context.settings.buildInfo.isDebug) {
+        const ptrName = try self.typechecker.folder.generateRandomName(.Ptr);
+        const ptrDef = try self.variableDef(false, exprType, ptrName, false, expr, null);
+        const ptrIdent = try self.identifier(ptrName);
+
+        const nullPtr = try self.literal(try self.addConstant(.{ .Undefined = exprType, }));
+
+        const safeLabelName = try self.typechecker.folder.generateRandomName(.Safe);
+        const cnd = try self.notEqual(ptrIdent, nullPtr);
+        const safetyCheck = try self.cjump(safeLabelName, cnd);
+
+        const segfault = try self.call(true, try self.identifier(try self.internString("raise")), &.{
+            try self.identifier(try self.internString("SIGSEGV")),
+        });
+
+        const safeLabel = try self.label(safeLabelName);
+
+        const deref = try self.commonSingle(.Dereference, ptrIdent);
+
+        return self.stmtExpr(deref, &.{
+            ptrDef,
+            safetyCheck,
+            segfault,
+            safeLabel
+        });
+    }
+    else {
+        return self.commonSingle(.Dereference, expr);
+    }
+}
 
 pub inline fn grouping(self: *Builder, args: []const JIR.Ptr) Error!JIR.Ptr {
     std.debug.assert(args.len <= 1);

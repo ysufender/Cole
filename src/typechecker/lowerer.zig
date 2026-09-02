@@ -383,7 +383,7 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
         const cnd =
             if (typeInfo == .Union) res: {
                 const tagFieldName = try typechecker.builder.internString("tag");
-                const tagField = try typechecker.builder.dot(enumOrUnion, tagFieldName);
+                const tagField = try typechecker.builder.dot(enumOrUnion, tagFieldName, enumOrUnionType);
                 break :res try typechecker.builder.notEqual(tagField, case);
             }
             else try typechecker.builder.notEqual(enumOrUnion, case);
@@ -410,7 +410,7 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
                     caseField.valueType,
                     name,
                     false,
-                    try typechecker.builder.dot(enumOrUnion, caseField.name),
+                    try typechecker.builder.dot(enumOrUnion, caseField.name, enumOrUnionType),
                     null,
                 );
 
@@ -750,11 +750,13 @@ fn forLoop(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.AST) 
             .Array => try self.typechecker.builder.internString("data"),
             else => return common.debug.ShouldBeImpossible(undefined, @src()),
         },
+        rangeType,
     );
     const rangeLen = switch (self.typechecker.typeTable.get(rangeType)) {
         .Pointer => try self.typechecker.builder.dot(
             rangeIdent,
             try self.typechecker.builder.internString("len"),
+            rangeType
         ),
         .Array => |arr| try self.typechecker.builder.literal(
             try self.typechecker.builder.addConstant(.{ .Integer = .{ .u32 = arr.len } }),
@@ -1159,13 +1161,14 @@ fn slicing(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JI
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
 
     const sliceable = try self.expression(ast.extra[extraPtr], try self.typechecker.typecheckExpression(ast.extra[extraPtr], null));
-    const sliceableInfo = self.typechecker.typeTable.get(try self.typechecker.typecheckExpression(ast.extra[extraPtr], null));
+    const sliceableType = try self.typechecker.typecheckExpression(ast.extra[extraPtr], null);
+    const sliceableInfo = self.typechecker.typeTable.get(sliceableType);
 
     const data = switch (sliceableInfo) {
-        .Array => try self.typechecker.builder.dot(sliceable, try self.typechecker.builder.internString("data")),
+        .Array => try self.typechecker.builder.dot(sliceable, try self.typechecker.builder.internString("data"), sliceableType),
         .Pointer => |ptr| switch (ptr.size) {
             .C => sliceable,
-            .Slice => try self.typechecker.builder.dot(sliceable, try self.typechecker.builder.internString("ptr")),
+            .Slice => try self.typechecker.builder.dot(sliceable, try self.typechecker.builder.internString("ptr"), sliceableType),
             else => return common.debug.ShouldBeImpossible(undefined, @src()),
         },
         else => return common.debug.ShouldBeImpossible(undefined, @src()),
@@ -1272,7 +1275,7 @@ fn switchExpr(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error
         const cnd =
             if (typeInfo == .Union) cnd: {
                 const tagFieldName = try typechecker.builder.internString("tag");
-                const tagField = try typechecker.builder.dot(enumOrUnion, tagFieldName);
+                const tagField = try typechecker.builder.dot(enumOrUnion, tagFieldName, enumOrUnionType);
                 break :cnd try typechecker.builder.notEqual(tagField, case);
             }
             else try typechecker.builder.notEqual(enumOrUnion, case);
@@ -1299,7 +1302,7 @@ fn switchExpr(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error
                     caseField.valueType,
                     name,
                     false,
-                    try typechecker.builder.dot(enumOrUnion, caseField.name),
+                    try typechecker.builder.dot(enumOrUnion, caseField.name, enumOrUnionType),
                     null,
                 );
 
@@ -1603,11 +1606,13 @@ fn cast(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR.P
                     const ptr = try self.typechecker.builder.dot(
                         rexpr,
                         try self.typechecker.builder.internString("ptr"),
+                        rtype
                     );
 
                     const len = try self.typechecker.builder.dot(
                         rexpr,
                         try self.typechecker.builder.internString("len"),
+                        rtype
                     );
 
                     const srcElemSize = self.typechecker.sizeOf(rptr.child) / 8;
@@ -1710,16 +1715,15 @@ fn indexing(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     const exprPtr = ast.extra[extraPtr];
     const typeID = try self.typechecker.typecheckExpression(exprPtr, null);
 
+    const indexableBase = try self.expression(exprPtr, typeID);
+    const indexableBaseName = try self.typechecker.folder.generateRandomName(.IndexableBase);
+    const indexableBaseDef = try self.typechecker.builder.variableDef(false, typeID, indexableBaseName, false, indexableBase, null);
+    const indexableBaseIdent = try self.typechecker.builder.identifier(indexableBaseName);
+
     const indexable = blk: switch (self.typechecker.typeTable.get(typeID)) {
-        .Array => {
-            const arr = try self.expression(exprPtr, typeID);
-            break :blk try self.typechecker.builder.dot(arr, try self.typechecker.builder.internString("data"));
-        },
+        .Array => break :blk try self.typechecker.builder.dot(indexableBaseIdent, try self.typechecker.builder.internString("data"), typeID),
         .Pointer => |ptr| switch (ptr.size) {
-            .Slice => {
-                const slice = try self.expression(exprPtr, typeID);
-                break :blk try self.typechecker.builder.dot(slice, try self.typechecker.builder.internString("ptr"));
-            },
+            .Slice => break :blk try self.typechecker.builder.dot(indexableBaseIdent, try self.typechecker.builder.internString("ptr"), typeID),
             else => try self.expression(exprPtr, typeID),
         },
         else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
@@ -1730,9 +1734,76 @@ fn indexing(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
 
     const index = try self.expression(indexPtr, indexType);
 
-    return self.typechecker.builder.dereference(
-        try self.typechecker.builder.add(indexable, index)
-    );
+    const indexedTypeChild = switch (self.typechecker.typeTable.get(typeID)) {
+        .Array => |arr| arr.child,
+        .Pointer => |ptr| ptr.child,
+        else => return common.debug.ShouldBeImpossible(undefined, @src()),
+    };
+
+    const indexedTypeChildPtr = try self.typechecker.registerType(.{
+        .Pointer = .{
+            .mutable = false,
+            .child = indexedTypeChild,
+            .size = .C,
+        },
+    });
+
+    if (self.typechecker.context.settings.buildInfo.isDebug and !self.typechecker.isCPtr(typeID)) {
+        const indexableName = try self.typechecker.folder.generateRandomName(.Indexable);
+        const indexableDef = try self.typechecker.builder.variableDef(false, indexedTypeChildPtr, indexableName, false, indexable, null);
+        const indexableIdent = try self.typechecker.builder.identifier(indexableName);
+
+        const indexName = try self.typechecker.folder.generateRandomName(.Index);
+        const indexDef = try self.typechecker.builder.variableDef(false, indexType, indexName, false, index, null);
+        const indexIdent = try self.typechecker.builder.identifier(indexName);
+
+        const indexableLen = switch (self.typechecker.typeTable.get(typeID)) {
+            .Pointer => try self.typechecker.builder.dot(
+                indexableBaseIdent,
+                try self.typechecker.builder.internString("len"),
+                typeID,
+            ),
+            .Array => |arr| try self.typechecker.builder.literal(try self.typechecker.builder.addConstant(.{ .Integer = .{ .u32 = arr.len } })),
+            else => return common.debug.ShouldBeImpossible(undefined, @src()),
+        };
+
+        const boundsEnd = try self.typechecker.folder.generateRandomName(.BoundsEnd);
+        const cnd = try self.typechecker.builder.lesser(indexIdent, indexableLen);
+        const boundsJump = try self.typechecker.builder.cjump(boundsEnd, cnd);
+
+        const segfault = try self.typechecker.builder.call(
+            true,
+            try self.typechecker.builder.identifier(try self.typechecker.builder.internString("raise")), &.{
+                try self.typechecker.builder.identifier(try self.typechecker.builder.internString("SIGSEGV")),
+            }
+        );
+
+        const boundsEndLabel = try self.typechecker.builder.label(boundsEnd);
+
+        const deref = try self.typechecker.builder.dereference(
+            try self.typechecker.builder.add(indexableIdent, indexIdent),
+            indexedTypeChildPtr,
+        );
+
+        return self.typechecker.builder.stmtExpr(deref, &.{
+            indexableBaseDef,
+            indexableDef,
+            indexDef,
+            boundsJump,
+            segfault,
+            boundsEndLabel
+        });
+    }
+    else {
+        const deref = try self.typechecker.builder.dereference(
+            try self.typechecker.builder.add(indexable, index),
+            indexedTypeChildPtr
+        );
+
+        return self.typechecker.builder.stmtExpr(deref, &.{
+            indexableBaseDef,
+        });
+    }
 }
 
 fn dot(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
@@ -1759,19 +1830,19 @@ fn dot(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
         .Array => |arr|
             if (std.mem.eql(u8, member, "ptr")) {
                 const data = try self.typechecker.builder.internString("data");
-                return try self.typechecker.builder.dot(obj, data);
+                return try self.typechecker.builder.dot(obj, data, exprType);
             }
             else if (std.mem.eql(u8, member, "len")) return try self.typechecker.builder.literal(
                 try self.typechecker.builder.addConstant(.{ .Integer = .{ .u32 = arr.len } }),
             )
             else if (ref) {
                 const len = try self.typechecker.builder.literal(try self.typechecker.builder.addConstant(.{ .Integer = .{ .u32 = arr.len } }));
-                const data = try self.typechecker.builder.dot(obj, try self.typechecker.builder.internString("data"));
+                const data = try self.typechecker.builder.dot(obj, try self.typechecker.builder.internString("data"), exprType);
                 return try self.typechecker.builder.construct(try self.typechecker.sliceOf(exprType), &.{data, len});
             }
             else {
                 const data = try self.typechecker.builder.internString("data");
-                obj = try self.typechecker.builder.dot(obj, data);
+                obj = try self.typechecker.builder.dot(obj, data, exprType);
             },
 
         .Pointer => |ptr|
@@ -1779,8 +1850,8 @@ fn dot(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
                 switch (self.typechecker.typeTable.get(ptr.child)) {
                 .Struct, .Union, .Array =>
                     if (ref) { return self.typechecker.builder.reference(obj); }
-                    else if (deref) { return self.typechecker.builder.dereference(obj); }
-                    else { obj = try self.typechecker.builder.dereference(obj); },
+                    else if (deref) { return self.typechecker.builder.dereference(obj, exprType); }
+                    else { obj = try self.typechecker.builder.dereference(obj, exprType); },
                 else => { },
             }
         },
@@ -1789,8 +1860,8 @@ fn dot(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
 
     return
         if (ref) self.typechecker.builder.reference(obj)
-        else if (deref) self.typechecker.builder.dereference(obj)
-        else self.typechecker.builder.dot(obj, try self.typechecker.builder.internString(member));
+        else if (deref) self.typechecker.builder.dereference(obj, exprType)
+        else self.typechecker.builder.dot(obj, try self.typechecker.builder.internString(member), exprType);
 }
 
 fn conditionalExpr(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR.Ptr {

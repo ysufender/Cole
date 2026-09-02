@@ -86,6 +86,10 @@ pub fn init(typechecker: *Typechecker, gpa: Allocator) Error!Folder {
 }
 
 pub fn attemptEval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeID) ?Comptime.Value.Ptr {
+    if (self.typechecker.context.settings.hasFlag("--no-comptime")) {
+        return null;
+    }
+
     const prev = self.typechecker.setFlag(.AttemptingEval, true);
     defer _ = self.typechecker.setFlag(.AttemptingEval, prev);
     return self.eval(exprPtr, maybeExpected) catch null;
@@ -103,7 +107,11 @@ pub fn eval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeI
     const ast = typechecker.context.getAST(file);
     const expr = ast.expressions.get(exprPtr);
 
-    const prevcb = self.setFlag(.ComptimeBanned, expr.type != .Literal and self.getFlag(.ComptimeBanned));
+    const prevcb = self.setFlag(
+        .ComptimeBanned,
+        expr.type != .Literal
+        and self.getFlag(.ComptimeBanned)
+    );
     defer _ = self.setFlag(.ComptimeBanned, prevcb);
 
     if (self.getFlag(.ComptimeBanned)) {
@@ -800,15 +808,16 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
     const res = try switch (decl.kind) {
         .Builtin => try self.evalBuiltin(declPtr, &decl, maybeExpected),
         .Variable => blk: {
+            const expected = try self.typechecker.typecheckDecl(declPtr, maybeExpected);
+
             if (
                 !decl.topLevel
                 and !self.typechecker.context.settings.canFold()
+                and !self.typechecker.typeTable.get(expected).isComptime(&self.typechecker.typeTable.slice())
             ) {
                 self.report("Can't fold comptime expression in Og optimization mode.", .{});
                 return Error.ComptimeNotPossible;
             }
-
-            const expected = try self.typechecker.typecheckDecl(declPtr, maybeExpected);
 
             if (self.typechecker.mutable(expected)) {
                 self.report("Comptime evaluation of mutable variable is not possible.", .{});

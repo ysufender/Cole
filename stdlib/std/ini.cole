@@ -250,12 +250,10 @@ let SectionList = struct {
 
     pub let append = fn (self: *mut SectionList, allocator: Allocator::Allocator, section: []u8) -> *mut Section {
         {
-            let idx: mut u32 = 0;
-            while idx < self.items.len {
+            for 0..self.items.len, |idx| {
                 if String::equals(self.items[idx].name, section) {
                     return undefined;
                 }
-                idx = idx + 1;
             }
         }
 
@@ -416,8 +414,7 @@ let number = fn (allocator: Allocator::Allocator, stream: Stream::Input::Stream)
     let _value = Allocator::alloc(allocator, len, 1);
     let value: []mut u8 = unsafeCast(_value);
 
-    let index: mut u32 = 0;
-    while index < len {
+    for 0..len, |index| {
         let res = Stream::Input::read(stream);
 
         switch res {
@@ -425,8 +422,6 @@ let number = fn (allocator: Allocator::Allocator, stream: Stream::Input::Stream)
             @Err -> return (@Err, "Stream Error in identifier.");
             @EOS -> return (@EOF, "EOF in identifier");
         }
-
-        index = index + 1;
     }
 
     return
@@ -457,8 +452,7 @@ let identifier = fn (allocator: Allocator::Allocator, stream: Stream::Input::Str
     let _value = Allocator::alloc(allocator, len, 1);
     let value: []mut u8 = unsafeCast(_value);
 
-    let index: mut u32 = 0;
-    while index < len {
+    for 0..len, |index| {
         let res = Stream::Input::read(stream);
 
         switch res {
@@ -466,8 +460,6 @@ let identifier = fn (allocator: Allocator::Allocator, stream: Stream::Input::Str
             @Err -> return (@Err, "Stream Error in identifier.");
             @EOS -> return (@EOF, "EOF in identifier");
         }
-
-        index = index + 1;
     }
 
     return (@Identifier, value);
