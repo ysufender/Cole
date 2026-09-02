@@ -680,11 +680,7 @@ fn rangeForLoop(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.
         const safetyCnd = try self.typechecker.builder.lesserEqual(rangeStartIdent, rangeEndIdent);
         const safetyEnd = try self.typechecker.folder.generateRandomName(.ForSafetyEnd);
         const safetyCheck = try self.typechecker.builder.cjump(safetyEnd, safetyCnd); 
-        const panic = try self.typechecker.builder.call(
-            true,
-            try self.typechecker.builder.identifier(try self.typechecker.builder.internString("raise")),
-            &.{try self.typechecker.builder.identifier(try self.typechecker.builder.internString("SIGABRT"))}
-        );
+        const panic = try self.handler("__invalid_index");
         const safetyEndLabel = try self.typechecker.builder.label(safetyEnd);
 
         return self.typechecker.builder.scope(
@@ -1462,12 +1458,7 @@ fn builtinCall(
         BI("typeOf") =>
             self.literal(ast.extra[args.at(0)], ofType),
         BI("unreachable") => blk: {
-            const builtinUnreach = try self.identifier(try self.typechecker.builder.internString("raise"));
-            break :blk self.typechecker.builder.call(true, builtinUnreach, &.{
-                try self.typechecker.builder.identifier(
-                    try self.typechecker.builder.internString("SIGABRT"),
-                ),
-            });
+            break :blk try self.handler("__unreachable");
         },
         BI("typeName") => self.typechecker.builder.literal(
             try self.typechecker.builder.addConstant(.{
@@ -1599,18 +1590,22 @@ fn cast(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR.P
     const targetInfo = self.typechecker.typeTable.get(ofType);
     const rtypeInfo = self.typechecker.typeTable.get(rtype);
 
+    const rName = try self.typechecker.folder.generateRandomName(.ThingToCast);
+    const rDef = try self.typechecker.builder.variableDef(false, rtype, rName, false, rexpr, null);
+    const rIdent = try self.typechecker.builder.identifier(rName);
+
     return res: switch (targetInfo) {
         .Pointer => |tptr| switch (rtypeInfo) {
             .Pointer => |rptr|
                 if (tptr.size == .Slice and rptr.size == .Slice) {
                     const ptr = try self.typechecker.builder.dot(
-                        rexpr,
+                        rIdent,
                         try self.typechecker.builder.internString("ptr"),
                         rtype
                     );
 
                     const len = try self.typechecker.builder.dot(
-                        rexpr,
+                        rIdent,
                         try self.typechecker.builder.internString("len"),
                         rtype
                     );
@@ -1637,13 +1632,20 @@ fn cast(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR.P
                         );
                     };
 
-                    break :res self.typechecker.builder.construct(ofType, &.{ptr, newSize});
+                    
+                    break :res self.typechecker.builder.stmtExpr(try self.typechecker.builder.construct(ofType, &.{ptr, newSize}), &.{
+                        rDef,
+                    });
                 }
-                else self.typechecker.builder.construct(ofType, &.{rexpr}),
+                else self.typechecker.builder.stmtExpr(try self.typechecker.builder.construct(ofType, &.{rIdent}), &.{
+                    rDef,
+                }),
 
                 else => return common.debug.ShouldBeImpossible(undefined, @src()),
         },
-        else => self.typechecker.builder.construct(ofType, &.{rexpr}),
+        else => self.typechecker.builder.stmtExpr(try self.typechecker.builder.construct(ofType, &.{rIdent}), &.{
+            rDef,
+        }),
     };
 }
 
@@ -1771,12 +1773,7 @@ fn indexing(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
         const cnd = try self.typechecker.builder.lesser(indexIdent, indexableLen);
         const boundsJump = try self.typechecker.builder.cjump(boundsEnd, cnd);
 
-        const segfault = try self.typechecker.builder.call(
-            true,
-            try self.typechecker.builder.identifier(try self.typechecker.builder.internString("raise")), &.{
-                try self.typechecker.builder.identifier(try self.typechecker.builder.internString("SIGSEGV")),
-            }
-        );
+        const segfault = try self.handler("__invalid_index");
 
         const boundsEndLabel = try self.typechecker.builder.label(boundsEnd);
 
@@ -1972,4 +1969,12 @@ fn literal(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID) Error
 fn report(self: *Lowerer, comptime fmt: []const u8, args: anytype) void {
     _ = self.typechecker.setFlag(.AttemptingEval, false);
     return self.typechecker.report("LOWERER: " ++ fmt, args);
+}
+
+pub fn handler(self: *Lowerer, comptime name: []const u8) Error!JIR.Ptr {
+    return self.typechecker.builder.inlineC(
+        try self.typechecker.builder.internString(
+            std.fmt.comptimePrint("{s}__: {s}((long)&&{s}__);", .{name, name, name})
+        )
+    );
 }

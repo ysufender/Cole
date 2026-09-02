@@ -1781,7 +1781,7 @@ pub fn typecheckCast(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpec
             Error.MutabilityViolation => self.report("Cast from '{s}' to '{s}' ignores mutability specifiers.", rargs),
             Error.PointerSizeMismatch => self.report("Illegal cast from unknown sized '{s}' to sized '{s}'.", rargs),
             Error.StructuralMismatch => self.report("Illegal cast from structurally incompatible '{s}' to '{s}'", rargs),
-            Error.MismatchingSliceChildType => self.report("Cast from slice type '{s}' to '{s}' will alter the length of the slice.", rargs),
+            Error.MismatchingSliceChildType => self.report("Cast from slice type '{s}' to '{s}' will alter the length of the slice. Use 'unsafeCast' instead.", rargs),
             Error.InferenceError => self.report("Illegal cast from '{s}' to unknown type '{s}'.", rargs),
             Error.RedundantCast => self.report("Redundant cast from type '{s}' to '{s}'.", rargs),
             Error.CastOfIncastableValue => self.report("Attempt to cast uncastable value of type '{s}' to '{s}'.", rargs),

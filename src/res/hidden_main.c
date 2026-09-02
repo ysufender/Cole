@@ -21,11 +21,11 @@
 
 #include "forward_decl.h"
 
-char const* __implicit__executable_path;
-Slice_Slice_uint8_t __implicit_commandline_args;
+Slice_uint8_t       _Cole_implicit__executable_path;
+Slice_Slice_uint8_t _Cole_implicit__commandline_args;
 
 void __attribute__((noreturn)) __panic_handler(int const addr) {{
-    fprintf(stderr, "General protection handler.\n");
+    fprintf(stderr, "General protection handler. %#018lx\n\n", addr);
 #ifdef COLE_DEBUG
     fprintf(stderr, "Trace:\n");
 #   ifdef COLE_WIN32
@@ -58,6 +58,28 @@ void __attribute__((noreturn)) __panic_handler(int const addr) {{
 #endif
     fflush(stderr);
     exit(EXIT_FAILURE);
+
+    __builtin_unreachable();
+}}
+
+void __attribute__((noreturn)) __unreachable(long const addr) {{
+    fprintf(stderr, "Reached unreachable code at address %#018lx\n", addr);
+    return __panic_handler(addr);
+}}
+
+void __attribute__((noreturn)) __invalid_index(long const addr) {{
+    fprintf(stderr, "Indexing error at %#018lx\n", addr);
+    return __panic_handler(addr);
+}}
+
+void __attribute__((noreturn)) __null_deref(long const addr) {{
+    fprintf(stderr, "Null pointer dereferencing at %#018lx\n", addr);
+    return __panic_handler(addr);
+}}
+
+void __attribute__((noreturn)) __union_access(long const addr, char const* const access) {{
+    fprintf(stderr, "Attempt to access inactive union field '%s' at %#018lx\n", access, addr);
+    return __panic_handler(addr);
 }}
 
 int main(int const argc, char const* const* const argv) {{
@@ -71,8 +93,11 @@ int main(int const argc, char const* const* const argv) {{
         .len = argc - 1,
     }};
 
-    __implicit__executable_path = argv[0];
-    __implicit_commandline_args = args;
+    _Cole_implicit__executable_path = (Slice_uint8_t){{
+        .ptr = (uint8_t*)argv[0],
+        .len = strlen(argv[0]),
+    }};
+    _Cole_implicit__commandline_args = args;
 
     signal(SIGABRT, __panic_handler);
     signal(SIGSEGV, __panic_handler);

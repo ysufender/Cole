@@ -1,0 +1,18 @@
+import std::memory::allocator as Allocator;
+import std::c::process as Process;
+import std::io::file as File;
+import std::io as IO;
+
+
+pub let readSelf = fn (allocator: Allocator::Allocator) -> []u8 {
+    if buildInfo().platform == @Windows {
+    }
+    else {
+        let file = switch File::Input::open(Process::Self().exec, allocator, false) {
+            @Ok -> |s| s,
+            @Err  -> File::Input::open("/proc/self/exe", allocator, false).Ok,
+        };
+    }
+
+    return undefined;
+};

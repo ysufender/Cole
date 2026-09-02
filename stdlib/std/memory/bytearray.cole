@@ -1,0 +1,42 @@
+import std::memory::allocator as Allocator;
+
+pub let ByteArray = struct {
+    items: mut []mut u8,
+    capacity: mut u32,
+};
+
+let Element = typeInfo(ByteArray).Struct.fields[0].valueType;
+
+pub let initCapacity = fn (capacity: u32, allocator: Allocator::Allocator) -> ByteArray {
+    if capacity == 0 {
+        return (undefined, 0);
+    }
+
+    let memory = Allocator::alloc(allocator, capacity, sizeOf(Element));
+
+    if memory.ptr == undefined {
+        return (undefined, 0);
+    }
+
+    return (memory[0..0], capacity);
+};
+
+pub let init = fn () -> ByteArray {
+    return initCapacity(0, undefined);
+};
+
+pub let append = fn (self: *mut ByteArray, allocator: Allocator::Allocator, byte: u8) -> void {
+    if self.items.len >= self.capacity {
+        grow(self, allocator);
+    }
+
+    let idx = self.items.len;
+    self.items = self.items[0..idx + 1];
+    self.items[idx] = byte;
+};
+
+pub let grow = fn (self: *mut ByteArray, allocator: Allocator::Allocator) -> void {
+    self.capacity = self.capacity * 2;
+    let new: []mut Element = unsafeCast(Allocator::realloc(allocator, cast(self.items), self.capacity * sizeOf(Element)));
+    self.items = new[0..self.items.len];
+};

@@ -8,12 +8,12 @@ const JIR = @import("../jir.zig");
 const Typechecker = @import("../../../typechecker/typechecker.zig");
 const MultiArrayList = @import("../../../util/collections.zig").MultiArrayList;
 const Allocator = std.mem.Allocator;
-pub const InternTable = std.array_hash_map.String(void);
 const Error = common.CompilerError;
 const TypeID = Types.TypeID;
 const Declaration = @import("../../../typechecker/resolver.zig").Declaration;
 const Comptime = @import("../../../typechecker/comptime.zig");
 
+pub const InternTable = std.array_hash_map.String(void);
 pub const StringPtr = defines.Offset;
 pub const MetadataMap = collections.HashMap(JIR.Ptr, []const JIR.Constant.Ptr);
 
@@ -274,14 +274,49 @@ pub inline fn bitwiseAnd(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.P
 pub inline fn not(self: *Builder, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonSingle(.Not, rhs); }
 pub inline fn negate(self: *Builder, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonSingle(.Negation, rhs); }
 
-pub inline fn dot(self: *Builder, object: JIR.Ptr, field: StringPtr, objType: TypeID) Error!JIR.Ptr {
+pub fn dot(self: *Builder, object: JIR.Ptr, field: StringPtr, objType: TypeID) Error!JIR.Ptr {
     const objName = try self.typechecker.folder.generateRandomName(.Obj);
     const objDef = try self.variableDef(false, objType, objName, false, object, null);
     const objIdent = try self.identifier(objName);
 
     const access = try self.commonBinary(.Dot, objIdent, field);
 
-    return self.stmtExpr(access, &.{objDef});
+    return switch (self.typechecker.typeTable.get(objType)) {
+        .Union => |uni|
+            if (self.typechecker.context.settings.buildInfo.isDebug and field != try self.internString("tag")) {
+                const fieldIndex = try self.typechecker.fieldIndex(objType, field);
+                const tagVal = try self.addConstant(.{ .Integer = .{ .u32 = fieldIndex } });
+                const tag = try self.dot(objIdent, try self.internString("tag"), objType);
+                const okLabelName = try self.typechecker.folder.generateRandomName(.UnionSafety);
+                const cnd = try self.equal(tag, try self.literal(try self.addConstant(.{
+                    .Aggregate = .{
+                        .type = uni.tag,
+                        .data = .{
+                            .start = tagVal,
+                            .end = tagVal + 1,
+                        },
+                    }
+                })));
+                const safetyCheck = try self.cjump(okLabelName, cnd);
+                const segfault = try self.typechecker.builder.inlineC(
+                    try self.internString(
+                        std.fmt.allocPrint(self.allocator, "__union_access__: __union_access((long)&&__union_access__, \"{s}\");", .{
+                            self.getInternedString(uni.fields[fieldIndex].name),
+                        }) catch return Error.AllocatorFailure,
+                    ),
+                );
+                const okLabel = try self.label(okLabelName);
+
+                return self.stmtExpr(access, &.{
+                    objDef,
+                    safetyCheck,
+                    segfault,
+                    okLabel,
+                });
+            }
+            else self.stmtExpr(access, &.{objDef}),
+        else => self.stmtExpr(access, &.{objDef}),
+    };
 }
 
 pub inline fn dereference(self: *Builder, expr: JIR.Ptr, exprType: TypeID) Error!JIR.Ptr {
@@ -296,9 +331,7 @@ pub inline fn dereference(self: *Builder, expr: JIR.Ptr, exprType: TypeID) Error
         const cnd = try self.notEqual(ptrIdent, nullPtr);
         const safetyCheck = try self.cjump(safeLabelName, cnd);
 
-        const segfault = try self.call(true, try self.identifier(try self.internString("raise")), &.{
-            try self.identifier(try self.internString("SIGSEGV")),
-        });
+        const segfault = try self.typechecker.lowerer.handler("__null_deref");
 
         const safeLabel = try self.label(safeLabelName);
 

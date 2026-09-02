@@ -41,3 +41,13 @@ pub let spawn = fn (path: []u8, argv: [][]u8) -> SpawnError {
     }
     return @Ok;
 };
+
+pub let Self = fn () -> struct {
+    exec: []u8,
+    args: [][]u8,
+} {
+    return (_Cole_implicit__executable_path, _Cole_implicit__commandline_args);
+};
+
+let _Cole_implicit__executable_path: mut []u8 = #(@extern) undefined;
+let _Cole_implicit__commandline_args: mut [][]u8   = #(@extern) undefined;

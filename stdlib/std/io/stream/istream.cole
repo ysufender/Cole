@@ -8,7 +8,7 @@ pub let ReadResult = union(enum) {
 };
 
 pub let ReadLineResult = union(enum) {
-    Ok: []u8,
+    Ok: []mut u8,
     Err: void,
     EOS: void,
 };
@@ -18,6 +18,7 @@ pub let IStream = struct {
     read      : *fn (*mut void) -> ReadResult,
     readline  : *fn (*mut void, Allocator::Allocator) -> ReadLineResult,
     readbuffer: *fn (*mut void, []mut u8) -> ReadLineResult,
+    exhaust   : *fn (*mut void, Allocator::Allocator) -> ReadLineResult,
     seek      : *fn (*mut void, u32) -> Stream::Result,
     tell      : *fn (*mut void) -> i32,
     close     : *fn (*mut void) -> Stream::Result,
@@ -41,6 +42,10 @@ pub let seek = fn (self: IStream, off: u32) -> Stream::Result {
 
 pub let tell = fn (self: IStream) -> i32 {
     return self.tell(self.context);
+};
+
+pub let exhaust = fn (self: IStream, allocator: Allocator::Allocator) -> ReadLineResult {
+    return self.exhaust(self.context, allocator);
 };
 
 pub let close = fn (self: IStream) -> Stream::Result {

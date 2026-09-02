@@ -34,23 +34,12 @@ pub let Input = struct {
     pub let OpenResult = ifile::OpenResult;
     pub let File       = ifile::IFile;
     pub let stream     = ifile::stream;
-    pub let read       = ifile::read;
-    pub let readline   = ifile::readline;
-    pub let readbuffer = ifile::readbuffer;
-    pub let seek       = ifile::seek;
     pub let open       = ifile::open;
-    pub let close      = ifile::close;
 };
 
 pub let Output = struct {
     pub let OpenResult  = ofile::OpenResult;
     pub let File        = ofile::OFile;
     pub let stream      = ofile::stream;
-    pub let write       = ofile::write;
-    pub let writeline   = ofile::writeline;
-    pub let writebuffer = ofile::writebuffer;
-    pub let seek        = ofile::seek;
     pub let open        = ofile::open;
-    pub let close       = ofile::close;
-    pub let flush       = ofile::flush;
 };

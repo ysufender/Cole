@@ -204,8 +204,7 @@ let PairList = struct {
 
     pub let grow = fn (self: *mut PairList, allocator: Allocator::Allocator) -> void {
         self.capacity = self.capacity * 2;
-        let _new = Allocator::realloc(allocator, cast(self.items), self.capacity * sizeOf(Pair));
-        let new: []mut Pair = cast(_new);
+        let new: []mut Pair = unsafeCast(Allocator::realloc(allocator, cast(self.items), self.capacity * sizeOf(Pair)));
         self.items = new[0..self.items.len];
     };
 
@@ -215,7 +214,7 @@ let PairList = struct {
         }
 
         let idx = self.items.len;
-        self.items = self.items[0..self.items.len + 1];
+        self.items = self.items[0..idx + 1];
         self.items[idx] = (name, value);
     };
 
