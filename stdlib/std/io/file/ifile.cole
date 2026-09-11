@@ -20,7 +20,7 @@ pub let stream = fn (self: IFile) -> Stream::Input::Stream {
     return (cast(self.handle), read, readline, readbuffer, exhaust, seek, tell, close);
 };
 
-let read = fn (handle: *mut void) -> Stream::Input::ReadResult {
+pub let read = fn (handle: *mut void) -> Stream::Input::ReadResult {
     let ch: mut u8 = undefined;
     if fread(ch.&, 1, 1, handle) == 1 {
         return
@@ -32,7 +32,7 @@ let read = fn (handle: *mut void) -> Stream::Input::ReadResult {
         else (@Err, ());
 };
 
-let readline = fn (handle: *mut void, allocator: Allocator::Allocator) -> Stream::Input::ReadLineResult {
+pub let readline = fn (handle: *mut void, allocator: Allocator::Allocator) -> Stream::Input::ReadLineResult {
     let start = ftell(handle);
 
     while true {
@@ -67,7 +67,7 @@ let readline = fn (handle: *mut void, allocator: Allocator::Allocator) -> Stream
     return res;
 };
 
-let readbuffer = fn (handle: *mut void, buffer: []mut u8) -> Stream::Input::ReadLineResult {
+pub let readbuffer = fn (handle: *mut void, buffer: []mut u8) -> Stream::Input::ReadLineResult {
     let idx: mut u32 = 0;
     while idx < buffer.len {
         let res = read(handle);
@@ -85,7 +85,7 @@ let readbuffer = fn (handle: *mut void, buffer: []mut u8) -> Stream::Input::Read
     return (@Ok, buffer);
 };
 
-let exhaust = fn (handle: *mut void, allocator: Allocator::Allocator) -> Stream::Input::ReadLineResult {
+pub let exhaust = fn (handle: *mut void, allocator: Allocator::Allocator) -> Stream::Input::ReadLineResult {
     _ = fseek(handle, 0, File::Base::End);
     let size = ftell(handle);
 
@@ -93,17 +93,17 @@ let exhaust = fn (handle: *mut void, allocator: Allocator::Allocator) -> Stream:
     return readbuffer(handle, mem);
 };
 
-let seek = fn (handle: *mut void, pos: u32) -> Stream::Result {
+pub let seek = fn (handle: *mut void, pos: u32) -> Stream::Result {
     return
         if (fseek(handle, pos, File::Base::Start) == 0) @Ok
         else @Err;
 };
 
-let tell = fn (handle: *mut void) -> i32 {
+pub let tell = fn (handle: *mut void) -> i32 {
     return unsafeCast(ftell(handle));
 };
 
-let close = fn (handle: *mut void) -> Stream::Result {
+pub let close = fn (handle: *mut void) -> Stream::Result {
     return
         if (fclose(handle) == 0) @Ok
         else @Err;

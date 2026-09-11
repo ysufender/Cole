@@ -3,7 +3,9 @@ code {
 }
 
 import std::io::stream as Stream;
-import std::io::file as File;
+import std::io::file::ofile as OutputFile;
+import std::io::file::ifile as InputFile;
+import std::memory::allocator as Allocator;
 
 let FILE = #(@extern) struct { };
 
@@ -14,38 +16,44 @@ let stderr: mut *mut FILE = #(@extern) undefined;
 pub let StdOut = fn () -> Stream::Output::Stream {
     return (
         stdout,
-        File::Output::write,
-        File::Output::writeline,
-        File::Output::writebuffer,
+        OutputFile::write,
+        OutputFile::writeline,
+        OutputFile::writebuffer,
         noseek,
         noclose,
-        File::Output::flush
+        OutputFile::flush
     );
 };
 
 pub let StdErr = fn () -> Stream::Output::Stream {
     return (
         stderr,
-        File::Output::write,
-        File::Output::writeline,
-        File::Output::writebuffer,
+        OutputFile::write,
+        OutputFile::writeline,
+        OutputFile::writebuffer,
         noseek,
         noclose,
-        File::Output::flush
+        OutputFile::flush
     );
 };
 
 pub let StdIn = fn () -> Stream::Input::Stream {
     return (
         stdin,
-        File::Input::read,
-        File::Input::readline,
-        File::Input::readbuffer,
+        InputFile::read,
+        InputFile::readline,
+        InputFile::readbuffer,
+        noexhaust,
         noseek,
         notell,
         noclose,
     );
 };
+
+let noexhaust = fn (stream: *mut void, allocator: Allocator::Allocator) -> Stream::Input::ReadLineResult {
+    return undefined;
+};
+
 
 let noseek = fn (stream: *mut void, off: u32) -> Stream::Result {
     return @Ok;
