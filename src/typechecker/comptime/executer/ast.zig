@@ -75,8 +75,7 @@ pub fn init(typechecker: *Typechecker, allocator: Allocator) Error!ASTExecuter {
 }
 
 pub fn executeCall(self: *ASTExecuter, func: *JIR.Function, args: []const Comptime.Value.Ptr) Error!Comptime.Value {
-    _ = self;
     _ = func;
     _ = args;
-    unreachable;
+    return common.debug.NotImplemented(self.typechecker.context.log, @src());
 }

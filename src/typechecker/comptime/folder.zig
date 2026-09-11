@@ -1764,12 +1764,29 @@ pub fn evalTypeInfo(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.V
     const received = try self.expectType(ast.extra[args.at(0)]);
     const typeID = self.getValue(received).Type;
     const typeToGetInfoOf = self.typechecker.typeTable.get(typeID);
+    const typeInfoTag = typeInfoTag: {
+        const tags = self.typechecker.typeTable.get(
+            self.typechecker.typeTable.get(
+                self.typechecker.findType("builtin::TypeInfo").?
+            ).Union.tag
+        ).Enum.fields;
+
+        const name = @tagName(typeToGetInfoOf);
+
+        for (tags) |tag| {
+            if (std.mem.eql(u8, name, tag.name)) {
+                break :typeInfoTag tag.value;
+            }
+        }
+
+        return common.debug.ShouldBeImpossible(undefined, @src());
+    };
 
     const typeInfo = Comptime.Value{
         .Union = .{
             .Type = self.typechecker.findType("builtin::TypeInfo")
                         orelse return common.debug.ShouldBeImpossible(undefined, @src()),
-            .Tag = @intFromEnum(typeToGetInfoOf),
+            .Tag = typeInfoTag,
             .Value = Value: {
                 break :Value try self.appendValue(switch (typeToGetInfoOf) {
                     .Type, .Noreturn,
@@ -2123,10 +2140,7 @@ pub fn constructFromList(self: *Folder, typeID: TypeID, _range: defines.Range) E
             return self.constructArrayFromList(typeID, arr.child, range);
         },
 
-        .Pointer => |ptr| {
-            assert(ptr.size != .Single);
-            return self.constructArrayFromList(typeID, ptr.child, range);
-        },
+        .Pointer => self.eval(ast.extra[range.at(0)], typeID),
 
         .Noreturn, .CChar, .CUChar, .CDouble, .CInt, .CLong,
         .CShort, .CSize, .CUInt, .CULong, .CUShort,

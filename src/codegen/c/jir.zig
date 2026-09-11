@@ -795,12 +795,10 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
             switch (typeInfo) {
                 .Union => |uni| {
                     if (uni.isTagged and len > 0) {
-                        // Emit tag field
                         const tagNodePtr = self.data[@intCast(node.value + 2)];
                         try self.write(out, ".{s} = ", .{self.strings[uni.fields[0].name]});
                         try self.operation(out, tagNodePtr);
 
-                        // Resolve tag value to find the active payload field
                         if (len > 1) {
                             const tagNode = self.nodes.get(tagNodePtr);
                             const tagConst = self.constants.get(tagNode.value);
@@ -825,7 +823,6 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
                             }
                         }
                     } else {
-                        // Untagged union: emit first non-zero-bit field only
                         var dataIdx: usize = 0;
                         for (uni.fields) |field| {
                             if (self.types.get(field.valueType).isZeroBit()) continue;
@@ -840,10 +837,10 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
                     var fieldIdx: usize = 0;
                     var dataIdx: usize = 0;
                     while (dataIdx < len) : (dataIdx += 1) {
-                        // Skip zero-bit fields
-                        while (fieldIdx < str.fields.len and
-                               self.types.get(str.fields[fieldIdx].valueType).isZeroBit())
-                        {
+                        while (
+                            fieldIdx < str.fields.len
+                            and self.types.get(str.fields[fieldIdx].valueType).isZeroBit()
+                        ) {
                             fieldIdx += 1;
                         }
                         if (fieldIdx >= str.fields.len) break;
@@ -854,7 +851,6 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
                     }
                 },
                 else => {
-                    // Primitive or pointer reinterpret: emit positionally
                     for (0..len) |idx| {
                         if (idx != 0) try self.write(out, ", ", .{});
                         try self.operation(out, self.data[@intCast(node.value + 2 + idx)]);
@@ -987,9 +983,10 @@ fn literal(self: *JIR, out: *Writer, ptr: Constant.Ptr) Error!void {
                     var fieldIdx: usize = 0;
                     var dataIdx: usize = 0;
                     while (dataIdx < dataLen) : (dataIdx += 1) {
-                        while (fieldIdx < str.fields.len and
-                               self.types.get(str.fields[fieldIdx].valueType).isZeroBit())
-                        {
+                        while (
+                            fieldIdx < str.fields.len
+                            and self.types.get(str.fields[fieldIdx].valueType).isZeroBit()
+                        ) {
                             fieldIdx += 1;
                         }
                         if (fieldIdx >= str.fields.len) break;
