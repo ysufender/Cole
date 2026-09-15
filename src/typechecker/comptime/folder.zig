@@ -2980,4 +2980,5 @@ pub const builtinMetadata = [_][]const u8 {
     "@extern",
     "@variadic",
     "@opaque",
+    "@packed",
 };

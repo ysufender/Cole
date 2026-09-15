@@ -67,6 +67,7 @@ void __attribute__((noreturn)) __unreachable(long const addr) {{
     return __panic_handler(addr);
 }}
 
+#ifdef COLE_DEBUG
 void __attribute__((noreturn)) __invalid_index(long const addr) {{
     fprintf(stderr, "Indexing error at %#018lx\n", addr);
     return __panic_handler(addr);
@@ -81,6 +82,7 @@ void __attribute__((noreturn)) __union_access(long const addr, char const* const
     fprintf(stderr, "Attempt to access inactive union field '%s' at %#018lx\n", access, addr);
     return __panic_handler(addr);
 }}
+#endif
 
 int main(int const argc, char const* const* const argv) {{
     Slice_uint8_t* const strings = (Slice_uint8_t*)malloc(sizeof(Slice_uint8_t) * (argc - 1));

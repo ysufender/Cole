@@ -44,20 +44,20 @@ fn addTestStep(b: *std.Build) void {
     opts.addOption(bool, "isDebug", true);
     opts.addOption([]const u8, "version", "test");
 
-    const tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/tests.zig"),
-            .target = config.native,
-            .optimize = .Debug,
-            .link_libc = true,
-        }),
-    });
-    tests.root_module.addEmbedPath(b.path(resourcePath));
-    tests.root_module.addOptions("config", opts);
+    opts.addOption(bool, "record", false);
 
-    const run = b.addRunArtifact(tests);
+    const buildTests = b.addSystemCommand(&.{"efile"});
+    buildTests.setCwd(.{ .cwd_relative = "tests/" });
+
+    const runTests = b.addSystemCommand(&.{
+        "testy",
+        if (b.option(bool, "record", "Run Testy in record mode") orelse false) "record" else "run",
+    });
+    runTests.setCwd(.{ .cwd_relative = "tests/" });
+    runTests.step.dependOn(&buildTests.step);
+
     const step = b.step("test", "Run unit tests reachable from src/main.zig");
-    step.dependOn(&run.step);
+    step.dependOn(&runTests.step);
 }
 
 fn buildCompiler(b: *std.Build) void {

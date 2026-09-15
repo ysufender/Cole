@@ -1,0 +1,12 @@
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let main = fn (args: [][]u8) -> i32 {
+    Console::log(String::intToStr(1256, C::Allocator));
+    Console::log(String::intToStr(0, C::Allocator));
+    Console::log(String::intToStr(String::strToInt("1256"), C::Allocator));
+    Console::log(String::intToStr(String::strToInt("0"), C::Allocator));
+
+    return 0;
+};

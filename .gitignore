@@ -5,6 +5,8 @@ zig-out
 test
 tests/crashes/
 tests/corpus/
+build/
+.testy/
 
 **/build
 src/res/vendor
