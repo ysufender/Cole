@@ -2492,22 +2492,22 @@ pub fn typecheckUnary(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpe
 
     return switch (token) {
         .Minus => switch (rhs) {
-            .ComptimeFloat, .Float, .ComptimeInt => rhsType,
-            .Integer => |int|
-                if (!int.signed) {
+            .ComptimeFloat, .CDouble, .Float, .ComptimeInt => rhsType,
+            else => if (self.isInt(rhsType))
+                if (!self.isSigned(rhsType)) {
                     self.report("Negation of unsigned integer type '{s}' is not allowed.", .{
                         try self.typeName(self.arena.allocator(), rhsType),
                     });
                     return Error.NegationOfUnsigned;
                 }
-                else if (int.size == 0) {
+                else if (self.sizeOf(rhsType) == 0) {
                     self.report("Pointless negation of zero-sized integer type '{s}'.", .{
                         try self.typeName(self.arena.allocator(), rhsType),
                     });
                     return Error.OperationOnZeroBitSize;
                 }
-                else rhsType,
-            else => {
+                else rhsType
+            else {
                 self.report("Attemp to negate non-numeric type '{s}'.", .{
                     try self.typeName(self.arena.allocator(), rhsType),
                 });
@@ -2523,15 +2523,14 @@ pub fn typecheckUnary(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpe
                 return Error.LogicOnNonBooleanType;
             },
         },
-        .Tilde => switch (rhs) {
-            .ComptimeInt, .Integer => rhsType,
-            else => {
+        .Tilde =>
+            if (self.isInt(rhsType)) rhsType
+            else {
                 self.report("Attempt to use bitwise not '~' operator on non-numeric type '{s}'.", .{
                     try self.typeName(self.arena.allocator(), rhsType),
                 });
                 return Error.BitwiseOnUnsupportedType;
             },
-        },
         else => common.debug.ShouldBeImpossible(self.context.log, @src()),
     };
 }
@@ -3159,6 +3158,18 @@ pub fn assertComparable(self: *const Typechecker, this: TypeID, that: TypeID) Er
 pub fn comparable(self: *const Typechecker, this: TypeID, that: TypeID) bool {
     self.assertComparable(this, that) catch return false;
     return true;
+}
+
+pub fn isSigned(self: *const Typechecker, maybeSigned: TypeID) bool {
+    return
+        if (self.isFloat(maybeSigned)) true
+        else if (self.isInt(maybeSigned)) switch (self.typeTable.get(maybeSigned)) {
+            .CUShort, .CULong, .CUInt, .CUChar, .CSize => false,
+            .CShort, .CLong, .CInt, .CChar, .ComptimeInt => true,
+            .Integer => |int| int.signed,
+            else => false,
+        }
+        else false;
 }
 
 pub fn isInt(self: *const Typechecker, maybeInt: TypeID) bool {

@@ -1,38 +1,40 @@
 import std::memory::allocator as Allocator;
 
 pub let intToStr = fn (num: c_long, allocator: Allocator::Allocator) -> []u8 {
-    let tmp: mut any = num;
+    let isSigned = num < 0;
+    let tmp: mut any = num * (if (isSigned) -1 else 1);
     let digitCount: mut u32 = 0;
     while tmp != 0 {
         tmp = tmp / 10;
         digitCount = digitCount + 1;
     }
 
-    digitCount = if (digitCount == 0) 1 else digitCount;
-    let mem = Allocator::alloc(allocator, digitCount, 1);
-    let result: []mut u8 = cast(mem);
+    digitCount = if (digitCount == 0) 1 else digitCount + (if (isSigned) 1 else 0);
+    let result: []mut u8 = cast(Allocator::alloc(allocator, digitCount, 1));
 
-    tmp = num;
+    tmp = num * (if (isSigned) -1 else 1);
     let index: mut u32 = digitCount;
-    while index > 0 {
+    while index > (if (isSigned) 1 else 0) {
         result[index - 1] = '0' + tmp % 10;
         tmp = tmp / 10;
         index = index - 1;
     }
+    result[0] = if (num < 0) '-' else result[0];
 
     return cast(result);
 };
 
-pub let strToInt = fn (str: []u8) -> c_long {
+pub let strToInt = fn (str: mut []u8) -> c_long {
+    let isSigned = str[0] == '-';
     let res: mut c_long = 0;
-    for 0..str.len, |index| {
+    for (if (isSigned) 1 else 0)..str.len, |index| {
         res = (res * 10) + (str[index] - '0');
     }
-    return res;
+    return res * (if (isSigned) -1 else 1);
 };
 
-// Expects <num>.<num> format.
-pub let strToFloat = fn (str: []u8) -> float {
+// Expects [-]<num>.<num> format.
+pub let strToFloat = fn (str: mut []u8) -> float {
     let base: mut u32 = 0;
     let index: mut u32 = 0;
     while str[index] != '.' {
@@ -76,8 +78,7 @@ pub let floatToStr = fn (num: float, allocator: Allocator::Allocator) -> []u8 {
     let fracLen: u32 = padding + fracSigLen;
 
     let totalLen: u32 = wholeStr.len + 1 + fracLen;
-    let mem = Allocator::alloc(allocator, totalLen, sizeOf(u8));
-    let result: []mut u8 = cast(mem);
+    let result: []mut u8 = cast(Allocator::alloc(allocator, totalLen, sizeOf(u8)));
 
     let pos: mut u32 = 0;
     for 0..wholeStr.len, |wi| {
