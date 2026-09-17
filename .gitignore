@@ -6,6 +6,7 @@ test
 tests/crashes/
 tests/corpus/
 build/
+.cache
 
 **/build
 src/res/vendor
