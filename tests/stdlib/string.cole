@@ -13,7 +13,22 @@ let main = fn (args: [][]u8) -> i32 {
     Console::log(String::floatToStr(1256, C::Allocator));
     Console::log(String::floatToStr(0, C::Allocator));
     Console::log(String::floatToStr(-1256, C::Allocator));
-    Console::log(String::floatToStr(-1256.150000000, C::Allocator));
+    Console::log(String::floatToStr(-1256.15, C::Allocator));
+    Console::log(String::floatToStr(1256.15, C::Allocator));
+    Console::log(String::floatToStr(String::strToFloat("1256.0"), C::Allocator));
+    Console::log(String::floatToStr(String::strToFloat("0.0"), C::Allocator));
+    Console::log(String::floatToStr(String::strToFloat("-1256.0"), C::Allocator));
+    Console::log(String::floatToStr(String::strToFloat("-1256.15"), C::Allocator));
+    Console::log(String::floatToStr(String::strToFloat("1256.15"), C::Allocator));
+
+    let empty = "";
+    let alpha = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+    Console::log(if (String::equals(empty, "")) "true" else "false");
+    Console::log(if (String::equals(empty, alpha)) "true" else "false");
+    Console::log(if (String::equals(alpha, alpha)) "true" else "false");
+
+    Console::log(String::boolToStr(false));
+    Console::log(String::boolToStr(String::strToBool("false")));
 
     return 0;
 };

@@ -35,6 +35,11 @@ pub let strToInt = fn (str: mut []u8) -> c_long {
 
 // Expects [-]<num>.<num> format.
 pub let strToFloat = fn (str: mut []u8) -> float {
+    let negative = str[0] == '-';
+    if negative {
+        str = str[1..str.len];
+    }
+
     let base: mut u32 = 0;
     let index: mut u32 = 0;
     while str[index] != '.' {
@@ -45,24 +50,30 @@ pub let strToFloat = fn (str: mut []u8) -> float {
 
     let decimal: mut float = 0;
     let divisor: mut float = 10;
-    for 0..str.len, |idx| {
+    for index..str.len, |idx| {
         decimal = decimal + as(float, cast(str[idx] - '0')) / divisor;
         divisor = divisor * 10;
     }
 
-    return as(float, cast(base)) + decimal;
+    return (as(float, cast(base)) + decimal) * (if (negative) -1 else 1);
 };
 
 pub let floatToStr = fn (num: float, allocator: Allocator::Allocator) -> []u8 {
-    let whole: c_long = cast(num);
-    let frac: float = num - cast(whole);
+    let whole: mut c_long = cast(num);
+    let frac: mut float = num - cast(whole);
+    if frac < 0.0 { frac = -frac; }
 
     let precision: u32 = 9;
     let multiplier: mut float = 1.0;
     for 0..precision, |i| {
         multiplier = multiplier * 10.0;
     }
-    let fracInt: c_long = cast(frac * multiplier);
+
+    let fracInt: mut c_long = cast(frac * multiplier + 0.5);
+    if fracInt >= cast(multiplier) {
+        fracInt = fracInt - cast(multiplier);
+        whole = whole + (if (num >= 0.0) 1 else -1);
+    }
 
     let wholeStr: []u8 = intToStr(whole, allocator);
     let fracStr: []u8 = intToStr(fracInt, allocator);
@@ -114,4 +125,12 @@ pub let equals = fn (str1: []u8, str2: []u8) -> bool {
     }
 
     return true;
+};
+
+pub let boolToStr = fn (b: bool) -> []u8 {
+    return if (b) "true" else "false";
+};
+
+pub let strToBool = fn (str: []u8) -> bool {
+    return equals(str, "true");
 };
