@@ -2493,26 +2493,27 @@ pub fn typecheckUnary(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpe
     return switch (token) {
         .Minus => switch (rhs) {
             .ComptimeFloat, .CDouble, .Float, .ComptimeInt => rhsType,
-            else => if (self.isInt(rhsType))
-                if (!self.isSigned(rhsType)) {
-                    self.report("Negation of unsigned integer type '{s}' is not allowed.", .{
+            else =>
+                if (self.isInt(rhsType))
+                    if (!self.isSigned(rhsType)) {
+                        self.report("Negation of unsigned integer type '{s}' is not allowed.", .{
+                            try self.typeName(self.arena.allocator(), rhsType),
+                        });
+                        return Error.NegationOfUnsigned;
+                    }
+                    else if (self.sizeOf(rhsType) == 0) {
+                        self.report("Pointless negation of zero-sized integer type '{s}'.", .{
+                            try self.typeName(self.arena.allocator(), rhsType),
+                        });
+                        return Error.OperationOnZeroBitSize;
+                    }
+                    else rhsType
+                else {
+                    self.report("Attempt to negate non-numeric type '{s}'.", .{
                         try self.typeName(self.arena.allocator(), rhsType),
                     });
-                    return Error.NegationOfUnsigned;
-                }
-                else if (self.sizeOf(rhsType) == 0) {
-                    self.report("Pointless negation of zero-sized integer type '{s}'.", .{
-                        try self.typeName(self.arena.allocator(), rhsType),
-                    });
-                    return Error.OperationOnZeroBitSize;
-                }
-                else rhsType
-            else {
-                self.report("Attemp to negate non-numeric type '{s}'.", .{
-                    try self.typeName(self.arena.allocator(), rhsType),
-                });
-                return Error.ArithmeticOnNonNumericType;
-            },
+                    return Error.ArithmeticOnNonNumericType;
+                },
         },
         .Bang => switch (rhs) {
             .Bool => rhsType,
