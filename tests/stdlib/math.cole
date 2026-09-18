@@ -1,0 +1,16 @@
+import std::math as Math;
+import std::string as String;
+import std::io::console as Console;
+import std::c as C;
+
+let main = fn (args: [][]u8) -> i32 {
+    Console::log(String::floatToStr(Math::sign(0), C::Allocator));
+    Console::log(String::floatToStr(Math::sign(2), C::Allocator));
+    Console::log(String::floatToStr(Math::sign(-1256), C::Allocator));
+
+    Console::log(String::floatToStr(Math::abs(0), C::Allocator));
+    Console::log(String::floatToStr(Math::abs(2), C::Allocator));
+    Console::log(String::floatToStr(Math::abs(-1256), C::Allocator));
+
+    return 1;
+};

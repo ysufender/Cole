@@ -2,7 +2,8 @@ local Testy = require "testy"
 
 local suites = {
     ["stdlib"] = {
-        "string"
+        "string",
+        "math"
     },
 }
 

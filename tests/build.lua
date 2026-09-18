@@ -20,7 +20,8 @@ local project = Efile.Project
     .init("Cole_Tests")
 
     :multiStep(suite("stdlib", {
-        "string"
+        "math",
+        "string",
     }))
 
 project:step(Efile.Step
