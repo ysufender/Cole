@@ -795,7 +795,7 @@ fn evalIfExpression(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?
 pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID) Error!Comptime.Value.Ptr {
     const decls = self.typechecker.symbols.declarations;
 
-    const decl  = decls.get(declPtr);
+    var decl  = decls.get(declPtr);
 
     const prevToken = self.typechecker.lastToken;
     const prevFile = self.typechecker.currentFile;
@@ -847,7 +847,20 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
                 .expr = decl.node,
             })) |capture| capture
             else Error.ComptimeNotPossible,
-        .Parameter => return Error.EarlyEval,
+        .Parameter => {
+            _ = try self.typechecker.typecheckDecl(declPtr, maybeExpected);
+            decl  = decls.get(declPtr);
+
+            if (self.typechecker.executer.getVar(decl.name)) |v| {
+                return v;
+            }
+            else {
+                self.report("Failed to evaluate comptime parameter '{s}'.", .{
+                    self.typechecker.builder.getInternedString(decl.name),
+                });
+                return Error.EarlyEval;
+            }
+        },
         else => |t| {
             self.report("{s} declaration is not implemented.", .{@tagName(t)});
             return common.debug.NotImplemented(self.typechecker.context.log, @src());
@@ -2328,12 +2341,7 @@ pub fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Type
     const prev = self.setFlag(.InComptimeCall, true);
     defer _ = self.setFlag(.InComptimeCall, prev);
 
-    const val = try self.typechecker.executer.executeCall(function, args);
-
-    return switch (val) {
-        .Void => @intFromEnum(Comptime.Value.Implicit.Void),
-        else => self.appendValue(val),
-    };
+    return self.typechecker.executer.executeCall(function, args);
 }
 
 fn evalIndexing(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {
