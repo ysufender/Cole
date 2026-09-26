@@ -422,8 +422,6 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
 
                 if (self.typeTable.get(def.valueType) == .Function) {
                     const funcPtr = try self.folder.evalDecl(rres.value, def.valueType);
-                    // const funcPtr = self.folder.declCache.get(rres.value)
-                    //    orelse return common.debug.ShouldBeImpossible(undefined, @src());
                     const func = &self.folder.memory.items[funcPtr].Function;
                     self.builder.modifyInternedString(func.name, nname);
                     func.name = nnname;
@@ -477,12 +475,6 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
 
             self.builder.modifyInternedString(func.name, newName);
             func.name = try self.builder.internString(newName);
-
-            // @Note See folder.zig:evalFunction
-            if (!self.folder.getFlag(.InComptimeCall)) {
-                const fun = try self.builder.addFunction(func.*);
-                try self.builder.functionDef(func.name, fun);
-            }
         },
         else => { },
     }
@@ -2060,7 +2052,44 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
         .result = declType,
     };
 
-    if (declType == comptime Comptime.Folder.Builtin.Type("type")) {
+    if (self.folder.attemptEval(decl.node, declType)) |val| fi: {
+        const func = switch (self.folder.memory.items[val]) {
+            .Function => |*f| f,
+            else => break :fi,
+        };
+
+        const returnType = self.typeTable.get(func.signature).Function.returnType;
+
+        // @Note See folder.zig:evalFunction
+        if (!self.folder.getFlag(.InComptimeCall)) {
+            if (!self.hasMetadata(func.expr, "@extern")) {
+                const pc = self.setFlag(.CoveredAllPaths, false);
+                defer _ = self.setFlag(.CoveredAllPaths, pc);
+
+                try self.typecheckStatement(func.body, returnType);
+                if (!(
+                    self.typeTable.get(returnType).isZeroBit()
+                    or self.getFlag(.CoveredAllPaths)
+                )) {
+                    self.report("Function with return type '{s}' does not return a value in all code paths.", .{
+                        try self.typeName(self.arena.allocator(), returnType),
+                    });
+                    return Error.UncoveredCodePath;
+                }
+            }
+
+            const prt = self.lowerer.lastReturnType;
+            self.lowerer.lastReturnType = returnType;
+            defer self.lowerer.lastReturnType = prt;
+
+            var copy = func.*;
+            copy.body = try self.lowerer.statement(func.body);
+
+            const fun = try self.builder.addFunction(copy);
+            try self.builder.functionDef(func.name, fun);
+        }
+    }
+    else if (declType == comptime Comptime.Folder.Builtin.Type("type")) {
         const typeID = self.folder.getValue(try self.folder.eval(decl.node, declType)).Type;
         const node = self.typeTable.get(typeID);
 

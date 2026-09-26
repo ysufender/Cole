@@ -68,10 +68,7 @@ pub fn topLevelDeclaration(self: *Lowerer, ptr: defines.DeclPtr, decl: *const De
                 decl.topLevel,
                 typeID,
                 decl.name,
-                if (self.typechecker.context.settings.canFold())
-                    if (self.typechecker.folder.attemptEval(decl.node, typeID)) |i| self.typechecker.folder.getValue(i) == .Undefined
-                    else false
-                else false,
+                true,
                 node,
                 decl.node,
             );

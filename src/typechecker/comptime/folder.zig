@@ -323,7 +323,9 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
             self.report("Attempt to mark a comptime function as extern.", .{});
             return Error.ExternComptime;
         }
+    }
 
+    if (true) {
         const functionDef = JIR.Function{
             .signature = functionType,
             .body = bodyPtr,
@@ -355,19 +357,21 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
         }
     }
 
-    const functionDef = JIR.Function{
-        .signature = functionType,
-        .body = try self.typechecker.lowerer.statement(bodyPtr),
-        .name = try self.generateRandomName(.Function),
-        .args = argNames,
-        .source = self.typechecker.currentFile,
-        .scope = scope,
-        .expr = exprPtr,
-    };
+    if (false) {
+        const functionDef = JIR.Function{
+            .signature = functionType,
+            .body = try self.typechecker.lowerer.statement(bodyPtr),
+            .name = try self.generateRandomName(.Function),
+            .args = argNames,
+            .source = self.typechecker.currentFile,
+            .scope = scope,
+            .expr = exprPtr,
+        };
 
-    return self.appendValue(.{
-        .Function = functionDef,
-    });
+        return self.appendValue(.{
+            .Function = functionDef,
+        });
+    }
 }
 
 pub fn evalDot(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {
