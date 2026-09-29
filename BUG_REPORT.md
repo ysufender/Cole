@@ -1,5 +1,33 @@
 # Known Bugs
 
+## TypeInfo Problems (41)
+
+When trying to access the fields of the union values from the builtin::TypeInfo, the
+types get mangled somehow. I don't have a reproductory snippet sorry. But below is somewhat
+a repro:
+
+```rust
+let Union = union(enum) {
+    Some: float,
+    None: void,
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    return typeInfo(Union).Union.fields.len;
+};
+```
+
+This should error out something like `can't find field 'len' in type 'bool'`.
+
+## Problems With Compile Time Execution
+
+The current commit (`1b62422`) is unable to call simple functions, they somewhat go the comptime route
+and end up in error `ComptimeNotPossible`.
+
+### Reproduction
+
+See the `test/` of this commit folder directly.
+
 ## Illegal Memory Access (31)
 
 Run the raylib demo. The output source.c is garbled when using a non-preserving allocator

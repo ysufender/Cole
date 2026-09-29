@@ -2302,7 +2302,7 @@ pub fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Type
         .Function => &maybeFunction.Function,
         else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
     };
-        
+
     const signature = self.typechecker.typeTable.get(function.signature).Function;
 
     const argsListPtr = ast.extra[extraPtr + 1];
