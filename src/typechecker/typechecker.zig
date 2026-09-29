@@ -2058,10 +2058,11 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
             else => break :fi,
         };
 
-        const returnType = self.typeTable.get(func.signature).Function.returnType;
+        const sign = self.typeTable.get(func.signature).Function;
+        const returnType = sign.returnType;
 
         // @Note See folder.zig:evalFunction
-        if (!self.folder.getFlag(.InComptimeCall)) {
+        if (!self.folder.getFlag(.InComptimeCall) and !sign.isComptime) {
             if (!self.hasMetadata(func.expr, "@extern")) {
                 const pc = self.setFlag(.CoveredAllPaths, false);
                 defer _ = self.setFlag(.CoveredAllPaths, pc);

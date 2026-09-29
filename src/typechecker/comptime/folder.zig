@@ -52,6 +52,7 @@ pub const Flags = enum(u3) {
 const Folder = @This();
 
 cache: Cache,
+declCache: DeclCache,
 
 typechecker: *Typechecker,
 
@@ -70,6 +71,9 @@ pub fn init(typechecker: *Typechecker, gpa: Allocator) Error!Folder {
     var cache = Cache.empty;
     cache.ensureTotalCapacity(allocator, typechecker.symbols.resolutionMap.count()) catch return Error.AllocatorFailure;
 
+    var declCache = DeclCache.empty;
+    declCache.ensureTotalCapacity(allocator, typechecker.symbols.resolutionMap.count()) catch return Error.AllocatorFailure;
+
     var memory = Memory.initCapacity(allocator, 512) catch return Error.AllocatorFailure;
     memory.appendAssumeCapacity(.{ .Type = Builtin.Type("any") });
     memory.appendAssumeCapacity(.{ .Type = Builtin.Type("__incomplete") });
@@ -78,6 +82,7 @@ pub fn init(typechecker: *Typechecker, gpa: Allocator) Error!Folder {
     return .{
         .typechecker = typechecker,
         .cache = cache,
+        .declCache = declCache,
         .memory = memory,
         .flags = FlagMap.initEmpty(),
         .rng = std.Random.DefaultPrng.init(5315),
@@ -317,7 +322,6 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
         },
     });
 
-    // @Note comptime functions get typechecked on-the-fly.
     if (isComptime) {
         if (self.typechecker.hasMetadata(exprPtr, "@extern")) {
             self.report("Attempt to mark a comptime function as extern.", .{});
@@ -325,53 +329,19 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
         }
     }
 
-    if (true) {
-        const functionDef = JIR.Function{
-            .signature = functionType,
-            .body = bodyPtr,
-            .name = try self.generateRandomName(.Function),
-            .args = argNames,
-            .source = self.typechecker.currentFile,
-            .scope = scope,
-            .expr = exprPtr,
-        };
+    const functionDef = JIR.Function{
+        .signature = functionType,
+        .body = bodyPtr,
+        .name = try self.generateRandomName(.Function),
+        .args = argNames,
+        .source = self.typechecker.currentFile,
+        .scope = scope,
+        .expr = exprPtr,
+    };
 
-        return self.appendValue(.{
-            .Function = functionDef,
-        });
-    }
-
-    if (!self.typechecker.hasMetadata(exprPtr, "@extern")) {
-        const pc = self.typechecker.setFlag(.CoveredAllPaths, false);
-        defer _ = self.typechecker.setFlag(.CoveredAllPaths, pc);
-
-        try self.typechecker.typecheckStatement(bodyPtr, returnType);
-        if (!(
-            self.typechecker.typeTable.get(returnType).isZeroBit()
-            or self.typechecker.getFlag(.CoveredAllPaths)
-        )) {
-            self.typechecker.report("Function with return type '{s}' does not return a value in all code paths.", .{
-                try self.typechecker.typeName(self.arena.allocator(), returnType),
-            });
-            return Error.UncoveredCodePath;
-        }
-    }
-
-    if (false) {
-        const functionDef = JIR.Function{
-            .signature = functionType,
-            .body = try self.typechecker.lowerer.statement(bodyPtr),
-            .name = try self.generateRandomName(.Function),
-            .args = argNames,
-            .source = self.typechecker.currentFile,
-            .scope = scope,
-            .expr = exprPtr,
-        };
-
-        return self.appendValue(.{
-            .Function = functionDef,
-        });
-    }
+    return self.appendValue(.{
+        .Function = functionDef,
+    });
 }
 
 pub fn evalDot(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {
@@ -809,6 +779,10 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
     defer self.typechecker.currentFile = prevFile;
     defer self.typechecker.currentScope = prevScope;
 
+    if (self.declCache.get(declPtr)) |v| {
+        return v;
+    }
+
     const res = try switch (decl.kind) {
         .Builtin => try self.evalBuiltin(declPtr, &decl, maybeExpected),
         .Variable => blk: {
@@ -852,13 +826,21 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
             decl  = decls.get(declPtr);
 
             if (self.typechecker.executer.getVar(decl.name)) |v| {
+                self.declCache.putNoClobber(self.arena.allocator(), declPtr, v)
+                    catch return Error.AllocatorFailure;
                 return v;
             }
-            else {
+            else if (self.getFlag(.InComptimeCall)) {
                 self.report("Failed to evaluate comptime parameter '{s}'.", .{
                     self.typechecker.builder.getInternedString(decl.name),
                 });
                 return Error.EarlyEval;
+            }
+            else {
+                self.report("Attempt to evaluate parameter '{s}' in non-comptime scope.", .{
+                    self.typechecker.builder.getInternedString(decl.name),
+                });
+                return Error.ComptimeNotPossible;
             }
         },
         else => |t| {

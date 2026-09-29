@@ -52,11 +52,12 @@ pub fn executeCall(self: *Executer, func: *JIR.Function, args: []const Comptime.
     const ast = self.typechecker.context.getAST(func.source);
     const bodyPtr = ast.statements.get(func.body).value;
 
-    const body  = ast.extra[
-        ast.extra[bodyPtr]
-        ..
-        ast.extra[bodyPtr + 1]
-    ];
+    const bodyRange = defines.Range{
+        .start = ast.extra[bodyPtr],
+        .end = ast.extra[bodyPtr + 1],
+    };
+
+    const body  = ast.extra[bodyRange.start..bodyRange.end];
 
     try self.stack.push(.{
         .bp = @intCast(self.typechecker.folder.memory.items.len),
@@ -89,15 +90,14 @@ pub fn executeCall(self: *Executer, func: *JIR.Function, args: []const Comptime.
     }
 
     while (self.stack.peekm()) |top| {
-        defer top.pc += 1;
-
         if (top.pc >= top.body.len) {
             self.typechecker.folder.memory.shrinkRetainingCapacity(top.bp);
             _ = self.stack.pop();
             continue;
         }
 
-        const statement = ast.statements.get(top.pc);
+        defer top.pc += 1;
+        const statement = ast.statements.get(top.body[top.pc]);
 
         switch (statement.type) {
             .Return => return self.typechecker.folder.eval(statement.value, returnType),
@@ -113,7 +113,10 @@ pub fn executeCall(self: *Executer, func: *JIR.Function, args: []const Comptime.
                     ],
                 });
             },
-            else => return Error.EarlyEval,
+            else => {
+                self.report("Unreachable '{s}'.", .{@tagName(statement.type)});
+                return Error.ShouldBeImpossible;
+            },
         }
     }
 
