@@ -45,6 +45,11 @@ pub fn init(typechecker: *Typechecker, allocator: Allocator) Error!Executer {
 }
 
 pub fn executeCall(self: *Executer, func: *JIR.Function, args: []const Comptime.Value.Ptr) Error!Comptime.Value.Ptr {
+    const sign = self.typechecker.typeTable.get(func.signature).Function;
+    if (!sign.isComptime) {
+        return Error.ComptimeNotPossible;
+    }
+
     const psrc = self.typechecker.currentFile;
     defer self.typechecker.currentFile = psrc;
     self.typechecker.currentFile = func.source;
@@ -76,7 +81,7 @@ pub fn executeCall(self: *Executer, func: *JIR.Function, args: []const Comptime.
     const pc = self.typechecker.setFlag(.CoveredAllPaths, false);
     defer _ = self.typechecker.setFlag(.CoveredAllPaths, pc);
 
-    const returnType = self.typechecker.typeTable.get(func.signature).Function.returnType;
+    const returnType = sign.returnType;
 
     try self.typechecker.typecheckStatement(func.body, returnType);
     if (!(

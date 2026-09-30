@@ -1675,6 +1675,7 @@ pub fn typecheckBuiltinCall(self: *Typechecker, extraPtr: defines.ExpressionPtr,
     self.lastToken = funcToken;
 
     return switch (declPtr) {
+        BI("inComptime") => comptime Comptime.Folder.Builtin.Type("bool"),
         BI("cast") => self.typecheckCast(extraPtr, maybeExpected, false),
         BI("unsafeCast") => self.typecheckCast(extraPtr, maybeExpected, true),
         BI("as") => self.typecheckTypeForwarding(extraPtr, maybeExpected),

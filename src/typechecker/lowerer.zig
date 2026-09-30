@@ -1449,6 +1449,9 @@ fn builtinCall(
     };
 
     return switch (declPtr) {
+        BI("inComptime") => self.typechecker.builder.literal(try self.typechecker.builder.addConstant(.{
+            .Integer = .{ .u8 = 0 },
+        })),
         BI("cast"), BI("unsafeCast") => self.cast(extraPtr, ofType),
         BI("as") =>
             self.expression(ast.extra[args.at(1)], try self.typechecker.expectType(ast.extra[args.at(0)])),

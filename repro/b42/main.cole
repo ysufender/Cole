@@ -1,0 +1,24 @@
+import std::c;
+import std::string;
+import std::io;
+
+import std::io::console;
+
+import core::cli;
+
+let main = fn (_args: [][]u8) -> i32 {
+    let args: mut any = core::cli::init(std::c::Allocator, 2);
+
+    if core::cli::param(args.&, "file", (@String, "~/file.txt"), "file to edit")
+       or core::cli::option(args.&, "gui", false, "open in gui mode") {
+        std::io::console::error("Failed to add params");
+        return 1;
+    }
+    /*                 error in this call */
+    else if core::cli::parse(args.&, _args, std::io::StdOut(), std::c::Allocator) {
+        std::io::console::error("Failed to parse params");
+        return 1;
+    }
+
+    return 0;
+};

@@ -19,10 +19,10 @@ let main = fn (args: [][]u8) -> i32 {
 
 This should error out something like `can't find field 'len' in type 'bool'`.
 
-## Problems With Compile Time Execution
+## Problems With Compile Time Execution (42)
 
-The current commit (`1b62422`) is unable to call simple functions, they somewhat go the comptime route
-and end up in error `ComptimeNotPossible`.
+We are unable to call simple functions, they somewhat go the comptime route
+and end up in error `ComptimeNotPossible`. See `repro/b42` for reproduction.
 
 ### Reproduction
 

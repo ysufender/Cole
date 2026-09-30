@@ -1272,7 +1272,7 @@ pub const builtins = [_][]const u8 {
     "sizeOf", "cast", "unsafeCast",
     "as", "compileLog", "typeName", "Tuple",
     "alignOf", "compileBreak", "typeInfo",
-    "src", "buildInfo",
+    "src", "buildInfo", "inComptime",
 };
 
 pub fn BuiltinIndex(comptime builtin: []const u8) u32 {

@@ -821,28 +821,29 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
                 .expr = decl.node,
             })) |capture| capture
             else Error.ComptimeNotPossible,
-        .Parameter => {
-            _ = try self.typechecker.typecheckDecl(declPtr, maybeExpected);
-            decl  = decls.get(declPtr);
+        .Parameter =>
+            if (self.getFlag(.InComptimeCall)) {
+                _ = try self.typechecker.typecheckDecl(declPtr, maybeExpected);
+                decl  = decls.get(declPtr);
 
-            if (self.typechecker.executer.getVar(decl.name)) |v| {
-                self.declCache.putNoClobber(self.arena.allocator(), declPtr, v)
-                    catch return Error.AllocatorFailure;
-                return v;
-            }
-            else if (self.getFlag(.InComptimeCall)) {
-                self.report("Failed to evaluate comptime parameter '{s}'.", .{
-                    self.typechecker.builder.getInternedString(decl.name),
-                });
-                return Error.EarlyEval;
+                if (self.typechecker.executer.getVar(decl.name)) |v| {
+                    self.declCache.putNoClobber(self.arena.allocator(), declPtr, v)
+                        catch return Error.AllocatorFailure;
+                    return v;
+                }
+                else {
+                    self.report("Failed to evaluate comptime parameter '{s}'.", .{
+                        self.typechecker.builder.getInternedString(decl.name),
+                    });
+                    return Error.EarlyEval;
+                }
             }
             else {
                 self.report("Attempt to evaluate parameter '{s}' in non-comptime scope.", .{
                     self.typechecker.builder.getInternedString(decl.name),
                 });
                 return Error.ComptimeNotPossible;
-            }
-        },
+            },
         else => |t| {
             self.report("{s} declaration is not implemented.", .{@tagName(t)});
             return common.debug.NotImplemented(self.typechecker.context.log, @src());
@@ -858,6 +859,7 @@ fn evalBuiltinCall(self: *Folder, extraPtr: defines.OpaquePtr, declPtr: defines.
     _ = try self.typechecker.typecheckBuiltinCall(extraPtr, declPtr, maybeExpected);
 
     return switch (declPtr) {
+        BI("inComptime") => self.appendValue(.{ .Bool = true }),
         BI("cast") => self.evalCast(extraPtr, maybeExpected, false),
         BI("unsafeCast") => self.evalCast(extraPtr, maybeExpected, true),
         BI("as") => self.evalTypeForwarding(extraPtr, maybeExpected),
@@ -2304,6 +2306,13 @@ pub fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Type
     };
 
     const signature = self.typechecker.typeTable.get(function.signature).Function;
+
+    if (!signature.isComptime) {
+        self.report("Attempt to comptime execute non-comptime function '{s}'.", .{
+            self.typechecker.builder.getInternedString(function.name),
+        });
+        return Error.ComptimeNotPossible;
+    }
 
     const argsListPtr = ast.extra[extraPtr + 1];
     const argsList: defines.OpaquePtr = ast.expressions.items(.value)[argsListPtr];
