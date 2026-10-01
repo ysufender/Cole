@@ -19,8 +19,6 @@ pub let Value = union(enum) {
     String: mut []u8,
     Bool: mut bool,
 
-    pub let Maybe = Option(Value);
-
     pub let tagName = [4][]u8(
         "Int",
         "String",
@@ -48,7 +46,7 @@ pub let Args = struct {
     capacity: u32,
 
     /* error in this function */
-    pub let get = fn (self: *Args, key: []u8) -> Value::Maybe {
+    pub let get = fn (self: *Args, key: []u8) -> Option(Value) {
         for self.pairs, |pair| {
             if String::equals(key, pair.key) {
                 return (@Some, pair.value);

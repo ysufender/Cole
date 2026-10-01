@@ -628,7 +628,10 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
             }
             else {
                 const zeroInit: []const u8 = switch (info) {
-                    .Pointer => " = NULL",
+                    .Pointer => |ptr| switch (ptr.size) {
+                        .Slice => "= {0}",
+                        else => " = NULL",
+                    },
                     .Bool, .Integer, .CInt, .CUInt, .CLong, .CULong,
                     .CShort, .CUShort, .CSize, .CChar, .CUChar => " = 0",
                     .Float, .CDouble => " = 0",

@@ -1,5 +1,9 @@
 let printf = #(@extern, @variadic) fn (fmt: mut [@c]c_char) -> mut c_int { };
 
+pub let write = fn (msg: []u8) -> void {
+    _ = printf("%s", msg.ptr);
+};
+
 pub let log = fn (msg: []u8) -> void {
     _ = printf("%s\n", msg.ptr);
 };

@@ -1,5 +1,7 @@
 local Efile = require "efile"
 
+local suites = require "suites"
+
 local exe_path = "../zig-out/debug-linux-x86_64/v0.0.1/cole"
 local cflags = " -I ../stdlib --supress-warnings "
 
@@ -19,10 +21,9 @@ end
 local project = Efile.Project
     .init("Cole_Tests")
 
-    :multiStep(suite("stdlib", {
-        "math",
-        "string",
-    }))
+for name, files in pairs(suites) do
+    project:multiStep(suite(name, files))
+end
 
 project:step(Efile.Step
     .init("all")

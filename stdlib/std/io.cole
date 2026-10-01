@@ -54,7 +54,6 @@ let noexhaust = fn (stream: *mut void, allocator: Allocator::Allocator) -> Strea
     return undefined;
 };
 
-
 let noseek = fn (stream: *mut void, off: u32) -> Stream::Result {
     return @Ok;
 };

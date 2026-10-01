@@ -1,20 +1,15 @@
 local Testy = require "testy"
 
-local suites = {
-    ["stdlib"] = {
-        "string",
-        "math"
-    },
-}
+local suites = require "suites"
 
 local function suite(name, tests)
-    local suite = Testy.Suite.init(name)
+    local s = Testy.Suite.init(name)
     for _, test in ipairs(tests) do
         local execp = "build/c/"..test..".cole.exec"
-        suite:test(Testy.Test
+        s:test(Testy.Test
             .init(test, execp))
     end
-    return suite
+    return s
 end
 
 local test = Testy.init("Cole_Test")

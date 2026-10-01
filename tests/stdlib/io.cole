@@ -1,0 +1,7 @@
+import std::io as Io;
+import std::io::stream as Stream;
+
+let main = fn (args: [][]u8) -> i32 {
+    Stream::Output::writeline(Io::StdOut(), "Test Line");
+    return 0;
+};

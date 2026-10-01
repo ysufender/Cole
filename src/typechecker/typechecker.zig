@@ -1461,7 +1461,9 @@ pub fn typecheckScoping(self: *Typechecker, expr: defines.ExpressionPtr) Error!T
     switch (lhsType) {
         .Enum => |enm| {
             for (enm.fields) |field| {
-                if (std.mem.eql(u8, field.name, member)) {
+                const lastColon = std.mem.findScalarLast(u8, member, ':');
+                const searchFor = if (lastColon) |lc| member[lc+1..] else member;
+                if (std.mem.eql(u8, field.name, searchFor)) {
                     return lhsTypeID;
                 }
             }

@@ -2245,7 +2245,9 @@ fn evalScoping(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Value.
 
     const scope = switch (self.typechecker.typeTable.get(res)) {
         .Enum => |enm| ret: {
-            if (try self.typechecker.tryGetFieldIndex(res, try self.typechecker.builder.internString(member))) |found| {
+            const lastColon = std.mem.findScalarLast(u8, member, ':');
+            const searchFor = if (lastColon) |lc| member[lc+1..] else member;
+            if (try self.typechecker.tryGetFieldIndex(res, try self.typechecker.builder.internString(searchFor))) |found| {
                 return self.appendValue(.{
                     .Enum = .{
                         .Type = res,
