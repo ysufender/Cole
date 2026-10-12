@@ -820,7 +820,10 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
                 .file = self.typechecker.currentFile,
                 .expr = decl.node,
             })) |capture| capture
-            else Error.ComptimeNotPossible,
+            else {
+                self.report("Failed to evaluate captured variable", .{});
+                return Error.ComptimeNotPossible;
+            },
         .Parameter =>
             if (self.getFlag(.InComptimeCall)) {
                 _ = try self.typechecker.typecheckDecl(declPtr, maybeExpected);
@@ -2821,7 +2824,7 @@ fn cacheValue(self: *Folder, ptr: FolderCacheKey, val: Comptime.Value.Ptr) Error
         else => { },
     }
 
-    if (!self.getFlag(.InComptimeCall)) {
+    if (true or !self.getFlag(.InComptimeCall)) {
         self.cache.put(self.arena.allocator(), ptr, val)
             catch return Error.AllocatorFailure;
     }

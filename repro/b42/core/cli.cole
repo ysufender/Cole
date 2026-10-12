@@ -47,6 +47,7 @@ pub let Args = struct {
 
     /* error in this function */
     pub let get = fn (self: *Args, key: []u8) -> Option(Value) {
+        /* Fails to evaluate the captured pair */
         for self.pairs, |pair| {
             if String::equals(key, pair.key) {
                 return (@Some, pair.value);
