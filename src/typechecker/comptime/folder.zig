@@ -685,10 +685,8 @@ fn evalSwitchExpression(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpecte
                         .file = self.typechecker.currentFile,
                         .expr = firstCapture,
                     });
-                    try self.cacheValue(.{
-                        .file = self.typechecker.currentFile,
-                        .expr = capture,
-                    }, varToSwitchOn);
+                    
+                    try self.cacheDecl(capture, varToSwitchOn);
                 }
 
                 return self.expectDefined(ast.extra[case + 3], resultType);
@@ -729,10 +727,7 @@ fn evalSwitchExpression(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpecte
                         .expr = firstCapture,
                     });
 
-                    try self.cacheValue(.{
-                        .file = self.typechecker.currentFile,
-                        .expr = capture,
-                    }, varToSwitchOn);
+                    try self.cacheDecl(capture, varToSwitchOn);
                 }
 
                 return self.expectDefined(ast.extra[case + 3], resultType);
@@ -816,10 +811,7 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
             break :blk self.castValue(valuePtr, expected, false);
         },
         .Capture =>
-            if (self.cache.get(.{
-                .file = self.typechecker.currentFile,
-                .expr = decl.node,
-            })) |capture| capture
+            if (self.declCache.get(declPtr)) |capture| capture
             else {
                 self.report("Failed to evaluate captured variable", .{});
                 return Error.ComptimeNotPossible;
@@ -830,8 +822,7 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
                 decl  = decls.get(declPtr);
 
                 if (self.typechecker.executer.getVar(decl.name)) |v| {
-                    self.declCache.putNoClobber(self.arena.allocator(), declPtr, v)
-                        catch return Error.AllocatorFailure;
+                    try self.cacheDecl(declPtr, v);
                     return v;
                 }
                 else {
@@ -2812,22 +2803,15 @@ pub fn resolveIncomplete(self: *Folder, typeID: TypeID, resolvedTo: TypeID) Erro
     };
 }
 
-fn cacheValue(self: *Folder, ptr: FolderCacheKey, val: Comptime.Value.Ptr) Error!void {
-    const value = self.getValue(val);
-    switch (value) {
-        .Function => |func| if (self.typechecker.typeTable.get(func.signature).Function.isComptime) {
-            return;
-        },
-        .Type => |t| if (self.isIncomplete(t)) {
-            return;
-        },
-        else => { },
-    }
+fn cacheDecl(self: *Folder, key: defines.DeclPtr, val: Comptime.Value.Ptr) Error!void {
+    self.declCache.put(self.arena.allocator(), key, val)
+        catch return Error.AllocatorFailure;
+}
+    
 
-    if (true or !self.getFlag(.InComptimeCall)) {
-        self.cache.put(self.arena.allocator(), ptr, val)
-            catch return Error.AllocatorFailure;
-    }
+fn cacheValue(self: *Folder, ptr: FolderCacheKey, val: Comptime.Value.Ptr) Error!void {
+    self.cache.put(self.arena.allocator(), ptr, val)
+        catch return Error.AllocatorFailure;
 }
 
 pub fn appendValue(self: *Folder, value: Comptime.Value) Error!Comptime.Value.Ptr {
