@@ -49,3 +49,15 @@ And the Cole compiler will be at `zig-out/<target>/<version>/cole(.exe)`.
 ## Contributing
 
 Check out the [CONTRIBUTING.md](./CONTRIBUTING.md) and [BUG_REPORT.md](./BUG_REPORT.md)
+
+## Testing
+
+There is a small test suite under `tests/`, written in the [Testy](https://codeberg.org/ysufender/Testy)
+framework of mine.
+
+You can run the tests by first changing your working directory to `tests/`
+and then executing `efile run`.
+
+If you wish to record the current outputs, you can use `efile record`.
+
+If you want to just build the tests, you can use `efile build`.

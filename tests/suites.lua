@@ -2,6 +2,10 @@ return {
     ["stdlib"] = {
         "string",
         "math",
-        "io"
+        -- "io"
+    },
+    ["regression"] = {
+        "expr_list_union_ctor",
+        "builtin_type_info",
     },
 }

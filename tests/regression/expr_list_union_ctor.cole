@@ -1,0 +1,32 @@
+import std::io::console as Console;
+
+let Inner = union(enum) { A: []u8, B: bool };
+let Outer = union(enum) { Some: Inner, None: void };
+
+let c = Inner(@A, "Comptime Inner");
+let top = Outer(@Some, c);
+
+let f = fn (v: Inner) -> Outer {
+    return (@Some, v);
+};
+
+let printInner = fn (i: Inner) -> void {
+    switch i {
+        @A -> |msg| Console::log(msg);
+        @B -> Console::log("None: Inner");
+    }
+};
+
+let printOuter = fn (i: Outer) -> void {
+    switch i {
+        @Some -> |inner| printInner(inner);
+        @None -> Console::log("None: Outer");
+    }
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    printOuter(top);
+    printInner((@A, "Hello World"));
+    printInner((@B, false));
+    return 1;
+};

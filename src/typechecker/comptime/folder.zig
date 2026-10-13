@@ -1854,6 +1854,9 @@ pub fn evalTypeInfo(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.V
                             .Type = self.typechecker.findType("builtin::Enum")
                                         orelse return common.debug.ShouldBeImpossible(undefined, @src()),
                             .Fields = range: {
+                                const fieldsSlice = try self.buildEnumFieldSlice(enm.fields);
+                                const defsSlice = try self.buildFieldInfoSlice(enm.definitions);
+
                                 const start: u32 = @intCast(self.memory.items.len);
                                 _ = try self.appendValue(.{ .Bool = enm.mutable });
                                 _ = try self.appendValue(.{
@@ -1862,34 +1865,11 @@ pub fn evalTypeInfo(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.V
                                         .str = self.typechecker.builder.getInternedString(enm.name),
                                     },
                                 });
+                                _ = try self.appendValue(fieldsSlice);
+                                _ = try self.appendValue(defsSlice);
+                                _ = try self.appendValue(.{ .Bool = false }); // external
 
-                                const fieldsSliceType = self.typechecker.findType("[]builtin::EnumField")
-                                    orelse return common.debug.ShouldBeImpossible(undefined, @src());
-                                const sliceStart: u32 = @intCast(self.memory.items.len);
-                                for (enm.fields) |field| {
-                                    const enumFieldType = self.typechecker.findType("builtin::EnumField")
-                                        orelse return common.debug.ShouldBeImpossible(undefined, @src());
-                                    _ = try self.appendValue(Comptime.Value{
-                                        .Struct = .{
-                                            .Type = enumFieldType,
-                                            .Fields = inner: {
-                                                const fs: u32 = @intCast(self.memory.items.len);
-                                                _ = try self.appendValue(.{ .String = .{ .type = .Cole, .str = field.name } });
-                                                _ = try self.appendValue(.{ .Int = field.value });
-                                                break :inner .{ .start = fs, .end = fs + 2 };
-                                            },
-                                        },
-                                    });
-                                }
-                                _ = try self.appendValue(.{
-                                    .Slice = .{
-                                        .Type = fieldsSliceType,
-                                        .To = sliceStart,
-                                        .Size = @intCast(enm.fields.len),
-                                    },
-                                });
-
-                                break :range .{ .start = start, .end = start + 3 };
+                                break :range .{ .start = start, .end = start + 5 };
                             },
                         },
                     },
@@ -1899,25 +1879,25 @@ pub fn evalTypeInfo(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.V
                             .Type = self.typechecker.findType("builtin::Function")
                                         orelse return common.debug.ShouldBeImpossible(undefined, @src()),
                             .Fields = range: {
-                                const start: u32 = @intCast(self.memory.items.len);
-                                _ = try self.appendValue(.{ .Bool = func.mutable });
-                                _ = try self.appendValue(.{ .Bool = func.isComptime });
-                                _ = try self.appendValue(.{ .Bool = func.variadic });
-
                                 const argSliceType = self.typechecker.findType("[]type")
                                     orelse return common.debug.ShouldBeImpossible(undefined, @src());
                                 const sliceStart: u32 = @intCast(self.memory.items.len);
                                 for (func.argTypes) |argTypeID| {
                                     _ = try self.appendValue(.{ .Type = argTypeID });
                                 }
-                                _ = try self.appendValue(.{
+                                const argsSlice = Comptime.Value{
                                     .Slice = .{
                                         .Type = argSliceType,
                                         .To = sliceStart,
                                         .Size = @intCast(func.argTypes.len),
                                     },
-                                });
+                                };
 
+                                const start: u32 = @intCast(self.memory.items.len);
+                                _ = try self.appendValue(.{ .Bool = func.mutable });
+                                _ = try self.appendValue(.{ .Bool = func.isComptime });
+                                _ = try self.appendValue(.{ .Bool = func.variadic });
+                                _ = try self.appendValue(argsSlice);
                                 _ = try self.appendValue(.{ .Type = func.returnType });
                                 break :range .{ .start = start, .end = start + 5 };
                             },
@@ -1929,6 +1909,9 @@ pub fn evalTypeInfo(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.V
                             .Type = self.typechecker.findType("builtin::Struct")
                                         orelse return common.debug.ShouldBeImpossible(undefined, @src()),
                             .Fields = range: {
+                                const fieldsSlice = try self.buildFieldInfoSlice(str.fields);
+                                const defsSlice = try self.buildFieldInfoSlice(str.definitions);
+
                                 const start: u32 = @intCast(self.memory.items.len);
                                 _ = try self.appendValue(.{ .Bool = str.mutable });
                                 _ = try self.appendValue(.{
@@ -1937,38 +1920,11 @@ pub fn evalTypeInfo(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.V
                                         .str = self.typechecker.builder.getInternedString(str.name),
                                     },
                                 });
-
-                                const fieldInfoSliceType = self.typechecker.findType("[]builtin::FieldInfo")
-                                    orelse return common.debug.ShouldBeImpossible(undefined, @src());
-
-                                // fields
-                                const fieldsStart: u32 = @intCast(self.memory.items.len);
-                                for (str.fields) |field| {
-                                    _ = try self.appendValue(try self.buildFieldInfoValue(field));
-                                }
-                                _ = try self.appendValue(.{
-                                    .Slice = .{
-                                        .Type = fieldInfoSliceType,
-                                        .To = fieldsStart,
-                                        .Size = @intCast(str.fields.len),
-                                    },
-                                });
-
-                                // definitions
-                                const defsStart: u32 = @intCast(self.memory.items.len);
-                                for (str.definitions) |def| {
-                                    _ = try self.appendValue(try self.buildFieldInfoValue(def));
-                                }
-                                _ = try self.appendValue(.{
-                                    .Slice = .{
-                                        .Type = fieldInfoSliceType,
-                                        .To = defsStart,
-                                        .Size = @intCast(str.definitions.len),
-                                    },
-                                });
-
+                                _ = try self.appendValue(fieldsSlice);
+                                _ = try self.appendValue(defsSlice);
+                                _ = try self.appendValue(.{ .Bool = false }); // external
                                 _ = try self.appendValue(.{ .Bool = str.isTuple });
-                                break :range .{ .start = start, .end = start + 5 };
+                                break :range .{ .start = start, .end = start + 6 };
                             },
                         },
                     },
@@ -1978,6 +1934,9 @@ pub fn evalTypeInfo(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.V
                             .Type = self.typechecker.findType("builtin::Union")
                                         orelse return common.debug.ShouldBeImpossible(undefined, @src()),
                             .Fields = range: {
+                                const fieldsSlice = try self.buildFieldInfoSlice(uni.fields);
+                                const defsSlice = try self.buildFieldInfoSlice(uni.definitions);
+
                                 const start: u32 = @intCast(self.memory.items.len);
                                 _ = try self.appendValue(.{ .Bool = uni.isTagged });
                                 _ = try self.appendValue(.{ .Type = uni.tag });
@@ -1988,37 +1947,10 @@ pub fn evalTypeInfo(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.V
                                         .str = self.typechecker.builder.getInternedString(uni.name),
                                     },
                                 });
-
-                                const fieldInfoSliceType = self.typechecker.findType("[]builtin::FieldInfo")
-                                    orelse return common.debug.ShouldBeImpossible(undefined, @src());
-
-                                // fields
-                                const fieldsStart: u32 = @intCast(self.memory.items.len);
-                                for (uni.fields) |field| {
-                                    _ = try self.appendValue(try self.buildFieldInfoValue(field));
-                                }
-                                _ = try self.appendValue(.{
-                                    .Slice = .{
-                                        .Type = fieldInfoSliceType,
-                                        .To = fieldsStart,
-                                        .Size = @intCast(uni.fields.len),
-                                    },
-                                });
-
-                                // definitions
-                                const defsStart: u32 = @intCast(self.memory.items.len);
-                                for (uni.definitions) |def| {
-                                    _ = try self.appendValue(try self.buildFieldInfoValue(def));
-                                }
-                                _ = try self.appendValue(.{
-                                    .Slice = .{
-                                        .Type = fieldInfoSliceType,
-                                        .To = defsStart,
-                                        .Size = @intCast(uni.definitions.len),
-                                    },
-                                });
-
-                                break :range .{ .start = start, .end = start + 6 };
+                                _ = try self.appendValue(fieldsSlice);
+                                _ = try self.appendValue(defsSlice);
+                                _ = try self.appendValue(.{ .Bool = false }); // external
+                                break :range .{ .start = start, .end = start + 7 };
                             },
                         },
                     },
@@ -2825,6 +2757,58 @@ fn cacheDecl(self: *Folder, key: defines.DeclPtr, val: Comptime.Value.Ptr) Error
         catch return Error.AllocatorFailure;
 }
     
+fn buildFieldInfoSlice(self: *Folder, fields: []const types.FieldInfo) Error!Comptime.Value {
+    const sliceType = self.typechecker.findType("[]builtin::FieldInfo")
+        orelse return common.debug.ShouldBeImpossible(undefined, @src());
+
+    const built = self.arena.allocator().alloc(Comptime.Value, fields.len)
+        catch return Error.AllocatorFailure;
+    for (fields, built) |field, *slot| {
+        slot.* = try self.buildFieldInfoValue(field);
+    }
+
+    const to: u32 = @intCast(self.memory.items.len);
+    for (built) |value| {
+        _ = try self.appendValue(value);
+    }
+
+    return .{
+        .Slice = .{
+            .Type = sliceType,
+            .To = to,
+            .Size = @intCast(fields.len),
+        },
+    };
+}
+
+fn buildEnumFieldSlice(self: *Folder, fields: []const types.EnumField) Error!Comptime.Value {
+    const sliceType = self.typechecker.findType("[]builtin::EnumField")
+        orelse return common.debug.ShouldBeImpossible(undefined, @src());
+    const fieldType = self.typechecker.findType("builtin::EnumField")
+        orelse return common.debug.ShouldBeImpossible(undefined, @src());
+
+    const built = self.arena.allocator().alloc(Comptime.Value, fields.len)
+        catch return Error.AllocatorFailure;
+    for (fields, built) |field, *slot| {
+        const start: u32 = @intCast(self.memory.items.len);
+        _ = try self.appendValue(.{ .String = .{ .type = .Cole, .str = field.name } });
+        _ = try self.appendValue(.{ .Int = field.value });
+        slot.* = .{ .Struct = .{ .Type = fieldType, .Fields = .{ .start = start, .end = start + 2 } } };
+    }
+
+    const to: u32 = @intCast(self.memory.items.len);
+    for (built) |value| {
+        _ = try self.appendValue(value);
+    }
+
+    return .{
+        .Slice = .{
+            .Type = sliceType,
+            .To = to,
+            .Size = @intCast(fields.len),
+        },
+    };
+}
 
 fn cacheValue(self: *Folder, ptr: FolderCacheKey, val: Comptime.Value.Ptr) Error!void {
     self.cache.put(self.arena.allocator(), ptr, val)

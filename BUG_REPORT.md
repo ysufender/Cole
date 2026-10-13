@@ -1,24 +1,5 @@
 # Known Bugs
 
-## TypeInfo Problems (41)
-
-When trying to access the fields of the union values from the builtin::TypeInfo, the
-types get mangled somehow. I don't have a reproductory snippet sorry. But below is somewhat
-a repro:
-
-```rust
-let Union = union(enum) {
-    Some: float,
-    None: void,
-};
-
-let main = fn (args: [][]u8) -> i32 {
-    return typeInfo(Union).Union.fields.len;
-};
-```
-
-This should error out something like `can't find field 'len' in type 'bool'`.
-
 ## Illegal Memory Access (31)
 
 Run the raylib demo. The output source.c is garbled when using a non-preserving allocator
@@ -30,3 +11,5 @@ else is holding a reference to the said memory.
 ## Unable to Compile Non Compile Time Code (38)
 ## Switch Captures Referencing (39)
 ## Slice Construction Mixup (40)
+## TypeInfo Problems (41)
+## Problems With Compile Time Execution (42)

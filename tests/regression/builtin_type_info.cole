@@ -1,0 +1,12 @@
+import std::io::console as Console;
+
+let Union = union(enum) {
+    Some: void,
+    None: void,
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    Console::log(typeInfo(typeInfo(Union).Union.tag).Enum.fields[0].name);
+    Console::log(typeInfo(Union).Union.fields[2].name);
+    return 0;
+};

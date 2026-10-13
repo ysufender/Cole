@@ -25,15 +25,26 @@ for name, files in pairs(suites) do
     project:multiStep(suite(name, files))
 end
 
-project:step(Efile.Step
-    .init("all")
-    :dependOnSteps((function()
-        local steps = { }
-        for step, _ in pairs(project.steps) do
-            table.insert(steps, step)
-        end
+project
+    :step(Efile.Step
+        .init("build")
+        :dependOnSteps((function()
+            local steps = { }
+            for step, _ in pairs(project.steps) do
+                table.insert(steps, step)
+            end
 
-        return steps
-    end)()))
+            return steps
+        end)()))
+        
+    :step(Efile.Step
+        .init("record")
+        :dependOnStep("build")
+        :action("testy record"))
+        
+    :step(Efile.Step
+        .init("run")
+        :dependOnStep("build")
+        :action("testy run"))
 
-print(project:build("all") or "Success")
+print(project:build(arg[1] or "build") or "Success")
