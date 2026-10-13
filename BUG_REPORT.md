@@ -19,15 +19,6 @@ let main = fn (args: [][]u8) -> i32 {
 
 This should error out something like `can't find field 'len' in type 'bool'`.
 
-## Problems With Compile Time Execution (42)
-
-We are unable to call simple functions, they somewhat go the comptime route
-and end up in error `ComptimeNotPossible`. See `repro/b42` for reproduction.
-
-### Reproduction
-
-See the `test/` of this commit folder directly.
-
 ## Illegal Memory Access (31)
 
 Run the raylib demo. The output source.c is garbled when using a non-preserving allocator

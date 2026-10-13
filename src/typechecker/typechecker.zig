@@ -1250,6 +1250,14 @@ pub fn typecheckExpressionList(self: *Typechecker, extra: defines.OpaquePtr, _ma
 pub fn typecheckExpressionListRange(self: *Typechecker, range: defines.Range, expected: TypeID) Error!TypeID {
     const ast = self.context.getAST(self.currentFile);
 
+    if (range.len() == 1) switch (self.typeTable.get(expected)) {
+        .Struct, .Union, .Array => {
+            const innerType = try self.typecheckExpression(ast.extra[range.at(0)], expected);
+            if (self.suitable(expected, innerType)) return expected;
+        },
+        else => {},
+    };
+
     switch (self.typeTable.get(expected)) {
         .Enum => |enm| try self.typecheckEnumInitialization(ast, &enm, range, expected),
         .Struct => |str| try self.typecheckStructInitialization(ast, &str, range),

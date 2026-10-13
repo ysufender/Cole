@@ -810,12 +810,16 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
             const valuePtr = try self.expectDefined(decl.node, maybeExpected);
             break :blk self.castValue(valuePtr, expected, false);
         },
-        .Capture =>
-            if (self.declCache.get(declPtr)) |capture| capture
-            else {
-                self.report("Failed to evaluate captured variable", .{});
-                return Error.ComptimeNotPossible;
-            },
+        .Capture => {
+            if (!self.typechecker.getFlag(.AttemptingEval)) {
+                self.report("HARD comptime eval of capture '{s}' (InComptimeCall={}, ComptimeBanned={}).", .{
+                    self.typechecker.builder.getInternedString(decl.name),
+                    self.getFlag(.InComptimeCall),
+                    self.getFlag(.ComptimeBanned),
+                });
+            }
+            return Error.ComptimeNotPossible;
+        },
         .Parameter =>
             if (self.getFlag(.InComptimeCall)) {
                 _ = try self.typechecker.typecheckDecl(declPtr, maybeExpected);
@@ -1149,7 +1153,7 @@ fn evalEnumType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Value
     }
 
     const scope =
-        if (self.getFlag(.InComptimeCall) )self.typechecker.currentScope
+        if (self.getFlag(.InComptimeCall)) self.typechecker.currentScope
         else oldScope;
 
     const name = try self.generateRandomName(.Enum);
@@ -2105,6 +2109,19 @@ fn evalExpressionList(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected:
 pub fn constructFromList(self: *Folder, typeID: TypeID, _range: defines.Range) Error!Comptime.Value.Ptr {
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
     var range = _range;
+    
+    if (range.len() == 1) {
+        switch (self.typechecker.typeTable.get(typeID)) {
+            .Struct, .Union => {
+                const single = ast.extra[range.at(0)];
+                const t = try self.typechecker.typecheckExpression(single, typeID);
+                if (self.typechecker.suitable(typeID, t)) {
+                    return self.expectDefined(single, typeID);
+                }
+            },
+            else => { },
+        }
+    }
 
     return ret: switch (self.typechecker.typeTable.get(typeID)) {
         .Void => {
