@@ -87,7 +87,6 @@ pub let Struct = struct {
     name: []u8,
     fields: []FieldInfo,
     definitions: []FieldInfo,
-    external: bool,
     isTuple: bool,
 };
 
@@ -102,7 +101,6 @@ pub let Union = struct {
     name: []u8,
     fields: []FieldInfo,
     definitions: []FieldInfo,
-    external: bool,
 };
 
 pub let EnumField = struct {
@@ -115,7 +113,6 @@ pub let Enum = struct {
     name: []u8,
     fields: []EnumField,
     definitions: []FieldInfo,
-    external: bool,
 };
 
 pub let Pointer = struct {
@@ -147,4 +144,3 @@ pub let Integer = struct {
     size: u8,
     isSigned: bool,
 };
-
