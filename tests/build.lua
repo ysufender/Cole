@@ -12,6 +12,7 @@ local function suite(name, files)
             local path = name.."/"..file..".cole"
             table.insert(steps, Efile.Step
                 .init(path)
+                :dependOnFile(path)
                 :action(exe_path..cflags..path.." -o "..file..".cole.exec"))
         end
 
@@ -36,14 +37,14 @@ project
 
             return steps
         end)()))
-        
+
     :step(Efile.Step
-        .init("record")
+        .init("record", { always_run = true })
         :dependOnStep("build")
         :action("testy record"))
-        
+
     :step(Efile.Step
-        .init("run")
+        .init("run", { always_run = true })
         :dependOnStep("build")
         :action("testy run"))
 

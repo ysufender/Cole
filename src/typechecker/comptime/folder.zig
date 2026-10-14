@@ -2753,8 +2753,21 @@ pub fn resolveIncomplete(self: *Folder, typeID: TypeID, resolvedTo: TypeID) Erro
 }
 
 fn cacheDecl(self: *Folder, key: defines.DeclPtr, val: Comptime.Value.Ptr) Error!void {
-    self.declCache.put(self.arena.allocator(), key, val)
-        catch return Error.AllocatorFailure;
+    const value = self.getValue(val);
+    switch (value) {
+        .Function => |func| if (self.typechecker.typeTable.get(func.signature).Function.isComptime) {
+            return;
+        },
+        .Type => |t| if (self.isIncomplete(t)) {
+            return;
+        },
+        else => { },
+    }
+
+    if (!self.getFlag(.InComptimeCall)) {
+        self.declCache.put(self.arena.allocator(), key, val)
+            catch return Error.AllocatorFailure;
+    }
 }
     
 fn buildFieldInfoSlice(self: *Folder, fields: []const types.FieldInfo) Error!Comptime.Value {

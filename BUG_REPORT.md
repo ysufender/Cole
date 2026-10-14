@@ -1,13 +1,5 @@
 # Known Bugs
 
-## Comptime Caching (43)
-
-Cached fields and values in general cause problems with comptime type generation.
-
-### Reproduction
-
-See the reproduction under `repro/b43/`
-
 ## Illegal Memory Access (31)
 
 Run the raylib demo. The output source.c is garbled when using a non-preserving allocator
@@ -21,3 +13,4 @@ else is holding a reference to the said memory.
 ## Slice Construction Mixup (40)
 ## TypeInfo Problems (41)
 ## Problems With Compile Time Execution (42)
+## Comptime Caching (43)
