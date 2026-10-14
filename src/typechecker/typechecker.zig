@@ -3663,87 +3663,89 @@ pub fn typeName(self: *Typechecker, allocator: Allocator, typeID: TypeID) Error!
     if (self.typenameMap.get(typeID)) |namePtr| {
         return self.builder.getInternedString(namePtr);
     }
-    else return ret: switch (self.typeTable.get(typeID)) {
-        .CUShort => "c_ushort",
-        .CShort => "c_short",
-        .CULong => "c_ulong",
-        .CLong => "c_long",
-        .CDouble => "c_double",
-        .CUInt => "c_uint",
-        .CInt => "c_int",
-        .CUChar => "c_uchar",
-        .CChar => "c_char",
-        .CSize => "c_size",
-        .Pointer => {
-            const ptr: Types.Pointer = self.typeTable.get(typeID).Pointer;
-            const child = try self.typeName(allocator, ptr.child);
+    else {
+        return ret: switch (self.typeTable.get(typeID)) {
+            .CUShort => "c_ushort",
+            .CShort => "c_short",
+            .CULong => "c_ulong",
+            .CLong => "c_long",
+            .CDouble => "c_double",
+            .CUInt => "c_uint",
+            .CInt => "c_int",
+            .CUChar => "c_uchar",
+            .CChar => "c_char",
+            .CSize => "c_size",
+            .Pointer => {
+                const ptr: Types.Pointer = self.typeTable.get(typeID).Pointer;
+                const child = try self.typeName(allocator, ptr.child);
 
-            const mut = if (ptr.mutable) "mut " else "";
-            const prefix = switch (ptr.size) {
-                .Slice => "[]",
-                .Single => "*",
-                .C => "[@c]",
-            };
+                const mut = if (ptr.mutable) "mut " else "";
+                const prefix = switch (ptr.size) {
+                    .Slice => "[]",
+                    .Single => "*",
+                    .C => "[@c]",
+                };
 
-            var res = allocator.alloc(u8, child.len + prefix.len + mut.len) catch return Error.AllocatorFailure;
-            res = std.fmt.bufPrint(res, "{s}{s}{s}", .{mut, prefix, child}) catch unreachable;
-            self.typenameMap.putNoClobber(allocator, typeID, try self.builder.internString(res)) catch unreachable;
-            break :ret res;
-        },
-        .Array => {
-            const arr: Types.Array = self.typeTable.get(typeID).Array;
-            const child = try self.typeName(allocator, arr.child);
+                var res = allocator.alloc(u8, child.len + prefix.len + mut.len) catch return Error.AllocatorFailure;
+                res = std.fmt.bufPrint(res, "{s}{s}{s}", .{mut, prefix, child}) catch unreachable;
+                self.typenameMap.putNoClobber(allocator, typeID, try self.builder.internString(res)) catch unreachable;
+                break :ret res;
+            },
+            .Array => {
+                const arr: Types.Array = self.typeTable.get(typeID).Array;
+                const child = try self.typeName(allocator, arr.child);
 
-            const prefix = if (arr.mutable) "mut " else "";
-            const size = std.fmt.allocPrint(allocator, "[{d}]", .{arr.len})
-                catch return Error.AllocatorFailure;
+                const prefix = if (arr.mutable) "mut " else "";
+                const size = std.fmt.allocPrint(allocator, "[{d}]", .{arr.len})
+                    catch return Error.AllocatorFailure;
 
-            var res = allocator.alloc(u8, child.len + prefix.len + size.len) catch return Error.AllocatorFailure;
-            res = std.fmt.bufPrint(res, "{s}{s}{s}", .{prefix, size, child}) catch unreachable;
-            self.typenameMap.putNoClobber(allocator, typeID, try self.builder.internString(res)) catch unreachable;
-            break :ret res;
-        },
-        .Struct, .Union, .Enum => typename(self, allocator, typeID),
-        .Function => |func| {
-            var res: []const u8 = if (func.mutable) "mut *fn (" else "*fn (";
+                var res = allocator.alloc(u8, child.len + prefix.len + size.len) catch return Error.AllocatorFailure;
+                res = std.fmt.bufPrint(res, "{s}{s}{s}", .{prefix, size, child}) catch unreachable;
+                self.typenameMap.putNoClobber(allocator, typeID, try self.builder.internString(res)) catch unreachable;
+                break :ret res;
+            },
+            .Struct, .Union, .Enum => typename(self, allocator, typeID),
+            .Function => |func| {
+                var res: []const u8 = if (func.mutable) "mut *fn (" else "*fn (";
 
-            for (0..func.argTypes.len) |index| {
-                res = std.fmt.allocPrint(allocator, "{s}{s}{s}", .{
-                    res,
-                    try self.typeName(allocator, func.argTypes[index]),
-                    if (index == func.argTypes.len - 1) "" else ", ",
-                }) catch return Error.AllocatorFailure;
-            }
+                for (0..func.argTypes.len) |index| {
+                    res = std.fmt.allocPrint(allocator, "{s}{s}{s}", .{
+                        res,
+                        try self.typeName(allocator, func.argTypes[index]),
+                        if (index == func.argTypes.len - 1) "" else ", ",
+                    }) catch return Error.AllocatorFailure;
+                }
 
 
-            res = std.fmt.allocPrint(allocator, "{s}) -> {s}", .{res, try self.typeName(allocator, func.returnType)}) catch return Error.AllocatorFailure;
-            self.typenameMap.putNoClobber(allocator, typeID, try self.builder.internString(res)) catch unreachable;
-            break :ret res;
-        },
-        .EnumLiteral => "enum_literal",
-        .ComptimeFloat => "comptime_float",
-        .ComptimeInt => "comptime_int",
-        .Type => "type",
-        .Any => "any",
-        .Bool => "bool",
-        .Float => "float",
-        .Noreturn => "noreturn",
-        .Void => "void",
-        .Integer => |int| {
-            const mut = if (int.mutable) "mut " else "";
-            const sign = if (int.signed) "i" else "u"; 
-            const size = std.fmt.allocPrint(
-                allocator,
-                "{d}",
-                .{int.size},
-            ) catch return Error.AllocatorFailure;
+                res = std.fmt.allocPrint(allocator, "{s}) -> {s}", .{res, try self.typeName(allocator, func.returnType)}) catch return Error.AllocatorFailure;
+                self.typenameMap.putNoClobber(allocator, typeID, try self.builder.internString(res)) catch unreachable;
+                break :ret res;
+            },
+            .EnumLiteral => "enum_literal",
+            .ComptimeFloat => "comptime_float",
+            .ComptimeInt => "comptime_int",
+            .Type => "type",
+            .Any => "any",
+            .Bool => "bool",
+            .Float => "float",
+            .Noreturn => "noreturn",
+            .Void => "void",
+            .Integer => |int| {
+                const mut = if (int.mutable) "mut " else "";
+                const sign = if (int.signed) "i" else "u"; 
+                const size = std.fmt.allocPrint(
+                    allocator,
+                    "{d}",
+                    .{int.size},
+                ) catch return Error.AllocatorFailure;
 
-            var res = allocator.alloc(u8, sign.len + size.len + mut.len) catch return Error.AllocatorFailure;
-            res = std.fmt.bufPrint(res, "{s}{s}{s}", .{mut, sign, size}) catch unreachable;
-            self.typenameMap.putNoClobber(allocator, typeID, try self.builder.internString(res)) catch unreachable;
-            break :ret res;
-        },
-    };
+                var res = allocator.alloc(u8, sign.len + size.len + mut.len) catch return Error.AllocatorFailure;
+                res = std.fmt.bufPrint(res, "{s}{s}{s}", .{mut, sign, size}) catch unreachable;
+                self.typenameMap.putNoClobber(allocator, typeID, try self.builder.internString(res)) catch unreachable;
+                break :ret res;
+            },
+        };
+    }
 }
 
 pub fn determineExpected(maybeExpected: ?TypeID) ?TypeID {

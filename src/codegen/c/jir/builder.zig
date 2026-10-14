@@ -101,7 +101,10 @@ pub fn addConstant(self: *Builder, constant: JIR.Constant) Error!JIR.Constant.Pt
 }
 
 pub fn modifyInternedString(self: *Builder, strPtr: defines.StringPtr, new: []const u8) void {
-    self.strings.keys()[strPtr] = new;
+    _ = self;
+    _ = strPtr;
+    _ = new;
+    // self.strings.keys()[strPtr] = new;
 }
 
 pub fn internString(self: *Builder, str: []const u8) Error!defines.StringPtr {

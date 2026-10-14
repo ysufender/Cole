@@ -27,6 +27,17 @@ pub let Integer = struct {
     pub let Check = fn (T: type) -> bool {
         return switch typeInfo(T) {
             @Integer -> true,
+            @CInt -> true,
+            @CUInt -> true,
+            @CChar -> true,
+            @CUChar -> true,
+            @CDouble -> true,
+            @CLong -> true,
+            @CULong -> true,
+            @CShort -> true,
+            @CUShort -> true,
+            @CSize -> true,
+            @ComptimeInt -> true,
             else -> false,
         };
     };
@@ -40,9 +51,28 @@ pub let Integer = struct {
     };
 };
 
+pub let Floating = struct {
+    pub let Check = fn (T: type) -> bool {
+        return switch typeInfo(T) {
+            @Float -> true,
+            @CDouble -> true,
+            @ComptimeFloat -> true,
+            else -> false,
+        };
+    };
+
+    pub let Trait = fn (T: type) -> type {
+        if !Check(T) {
+            compileError("Given type does not satisfy the Floating traits.", ());
+        }
+
+        return T;
+    };
+};
+
 pub let Numeric = struct {
     pub let Check = fn (T: type) -> bool {
-        return Integer::Check(T) or T == float;
+        return Integer::Check(T) or Floating::Check(T);
     };
 
     pub let Trait = fn (T: type) -> type {
@@ -56,11 +86,19 @@ pub let Numeric = struct {
 
 pub let Signed = struct {
     pub let Check = fn (T: type) -> bool {
-        switch typeInfo(T) {
-            @Integer -> |i| return i.signed;
-            @Float -> return true;
-            else -> return false;
-        }
+        return switch typeInfo(T) {
+            @Integer -> |i| i.signed,
+            @Float -> true,
+            @CInt -> true,
+            @CChar -> true,
+            @CDouble -> true,
+            @CLong -> true,
+            @CShort -> true,
+            @CSize -> true,
+            @ComptimeFloat -> true,
+            @ComptimeInt -> true,
+            else -> false,
+        };
     }; 
 
     pub let Trait = fn (T: type) -> type {
@@ -74,7 +112,7 @@ pub let Signed = struct {
 
 pub let Unsigned = struct {
     pub let Check = fn (T: type) -> bool {
-        return !Signed::Check(T);
+        return Numeric::Check(T) and !Signed::Check(T);
     }; 
 
     pub let Trait = fn (T: type) -> type {
