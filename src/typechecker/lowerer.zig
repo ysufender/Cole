@@ -677,7 +677,7 @@ fn rangeForLoop(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.
         const safetyCnd = try self.typechecker.builder.lesserEqual(rangeStartIdent, rangeEndIdent);
         const safetyEnd = try self.typechecker.folder.generateRandomName(.ForSafetyEnd);
         const safetyCheck = try self.typechecker.builder.cjump(safetyEnd, safetyCnd); 
-        const panic = try self.handler("__invalid_index");
+        const panic = try self.handler("$$invalid_index");
         const safetyEndLabel = try self.typechecker.builder.label(safetyEnd);
 
         return self.typechecker.builder.scope(
@@ -1138,12 +1138,12 @@ fn scoping(self: *Lowerer, _extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     }
 
     const member = self.typechecker.context.getFile(ast.tokens)[leftMost..rightMost];
-    const qualified = std.fmt.allocPrint(self.typechecker.builder.allocator, "{s}__{s}", .{
+    const qualified = std.fmt.allocPrint(self.typechecker.builder.allocator, "{s}$${s}", .{
         namespace,
         member,
     }) catch return Error.AllocatorFailure;
 
-    _ = std.mem.replace(u8, qualified, "::", "__", qualified);
+    _ = std.mem.replace(u8, qualified, "::", "$$", qualified);
 
     const id = try self.typechecker.builder.internString(qualified);
 
@@ -1458,7 +1458,7 @@ fn builtinCall(
         BI("typeOf") =>
             self.literal(ast.extra[args.at(0)], ofType),
         BI("unreachable") => blk: {
-            break :blk try self.handler("__unreachable");
+            break :blk try self.handler("$$unreachable");
         },
         BI("typeName") => self.typechecker.builder.literal(
             try self.typechecker.builder.addConstant(.{
@@ -1773,7 +1773,7 @@ fn indexing(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
         const cnd = try self.typechecker.builder.lesser(indexIdent, indexableLen);
         const boundsJump = try self.typechecker.builder.cjump(boundsEnd, cnd);
 
-        const segfault = try self.handler("__invalid_index");
+        const segfault = try self.handler("$$invalid_index");
 
         const boundsEndLabel = try self.typechecker.builder.label(boundsEnd);
 
@@ -1951,7 +1951,7 @@ pub fn addMetadata(self: *Lowerer, to: JIR.Ptr, from: defines.ExpressionPtr) Err
     for (expressions, 0..) |valuePtr, idx| {
         const constant = try self.addConstant(
             valuePtr,
-            try self.typechecker.typecheckValue(valuePtr, comptime Comptime.Folder.Builtin.Type("__builtin_metadata"))
+            try self.typechecker.typecheckValue(valuePtr, comptime Comptime.Folder.Builtin.Type("$$builtin_metadata"))
         );
         metadata[idx] = constant;
     }
@@ -1974,7 +1974,7 @@ fn report(self: *Lowerer, comptime fmt: []const u8, args: anytype) void {
 pub fn handler(self: *Lowerer, comptime name: []const u8) Error!JIR.Ptr {
     return self.typechecker.builder.inlineC(
         try self.typechecker.builder.internString(
-            std.fmt.comptimePrint("{s}__: {s}((long)&&{s}__);", .{name, name, name})
+            std.fmt.comptimePrint("{s}$$: {s}((long)&&{s}__);", .{name, name, name})
         )
     );
 }

@@ -301,7 +301,7 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
                 else => break :blk,
             });
 
-            if (!std.mem.startsWith(u8, prevName, "__")) {
+            if (!std.mem.startsWith(u8, prevName, "$$")) {
                 break :blk;
             }
 
@@ -432,7 +432,7 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
             const val = try self.folder.eval(decl.node, expected);
             const func = &self.folder.memory.items[val].Function;
             const prevName = self.builder.getInternedString(func.name);
-            if (!std.mem.startsWith(u8, prevName, "__")) {
+            if (!std.mem.startsWith(u8, prevName, "$$")) {
                 break :blk;
             }
 
@@ -1509,7 +1509,7 @@ pub fn discoverScopeDef(
         return Error.AccessSpecifierMismatch;
     }
 
-    if (member.valueType != comptime Comptime.Folder.Builtin.Type("__incomplete")) {
+    if (member.valueType != comptime Comptime.Folder.Builtin.Type("$$incomplete")) {
         return member.valueType;
     }
 
@@ -1966,7 +1966,7 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
     if (isPresent.found_existing) {
         switch (isPresent.value_ptr.status) {
             .Checked => {
-                if (isPresent.value_ptr.result != comptime Comptime.Folder.Builtin.Type("__incomplete")) {
+                if (isPresent.value_ptr.result != comptime Comptime.Folder.Builtin.Type("$$incomplete")) {
                     return isPresent.value_ptr.result;
                 }
             },
@@ -2030,7 +2030,7 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
 
     isPresent.value_ptr.* = .{
         .status = .InProgress,
-        .result = comptime Comptime.Folder.Builtin.Type("__incomplete"),
+        .result = comptime Comptime.Folder.Builtin.Type("$$incomplete"),
     };
     errdefer isPresent.value_ptr.status = .NotChecked;
 
@@ -2333,7 +2333,7 @@ pub fn typecheckMark(
     for (0..marks.len()) |index| {
         metadata[index] = try self.folder.eval(
             ast.extra[marks.at(@intCast(index))],
-            comptime Comptime.Folder.Builtin.Type("__builtin_metadata")
+            comptime Comptime.Folder.Builtin.Type("$$builtin_metadata")
         );
     }
 
@@ -3817,7 +3817,7 @@ pub fn hasMetadata(
                 switch (meval) {
                     .Enum => |enm|
                         if (
-                            enm.Type == (comptime Comptime.Folder.Builtin.Type("__builtin_metadata"))
+                            enm.Type == (comptime Comptime.Folder.Builtin.Type("$$builtin_metadata"))
                             and enm.Value == Comptime.Folder.Builtin.Metadata(_meta)
                         ) break :blk true,
 

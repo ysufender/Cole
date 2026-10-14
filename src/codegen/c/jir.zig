@@ -1296,7 +1296,7 @@ pub fn hasMetadata(
                 const constant = self.constants.get(meta);
                 switch (constant) {
                     .Aggregate => |agg|
-                        if (agg.type == comptime Comptime.Folder.Builtin.Type("__builtin_metadata")) {
+                        if (agg.type == comptime Comptime.Folder.Builtin.Type("$$builtin_metadata")) {
                             const enumValue = self.constants.get(agg.data.start).Integer.u32;
                             if (enumValue == Comptime.Folder.Builtin.Metadata(_meta)) break :blk true;
                         },

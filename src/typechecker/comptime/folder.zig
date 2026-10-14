@@ -76,7 +76,7 @@ pub fn init(typechecker: *Typechecker, gpa: Allocator) Error!Folder {
 
     var memory = Memory.initCapacity(allocator, 512) catch return Error.AllocatorFailure;
     memory.appendAssumeCapacity(.{ .Type = Builtin.Type("any") });
-    memory.appendAssumeCapacity(.{ .Type = Builtin.Type("__incomplete") });
+    memory.appendAssumeCapacity(.{ .Type = Builtin.Type("$$incomplete") });
     memory.appendAssumeCapacity(.{ .Void = { } });
 
     return .{
@@ -2474,7 +2474,7 @@ pub fn generateRandomName(self: *Folder, comptime mode: @TypeOf(.EnumLiteral)) E
 pub fn generateRandomNameString(self: *Folder, comptime mode: @TypeOf(.EnumLiteral)) Error![]u8 {
     const randint = self.rng.next();
 
-    return std.fmt.allocPrint(self.arena.allocator(), "__anon_"++@tagName(mode)++"_{d}", .{
+    return std.fmt.allocPrint(self.arena.allocator(), "$$anon_"++@tagName(mode)++"_{d}", .{
         randint
     }) catch Error.AllocatorFailure;
 }
@@ -2522,7 +2522,7 @@ fn handleScopeDecls(
 
         const valueType =
             if (self.getFlag(.InComptimeCall)) try self.typechecker.typecheckDecl(newDecl, null)
-            else Builtin.Type("__incomplete");
+            else Builtin.Type("$$incomplete");
 
         const newName = try self.typechecker.builder.internString(symbolName);
         defs.appendAssumeCapacity(.{
@@ -2729,9 +2729,9 @@ fn setValue(self: *const Folder, address: defines.Offset, new: Comptime.Value) v
 
 pub fn isIncomplete(self: *const Folder, typeID: TypeID) bool {
     return switch (self.typechecker.typeTable.get(typeID)) {
-        .Pointer => |ptr| ptr.child == Builtin.Type("__incomplete") 
+        .Pointer => |ptr| ptr.child == Builtin.Type("$$incomplete") 
                        or self.isIncomplete(ptr.child),
-        else => typeID == Builtin.Type("__incomplete"),
+        else => typeID == Builtin.Type("$$incomplete"),
     };
 }
 
@@ -2811,8 +2811,21 @@ fn buildEnumFieldSlice(self: *Folder, fields: []const types.EnumField) Error!Com
 }
 
 fn cacheValue(self: *Folder, ptr: FolderCacheKey, val: Comptime.Value.Ptr) Error!void {
-    self.cache.put(self.arena.allocator(), ptr, val)
-        catch return Error.AllocatorFailure;
+    const value = self.getValue(val);
+    switch (value) {
+        .Function => |func| if (self.typechecker.typeTable.get(func.signature).Function.isComptime) {
+            return;
+        },
+        .Type => |t| if (self.isIncomplete(t)) {
+            return;
+        },
+        else => { },
+    }
+
+    if (!self.getFlag(.InComptimeCall)) {
+        self.cache.put(self.arena.allocator(), ptr, val)
+            catch return Error.AllocatorFailure;
+    }
 }
 
 pub fn appendValue(self: *Folder, value: Comptime.Value) Error!Comptime.Value.Ptr {
@@ -2958,10 +2971,10 @@ pub const builtinTypes = [_]struct {
     .{ .name = "mut u32", .info = .{ .Integer = .{ .mutable = true, .size = 32, .signed = false, } } },
     // mut any
     .{ .name = "mut any", .info = .{ .Any = true } },
-    // __incomplete
-    .{ .name = "__incomplete", .info = .{ .Struct = .{ .mutable = false, .name = Resolver.BuiltinIndex("any") + 2, .fields = &.{}, .definitions = &.{}, .scope = 0, .isTuple = false, .expr = 0 } } },
-    // __builtin_metadata
-    .{ .name = "__builtin_metadata", .info = .{ .Enum = .{ .mutable = false, .name = Resolver.BuiltinIndex("any") + 3, .fields = &.{ types.EnumField{ .name = "__placeholder", .value = 0, } }, .definitions = &.{}, .scope = 0, .expr = 0 } } },
+    // $$incomplete
+    .{ .name = "$$incomplete", .info = .{ .Struct = .{ .mutable = false, .name = Resolver.BuiltinIndex("any") + 2, .fields = &.{}, .definitions = &.{}, .scope = 0, .isTuple = false, .expr = 0 } } },
+    // $$builtin_metadata
+    .{ .name = "$$builtin_metadata", .info = .{ .Enum = .{ .mutable = false, .name = Resolver.BuiltinIndex("any") + 3, .fields = &.{ types.EnumField{ .name = "$$placeholder", .value = 0, } }, .definitions = &.{}, .scope = 0, .expr = 0 } } },
     // []u8
     .{ .name = "[]u8", .info = .{ .Pointer = .{ .mutable = false, .child = 2, .size = .Slice, }, } },
 };
