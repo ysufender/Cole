@@ -4,3 +4,10 @@ pub let Result = fn (Ok: type, Err: type) -> type {
         Err: Err,
     };
 };
+
+pub let Option = fn (T: type) -> type {
+    return union(enum) {
+        Some: T,
+        None: void,
+    };
+};

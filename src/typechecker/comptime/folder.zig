@@ -826,7 +826,9 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
                 decl  = decls.get(declPtr);
 
                 if (self.typechecker.executer.getVar(decl.name)) |v| {
-                    try self.cacheDecl(declPtr, v);
+                    // try self.cacheDecl(declPtr, v);
+                    self.declCache.put(self.arena.allocator(), declPtr, v)
+                        catch return Error.AllocatorFailure;
                     return v;
                 }
                 else {
