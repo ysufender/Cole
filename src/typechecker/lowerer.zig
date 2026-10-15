@@ -252,8 +252,8 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
         }
         else .{ .Void = { } },
 
-        .Function => |func| .{
-            .Function = func.name,
+        .Function => |func| fnc: { 
+            break :fnc .{ .Function = func.name }; 
         },
 
         .Type => |id| .{ .Type = id },

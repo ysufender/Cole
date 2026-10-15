@@ -1,3 +1,5 @@
+// @Beware comments may be out of date, mind the context.
+
 // @Note Lowering to C IR is requested by the typechecker,typechecker
 // but it is done by the lowerer.zig, which makes calls to
 // JIR.Builder since JIR.Builder itself doesn't know about
@@ -263,6 +265,7 @@ pub fn typecheckStatement(self: *Typechecker, statementPtr: defines.StatementPtr
         .Defer => self.typecheckDefer(stmt.value),
         .VariableDefinition => try self.typecheckVarDefStatement(stmt.value),
         .InlineC => { }, // @Note allow direct C code insertion
+                         // @Maybe typecheck the C code too
     };
 }
 

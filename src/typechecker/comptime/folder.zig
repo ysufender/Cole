@@ -757,10 +757,17 @@ fn evalIfExpression(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?
         else self.expectDefined(conditional.otherwise, maybeExpected);
 }
 
-pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID) Error!Comptime.Value.Ptr {
-    const decls = self.typechecker.symbols.declarations;
+pub fn evalDecl(self: *Folder, _declPtr: defines.DeclPtr, maybeExpected: ?TypeID) Error!Comptime.Value.Ptr {
+    const declPtr =
+        if (self.getFlag(.InComptimeCall)) fi: {
+            const dp = try self.typechecker.symbols.declarations.addOne(self.arena.allocator());
+            self.typechecker.symbols.declarations.set(dp, self.typechecker.symbols.declarations.get(_declPtr));
+            self.typechecker.symbols.declarations.items(.scope)[dp] = self.typechecker.currentScope;
+            break :fi dp;
+        }
+        else _declPtr;
 
-    var decl  = decls.get(declPtr);
+    var decl  = self.typechecker.symbols.declarations.get(declPtr);
 
     const prevToken = self.typechecker.lastToken;
     const prevFile = self.typechecker.currentFile;
@@ -823,10 +830,9 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
         .Parameter =>
             if (self.getFlag(.InComptimeCall)) {
                 _ = try self.typechecker.typecheckDecl(declPtr, maybeExpected);
-                decl  = decls.get(declPtr);
+                decl  = self.typechecker.symbols.declarations.get(declPtr);
 
                 if (self.typechecker.executer.getVar(decl.name)) |v| {
-                    // try self.cacheDecl(declPtr, v);
                     self.declCache.put(self.arena.allocator(), declPtr, v)
                         catch return Error.AllocatorFailure;
                     return v;
