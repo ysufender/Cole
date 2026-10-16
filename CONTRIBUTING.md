@@ -120,7 +120,7 @@ starting from the entry point of the program. Subsequently lowers any top-level
 definitions it discovers and at the end returns a lowered and typed IR.
 
 If allowed, folds any compile time executable expression into literals
-by calling to Typechecker.Folder and Typechecker.Executer.
+by calling to Typechecker.Comptime.Folder and Typechecker.Comptime.Executer.
 
 ## Codegen.Codegen
 
