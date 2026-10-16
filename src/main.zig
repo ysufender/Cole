@@ -50,10 +50,10 @@ pub fn main(init: std.process.Init) void {
         });
     };
 
-    common.log.info("Compilation took {d} milliseconds.", .{
-        start.durationTo(std.Io.Clock.now(.real, init.io)).toMilliseconds(),
-    });
-    common.log.info("Exited successfully.", .{});
+    //common.log.info("Compilation took {d} milliseconds.", .{
+    //    start.durationTo(std.Io.Clock.now(.real, init.io)).toMilliseconds(),
+    //});
+    //common.log.info("Exited successfully.", .{});
 }
 
 fn innerMain(allocator: std.mem.Allocator, init: std.process.Init) common.CompilerError!void {

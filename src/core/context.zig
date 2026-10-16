@@ -85,7 +85,7 @@ pub fn init(baseAllocator: std.mem.Allocator, mainInit: std.process.Init) Error!
         }
         return err;
     };
-    settings.print(allocator);
+    // settings.print(allocator);
 
     var resolved = ResolveMap.empty;
     resolved.ensureTotalCapacity(allocator, 512) catch return error.AllocatorFailure;
