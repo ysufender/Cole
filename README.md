@@ -46,6 +46,10 @@ And the Cole compiler will be at `zig-out/<target>/<version>/cole(.exe)`.
 > on Windows builds you must provide a library path leading to TCC headers and
 > libraries
 
+## Language Reference
+
+See [Language Reference](docs/LANGUAGE_REFERENCE.md)
+
 ## Contributing
 
 Check out the [CONTRIBUTING.md](./CONTRIBUTING.md) and [BUG_REPORT.md](./BUG_REPORT.md)
