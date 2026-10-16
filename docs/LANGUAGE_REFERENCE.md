@@ -23,7 +23,7 @@ Cole is a WIP project, maintained and developed solely by me, @ysufender, so it 
 a lot of places. However, it is developing steadily. Rest assured, it will reach v1.0.0
 soon enough.
 
-## Installing V from source
+## Installing Cole from source
 
 The best way to get the latest and greatest Cole, is to install it from source.
 It is easy, and it takes only a few seconds:
@@ -64,7 +64,7 @@ don't have to compile each source file separately because Cole discovers your co
 * [Variables](#variables)
     * [Mutable variables](#mutable-variables)
     * [Warnings and declaration errors](#warnings-and-declaration-errors)
-* [V types](#v-types)
+* [Cole types](#cole-types)
     * [Primitive types](#primitive-types)
     * [Pointer Types](#pointer-types)
         * [Single Pointers](#single-pointers)
@@ -420,7 +420,7 @@ LoopOverNonRange
 Terminate
 ```
 
-## V Types
+## Cole Types
 
 ### Primitive types
 
