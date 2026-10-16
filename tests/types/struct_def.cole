@@ -1,0 +1,16 @@
+import std::io::console as Console;
+
+let main = fn (args: [][]u8) -> i32 {
+    let message = "Static message";
+    let a = Struct("This is a", message.&);
+
+    Console::log(a.field1);
+    Console::log(a.field2.*);
+
+    return 0;
+};
+
+let Struct = struct {
+    field1: []u8,
+    field2: *[]u8,
+};

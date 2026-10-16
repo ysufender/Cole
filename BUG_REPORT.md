@@ -1,5 +1,37 @@
 # Known Bugs
 
+## Scoped Definition Access (45)
+
+Referencing definitions inside scopes aborts with an integer overflow.
+
+### Reproduction
+
+```rust
+import std::io::console as Console;
+
+let Struct = struct {
+    pub let msg = 15;
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let a = Struct::msg.&;
+
+    return 0;
+};
+```
+
+### Expected Output
+
+Successful compilation
+
+### Received Output
+
+```bash
+thread 30644 panic: integer overflow
+Cannot print stack trace: stack tracing is disabled
+zsh: abort (core dumped)  zig-out/debug-linux-x86_64/v0.0.1/cole --working test main.cole -I ../stdlib
+```
+
 ## Illegal Memory Access (31)
 
 Run the raylib demo. The output source.c is garbled when using a non-preserving allocator

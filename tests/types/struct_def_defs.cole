@@ -1,0 +1,12 @@
+import std::io::console as Console;
+
+let Struct = struct {
+    pub let msg = "Static message";
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    Console::log(Struct::msg);
+    Console::log(#(@noComptime) Struct::msg);
+
+    return 0;
+};

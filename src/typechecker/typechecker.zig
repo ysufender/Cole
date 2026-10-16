@@ -827,7 +827,6 @@ fn typecheckSwitchStatementOnEnum(
             fieldMap.set(enumeration);
         }
 
-        // @TODO These are broken. Fix them.
         const hasCapture = ast.extra[case + 1] == 1;
         if (hasCapture) {
             const capture = ast.extra[case + 2];

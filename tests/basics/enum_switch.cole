@@ -1,0 +1,15 @@
+import std::io::console as Console;
+
+let main = fn (args: [][]u8) -> i32 {
+    switch (enum { Some, None })(@Some) {
+        @Some -> Console::log("Some");
+        else -> Console::log("Unexpected Error");
+    }
+
+    switch (enum { Some, None })(@None) {
+        @Some -> Console::log("Unexpected Error");
+        else -> Console::log("None");
+    }
+
+    return 0;
+};

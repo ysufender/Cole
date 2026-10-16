@@ -1,0 +1,15 @@
+import std::io::console as Console;
+
+let main = fn (args: [][]u8) -> i32 {
+    test("Message");
+    test2();
+    return 0;
+};
+
+let test = fn (msg: []u8) -> void {
+    Console::log(msg);
+};
+
+let test2 = fn () -> void {
+    Console::log("No Message");
+};

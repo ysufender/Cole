@@ -3,8 +3,6 @@
 zig-out
 .vscode
 test
-tests/crashes/
-tests/corpus/
 build/
 .cache
 

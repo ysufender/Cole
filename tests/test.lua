@@ -18,7 +18,15 @@ for name, tests in pairs(suites) do
 end
 
 if arg[1] == "record" then
-    test:record()
+    test:record(arg[2] and {table.unpack(arg, 2)} or nil)
 elseif arg[1] == "run" then
-    test:run()
+    local res = test:run(arg[2] and {table.unpack(arg, 2)} or nil)
+
+    if res then
+        if res.fail ~= 0 then
+            os.exit(1)
+        else
+            os.exit(0)
+        end
+    end
 end
