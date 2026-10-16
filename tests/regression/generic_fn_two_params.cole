@@ -1,0 +1,20 @@
+import std::io::console as Console;
+
+let Second = fn (A: type, B: type) -> any {
+    return fn (a: A, b: B) -> B {
+        return b;
+    };
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let x = Second(i32, float)(1, 2.5);
+    let y = Second(float, i32)(1.5, 3);
+
+    if x == 2.5 {
+        Console::log("second float: ok");
+    }
+    if y == 3 {
+        Console::log("second i32: ok");
+    }
+    return 0;
+};

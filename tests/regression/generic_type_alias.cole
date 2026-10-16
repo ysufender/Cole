@@ -1,0 +1,26 @@
+import std::io::console as Console;
+
+let Wrapper = fn (T: type) -> type {
+    return struct {
+        value: T,
+        count: u8,
+
+        pub let Inner = T;
+    };
+};
+
+let IntW = Wrapper(i32);
+let FloatW = Wrapper(float);
+
+let main = fn (args: [][]u8) -> i32 {
+    let a: IntW::Inner = 3;
+    let b: FloatW::Inner = 1.5;
+
+    if a == 3 {
+        Console::log("IntW::Inner: ok");
+    }
+    if b == 1.5 {
+        Console::log("FloatW::Inner: ok");
+    }
+    return 0;
+};

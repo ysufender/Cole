@@ -1,0 +1,15 @@
+import std::io::console as Console;
+
+let Identity = fn (T: type) -> any {
+    return fn (a: T) -> T {
+        return a;
+    };
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let r = Identity(i32)(7);
+    if r == 7 {
+        Console::log("identity i32: ok");
+    }
+    return 0;
+};

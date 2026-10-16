@@ -1,0 +1,21 @@
+import std::io::console as Console;
+
+let Identity = fn (T: type) -> any {
+    return fn (a: T) -> T {
+        return a;
+    };
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let f = Identity(float);
+    let a = f(1.5);
+    let b = f(2.5);
+
+    if a == 1.5 {
+        Console::log("first call: ok");
+    }
+    if b == 2.5 {
+        Console::log("second call: ok");
+    }
+    return 0;
+};

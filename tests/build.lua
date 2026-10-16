@@ -47,10 +47,10 @@ project
         .init("run", { always_run = true })
         :dependOnStep("build")
         :action("testy run"))
-        
+
     :step(Efile.Step
         .init("clean")
         :action("rm -rf build")
-        :action("rm -rf .testy"))
+        :action("rm -rf .testy/.cache"))
 
 print(project:build(arg[1] or "build") or "Success")

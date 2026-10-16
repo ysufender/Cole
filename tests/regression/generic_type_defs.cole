@@ -1,0 +1,40 @@
+import std::io::console as Console;
+
+let Box = fn (T: type) -> type {
+    return struct {
+        value: T,
+        count: u8,
+
+        pub let identity = fn (v: T) -> T {
+            return v;
+        };
+
+        pub let twice = fn (v: T) -> T {
+            return identity(identity(v));
+        };
+    };
+};
+
+let IntBox = Box(i32);
+let FloatBox = Box(float);
+
+let main = fn (args: [][]u8) -> i32 {
+    let a = IntBox::twice(41);
+    let b = FloatBox::twice(2.5);
+    let ib = IntBox(5, 1);
+    let fb = FloatBox(0.5, 2);
+
+    if a == 41 {
+        Console::log("IntBox::twice: ok");
+    }
+    if b == 2.5 {
+        Console::log("FloatBox::twice: ok");
+    }
+    if ib.value == 5 {
+        Console::log("IntBox.value: ok");
+    }
+    if fb.value == 0.5 {
+        Console::log("FloatBox.value: ok");
+    }
+    return 0;
+};

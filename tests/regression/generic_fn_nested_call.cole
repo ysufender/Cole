@@ -1,0 +1,26 @@
+import std::io::console as Console;
+
+let Identity = fn (T: type) -> any {
+    return fn (a: T) -> T {
+        return a;
+    };
+};
+
+let Twice = fn (T: type) -> any {
+    return fn (a: T) -> T {
+        return Identity(T)(Identity(T)(a));
+    };
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let i = Twice(i32)(4);
+    let f = Twice(float)(0.5);
+
+    if i == 4 {
+        Console::log("twice i32: ok");
+    }
+    if f == 0.5 {
+        Console::log("twice float: ok");
+    }
+    return 0;
+};

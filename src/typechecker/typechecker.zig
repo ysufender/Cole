@@ -1635,12 +1635,22 @@ pub fn typecheckCall(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpec
             );
         },
         .Function => |func| func,
-        else => {
-            self.report("Attempt to call non-function type '{s}'.", .{
-                try self.typeName(self.arena.allocator(), lhsType),
-            });
-            return Error.TypeIsNotCallable;
-        },
+        else =>
+            if (self.folder.attemptEval(ast.extra[extraPtr], lhsType)) |val| switch (self.folder.getValue(val)) {
+                .Function => |func| self.typeTable.get(func.signature).Function,
+                else => {
+                    self.report("Attempt to call non-function type '{s}'.", .{
+                        try self.typeName(self.arena.allocator(), lhsType),
+                    });
+                    return Error.TypeIsNotCallable;
+                }
+            }
+            else {
+                self.report("Attempt to call non-function type '{s}'.", .{
+                    try self.typeName(self.arena.allocator(), lhsType),
+                });
+                return Error.TypeIsNotCallable;
+            },
     };
 
     const exprList = ast.expressions.items(.value)[ast.extra[extraPtr + 1]];

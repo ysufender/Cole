@@ -1,0 +1,21 @@
+import std::io::console as Console;
+
+let Copy = fn (T: type) -> any {
+    return fn (a: T) -> T {
+        let tmp: T = a;
+        return tmp;
+    };
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let i = Copy(i32)(4);
+    let f = Copy(float)(0.25);
+
+    if i == 4 {
+        Console::log("body i32: ok");
+    }
+    if f == 0.25 {
+        Console::log("body float: ok");
+    }
+    return 0;
+};

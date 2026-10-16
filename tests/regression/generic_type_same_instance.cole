@@ -1,0 +1,33 @@
+import std::io::console as Console;
+
+let Box = fn (T: type) -> type {
+    return struct {
+        value: T,
+        count: u8,
+
+        pub let identity = fn (v: T) -> T {
+            return v;
+        };
+    };
+};
+
+let A = Box(i32);
+let B = Box(i32);
+
+let take = fn (b: A) -> i32 {
+    return b.value;
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let b = B(9, 1);
+    if take(b) == 9 {
+        Console::log("same instance: ok");
+    }
+    if A::identity(4) == 4 {
+        Console::log("A::identity: ok");
+    }
+    if B::identity(5) == 5 {
+        Console::log("B::identity: ok");
+    }
+    return 0;
+};

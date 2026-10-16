@@ -1,0 +1,12 @@
+import std::io::console as Console;
+
+let Noop = fn (T: type) -> any {
+    return fn (a: T) -> void {
+    };
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    Noop(float)(1);
+    Console::log("noop float: ok");
+    return 0;
+};

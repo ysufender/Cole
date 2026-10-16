@@ -1,0 +1,4 @@
+IntBox::twice: ok
+FloatBox::twice: ok
+IntBox.value: ok
+FloatBox.value: ok

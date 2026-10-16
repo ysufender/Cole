@@ -759,7 +759,7 @@ fn evalIfExpression(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?
 
 pub fn evalDecl(self: *Folder, _declPtr: defines.DeclPtr, maybeExpected: ?TypeID) Error!Comptime.Value.Ptr {
     const declPtr =
-        if (self.getFlag(.InComptimeCall)) fi: {
+        if (false and self.getFlag(.InComptimeCall)) fi: {
             const dp = try self.typechecker.symbols.declarations.addOne(self.arena.allocator());
             self.typechecker.symbols.declarations.set(dp, self.typechecker.symbols.declarations.get(_declPtr));
             self.typechecker.symbols.declarations.items(.scope)[dp] = self.typechecker.currentScope;

@@ -1,0 +1,3 @@
+identity i32: ok
+identity float: ok
+identity bool: ok
