@@ -1,0 +1,20 @@
+import std::io::console as Console;
+
+let S = struct { x: i32 };
+let Wrap = struct { inner: S };
+
+let make = fn () -> S {
+    return (3);
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let a = S(5);
+    let b = make();
+    let c: S = (7);
+    let d = Wrap((S(9)));
+    if a.x == 5 { Console::log("call ctor: ok"); }
+    if b.x == 3 { Console::log("return list: ok"); }
+    if c.x == 7 { Console::log("typed let: ok"); }
+    if d.inner.x == 9 { Console::log("nested: ok"); }
+    return 0;
+};

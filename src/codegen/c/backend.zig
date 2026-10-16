@@ -48,7 +48,7 @@ pub fn compile(outDir: Dir, allocator: std.mem.Allocator, context: *common.Compi
 
     tcc.tcc_define_symbol(
         state,
-        if (context.settings.buildInfo.platform == .Windows) "COLE_WIN32" else "COLE_UNIX",
+        if (context.settings.buildInfo.platform == .Unix) "COLE_UNIX" else "COLE_WIN32",
         "1"
     );
 

@@ -23,6 +23,7 @@ constants: std.MultiArrayList(JIR.Constant),
 functions: MultiArrayList(JIR.Function),
 functionCache: collections.HashMap(JIR.Ptr, JIR.Function.Ptr),
 functionDefCache: collections.HashMap(JIR.Function.Ptr, void),
+loweredBodies: std.AutoHashMapUnmanaged([3]u64, void) = .empty,
 metadata: MetadataMap,
 nodes: JIR.Node.List,
 data: std.ArrayList(u32),
@@ -101,10 +102,7 @@ pub fn addConstant(self: *Builder, constant: JIR.Constant) Error!JIR.Constant.Pt
 }
 
 pub fn modifyInternedString(self: *Builder, strPtr: defines.StringPtr, new: []const u8) void {
-    _ = self;
-    _ = strPtr;
-    _ = new;
-    // self.strings.keys()[strPtr] = new;
+    self.strings.keys()[strPtr] = new;
 }
 
 pub fn internString(self: *Builder, str: []const u8) Error!defines.StringPtr {

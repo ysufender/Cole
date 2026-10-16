@@ -1,5 +1,3 @@
-// @Beware comments may be out of date, mind the context.
-
 // @Note Lowering to C IR is requested by the typechecker,typechecker
 // but it is done by the lowerer.zig, which makes calls to
 // JIR.Builder since JIR.Builder itself doesn't know about
@@ -265,7 +263,6 @@ pub fn typecheckStatement(self: *Typechecker, statementPtr: defines.StatementPtr
         .Defer => self.typecheckDefer(stmt.value),
         .VariableDefinition => try self.typecheckVarDefStatement(stmt.value),
         .InlineC => { }, // @Note allow direct C code insertion
-                         // @Maybe typecheck the C code too
     };
 }
 
@@ -1255,7 +1252,7 @@ pub fn typecheckExpressionListRange(self: *Typechecker, range: defines.Range, ex
 
     if (range.len() == 1) switch (self.typeTable.get(expected)) {
         .Struct, .Union, .Array => {
-            const innerType = try self.typecheckExpression(ast.extra[range.at(0)], expected);
+            const innerType = try self.typecheckExpression(ast.extra[range.at(0)], null);
             if (self.suitable(expected, innerType)) return expected;
         },
         else => {},
@@ -2067,8 +2064,8 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
     };
 
     if (self.folder.attemptEval(decl.node, declType)) |val| fi: {
-        const func = switch (self.folder.memory.items[val]) {
-            .Function => |*f| f,
+        var func = switch (self.folder.memory.items[val]) {
+            .Function => |f| f,
             else => break :fi,
         };
 
@@ -2076,7 +2073,10 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
         const returnType = sign.returnType;
 
         // @Note See folder.zig:evalFunction
-        if (!self.folder.getFlag(.InComptimeCall) and !sign.isComptime) {
+        const loweredKey = [3]u64{ @intCast(func.source), @intCast(func.body), @intCast(func.signature) };
+        const alreadyLowered = self.builder.loweredBodies.contains(loweredKey);
+
+        if (!self.folder.getFlag(.InComptimeCall) and !sign.isComptime and !alreadyLowered) {
             if (!self.hasMetadata(func.expr, "@extern")) {
                 const pc = self.setFlag(.CoveredAllPaths, false);
                 defer _ = self.setFlag(.CoveredAllPaths, pc);
@@ -2097,14 +2097,17 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
             self.lowerer.lastReturnType = returnType;
             defer self.lowerer.lastReturnType = prt;
 
-            var copy = func.*;
-            copy.body = try self.lowerer.statement(func.body);
+            func.body = try self.lowerer.statement(func.body);
 
-            const fun = try self.builder.addFunction(copy);
+            const fun = try self.builder.addFunction(func);
             try self.builder.functionDef(func.name, fun);
+
+            self.builder.loweredBodies.put(self.builder.allocator, loweredKey, {})
+                catch return Error.AllocatorFailure;
         }
     }
-    else if (declType == comptime Comptime.Folder.Builtin.Type("type")) {
+
+    if (declType == comptime Comptime.Folder.Builtin.Type("type")) {
         const typeID = self.folder.getValue(try self.folder.eval(decl.node, declType)).Type;
         const node = self.typeTable.get(typeID);
 
@@ -3843,4 +3846,3 @@ fn unwrapMark(self: *Typechecker, exprPtr: defines.ExpressionPtr) defines.Expres
     }
     return e;
 }
-

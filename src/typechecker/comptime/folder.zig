@@ -782,7 +782,9 @@ pub fn evalDecl(self: *Folder, _declPtr: defines.DeclPtr, maybeExpected: ?TypeID
     defer self.typechecker.currentScope = prevScope;
 
     if (self.declCache.get(declPtr)) |v| {
-        return v;
+        if (decl.kind != .Parameter or !self.getFlag(.InComptimeCall)) {
+            return v;
+        }
     }
 
     const res = try switch (decl.kind) {
@@ -2054,10 +2056,13 @@ pub fn constructFromList(self: *Folder, typeID: TypeID, _range: defines.Range) E
         switch (self.typechecker.typeTable.get(typeID)) {
             .Struct, .Union => {
                 const single = ast.extra[range.at(0)];
-                const t = try self.typechecker.typecheckExpression(single, typeID);
-                if (self.typechecker.suitable(typeID, t)) {
-                    return self.expectDefined(single, typeID);
-                }
+                const probe = self.typechecker.typecheckExpression(single, typeID);
+
+                if (probe) |t| {
+                    if (self.typechecker.suitable(typeID, t)) {
+                        return self.expectDefined(single, typeID);
+                    }
+                } else |_| {}
             },
             else => { },
         }

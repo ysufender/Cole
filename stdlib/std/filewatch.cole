@@ -5,6 +5,7 @@
 
 code {
 #include <stdio.h>
+#include <time.h>
 #ifdef COLE_UNIX
 #   include <sys/stat.h>
 #else
@@ -63,7 +64,7 @@ pub let print = fn (self: *Watcher, stream: Stream::Output::Stream, allocator: A
 /*
  * POSIX
  */
-let timespec = #(@extern) struct {
+let timespec = #(@extern, @opaque) struct {
     tv_sec: c_long,
 };
 
