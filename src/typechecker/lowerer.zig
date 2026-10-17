@@ -68,7 +68,7 @@ pub fn topLevelDeclaration(self: *Lowerer, ptr: defines.DeclPtr, decl: *const De
                 decl.topLevel,
                 typeID,
                 decl.name,
-                false,
+                false, // @Note Top-level decls must always be initialized
                 node,
                 decl.node,
             );
@@ -1133,7 +1133,16 @@ fn scoping(self: *Lowerer, _extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
             .expr = lhs,
             .file = ast.tokens,
         })) |decl| {
-            namespace = self.typechecker.builder.getInternedString(self.typechecker.symbols.getDecl(decl).name);
+            const declType = try self.typechecker.typecheckDecl(decl, null);
+            if (declType == comptime Comptime.Folder.Builtin.Type("type")) {
+                const prevc = self.typechecker.folder.setFlag(.ComptimeBanned, false);
+                const typeID = self.typechecker.folder.getValue(try self.typechecker.folder.evalDecl(decl, declType)).Type;
+                _ = self.typechecker.folder.setFlag(.ComptimeBanned, prevc);
+                namespace = try self.typechecker.typeName(undefined, typeID);
+            }
+            else {
+                namespace = self.typechecker.builder.getInternedString(self.typechecker.symbols.getDecl(decl).name);
+            }
             break;
         }
 
