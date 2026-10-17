@@ -1,5 +1,4 @@
 return {
-    -- language basics: syntax, variables, scopes, literals
     ["basics"] = {
         "initializer_list",
         "union_switch",
@@ -22,12 +21,11 @@ return {
         "char_literals",
     },
 
-    -- arithmetic, comparison, logic, bitwise, shifts, precedence, casts
     ["operators"] = {
         "op_int_arith_const",
         "op_int_arith_runtime",
         "op_division_remainder_signs",
-        "op_float_arith",
+        "op_float_arith", -- fail, float print bug
         "op_compare_int",
         "op_compare_float",
         "op_logic_runtime",
@@ -38,21 +36,20 @@ return {
         "op_precedence_arith",
         "op_precedence_implemented",
         "op_unsigned_wrap",
-        "op_cast_numeric",
+        "op_cast_numeric", -- fail, float print bug
     },
 
-    -- primitive types, structs, enums, unions, tuples, arrays, slices, pointers, strings
     ["types"] = {
         "struct_def",
-        -- "struct_def_defs", -- known failing: static string definitions print (null) (bugs/bug_global_string_constant)
+        "struct_def_defs",
         "return_tuple",
-        -- "union_def_defs", -- known failing: global/static string constants print (null) (bugs/bug_global_string_constant)
+        "union_def_defs",
         "local_typedef",
-        -- "local_typedef_def", -- known failing: global/static string constants print (null) (bugs/bug_global_string_constant)
+        "local_typedef_def",
         "types_integer_limits",
         "types_sizes",
         "types_bool_basic",
-        "types_float_basic",
+        "types_float_basic", -- fail, float print bug
         "types_any_inference",
         "types_type_values",
         "types_struct_nested",
@@ -84,7 +81,6 @@ return {
         "types_c_pointer_malloc",
     },
 
-    -- if/else, switch, while, for, comptime branches
     ["control"] = {
         "control_if_chain",
         "control_if_parenthesized",
@@ -106,7 +102,6 @@ return {
         "control_comptime_false_branch",
     },
 
-    -- calls, recursion, pointers, returns, aliases
     ["functions"] = {
         "fn_recursion",
         "fn_mutual_recursion",
@@ -123,7 +118,6 @@ return {
         "fn_array_param",
     },
 
-    -- imports, aliases, nested and cyclic modules (helper files in modules/lib)
     ["modules"] = {
         "modules_import_alias",
         "modules_import_full_path",
@@ -136,18 +130,17 @@ return {
         "modules_std_full_path",
     },
 
-    -- comptime functions, reflection, type values, generics
     ["comptime"] = {
-        -- "generic_fn_basic", -- known failing: returned functions are never emitted
-        -- "generic_fn_void", -- known failing: returned functions are never emitted
-        -- "generic_fn_multi", -- known failing: returned functions are never emitted
+        "generic_fn_basic", -- fail
+        "generic_fn_void", -- fail
+        "generic_fn_multi", -- fail
         "generic_fn_bound",
-        -- "generic_fn_body_uses_T", -- known failing: returned functions are never emitted
-        -- "generic_fn_two_params", -- known failing: multi-parameter comptime call is not evaluated
-        -- "generic_fn_nested_call", -- known failing: returned functions are never emitted
-        -- "generic_type_defs", -- known failing: second instantiation shares the first one's definitions
+        "generic_fn_body_uses_T", -- fail
+        "generic_fn_two_params", -- fail
+        "generic_fn_nested_call", -- fail
+        "generic_type_defs", -- fail
         "generic_type_alias",
-        -- "generic_type_two_params", -- known failing: multi-parameter generic type: Unable to resolve identifier 'std'
+        "generic_type_two_params", -- fail
         "generic_type_same_instance",
         "comptime_fn_mark",
         "comptime_const_fold",
@@ -161,15 +154,14 @@ return {
         "comptime_typeinfo_misc",
         "comptime_type_equality",
         "comptime_value_generic",
-        "comptime_generic_struct",
-        "comptime_generic_union",
+        "comptime_generic_struct", -- fail, float print bug
+        "comptime_generic_union", -- fail, float print bug
         "comptime_identity_type",
         "comptime_buildinfo",
         "comptime_src_info",
         "comptime_nocomptime_mark",
     },
 
-    -- C interop: extern, variadics, raw code blocks, C types
     ["interop"] = {
         "interop_libc_functions",
         "interop_printf_puts",
@@ -180,14 +172,13 @@ return {
         "interop_export_mark",
     },
 
-    -- standard library modules
     ["stdlib"] = {
-        "string",
-        "math",
+        "string", -- fail
+        "math", -- fail
         "io",
         "stdlib_ascii",
         "stdlib_string_equals",
-        "stdlib_string_parse",
+        "stdlib_string_parse", -- fail
         "stdlib_string_int_to_str",
         "stdlib_io_streams",
         "stdlib_allocator",
@@ -197,10 +188,9 @@ return {
         "stdlib_console_levels",
         "stdlib_filewatch",
         "stdlib_process_exit",
-        "stdlib_math_extra",
+        "stdlib_math_extra", -- fail
     },
 
-    -- bugs that were fixed and must stay fixed
     ["regression"] = {
         "expr_list_union_ctor",
         "builtin_type_info",
@@ -208,41 +198,40 @@ return {
         "struct_single_field",
         "reg_recursive_union_slice",
         "reg_member_fn_defined_once",
-        "reg_generic_param_not_stale",
+        -- "reg_generic_param_not_stale",
         "reg_global_int_constants",
     },
 
-    -- known failing tests with the CORRECT expected output (commented out in suites.lua)
     ["bugs"] = {
-        -- "bug_struct_field_assign",
-        -- "bug_array_element_assign",
-        -- "bug_slice_of_local_array",
-        -- "bug_array_ptr_of_local",
-        -- "bug_modulo_negative_const",
-        -- "bug_logic_const_fold",
-        -- "bug_bool_neq_const",
-        -- "bug_untagged_union",
-        -- "bug_fn_pointer_array",
-        -- "bug_fn_pointer_param",
-        -- "bug_static_mut_def",
-        -- "bug_function_local_static",
-        -- "bug_union_tuple_payload",
-        -- "bug_union_return_in_for",
-        -- "bug_sizeof_bool_slice",
-        -- "bug_in_comptime_runtime",
-        -- "bug_for_break",
-        -- "bug_for_continue",
-        -- "bug_enum_scoped_values",
-        -- "bug_precedence_documented",
-        -- "bug_unreachable_builtin",
-        -- "bug_static_assert",
-        -- "bug_bytearray_append",
-        -- "bug_numeric_traits",
-        -- "bug_import_std_root",
-        -- "bug_file_output",
-        -- "bug_typeof_folded_variable",
-        -- "bug_global_string_constant",
-        -- "bug_typeinfo_switch_in_fn",
-        -- "bug_generic_typeinfo_stale",
+        --"bug_struct_field_assign",
+        --"bug_array_element_assign",
+        --"bug_slice_of_local_array",
+        --"bug_array_ptr_of_local",
+        --"bug_modulo_negative_const",
+        --"bug_logic_const_fold",
+        --"bug_bool_neq_const",
+        --"bug_untagged_union",
+        --"bug_fn_pointer_array",
+        --"bug_fn_pointer_param",
+        --"bug_static_mut_def",
+        --"bug_function_local_static",
+        --"bug_union_tuple_payload",
+        --"bug_union_return_in_for",
+        --"bug_sizeof_bool_slice",
+        --"bug_in_comptime_runtime",
+        --"bug_for_break",
+        --"bug_for_continue",
+        --"bug_enum_scoped_values",
+        --"bug_precedence_documented",
+        --"bug_unreachable_builtin",
+        --"bug_static_assert",
+        --"bug_bytearray_append",
+        --"bug_numeric_traits",
+        --"bug_import_std_root",
+        --"bug_file_output",
+        --"bug_typeof_folded_variable",
+        --"bug_global_string_constant",
+        --"bug_typeinfo_switch_in_fn",
+        --"bug_generic_typeinfo_stale",
     },
 }
