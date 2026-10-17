@@ -1109,6 +1109,9 @@ fn tuple(self: *Lowerer, exprListPtr: defines.OpaquePtr, ofType: TypeID) Error!J
 }
 
 fn scoping(self: *Lowerer, _extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
+    // @Beware @Bug This part causes integer overflow because of
+    // the namespace string being corrupted for some reason.
+
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
     const tokens = self.typechecker.context.getTokens(ast.tokens);
 
@@ -1138,6 +1141,7 @@ fn scoping(self: *Lowerer, _extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     }
 
     const member = self.typechecker.context.getFile(ast.tokens)[leftMost..rightMost];
+
     const qualified = std.fmt.allocPrint(self.typechecker.builder.allocator, "{s}$${s}", .{
         namespace,
         member,

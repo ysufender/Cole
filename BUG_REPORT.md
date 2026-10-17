@@ -4,17 +4,20 @@
 
 Referencing definitions inside scopes aborts with an integer overflow.
 
+> Note: Only works when addressing the scoped def, or when the scoped def is
+> a string.
+
 ### Reproduction
 
 ```rust
-import std::io::console as Console;
-
 let Struct = struct {
-    pub let msg = 15;
+    pub let msg = "Hello World";
+    pub let msg2 = 15;
 };
 
 let main = fn (args: [][]u8) -> i32 {
-    let a = Struct::msg.&;
+    let a = Struct::msg;
+    let b = Struct::msg.&;
 
     return 0;
 };

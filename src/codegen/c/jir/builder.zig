@@ -23,7 +23,7 @@ constants: std.MultiArrayList(JIR.Constant),
 functions: MultiArrayList(JIR.Function),
 functionCache: collections.HashMap(JIR.Ptr, JIR.Function.Ptr),
 functionDefCache: collections.HashMap(JIR.Function.Ptr, void),
-loweredBodies: std.AutoHashMapUnmanaged([3]u64, void) = .empty,
+loweredBodies: std.AutoHashMapUnmanaged(defines.StringPtr, void) = .empty,
 metadata: MetadataMap,
 nodes: JIR.Node.List,
 data: std.ArrayList(u32),
@@ -162,6 +162,8 @@ pub inline fn functionDef(self: *Builder, name: defines.StringPtr, function: JIR
     }
 
     self.functionDefCache.putNoClobber(self.allocator, function, {})
+        catch return Error.AllocatorFailure;
+    self.loweredBodies.put(self.allocator, self.functions.get(function).name, {})
         catch return Error.AllocatorFailure;
     const node = try self.commonBinary(.FunctionDef, name, function);
     try self.typechecker.lowerer.addMetadata(node, self.functions.get(function).expr);

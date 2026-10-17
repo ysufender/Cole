@@ -1,0 +1,14 @@
+import std::io::console as Console;
+
+let Union = union(enum) {
+    Some: void,
+    None: u32,
+
+    pub let def = "Hello World";
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let a = Union(@Some, ());
+    Console::log(Union::def);
+    return 0;
+};

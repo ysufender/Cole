@@ -2082,7 +2082,7 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
         const returnType = sign.returnType;
 
         // @Note See folder.zig:evalFunction
-        const loweredKey = [3]u64{ @intCast(func.source), @intCast(func.body), @intCast(func.signature) };
+        const loweredKey = func.name;
         const alreadyLowered = self.builder.loweredBodies.contains(loweredKey);
 
         if (!self.folder.getFlag(.InComptimeCall) and !sign.isComptime and !alreadyLowered) {

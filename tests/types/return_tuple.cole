@@ -1,0 +1,29 @@
+import std::c as C;
+import std::string as String;
+import std::io::console as Console;
+
+let foo = fn () -> Tuple(i32, i32) {
+	return (2, 3);
+};
+
+let foo2 = fn () -> Tuple(i32, i32) {
+	return Tuple(i32, i32)(2, 3);
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let tuple = foo();
+    let a = tuple._0; // 2
+    let b = tuple._1; // 3
+
+    Console::log(String::intToStr(a, C::Allocator));
+    Console::log(String::intToStr(b, C::Allocator));
+
+    let tuple2 = foo2();
+    let a2 = tuple2._0; // 2
+    let b2 = tuple2._1; // 3
+
+    Console::log(String::intToStr(a2, C::Allocator));
+    Console::log(String::intToStr(b2, C::Allocator));
+
+    return 0;
+};
