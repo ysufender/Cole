@@ -1,0 +1,19 @@
+// types/types_pointer_reassign
+// A pointer variable can be repointed when the pointer itself is mutable.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let a: i32 = 1;
+    let b: i32 = 2;
+    let p: mut *i32 = a.&;
+    pi(p.*);
+    p = b.&;
+    pi(p.*);
+    return 0;
+};

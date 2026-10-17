@@ -1,0 +1,13 @@
+// control/control_while_zero_iterations
+// A while loop whose condition is false initially never runs.
+import std::io::console as Console;
+
+let main = fn (args: [][]u8) -> i32 {
+    let i: mut i32 = 10;
+    while i < 5 {
+        Console::log("never");
+        i = i + 1;
+    }
+    Console::log("skipped");
+    return 0;
+};

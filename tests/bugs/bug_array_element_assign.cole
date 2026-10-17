@@ -1,0 +1,23 @@
+// bugs/bug_array_element_assign
+// Assigning to an element of a mutable array variable is lost, and so is a later copy.
+// KNOWN BUG: same temporary-copy codegen as bug_struct_field_assign.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let a: mut [3]mut i32 = (1, 2, 3);
+    a[1] = 20;
+    pi(a[0]);
+    pi(a[1]);
+    pi(a[2]);
+    let b = a;
+    a[0] = 99;
+    pi(b[0]);
+    pi(a[0]);
+    return 0;
+};

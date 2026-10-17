@@ -1,0 +1,17 @@
+// types/types_tuple_nested
+// Tuples can nest.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let t: Tuple(i32, Tuple(i32, i32)) = (1, (2, 3));
+    pi(t._0);
+    pi(t._1._0);
+    pi(t._1._1);
+    return 0;
+};

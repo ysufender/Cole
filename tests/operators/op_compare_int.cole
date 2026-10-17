@@ -1,0 +1,22 @@
+// operators/op_compare_int
+// Integer comparison operators (runtime).
+import std::io::console as Console;
+import std::string as String;
+
+let pb = fn (b: bool) -> void {
+    Console::log(String::boolToStr(b));
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let a: i32 = #(@noComptime) 5;
+    let b: i32 = #(@noComptime) 7;
+    pb(a < b);
+    pb(a <= b);
+    pb(a > b);
+    pb(a >= b);
+    pb(a == b);
+    pb(a != b);
+    pb(a <= 5);
+    pb(a >= 5);
+    return 0;
+};

@@ -1,0 +1,17 @@
+// modules/modules_import_alias
+// import ... as gives a module a short alias; pub functions and constants are visible.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+import modules::lib::util as Util;
+
+let main = fn (args: [][]u8) -> i32 {
+    pi(Util::add(2, 3));
+    pi(Util::Version);
+    return 0;
+};

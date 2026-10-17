@@ -1,0 +1,15 @@
+// comptime/comptime_buildinfo
+// buildInfo describes the target platform and backend.
+import std::io::console as Console;
+import std::string as String;
+
+let pb = fn (b: bool) -> void {
+    Console::log(String::boolToStr(b));
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    pb(buildInfo().platform == @Unix);
+    pb(buildInfo().platform == @Windows);
+    pb(buildInfo().backend == @C);
+    return 0;
+};

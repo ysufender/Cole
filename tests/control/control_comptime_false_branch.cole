@@ -1,0 +1,11 @@
+// control/control_comptime_false_branch
+// A comptime-false branch is eliminated, so compileError inside it never fires.
+import std::io::console as Console;
+
+let main = fn (args: [][]u8) -> i32 {
+    if false {
+        compileError("must be eliminated");
+    }
+    Console::log("compiled");
+    return 0;
+};

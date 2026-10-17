@@ -1,0 +1,21 @@
+// types/types_enum_runtime_values
+// Enums with explicit values keep them when cast at runtime.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let Level = enum { Low = 1, Mid = 5, High = 10 };
+
+let main = fn (args: [][]u8) -> i32 {
+    let h: Level = #(@noComptime) (@High);
+    let l: Level = #(@noComptime) (@Low);
+    let m: Level = #(@noComptime) (@Mid);
+    pi(cast(h));
+    pi(cast(l));
+    pi(cast(m));
+    return 0;
+};

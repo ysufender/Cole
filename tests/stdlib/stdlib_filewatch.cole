@@ -1,0 +1,18 @@
+// stdlib/stdlib_filewatch
+// std::filewatch reports no change for a file that was not touched.
+import std::io::console as Console;
+import std::string as String;
+
+let pb = fn (b: bool) -> void {
+    Console::log(String::boolToStr(b));
+};
+
+import std::filewatch as FW;
+
+let main = fn (args: [][]u8) -> i32 {
+    let w: mut any = FW::createWatcher("suites.lua");
+    pb(FW::poll(w.&));
+    pb(FW::poll(w.&));
+    Console::log("done");
+    return 0;
+};

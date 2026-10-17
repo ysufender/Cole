@@ -1,0 +1,27 @@
+// stdlib/stdlib_ascii
+// std::ascii character classification and constants.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+let pb = fn (b: bool) -> void {
+    Console::log(String::boolToStr(b));
+};
+
+import std::ascii as Ascii;
+
+let main = fn (args: [][]u8) -> i32 {
+    pb(Ascii::isDigit('5'));
+    pb(Ascii::isDigit('a'));
+    pb(Ascii::isAlpha('z'));
+    pb(Ascii::isAlpha('Q'));
+    pb(Ascii::isAlpha('1'));
+    pb(Ascii::isWhitespace(' '));
+    pb(Ascii::isWhitespace('x'));
+    pi(Ascii::NEWLINE);
+    pi(Ascii::NULL);
+    return 0;
+};

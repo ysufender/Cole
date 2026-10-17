@@ -1,0 +1,12 @@
+// stdlib/stdlib_process_exit
+// std::c::process::exit terminates immediately; later statements never run.
+import std::io::console as Console;
+
+import std::c::process as Process;
+
+let main = fn (args: [][]u8) -> i32 {
+    Console::log("before exit");
+    Process::exit(0);
+    Console::log("never printed");
+    return 0;
+};

@@ -1,0 +1,20 @@
+// operators/op_float_arith
+// Floating point arithmetic.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pf = fn (f: float) -> void {
+    Console::log(String::floatToStr(f, C::Allocator));
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let x: float = 1.5;
+    let y: float = 2.25;
+    pf(x + y);
+    pf(x * y);
+    pf(y - x);
+    pf(y / x);
+    pf(-x);
+    return 0;
+};

@@ -1,0 +1,17 @@
+pub let add = fn (a: i32, b: i32) -> i32 { return a + b; };
+
+let hidden = fn () -> i32 { return 1; };
+pub let useHidden = fn () -> i32 { return hidden() + 1; };
+
+pub let Version = 3;
+pub let Point = struct { x: i32, y: i32 };
+pub let Color = enum { Red, Green, Blue };
+pub let Shape = union(enum) { Circle: i32, Square: i32 };
+
+pub let describe = fn (c: Color) -> []u8 {
+    return switch c {
+        @Red -> "red",
+        @Green -> "green",
+        @Blue -> "blue",
+    };
+};

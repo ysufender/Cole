@@ -1,0 +1,26 @@
+// functions/fn_mutual_recursion
+// Mutually recursive functions need no forward declarations.
+import std::io::console as Console;
+import std::string as String;
+
+let pb = fn (b: bool) -> void {
+    Console::log(String::boolToStr(b));
+};
+
+let isEven = fn (n: i32) -> bool {
+    if n == 0 { return true; }
+    return isOdd(n - 1);
+};
+
+let isOdd = fn (n: i32) -> bool {
+    if n == 0 { return false; }
+    return isEven(n - 1);
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    pb(isEven(10));
+    pb(isOdd(10));
+    pb(isEven(7));
+    pb(isOdd(7));
+    return 0;
+};

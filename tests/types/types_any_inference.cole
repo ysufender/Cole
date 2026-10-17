@@ -1,0 +1,20 @@
+// types/types_any_inference
+// any infers the type from the right hand side; mut any infers a mutable type.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let a: any = i32(999);
+    pi(a);
+
+    let m: mut any = i32(5);
+    m = m + 1;
+    pi(m);
+    Console::log(typeName(typeOf(m)));
+    return 0;
+};

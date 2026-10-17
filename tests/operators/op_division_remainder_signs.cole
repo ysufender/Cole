@@ -1,0 +1,27 @@
+// operators/op_division_remainder_signs
+// Division truncates toward zero; the remainder takes the sign of the dividend (runtime).
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let p: i32 = #(@noComptime) 7;
+    let q: i32 = #(@noComptime) -2;
+    let m: i32 = #(@noComptime) -7;
+    let two: i32 = #(@noComptime) 2;
+    let three: i32 = #(@noComptime) 3;
+
+    pi(m / two);
+    pi(m % two);
+    pi(p / q);
+    pi(p % q);
+    pi(m / q);
+    pi(m % q);
+    pi(m % three);
+    pi(-7 / 2);
+    return 0;
+};

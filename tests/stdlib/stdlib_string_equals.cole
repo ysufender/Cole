@@ -1,0 +1,18 @@
+// stdlib/stdlib_string_equals
+// std::string::equals compares contents, not pointers.
+import std::io::console as Console;
+import std::string as String;
+
+let pb = fn (b: bool) -> void {
+    Console::log(String::boolToStr(b));
+};
+
+import std::string as S;
+
+let main = fn (args: [][]u8) -> i32 {
+    pb(S::equals("abc", "abc"));
+    pb(S::equals("abc", "abd"));
+    pb(S::equals("abc", "ab"));
+    pb(S::equals("", ""));
+    return 0;
+};

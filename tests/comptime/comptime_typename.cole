@@ -1,0 +1,17 @@
+// comptime/comptime_typename
+// typeName renders types as strings.
+import std::io::console as Console;
+
+let main = fn (args: [][]u8) -> i32 {
+    Console::log(typeName(i32));
+    Console::log(typeName([]u8));
+    Console::log(typeName(*i32));
+    Console::log(typeName(*mut i32));
+    Console::log(typeName(mut i32));
+    Console::log(typeName([3]u8));
+    Console::log(typeName(typeOf(true)));
+    Console::log(typeName(typeOf(1.5)));
+    Console::log(typeName(typeOf("hi")));
+    Console::log(typeName(typeOf(1)));
+    return 0;
+};

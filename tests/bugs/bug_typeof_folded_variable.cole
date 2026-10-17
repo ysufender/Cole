@@ -1,0 +1,12 @@
+// bugs/bug_typeof_folded_variable
+// typeOf of a constant-folded variable reports comptime_int instead of its declared type.
+// KNOWN BUG: both print comptime_int.
+import std::io::console as Console;
+
+let main = fn (args: [][]u8) -> i32 {
+    let x: i32 = 5;
+    Console::log(typeName(typeOf(x)));
+    let a: any = i32(999);
+    Console::log(typeName(typeOf(a)));
+    return 0;
+};

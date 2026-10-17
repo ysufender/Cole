@@ -1,0 +1,22 @@
+// types/types_array_2d
+// Arrays of arrays.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let g = [2][2]i32((1, 2), (3, 4));
+    pi(g[0][0]);
+    pi(g[0][1]);
+    pi(g[1][0]);
+    pi(g[1][1]);
+    let h: [2][3]i32 = ((1, 2, 3), (4, 5, 6));
+    pi(h[1][2]);
+    pi(h.len);
+    pi(h[0].len);
+    return 0;
+};

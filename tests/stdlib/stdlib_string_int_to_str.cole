@@ -1,0 +1,19 @@
+// stdlib/stdlib_string_int_to_str
+// intToStr renders positive, negative and zero values.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    pi(0);
+    pi(7);
+    pi(-9);
+    pi(1000000);
+    pi(2147483647);
+    pi(-2147483647);
+    return 0;
+};

@@ -1,0 +1,18 @@
+// types/types_array_basic
+// Fixed size arrays: indexing and the len field.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let a = [4]i32(10, 20, 30, 40);
+    pi(a[0]);
+    pi(a[3]);
+    pi(a.len);
+    pi(a[1] + a[2]);
+    return 0;
+};

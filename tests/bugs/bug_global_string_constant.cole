@@ -1,0 +1,13 @@
+// bugs/bug_global_string_constant
+// Global string constants are zero initialised and print (null).
+// KNOWN BUG: emitted as Slice_uint8_t const root__annotated = {0}; never assigned.
+import std::io::console as Console;
+
+let annotated: []u8 = "annotated";
+let inferred = "inferred";
+
+let main = fn (args: [][]u8) -> i32 {
+    Console::log(annotated);
+    Console::log(inferred);
+    return 0;
+};

@@ -1,0 +1,20 @@
+// bugs/bug_file_output
+// std::io::file::Output::open does not typecheck (fopen is declared with an incompatible pointer type).
+// KNOWN BUG: type mismatch between []u8 and mut [@c]c_char in std/io/file/ofile.cole.
+import std::io::console as Console;
+
+import std::io::file as File;
+import std::io::stream as Stream;
+
+let main = fn (args: [][]u8) -> i32 {
+    let w = File::Output::open("build/c/_file_output_test.txt", C::Allocator, false, false);
+    switch w {
+        @Ok -> |f| {
+            _ = Stream::Output::writeline(File::Output::stream(f), "first line");
+            _ = Stream::Output::close(File::Output::stream(f));
+            Console::log("written");
+        }
+        @Err -> Console::log("open failed");
+    }
+    return 0;
+};

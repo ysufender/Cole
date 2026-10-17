@@ -1,0 +1,30 @@
+// control/control_switch_union_capture
+// Switching on a tagged union captures the payload of the active member.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let Msg = union(enum) {
+    Text: []u8,
+    Number: i32,
+    Nothing: void,
+};
+
+let show = fn (m: Msg) -> void {
+    switch m {
+        @Text -> |t| Console::log(t);
+        @Number -> |n| pi(n);
+        @Nothing -> Console::log("nothing");
+    }
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    show(Msg(@Text, "hello"));
+    show(Msg(@Number, 42));
+    show(Msg(@Nothing, ()));
+    return 0;
+};

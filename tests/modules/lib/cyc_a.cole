@@ -1,0 +1,3 @@
+import modules::lib::cyc_b as B;
+
+pub let fromA = fn (n: i32) -> i32 { return if (n <= 0) 0 else n + B::fromB(n - 1); };

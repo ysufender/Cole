@@ -10,7 +10,7 @@ pub let intToStr = fn (num: c_long, allocator: Allocator::Allocator) -> []u8 {
     }
 
     digitCount = if (digitCount == 0) 1 else digitCount + (if (isSigned) 1 else 0);
-    let result: []mut u8 = cast(Allocator::alloc(allocator, digitCount, 1));
+    let result: []mut u8 = cast(Allocator::alloc(allocator, digitCount + 1, 1));
 
     tmp = num * (if (isSigned) -1 else 1);
     let index: mut u32 = digitCount;
@@ -20,6 +20,7 @@ pub let intToStr = fn (num: c_long, allocator: Allocator::Allocator) -> []u8 {
         index = index - 1;
     }
     result[0] = if (num < 0) '-' else result[0];
+    result[result.len - 1] = 0;
 
     return cast(result);
 };

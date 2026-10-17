@@ -1,0 +1,22 @@
+// comptime/comptime_typeinfo_union
+// typeInfo exposes the tag type and fields of a tagged union.
+// NOTE: A tagged union reports one more field than declared: field 0 is the tag itself.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+let pb = fn (b: bool) -> void {
+    Console::log(String::boolToStr(b));
+};
+
+let U = union(enum) { X: i32, Y: void };
+
+let main = fn (args: [][]u8) -> i32 {
+    pb(typeInfo(U).Union.isTagged);
+    pi(typeInfo(U).Union.fields.len);
+    Console::log(typeInfo(U).Union.fields[1].name);
+    return 0;
+};

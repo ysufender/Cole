@@ -1,0 +1,17 @@
+// modules/modules_cyclic_imports
+// Cyclic imports are allowed as long as no declaration depends on itself.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+import modules::lib::cyc_a as A;
+
+let main = fn (args: [][]u8) -> i32 {
+    pi(A::fromA(4));
+    pi(A::fromA(0));
+    return 0;
+};

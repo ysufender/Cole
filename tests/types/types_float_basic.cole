@@ -1,0 +1,20 @@
+// types/types_float_basic
+// Float literals and values.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pf = fn (f: float) -> void {
+    Console::log(String::floatToStr(f, C::Allocator));
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let a: float = 1.5;
+    let b: float = 0.25;
+    let c: float = 100;
+    pf(a);
+    pf(b);
+    pf(c);
+    pf(a + b + c);
+    return 0;
+};

@@ -1,0 +1,20 @@
+// operators/op_bool_equality_runtime
+// == and != on booleans (!= acts as logical xor).
+import std::io::console as Console;
+import std::string as String;
+
+let pb = fn (b: bool) -> void {
+    Console::log(String::boolToStr(b));
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let t: bool = #(@noComptime) true;
+    let f: bool = #(@noComptime) false;
+    pb(t != f);
+    pb(t != t);
+    pb(f != f);
+    pb(t == t);
+    pb(t == f);
+    pb(!t == f);
+    return 0;
+};

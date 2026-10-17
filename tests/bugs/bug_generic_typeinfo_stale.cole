@@ -1,0 +1,22 @@
+// bugs/bug_generic_typeinfo_stale
+// typeInfo(Generic(T)) sees a stale T after another instantiation of the same generic.
+// KNOWN BUG: both lines print i32.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let Pair = fn (T: type) -> type {
+    return struct { a: T, b: T };
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let p = Pair(i32)(1, 2);
+    pi(p.a);
+    Console::log(typeName(typeInfo(Pair(float)).Struct.fields[0].valueType));
+    Console::log(typeName(typeInfo(Pair(i32)).Struct.fields[0].valueType));
+    return 0;
+};

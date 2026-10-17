@@ -1,0 +1,38 @@
+// comptime/comptime_generic_union
+// A generic Option type instantiated for two payload types.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+let pf = fn (f: float) -> void {
+    Console::log(String::floatToStr(f, C::Allocator));
+};
+
+let Opt = fn (T: type) -> type {
+    return union(enum) { Some: T, None: void };
+};
+
+let I = Opt(i32);
+let F = Opt(float);
+
+let main = fn (args: [][]u8) -> i32 {
+    let a: I = (@Some, 7);
+    switch a {
+        @Some -> |v| pi(v);
+        @None -> Console::log("none");
+    }
+    let b: F = (@Some, 2.5);
+    switch b {
+        @Some -> |v| pf(v);
+        @None -> Console::log("none");
+    }
+    let c: I = (@None, ());
+    switch c {
+        @Some -> |v| pi(v);
+        @None -> Console::log("none");
+    }
+    return 0;
+};

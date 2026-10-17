@@ -1,0 +1,19 @@
+// stdlib/stdlib_math_extra
+// std::math abs and sign on additional values.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pf = fn (f: float) -> void {
+    Console::log(String::floatToStr(f, C::Allocator));
+};
+
+import std::math as Math;
+
+let main = fn (args: [][]u8) -> i32 {
+    pf(Math::abs(-2.5));
+    pf(Math::abs(3.5));
+    pf(Math::sign(0.5));
+    pf(Math::sign(-0.5));
+    return 0;
+};

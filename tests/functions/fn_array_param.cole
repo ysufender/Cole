@@ -1,0 +1,20 @@
+// functions/fn_array_param
+// Arrays are passed by value.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let first = fn (a: [3]i32) -> i32 {
+    return a[0] * 100 + a[1] * 10 + a[2];
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    pi(first((1, 2, 3)));
+    let arr = [3]i32(4, 5, 6);
+    pi(first(arr));
+    return 0;
+};

@@ -1,0 +1,20 @@
+// bugs/bug_for_continue
+// continue inside a for loop emits a goto to an undefined label.
+// KNOWN BUG: C error: label $$anon_Loop_..._Check used but not defined.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let s: mut i32 = 0;
+    for 0..6, |i| {
+        if i % 2 == 0 { continue; }
+        s = s + cast(i);
+    }
+    pi(s);
+    return 0;
+};

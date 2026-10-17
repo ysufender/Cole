@@ -1,0 +1,11 @@
+// interop/interop_printf_puts
+// Variadic externs (printf) and plain externs (puts) writing through C stdio.
+
+let puts = #(@extern) fn (s: [@c]c_char) -> c_int { };
+let printf = #(@extern, @variadic) fn (fmt: mut [@c]c_char) -> mut c_int { };
+
+let main = fn (args: [][]u8) -> i32 {
+    _ = puts("from puts");
+    _ = printf("%d-%s-%c\n", 42, "str".ptr, 65);
+    return 0;
+};

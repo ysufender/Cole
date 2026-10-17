@@ -1,0 +1,21 @@
+// basics/hoisting
+// Declarations can be used before they are declared, including globals.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    pi(later());
+    pi(derived);
+    pi(base);
+    return 0;
+};
+
+let derived = base + 1;
+let base = 41;
+let later = fn () -> i32 { return helper() * 2; };
+let helper = fn () -> i32 { return 21; };

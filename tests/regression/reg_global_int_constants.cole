@@ -1,0 +1,21 @@
+// regression/reg_global_int_constants
+// Global integer constants are folded and usable from several functions.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let LIMIT = 10;
+let DOUBLE = LIMIT * 2;
+
+let a = fn () -> i32 { return LIMIT; };
+let b = fn () -> i32 { return DOUBLE + LIMIT; };
+
+let main = fn (args: [][]u8) -> i32 {
+    pi(a());
+    pi(b());
+    return 0;
+};

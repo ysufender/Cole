@@ -1,0 +1,19 @@
+// bugs/bug_logic_const_fold
+// and / or on comptime comparisons crash the compiler (access of union field Bool while Type is active).
+// KNOWN BUG: compiler panic while folding.
+import std::io::console as Console;
+import std::string as String;
+
+let pb = fn (b: bool) -> void {
+    Console::log(String::boolToStr(b));
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let t = true;
+    let f = false;
+    pb(t and f);
+    pb(t or f);
+    pb(1 < 2 and 2 < 3);
+    pb(1 > 2 or 2 > 3);
+    return 0;
+};

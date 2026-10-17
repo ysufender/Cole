@@ -1,0 +1,18 @@
+// modules/modules_two_aliases
+// The same module can be imported under two different aliases.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+import modules::lib::util as Util;
+import modules::lib::util as Other;
+
+let main = fn (args: [][]u8) -> i32 {
+    pi(Util::add(1, 2));
+    pi(Other::add(3, 4));
+    return 0;
+};

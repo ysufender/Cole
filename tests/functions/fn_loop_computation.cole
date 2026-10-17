@@ -1,0 +1,43 @@
+// functions/fn_loop_computation
+// Functions with local loops: sum, gcd and power.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let sum = fn (n: i32) -> i32 {
+    let i: mut i32 = 0;
+    let acc: mut i32 = 0;
+    while i < n { i = i + 1; acc = acc + i; }
+    return acc;
+};
+
+let gcd = fn (a: i32, b: i32) -> i32 {
+    let x: mut i32 = a;
+    let y: mut i32 = b;
+    while y != 0 {
+        let t = y;
+        y = x % y;
+        x = t;
+    }
+    return x;
+};
+
+let power = fn (base: i32, exp: i32) -> i32 {
+    let r: mut i32 = 1;
+    let e: mut i32 = exp;
+    while e > 0 { r = r * base; e = e - 1; }
+    return r;
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    pi(sum(100));
+    pi(gcd(48, 18));
+    pi(gcd(17, 5));
+    pi(power(2, 10));
+    pi(power(7, 0));
+    return 0;
+};

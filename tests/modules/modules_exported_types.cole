@@ -1,0 +1,25 @@
+// modules/modules_exported_types
+// Structs, enums and unions can be exported from a module.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+import modules::lib::util as Util;
+
+let main = fn (args: [][]u8) -> i32 {
+    let p = Util::Point(4, 5);
+    pi(p.x * p.y);
+
+    Console::log(Util::describe(Util::Color(@Green)));
+
+    let s = Util::Shape(@Square, 6);
+    switch s {
+        @Circle -> |r| pi(r);
+        @Square -> |side| pi(side * side);
+    }
+    return 0;
+};

@@ -1,0 +1,29 @@
+// types/types_pointer_swap
+// Pointers allow out-parameters.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let swap = fn (a: *mut i32, b: *mut i32) -> void {
+    let t = a.*;
+    a.* = b.*;
+    b.* = t;
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let x: mut i32 = 1;
+    let y: mut i32 = 2;
+    swap(x.&, y.&);
+    pi(x);
+    pi(y);
+    let p = x.&;
+    pi(p.*);
+    let q: *mut i32 = x.&;
+    q.* = 77;
+    pi(x);
+    return 0;
+};

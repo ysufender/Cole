@@ -1,0 +1,25 @@
+// stdlib/stdlib_allocator
+// The C allocator hands out writable memory that can be viewed as a typed slice.
+// NOTE: alloc(count, size) returns a slice with count elements.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+import std::memory::allocator as Alloc;
+
+let main = fn (args: [][]u8) -> i32 {
+    let mem = Alloc::alloc(C::Allocator, 4, 4);
+    pi(mem.len);
+    let ints: []mut i32 = unsafeCast(mem);
+    ints[0] = 5;
+    ints[1] = 6;
+    ints[2] = 7;
+    ints[3] = 8;
+    pi(ints[0] + ints[1] + ints[2] + ints[3]);
+    Alloc::dealloc(C::Allocator, mem);
+    return 0;
+};

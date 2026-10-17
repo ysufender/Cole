@@ -1,0 +1,17 @@
+// comptime/comptime_nocomptime_mark
+// @noComptime keeps a value out of the constant folder without changing it.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let x = #(@noComptime) 5;
+    pi(x);
+    let y: i32 = #(@noComptime) 20;
+    pi(y + 1);
+    return 0;
+};

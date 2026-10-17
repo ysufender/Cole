@@ -1,0 +1,24 @@
+// functions/fn_slice_param
+// Slices are passed by value (pointer + length).
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let sum = fn (s: []u8) -> i32 {
+    let total: mut i32 = 0;
+    for s, |c| {
+        total = total + cast(c.*);
+    }
+    return total;
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    pi(sum("abc"));
+    pi(sum(""));
+    pi(sum("A"));
+    return 0;
+};

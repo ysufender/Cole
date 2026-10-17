@@ -1,0 +1,19 @@
+// modules/modules_symbol_alias
+// A function from a module can be aliased with let.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+import modules::lib::util as Util;
+
+let add2 = Util::add;
+
+let main = fn (args: [][]u8) -> i32 {
+    pi(add2(1, 1));
+    pi(add2(40, 2));
+    return 0;
+};

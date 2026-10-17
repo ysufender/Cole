@@ -1,0 +1,20 @@
+// types/types_enum_switch_expr
+// A switch expression maps every enum member to a value.
+import std::io::console as Console;
+
+let Color = enum { Red, Green, Blue };
+
+let name = fn (c: Color) -> []u8 {
+    return switch c {
+        @Red -> "red",
+        @Green -> "green",
+        @Blue -> "blue",
+    };
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    Console::log(name(Color(@Red)));
+    Console::log(name(Color(@Green)));
+    Console::log(name(Color(@Blue)));
+    return 0;
+};

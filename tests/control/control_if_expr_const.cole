@@ -1,0 +1,10 @@
+// control/control_if_expr_const
+// if expressions on compile-time constants (example from the language reference).
+import std::io::console as Console;
+
+let main = fn (args: [][]u8) -> i32 {
+    let num = 777;
+    let s = if (num % 2 == 0) "even" else "odd";
+    Console::log(s);
+    return 0;
+};

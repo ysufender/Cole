@@ -1,0 +1,20 @@
+// comptime/comptime_typeinfo_enum
+// typeInfo exposes enum members and their values.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let E = enum { A, B = 7, C };
+
+let main = fn (args: [][]u8) -> i32 {
+    pi(typeInfo(E).Enum.fields.len);
+    Console::log(typeInfo(E).Enum.fields[1].name);
+    pi(typeInfo(E).Enum.fields[0].value);
+    pi(typeInfo(E).Enum.fields[1].value);
+    pi(typeInfo(E).Enum.fields[2].value);
+    return 0;
+};

@@ -1,0 +1,10 @@
+i32
+[]u8
+*i32
+*mut i32
+mut i32
+[3]u8
+bool
+comptime_float
+[]u8
+comptime_int

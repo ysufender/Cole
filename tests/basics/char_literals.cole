@@ -1,0 +1,19 @@
+// basics/char_literals
+// Character literals are u8 values and support arithmetic.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    pi('A');
+    pi('z');
+    pi('0');
+    pi(' ');
+    pi('a' - 'A');
+    pi('9' - '0');
+    return 0;
+};

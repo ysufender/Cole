@@ -1,0 +1,22 @@
+// functions/fn_void_with_pointer_effect
+// A void function communicates through a pointer parameter.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let fill = fn (out: *mut i32, value: i32) -> void {
+    out.* = value;
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let r: mut i32 = 0;
+    fill(r.&, 99);
+    pi(r);
+    fill(r.&, r + 1);
+    pi(r);
+    return 0;
+};

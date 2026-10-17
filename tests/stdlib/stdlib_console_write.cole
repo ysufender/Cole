@@ -1,0 +1,10 @@
+// stdlib/stdlib_console_write
+// Console::write prints without a trailing newline.
+import std::io::console as Console;
+
+let main = fn (args: [][]u8) -> i32 {
+    Console::write("no newline,");
+    Console::write(" then ");
+    Console::log("newline");
+    return 0;
+};

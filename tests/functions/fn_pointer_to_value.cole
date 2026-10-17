@@ -1,0 +1,19 @@
+// functions/fn_pointer_to_value
+// Functions are implicit function pointers and can be aliased with let.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let double = fn (x: i32) -> i32 { return x * 2; };
+let alias = double;
+
+let main = fn (args: [][]u8) -> i32 {
+    pi(alias(8));
+    let g = double;
+    pi(g(21));
+    return 0;
+};

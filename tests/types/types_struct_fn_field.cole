@@ -1,0 +1,27 @@
+// types/types_struct_fn_field
+// Struct fields can be function pointers.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let Op = struct {
+    f: *fn (i32, i32) -> i32,
+    name: []u8,
+};
+
+let add = fn (a: i32, b: i32) -> i32 { return a + b; };
+let mul = fn (a: i32, b: i32) -> i32 { return a * b; };
+
+let main = fn (args: [][]u8) -> i32 {
+    let o1 = Op(add, "add");
+    let o2 = Op(mul, "mul");
+    pi(o1.f(3, 4));
+    pi(o2.f(3, 4));
+    Console::log(o1.name);
+    Console::log(o2.name);
+    return 0;
+};

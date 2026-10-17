@@ -1,0 +1,14 @@
+// interop/interop_stdout_ordering
+// Console, puts and printf share one C stdout buffer, so ordering is preserved.
+import std::io::console as Console;
+
+let puts = #(@extern) fn (s: [@c]c_char) -> c_int { };
+let printf = #(@extern, @variadic) fn (fmt: mut [@c]c_char) -> mut c_int { };
+
+let main = fn (args: [][]u8) -> i32 {
+    Console::log("one");
+    _ = puts("two");
+    _ = printf("three\n");
+    Console::log("four");
+    return 0;
+};

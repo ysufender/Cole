@@ -1,0 +1,26 @@
+// regression/reg_generic_param_not_stale
+// A generic type instantiated twice must see its own parameter each time.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+let pf = fn (f: float) -> void {
+    Console::log(String::floatToStr(f, C::Allocator));
+};
+
+let Wrap = fn (T: type) -> type {
+    return struct { a: T, b: T };
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let w1 = Wrap(i32)(1, 2);
+    let w2 = Wrap(float)(0.5, 0.25);
+    let w3 = Wrap(u8)(3, 4);
+    pi(w1.a + w1.b);
+    pf(w2.a + w2.b);
+    pi(w3.a + w3.b);
+    return 0;
+};

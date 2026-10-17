@@ -1,0 +1,21 @@
+// types/types_array_of_structs
+// Arrays of structs, iterated with a pointer capture.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let P = struct { a: i32, b: i32 };
+
+let main = fn (args: [][]u8) -> i32 {
+    let arr: [3]P = ((1, 2), (3, 4), (5, 6));
+    pi(arr[0].a);
+    pi(arr[2].b);
+    for arr, |p| {
+        pi(p.a + p.b);
+    }
+    return 0;
+};

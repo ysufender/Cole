@@ -1,0 +1,23 @@
+// comptime/comptime_fn_mark
+// Functions marked @comptime run at compile time and can size arrays.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let sq = #(@comptime) fn (x: comptime_int) -> comptime_int {
+    return x * x;
+};
+
+let N = sq(7);
+
+let main = fn (args: [][]u8) -> i32 {
+    pi(N);
+    pi(sq(3));
+    let arr = [sq(2)]i32(1, 2, 3, 4);
+    pi(arr.len);
+    return 0;
+};

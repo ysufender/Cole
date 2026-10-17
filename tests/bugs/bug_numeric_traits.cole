@@ -1,0 +1,24 @@
+// bugs/bug_numeric_traits
+// std::numeric trait checks crash or fail to typecheck.
+// KNOWN BUG: compiler panic (index out of bounds) / dependency cycle in std::numeric.
+import std::io::console as Console;
+import std::string as String;
+
+let pb = fn (b: bool) -> void {
+    Console::log(String::boolToStr(b));
+};
+
+import std::numeric as Num;
+
+let main = fn (args: [][]u8) -> i32 {
+    pb(Num::Integer::Check(i32));
+    pb(Num::Integer::Check(float));
+    pb(Num::Floating::Check(float));
+    pb(Num::Numeric::Check(u8));
+    pb(Num::Numeric::Check(bool));
+    pb(Num::Signed::Check(i32));
+    pb(Num::Signed::Check(u32));
+    pb(Num::Unsigned::Check(u32));
+    pb(Num::Unsigned::Check(float));
+    return 0;
+};

@@ -1,0 +1,25 @@
+// bugs/bug_static_mut_def
+// A mutable definition inside a struct (static variable) panics the compiler.
+// KNOWN BUG: compiler panic: integer overflow while lowering the scoped access.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let Counter = struct {
+    pub let count: mut i32 = 0;
+    pub let bump = fn () -> void {
+        Counter::count = Counter::count + 1;
+    };
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    Counter::bump();
+    Counter::bump();
+    Counter::bump();
+    pi(Counter::count);
+    return 0;
+};

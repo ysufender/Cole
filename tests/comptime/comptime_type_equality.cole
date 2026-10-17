@@ -1,0 +1,15 @@
+// comptime/comptime_type_equality
+// Types can be compared with ==.
+import std::io::console as Console;
+import std::string as String;
+
+let pb = fn (b: bool) -> void {
+    Console::log(String::boolToStr(b));
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    pb(typeOf(1) == typeOf(2));
+    pb(i32 == i32);
+    pb(i32 == u32);
+    return 0;
+};

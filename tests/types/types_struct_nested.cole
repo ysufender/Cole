@@ -1,0 +1,31 @@
+// types/types_struct_nested
+// Structs nest, and can be built with constructors or initializer lists.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let Point = struct {
+    x: i32,
+    y: i32,
+};
+
+let Line = struct {
+    a: Point,
+    b: Point,
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let p = Point(3, 4);
+    pi(p.x);
+    pi(p.y);
+    let l = Line(p, Point(10, 20));
+    pi(l.b.y);
+    pi(l.a.x);
+    let q: Point = (5, 6);
+    pi(q.x + q.y);
+    return 0;
+};

@@ -1,0 +1,11 @@
+// modules/modules_std_full_path
+// Standard library modules can be used through their full path.
+
+import std::string;
+import std::io::console;
+
+let main = fn (args: [][]u8) -> i32 {
+    std::io::console::log(if (std::string::equals("a", "a")) "same" else "different");
+    std::io::console::log(if (std::string::equals("a", "b")) "same" else "different");
+    return 0;
+};

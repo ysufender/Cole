@@ -1,0 +1,19 @@
+// bugs/bug_in_comptime_runtime
+// inComptime() reports true in code that executes at runtime.
+// KNOWN BUG: folded to true unconditionally.
+import std::io::console as Console;
+import std::string as String;
+
+let pb = fn (b: bool) -> void {
+    Console::log(String::boolToStr(b));
+};
+
+let probe = fn () -> bool {
+    return inComptime();
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let r: bool = #(@noComptime) probe();
+    pb(r);
+    return 0;
+};

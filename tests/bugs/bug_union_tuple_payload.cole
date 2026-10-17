@@ -1,0 +1,28 @@
+// bugs/bug_union_tuple_payload
+// A tagged union member whose payload is a tuple cannot be constructed from a nested list.
+// KNOWN BUG: type of the nested expression list cannot be inferred.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let Shape = union(enum) {
+    Circle: i32,
+    Rect: Tuple(i32, i32),
+};
+
+let area = fn (s: Shape) -> i32 {
+    return switch s {
+        @Circle -> |r| 3 * r * r,
+        @Rect -> |d| d._0 * d._1,
+    };
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    pi(area(Shape(@Circle, 2)));
+    pi(area(Shape(@Rect, (3, 4))));
+    return 0;
+};

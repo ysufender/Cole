@@ -1,0 +1,23 @@
+// bugs/bug_fn_pointer_param
+// A function pointer used as a parameter type is emitted as int32_t const (*)(int32_t const) f.
+// KNOWN BUG: the parameter name is placed after the function pointer type instead of inside it.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let apply = fn (f: *fn (i32) -> i32, x: i32) -> i32 {
+    return f(x);
+};
+
+let double = fn (x: i32) -> i32 { return x * 2; };
+let inc = fn (x: i32) -> i32 { return x + 1; };
+
+let main = fn (args: [][]u8) -> i32 {
+    pi(apply(double, 5));
+    pi(apply(inc, 5));
+    return 0;
+};

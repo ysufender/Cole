@@ -1,0 +1,14 @@
+// bugs/bug_unreachable_builtin
+// The unreachable() builtin is emitted as a call to an undefined $$unreachable function (breaks std::debug::assert).
+// KNOWN BUG: C error: label $$unreachable__ used but not defined.
+import std::io::console as Console;
+
+import std::debug as Debug;
+
+let main = fn (args: [][]u8) -> i32 {
+    Debug::assert(true, "never shown");
+    let ok: bool = #(@noComptime) 1 + 1 == 2;
+    Debug::assert(ok, "never shown");
+    Console::log("asserts passed");
+    return 0;
+};

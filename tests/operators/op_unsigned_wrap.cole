@@ -1,0 +1,23 @@
+// operators/op_unsigned_wrap
+// Unsigned arithmetic wraps around on overflow and underflow.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let u: u32 = #(@noComptime) 4000000000;
+    let v: u32 = #(@noComptime) 500000000;
+    pi(u + v);
+
+    let zero: u32 = #(@noComptime) 0;
+    pi(zero - 1);
+
+    let b: u8 = #(@noComptime) 250;
+    let c: u8 = b + 10;
+    pi(c);
+    return 0;
+};

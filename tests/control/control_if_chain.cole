@@ -1,0 +1,24 @@
+// control/control_if_chain
+// if / else if / else chains select exactly one branch (runtime values).
+import std::io::console as Console;
+
+let grade = fn (score: i32) -> []u8 {
+    let result: mut []u8 = "F";
+    if score >= 90 { result = "A"; }
+    else if score >= 80 { result = "B"; }
+    else if score >= 70 { result = "C"; }
+    else { result = "F"; }
+    return result;
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let a: i32 = #(@noComptime) 95;
+    let b: i32 = #(@noComptime) 85;
+    let c: i32 = #(@noComptime) 71;
+    let d: i32 = #(@noComptime) 12;
+    Console::log(grade(a));
+    Console::log(grade(b));
+    Console::log(grade(c));
+    Console::log(grade(d));
+    return 0;
+};

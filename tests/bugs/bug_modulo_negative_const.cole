@@ -1,0 +1,18 @@
+// bugs/bug_modulo_negative_const
+// Remainder of negative constants uses floored modulo at compile time but C remainder at runtime.
+// KNOWN BUG: the constant folder returns 1, -1, 2, -2; runtime gives the values above (see operators/op_division_remainder_signs).
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    pi(-5 % 3);
+    pi(5 % -3);
+    pi(-7 % 3);
+    pi(7 % -3);
+    return 0;
+};

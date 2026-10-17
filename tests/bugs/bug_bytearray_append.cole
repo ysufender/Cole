@@ -1,0 +1,24 @@
+// bugs/bug_bytearray_append
+// std::memory::bytearray::append does not typecheck (Element is the type of the whole items slice).
+// KNOWN BUG: Can't assign value of type 'mut []mut u8' to value of type '[]mut []mut u8'.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+import std::memory::bytearray as Bytes;
+
+let main = fn (args: [][]u8) -> i32 {
+    let arr: mut any = Bytes::initCapacity(2, C::Allocator);
+    Bytes::append(arr.&, C::Allocator, 'a');
+    Bytes::append(arr.&, C::Allocator, 'b');
+    Bytes::append(arr.&, C::Allocator, 'c');
+    pi(arr.items.len);
+    pi(arr.items[0]);
+    pi(arr.items[2]);
+    pi(arr.capacity);
+    return 0;
+};

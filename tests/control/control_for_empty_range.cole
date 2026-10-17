@@ -1,0 +1,17 @@
+// control/control_for_empty_range
+// An empty range runs zero iterations.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    for 3..3, |i| {
+        pi(i);
+    }
+    Console::log("done");
+    return 0;
+};

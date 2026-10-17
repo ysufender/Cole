@@ -1,0 +1,27 @@
+// types/types_c_pointer_malloc
+// C pointers are indexable and can be sliced into a runtime-sized slice.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let malloc = #(@extern) fn (size: mut c_size) -> mut [@c]mut void { };
+let free = #(@extern) fn (ptr: [@c]mut void) -> void { };
+
+let main = fn (args: [][]u8) -> i32 {
+    let raw = malloc(4);
+    let p: [@c]mut u8 = unsafeCast(raw);
+    p[0] = 10;
+    p[1] = 20;
+    p[2] = 30;
+    pi(cast(p[0] + p[1] + p[2]));
+    let s = p[0..3];
+    pi(s.len);
+    s[1] = 99;
+    pi(cast(p[1]));
+    free(raw);
+    return 0;
+};

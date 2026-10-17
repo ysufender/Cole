@@ -1,0 +1,20 @@
+// comptime/comptime_const_fold
+// Global constants built from other constants are folded.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let N = 6 * 7;
+let M = N + 1;
+let Q = (M - 3) / 2;
+
+let main = fn (args: [][]u8) -> i32 {
+    pi(N);
+    pi(M);
+    pi(Q);
+    return 0;
+};

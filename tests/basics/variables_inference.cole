@@ -1,0 +1,20 @@
+// basics/variables_inference
+// Variable types are inferred, annotated, or forwarded with any.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let age = 20;
+
+let main = fn (args: [][]u8) -> i32 {
+    let name: []u8 = "Bob";
+    let big: any = i32(999);
+    pi(age);
+    Console::log(name);
+    pi(big);
+    return 0;
+};

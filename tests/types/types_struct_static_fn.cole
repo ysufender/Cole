@@ -1,0 +1,25 @@
+// types/types_struct_static_fn
+// Structs are namespaces: static functions and functions taking a self pointer.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let Point = struct {
+    x: i32,
+    y: i32,
+
+    pub let sum = fn (self: *Point) -> i32 { return self.x + self.y; };
+    pub let origin = fn () -> Point { return Point(0, 0); };
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let p = Point(3, 4);
+    pi(Point::sum(p.&));
+    let o = Point::origin();
+    pi(o.x + o.y);
+    return 0;
+};

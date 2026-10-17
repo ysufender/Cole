@@ -509,8 +509,10 @@ fn assignment(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     const vt = try self.typechecker.typecheckExpression(vexpr, null);
 
     const expr = expr: {
+        const prevlhs = self.typechecker.setFlag(.LValue, true);
         const prev = self.typechecker.folder.setFlag(.ComptimeBanned, true);
         defer _ = self.typechecker.folder.setFlag(.ComptimeBanned, prev);
+        defer _ = self.typechecker.setFlag(.LValue, prevlhs);
         break :expr try self.expression(vexpr, vt);
     };
 

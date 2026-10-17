@@ -1,0 +1,19 @@
+// bugs/bug_enum_scoped_values
+// Scoped enum members (Level::High) evaluate to their ordinal instead of their explicit value.
+// KNOWN BUG: prints 2, 0, 1; runtime values are correct (types/types_enum_runtime_values).
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let Level = enum { Low = 1, Mid = 5, High = 10 };
+
+let main = fn (args: [][]u8) -> i32 {
+    pi(cast(Level::High));
+    pi(cast(Level::Low));
+    pi(cast(Level::Mid));
+    return 0;
+};

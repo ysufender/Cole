@@ -1,0 +1,25 @@
+// types/types_sizes
+// sizeOf, bitSizeOf and alignOf of primitive and composite types (x86-64 Linux).
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    pi(sizeOf(i32));
+    pi(sizeOf(u8));
+    pi(sizeOf(float));
+    pi(sizeOf(c_int));
+    pi(sizeOf(c_long));
+    pi(sizeOf(c_char));
+    pi(sizeOf(c_double));
+    pi(bitSizeOf(i32));
+    pi(bitSizeOf(u8));
+    pi(alignOf(i32));
+    pi(sizeOf(*i32));
+    pi(sizeOf([4]i32));
+    return 0;
+};

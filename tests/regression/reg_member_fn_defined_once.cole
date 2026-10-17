@@ -1,0 +1,21 @@
+// regression/reg_member_fn_defined_once
+// A struct function referenced from several places must be emitted exactly once.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let Math2 = struct {
+    pub let identity = fn (v: i32) -> i32 { return v; };
+    pub let twice = fn (v: i32) -> i32 { return identity(identity(v)); };
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    pi(Math2::twice(41));
+    pi(Math2::identity(1));
+    pi(Math2::twice(Math2::identity(2)));
+    return 0;
+};

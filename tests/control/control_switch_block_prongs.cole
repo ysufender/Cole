@@ -1,0 +1,15 @@
+// control/control_switch_block_prongs
+// Switch prongs may be blocks with several statements.
+import std::io::console as Console;
+
+let E = enum { A, B, C };
+
+let main = fn (args: [][]u8) -> i32 {
+    let e = E(@B);
+    switch e {
+        @A -> Console::log("A");
+        @B -> { Console::log("B1"); Console::log("B2"); }
+        @C -> Console::log("C");
+    }
+    return 0;
+};

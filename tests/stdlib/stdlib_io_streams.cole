@@ -1,0 +1,17 @@
+// stdlib/stdlib_io_streams
+// std::io output streams: single bytes, lines and buffers.
+
+import std::io as Io;
+import std::io::stream as Stream;
+
+let main = fn (args: [][]u8) -> i32 {
+    let out = Io::StdOut();
+    _ = Stream::Output::write(out, 'A');
+    _ = Stream::Output::write(out, 'B');
+    _ = Stream::Output::write(out, 10);
+    _ = Stream::Output::writeline(out, "line");
+    _ = Stream::Output::writebuffer(out, "buffer");
+    _ = Stream::Output::write(out, 10);
+    _ = Stream::Output::flush(out);
+    return 0;
+};

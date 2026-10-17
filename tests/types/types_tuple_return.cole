@@ -1,0 +1,27 @@
+// types/types_tuple_return
+// Tuples return multiple values; fields are named _0, _1, ...
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+let pb = fn (b: bool) -> void {
+    Console::log(String::boolToStr(b));
+};
+
+let pair = fn () -> Tuple(i32, i32) {
+    return (2, 3);
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let t = pair();
+    pi(t._0);
+    pi(t._1);
+    let u: Tuple(i32, bool, []u8) = (1, true, "x");
+    pi(u._0);
+    pb(u._1);
+    Console::log(u._2);
+    return 0;
+};

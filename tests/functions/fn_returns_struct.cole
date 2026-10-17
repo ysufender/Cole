@@ -1,0 +1,26 @@
+// functions/fn_returns_struct
+// A function can return a struct by value.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let Vec = struct { x: i32, y: i32 };
+
+let make = fn (a: i32, b: i32) -> Vec {
+    return Vec(a, b);
+};
+
+let add = fn (a: Vec, b: Vec) -> Vec {
+    return Vec(a.x + b.x, a.y + b.y);
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let v = add(make(1, 2), make(10, 20));
+    pi(v.x);
+    pi(v.y);
+    return 0;
+};

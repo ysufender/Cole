@@ -1,0 +1,20 @@
+// interop/interop_toplevel_code
+// A top-level code block defines C that Cole can call through an extern declaration.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+code {
+    static int twice_c(int x) { return x * 2; }
+}
+
+let twice_c = #(@extern) fn (x: c_int) -> c_int { };
+
+let main = fn (args: [][]u8) -> i32 {
+    pi(cast(twice_c(21)));
+    return 0;
+};

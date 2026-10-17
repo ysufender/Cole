@@ -1,0 +1,21 @@
+// types/types_string_basics
+// Strings are []u8 slices: length, indexing and printing.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let s = "Hello";
+    pi(s.len);
+    pi(s[0]);
+    pi(s[4]);
+    Console::log(s);
+    Console::log("Hello World");
+    Console::log("");
+    Console::log("after empty");
+    return 0;
+};

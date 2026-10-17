@@ -1,0 +1,20 @@
+// operators/op_compare_float
+// Floating point comparison operators (runtime).
+import std::io::console as Console;
+import std::string as String;
+
+let pb = fn (b: bool) -> void {
+    Console::log(String::boolToStr(b));
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let x: float = #(@noComptime) 1.5;
+    let y: float = #(@noComptime) 2.25;
+    pb(x < y);
+    pb(x <= y);
+    pb(x > y);
+    pb(x >= y);
+    pb(x == 1.5);
+    pb(x != y);
+    return 0;
+};

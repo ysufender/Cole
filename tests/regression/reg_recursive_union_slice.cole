@@ -1,0 +1,23 @@
+// regression/reg_recursive_union_slice
+// A union containing a slice of itself must resolve its element type (was emitted as Slice_mut any).
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let Value = union(enum) {
+    Int: i32,
+    List: []Value,
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let v = Value(@Int, 5);
+    switch v {
+        @Int -> |i| pi(i);
+        @List -> |l| pi(l.len);
+    }
+    return 0;
+};

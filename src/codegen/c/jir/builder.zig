@@ -278,6 +278,10 @@ pub inline fn not(self: *Builder, rhs: JIR.Ptr) Error!JIR.Ptr { return self.comm
 pub inline fn negate(self: *Builder, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonSingle(.Negation, rhs); }
 
 pub fn dot(self: *Builder, object: JIR.Ptr, field: StringPtr, objType: TypeID) Error!JIR.Ptr {
+    if (self.typechecker.getFlag(.LValue)) {
+        return self.commonBinary(.Dot, object, field);
+    }
+
     const objName = try self.typechecker.folder.generateRandomName(.Obj);
     const objDef = try self.variableDef(false, objType, objName, false, object, null);
     const objIdent = try switch (self.typechecker.typeTable.get(objType)) {

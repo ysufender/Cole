@@ -1,0 +1,28 @@
+// control/control_switch_expr_else
+// Switch expressions can use else, including else -> unreachable().
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let E = enum { A, B, C };
+
+let main = fn (args: [][]u8) -> i32 {
+    let e = E(@B);
+    let r = switch e {
+        @A -> 1,
+        @B -> 2,
+        else -> unreachable(),
+    };
+    pi(r);
+    let c = E(@C);
+    let r2 = switch c {
+        @A -> 1,
+        else -> 99,
+    };
+    pi(r2);
+    return 0;
+};

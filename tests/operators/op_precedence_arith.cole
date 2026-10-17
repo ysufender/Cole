@@ -1,0 +1,25 @@
+// operators/op_precedence_arith
+// Arithmetic precedence and associativity with parentheses.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+let pb = fn (b: bool) -> void {
+    Console::log(String::boolToStr(b));
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    pi(2 + 3 * 4);
+    pi((2 + 3) * 4);
+    pi(10 - 4 - 3);
+    pi(100 / 10 / 5);
+    pi(20 / 3 * 3);
+    pi(2 * (3 + 4));
+    pi(100 - 3 * 4 - 8);
+    pb(1 + 1 == 2);
+    pb(2 + 2 > 3);
+    return 0;
+};

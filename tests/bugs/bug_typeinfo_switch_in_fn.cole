@@ -1,0 +1,21 @@
+// bugs/bug_typeinfo_switch_in_fn
+// Switching on typeInfo(T) inside an ordinary function called with a type crashes the compiler.
+// KNOWN BUG: compiler panic: index out of bounds.
+import std::io::console as Console;
+
+let kind = fn (T: type) -> []u8 {
+    return switch typeInfo(T) {
+        @Integer -> "int",
+        @Float -> "float",
+        @Bool -> "bool",
+        else -> "other",
+    };
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    Console::log(kind(i32));
+    Console::log(kind(float));
+    Console::log(kind(bool));
+    Console::log(kind([]u8));
+    return 0;
+};

@@ -1,0 +1,25 @@
+// types/types_integer_limits
+// Limits of the fixed-size integer types.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let a: i32 = 2147483647;
+    let b: u32 = 4000000000;
+    let c: u8 = 255;
+    let d: i8 = 127;
+    let e: i8 = -128;
+    let f: i32 = -2147483647;
+    pi(a);
+    pi(b);
+    pi(c);
+    pi(d);
+    pi(e);
+    pi(f);
+    return 0;
+};

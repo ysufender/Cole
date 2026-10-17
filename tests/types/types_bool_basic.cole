@@ -1,0 +1,19 @@
+// types/types_bool_basic
+// Boolean literals and comparison results.
+import std::io::console as Console;
+import std::string as String;
+
+let pb = fn (b: bool) -> void {
+    Console::log(String::boolToStr(b));
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let t = true;
+    let f = false;
+    pb(t);
+    pb(f);
+    pb(1 < 2);
+    pb(2 < 1);
+    pb(t == t);
+    return 0;
+};

@@ -1,0 +1,25 @@
+// bugs/bug_untagged_union
+// An untagged union produces a redefinition error in the generated C.
+// KNOWN BUG: 'root__Bits' redefinition in generated C.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+let pf = fn (f: float) -> void {
+    Console::log(String::floatToStr(f, C::Allocator));
+};
+
+let Bits = union {
+    i: i32,
+    f: float,
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let b = Bits(@i, 1065353216);
+    pi(b.i);
+    pf(b.f);
+    return 0;
+};

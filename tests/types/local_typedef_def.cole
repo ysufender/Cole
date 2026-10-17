@@ -1,0 +1,11 @@
+import std::io::console as Console;
+
+let main = fn (args: [][]u8) -> i32 {
+    let LocalType = struct {
+        pub let def1 = "Hello World";
+    };
+
+    Console::log(LocalType::def1);
+
+    return 0;
+};

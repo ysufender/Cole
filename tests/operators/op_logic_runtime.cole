@@ -1,0 +1,23 @@
+// operators/op_logic_runtime
+// Logical and/or/! on runtime booleans and compound conditions.
+import std::io::console as Console;
+import std::string as String;
+
+let pb = fn (b: bool) -> void {
+    Console::log(String::boolToStr(b));
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let t: bool = #(@noComptime) true;
+    let f: bool = #(@noComptime) false;
+    pb(t and f);
+    pb(t and t);
+    pb(f or t);
+    pb(f or f);
+
+    let a: i32 = #(@noComptime) 5;
+    pb(a > 1 and a < 10);
+    pb(a > 7 or a < 3);
+    pb(!(a == 5));
+    return 0;
+};

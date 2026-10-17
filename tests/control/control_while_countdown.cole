@@ -1,0 +1,19 @@
+// control/control_while_countdown
+// Countdown with a mutable counter.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let n: mut i32 = 3;
+    while n > 0 {
+        pi(n);
+        n = n - 1;
+    }
+    Console::log("liftoff");
+    return 0;
+};

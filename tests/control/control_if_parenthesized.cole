@@ -1,0 +1,11 @@
+// control/control_if_parenthesized
+// Parentheses around an if condition are optional.
+import std::io::console as Console;
+
+let main = fn (args: [][]u8) -> i32 {
+    let a: i32 = #(@noComptime) 3;
+    if (a < 5) { Console::log("parens"); }
+    if a < 5 { Console::log("no parens"); }
+    if (a > 5) { Console::log("never"); }
+    return 0;
+};

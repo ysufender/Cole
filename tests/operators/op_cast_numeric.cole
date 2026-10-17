@@ -1,0 +1,40 @@
+// operators/op_cast_numeric
+// cast converts between numeric types, truncating like C.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+let pf = fn (f: float) -> void {
+    Console::log(String::floatToStr(f, C::Allocator));
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let f: float = #(@noComptime) 3.75;
+    let i: i32 = cast(f);
+    pi(i);
+
+    let nf: float = #(@noComptime) -3.75;
+    let ni: i32 = cast(nf);
+    pi(ni);
+
+    let n: i32 = #(@noComptime) 42;
+    let g: float = cast(n);
+    pf(g);
+
+    let wide: i32 = #(@noComptime) 300;
+    let narrow: u8 = cast(wide);
+    pi(narrow);
+
+    let neg: i32 = #(@noComptime) -1;
+    let wrapped: u32 = cast(neg);
+    pi(wrapped);
+
+    let k = i32(5);
+    pi(k);
+    let m = as(i32, 9);
+    pi(m);
+    return 0;
+};

@@ -1,0 +1,14 @@
+// basics/main_args_len
+// main receives an argument slice; it is empty when no arguments are passed.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    pi(args.len);
+    return 0;
+};

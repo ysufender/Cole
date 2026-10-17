@@ -1,0 +1,16 @@
+// functions/fn_returns_slice
+// A function can return a string slice.
+import std::io::console as Console;
+
+let pick = fn (flag: bool) -> []u8 {
+    if flag { return "yes"; }
+    return "no";
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let t: bool = #(@noComptime) true;
+    let f: bool = #(@noComptime) false;
+    Console::log(pick(t));
+    Console::log(pick(f));
+    return 0;
+};

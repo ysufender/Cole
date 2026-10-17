@@ -1,0 +1,19 @@
+// control/control_platform_branch
+// Branches on comptime-known platform information select one side.
+import std::io::console as Console;
+import std::string as String;
+
+let pb = fn (b: bool) -> void {
+    Console::log(String::boolToStr(b));
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    if buildInfo().platform == @Unix {
+        Console::log("unix");
+    }
+    else {
+        Console::log("windows");
+    }
+    pb(buildInfo().platform == @Unix);
+    return 0;
+};

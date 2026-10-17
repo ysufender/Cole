@@ -1,0 +1,30 @@
+// comptime/comptime_typeinfo_misc
+// typeInfo for arrays, pointers and function types.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+let pb = fn (b: bool) -> void {
+    Console::log(String::boolToStr(b));
+};
+
+let add = fn (a: i32, b: i32) -> i32 { return a + b; };
+
+let main = fn (args: [][]u8) -> i32 {
+    pi(typeInfo([3]i32).Array.len);
+
+    let fi = typeInfo(typeOf(add)).Function;
+    pi(fi.argTypes.len);
+    pb(fi.variadic);
+    Console::log(typeName(fi.returnType));
+    Console::log(typeName(fi.argTypes[0]));
+
+    let pt = typeInfo(*mut i32).Pointer;
+    pb(pt.mutable);
+    Console::log(typeName(pt.child));
+    pb(typeInfo([]u8).Pointer.size == @Slice);
+    return 0;
+};

@@ -1,0 +1,21 @@
+// functions/fn_comptime_constant
+// A comptime function initialises a global constant.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let square = #(@comptime) fn (x: comptime_int) -> comptime_int {
+    return x * x;
+};
+
+let K = square(12);
+
+let main = fn (args: [][]u8) -> i32 {
+    pi(K);
+    pi(square(3));
+    return 0;
+};

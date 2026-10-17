@@ -1,0 +1,22 @@
+// operators/op_bitwise
+// Bitwise and, or, xor and not.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let a: i32 = #(@noComptime) 12;
+    let b: i32 = #(@noComptime) 10;
+    pi(a & b);
+    pi(a | b);
+    pi(a ^ b);
+    pi(~a);
+    pi(6 & 3);
+    pi(6 | 3);
+    pi(6 ^ 3);
+    return 0;
+};

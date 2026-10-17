@@ -1,0 +1,25 @@
+// bugs/bug_function_local_static
+// A function-local struct used as a static counter (language reference example) panics the compiler.
+// KNOWN BUG: compiler panic: integer overflow.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let count = fn () -> i32 {
+    let static = struct {
+        pub let counter: mut i32 = 0;
+    };
+    static::counter = static::counter + 1;
+    return static::counter;
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    pi(count());
+    pi(count());
+    pi(count());
+    return 0;
+};

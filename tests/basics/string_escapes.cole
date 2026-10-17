@@ -1,0 +1,11 @@
+// basics/string_escapes
+// String literals support \t, \n and \\; percent signs are printed verbatim.
+import std::io::console as Console;
+
+let main = fn (args: [][]u8) -> i32 {
+    Console::log("a\tb");
+    Console::log("back\\slash");
+    Console::log("two\nlines");
+    Console::log("100% sure");
+    return 0;
+};

@@ -1,0 +1,29 @@
+// bugs/bug_union_return_in_for
+// Returning a tagged union from inside a for loop emits a bad C initializer.
+// KNOWN BUG: C error: too many field init. (Also slices a local array, see bug_slice_of_local_array.)
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let Maybe = union(enum) { Some: i32, None: void };
+
+let find = fn (xs: []i32, target: i32) -> Maybe {
+    for xs, |p| {
+        let v = p.*;
+        if v == target { return (@Some, v); }
+    }
+    return (@None, ());
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let data = [3]i32(4, 5, 6);
+    switch find(data[0..3], 5) {
+        @Some -> |v| pi(v);
+        @None -> Console::log("none");
+    }
+    return 0;
+};

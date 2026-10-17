@@ -1,0 +1,21 @@
+// types/types_enum_static_fn
+// Enums are namespaces too and can hold functions.
+import std::io::console as Console;
+
+let Kind = enum {
+    A, B, C,
+
+    pub let describe = fn (k: Kind) -> []u8 {
+        return switch k {
+            @A -> "a",
+            @B -> "b",
+            @C -> "c",
+        };
+    };
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    Console::log(Kind::describe(Kind(@C)));
+    Console::log(Kind::describe(Kind(@A)));
+    return 0;
+};

@@ -1,0 +1,23 @@
+// types/types_type_values
+// Types are first-class comptime values and can be aliased and used in annotations.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let T = i32;
+let Pair = struct { a: T, b: T };
+
+let main = fn (args: [][]u8) -> i32 {
+    let x: T = 41;
+    pi(x + 1);
+    let p = Pair(1, 2);
+    pi(p.a + p.b);
+    let U = typeOf(x);
+    let y: U = 9;
+    pi(y);
+    return 0;
+};

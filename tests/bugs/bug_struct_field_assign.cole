@@ -1,0 +1,23 @@
+// bugs/bug_struct_field_assign
+// Assigning to a field of a by-value struct variable is lost (member access copies the struct into a temporary).
+// KNOWN BUG: member assignment writes into a temporary copy ({ Point tmp = m; tmp.x; }); pointer access works. See TODO: temporary expression caching.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let Point = struct {
+    x: mut i32,
+    y: mut i32,
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let m: mut Point = (1, 2);
+    m.x = 100;
+    pi(m.x);
+    pi(m.y);
+    return 0;
+};

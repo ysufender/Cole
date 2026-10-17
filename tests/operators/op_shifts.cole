@@ -1,0 +1,21 @@
+// operators/op_shifts
+// Left and right shifts with runtime and constant operands.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let a: i32 = #(@noComptime) 12;
+    let s: u32 = #(@noComptime) 3;
+    pi(a << s);
+    pi(a >> 2);
+    pi(1 << 4);
+    pi(256 >> 4);
+    let one: i32 = #(@noComptime) 1;
+    pi(one << 10);
+    return 0;
+};

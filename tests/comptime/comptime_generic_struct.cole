@@ -1,0 +1,24 @@
+// comptime/comptime_generic_struct
+// A type returning function creates distinct struct types per argument.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+let pf = fn (f: float) -> void {
+    Console::log(String::floatToStr(f, C::Allocator));
+};
+
+let Pair = fn (T: type) -> type {
+    return struct { a: T, b: T };
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let p = Pair(i32)(1, 2);
+    let q = Pair(float)(1.5, 2.5);
+    pi(p.a + p.b);
+    pf(q.a + q.b);
+    return 0;
+};

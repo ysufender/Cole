@@ -1,0 +1,23 @@
+// interop/interop_c_types
+// C scalar types map to their C counterparts.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let toupper = #(@extern) fn (c: c_int) -> c_int { };
+
+let main = fn (args: [][]u8) -> i32 {
+    let c: c_int = toupper(97);
+    pi(cast(c));
+    let ch: c_char = 65;
+    pi(cast(ch));
+    let l: c_long = 2000000000;
+    pi(l);
+    let ui: c_uint = 4000000000;
+    pi(cast(ui));
+    return 0;
+};
