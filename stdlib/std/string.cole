@@ -1,5 +1,7 @@
 import std::memory::allocator as Allocator;
 
+import std::io::console as Console;
+
 pub let intToStr = fn (num: c_long, allocator: Allocator::Allocator) -> []u8 {
     let isSigned = num < 0;
     let tmp: mut any = num * (if (isSigned) -1 else 1);
@@ -60,58 +62,77 @@ pub let strToFloat = fn (str: mut []u8) -> float {
 };
 
 pub let floatToStr = fn (num: float, allocator: Allocator::Allocator) -> []u8 {
-    let whole: mut c_long = cast(num);
-    let frac: mut float = num - cast(whole);
-    if frac < 0.0 { frac = -frac; }
-
     let precision: u32 = 9;
-    let multiplier: mut float = 1.0;
-    for 0..precision, |i| {
-        multiplier = multiplier * 10.0;
-    }
+    let negative: bool = num < 0;
+    let value: mut c_double = cast(num);
+    if negative { value = -value; }
 
-    let fracInt: mut c_long = cast(frac * multiplier + 0.5);
-    if fracInt >= cast(multiplier) {
-        fracInt = fracInt - cast(multiplier);
-        whole = whole + (if (num >= 0.0) 1 else -1);
-    }
+    let special: mut []u8 = "";
+    if value != value { special = "nan"; }
+    else if value >= 9223372036854775808.0 { special = if (negative) "-inf" else "inf"; }
 
-    let wholeStr: []u8 = intToStr(whole, allocator);
-    let fracStr: []u8 = intToStr(fracInt, allocator);
-
-    let padding: u32 = precision - fracStr.len;
-    let fracSigLen: mut u32 = fracStr.len;
-    while fracSigLen > 1 {
-        if fracStr[fracSigLen - 1] != '0' {
-            break;
+    if special.len > 0 {
+        let text: []mut u8 = cast(Allocator::alloc(allocator, special.len + 1, 1));
+        for 0..special.len, |i| {
+            text[i] = special[i];
         }
-        fracSigLen = fracSigLen - 1;
-    }
-    let fracLen: u32 = padding + fracSigLen;
-
-    let totalLen: u32 = wholeStr.len + 1 + fracLen;
-    let result: []mut u8 = cast(Allocator::alloc(allocator, totalLen, sizeOf(u8)));
-
-    let pos: mut u32 = 0;
-    for 0..wholeStr.len, |wi| {
-        result[pos] = wholeStr[wi];
-        pos = pos + 1;
+        text[special.len] = 0;
+        return cast(text[0..special.len]);
     }
 
+    let whole: mut c_ulong = cast(value);
+    let frac: mut c_double = value - cast(whole);
+
+    let fracDigits: mut u32 = 0;
+    for 0..precision, |i| {
+        frac = frac * 10;
+        let digit: u32 = cast(frac);
+        fracDigits = fracDigits * 10 + digit;
+        frac = frac - cast(digit);
+    }
+
+    if frac > 0.5 or (frac == 0.5 and fracDigits % 2 == 1) {
+        fracDigits = fracDigits + 1;
+        if fracDigits == 1000000000 {
+            fracDigits = 0;
+            whole = whole + 1;
+        }
+    }
+
+    let wholeDigits: mut u32 = 1;
+    let rest: mut c_ulong = whole / 10;
+    while rest > 0 {
+        wholeDigits = wholeDigits + 1;
+        rest = rest / 10;
+    }
+
+    let length: u32 = (if (negative) 1 else 0) + wholeDigits + 1 + precision;
+    let result: []mut u8 = cast(Allocator::alloc(allocator, length + 1, 1));
+
+    let pos: mut u32 = length;
+    result[pos] = 0;
+
+    for 0..precision, |i| {
+        pos = pos - 1;
+        result[pos] = '0' + cast(fracDigits % 10);
+        fracDigits = fracDigits / 10;
+    }
+
+    pos = pos - 1;
     result[pos] = '.';
-    pos = pos + 1;
 
-    for 0..padding, |pi| {
-        result[pos] = '0';
-        pos = pos + 1;
+    pos = pos - 1;
+    result[pos] = '0' + cast(whole % 10);
+    whole = whole / 10;
+    while whole > 0 {
+        pos = pos - 1;
+        result[pos] = '0' + cast(whole % 10);
+        whole = whole / 10;
     }
 
-    for 0..fracSigLen, |fi| {
-        result[pos] = fracStr[fi];
-        pos = pos + 1;
-    }
+    if negative { result[0] = '-'; }
 
-    return cast(result);
+    return cast(result[0..length]);
 };
 
 pub let equals = fn (str1: []u8, str2: []u8) -> bool {

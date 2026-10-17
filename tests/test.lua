@@ -26,6 +26,16 @@ elseif arg[1] == "run" then
         if res.fail ~= 0 then
             os.exit(1)
         else
+            print(string.format("Total %d suites, %d tests passed.", (function()
+                local suitec, tests = 0, 0
+                for _, suit in pairs(test.suites) do
+                    suitec = suitec + 1
+                    for _, _ in pairs(suit.tests) do
+                        tests = tests + 1
+                    end
+                end
+                return suitec, tests
+            end)()))
             os.exit(0)
         end
     end

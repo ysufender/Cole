@@ -25,7 +25,7 @@ return {
         "op_int_arith_const",
         "op_int_arith_runtime",
         "op_division_remainder_signs",
-        "op_float_arith", -- fail, float print bug
+        "op_float_arith",
         "op_compare_int",
         "op_compare_float",
         "op_logic_runtime",
@@ -36,7 +36,7 @@ return {
         "op_precedence_arith",
         "op_precedence_implemented",
         "op_unsigned_wrap",
-        "op_cast_numeric", -- fail, float print bug
+        "op_cast_numeric",
     },
 
     ["types"] = {
@@ -49,7 +49,7 @@ return {
         "types_integer_limits",
         "types_sizes",
         "types_bool_basic",
-        "types_float_basic", -- fail, float print bug
+        "types_float_basic",
         "types_any_inference",
         "types_type_values",
         "types_struct_nested",
@@ -131,16 +131,16 @@ return {
     },
 
     ["comptime"] = {
-        "generic_fn_basic", -- fail
-        "generic_fn_void", -- fail
-        "generic_fn_multi", -- fail
+        -- "generic_fn_basic", -- fail
+        -- "generic_fn_void", -- fail
+        -- "generic_fn_multi", -- fail
         "generic_fn_bound",
-        "generic_fn_body_uses_T", -- fail
-        "generic_fn_two_params", -- fail
-        "generic_fn_nested_call", -- fail
-        "generic_type_defs", -- fail
+        -- "generic_fn_body_uses_T", -- fail
+        -- "generic_fn_two_params", -- fail
+        -- "generic_fn_nested_call", -- fail
+        -- "generic_type_defs", -- fail
         "generic_type_alias",
-        "generic_type_two_params", -- fail
+        -- "generic_type_two_params", -- fail
         "generic_type_same_instance",
         "comptime_fn_mark",
         "comptime_const_fold",
@@ -154,8 +154,8 @@ return {
         "comptime_typeinfo_misc",
         "comptime_type_equality",
         "comptime_value_generic",
-        "comptime_generic_struct", -- fail, float print bug
-        "comptime_generic_union", -- fail, float print bug
+        "comptime_generic_struct",
+        "comptime_generic_union",
         "comptime_identity_type",
         "comptime_buildinfo",
         "comptime_src_info",
@@ -173,12 +173,12 @@ return {
     },
 
     ["stdlib"] = {
-        "string", -- fail
-        "math", -- fail
+        "string",
+        "math",
         "io",
         "stdlib_ascii",
         "stdlib_string_equals",
-        "stdlib_string_parse", -- fail
+        "stdlib_string_parse",
         "stdlib_string_int_to_str",
         "stdlib_io_streams",
         "stdlib_allocator",
@@ -188,7 +188,7 @@ return {
         "stdlib_console_levels",
         "stdlib_filewatch",
         "stdlib_process_exit",
-        "stdlib_math_extra", -- fail
+        "stdlib_math_extra",
     },
 
     ["regression"] = {
@@ -198,7 +198,7 @@ return {
         "struct_single_field",
         "reg_recursive_union_slice",
         "reg_member_fn_defined_once",
-        -- "reg_generic_param_not_stale",
+        "reg_generic_param_not_stale",
         "reg_global_int_constants",
     },
 
