@@ -68,7 +68,7 @@ pub fn topLevelDeclaration(self: *Lowerer, ptr: defines.DeclPtr, decl: *const De
                 decl.topLevel,
                 typeID,
                 decl.name,
-                true,
+                false,
                 node,
                 decl.node,
             );
@@ -1133,7 +1133,7 @@ fn scoping(self: *Lowerer, _extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
             .expr = lhs,
             .file = ast.tokens,
         })) |decl| {
-            namespace = self.typechecker.context.moduleNameMap.items[self.typechecker.symbols.getDecl(decl).node];
+            namespace = self.typechecker.builder.getInternedString(self.typechecker.symbols.getDecl(decl).name);
             break;
         }
 
@@ -1142,12 +1142,12 @@ fn scoping(self: *Lowerer, _extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
 
     const member = self.typechecker.context.getFile(ast.tokens)[leftMost..rightMost];
 
-    const qualified = std.fmt.allocPrint(self.typechecker.builder.allocator, "{s}$${s}", .{
+    const qualified = std.fmt.allocPrint(self.typechecker.builder.allocator, "{s}__{s}", .{
         namespace,
         member,
     }) catch return Error.AllocatorFailure;
 
-    _ = std.mem.replace(u8, qualified, "::", "$$", qualified);
+    _ = std.mem.replace(u8, qualified, "::", "__", qualified);
 
     const id = try self.typechecker.builder.internString(qualified);
 

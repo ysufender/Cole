@@ -19,9 +19,9 @@ return {
 
     ["types"] = {
         "struct_def",
-        -- "struct_def_defs",
+        "struct_def_defs",
         "return_tuple",
-        -- "union_def_defs",
+        "union_def_defs",
     },
 
     ["regression"] = {
