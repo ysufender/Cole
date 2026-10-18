@@ -5,6 +5,7 @@ import std::io::console as Console;
 
 import std::io::file as File;
 import std::io::stream as Stream;
+import std::c as C;
 
 let main = fn (args: [][]u8) -> i32 {
     let w = File::Output::open("build/c/_file_output_test.txt", C::Allocator, false, false);

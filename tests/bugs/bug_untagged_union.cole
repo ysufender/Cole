@@ -18,7 +18,7 @@ let Bits = union {
 };
 
 let main = fn (args: [][]u8) -> i32 {
-    let b = Bits(@i, 1065353216);
+    let b = #(@noComptime) Bits(@i, 1065353216);
     pi(b.i);
     pf(b.f);
     return 0;

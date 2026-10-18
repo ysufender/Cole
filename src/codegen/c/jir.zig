@@ -265,8 +265,15 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
                     continue;
                 }
                 res.key_ptr.* = name;
-                try self.write(out, "struct {s};\n", .{name});
-                try self.write(out, "typedef struct {s} {s};\n\n", .{name, name});
+                try self.write(out, "{s} {s};\n", .{
+                    if (uni.isTagged) "struct" else "union",
+                    name
+                });
+                try self.write(out, "typedef {s} {s} {s};\n\n", .{
+                    if (uni.isTagged) "struct" else "union",
+                    name,
+                    name,
+                });
             },
             else => {},
         }
@@ -306,10 +313,18 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
                 }
                 res.key_ptr.* = name;
 
-                try self.write(out, "typedef struct {s} {{ {s} data[{d}]; }} {s};\n\n", .{
-                    name,
-                    try self.getCName(arr.child, null, false, false),
+                const data = std.fmt.allocPrint(self.allocator, "data[{d}]", .{
                     arr.len,
+                }) catch return Error.AllocatorFailure;
+
+                self.strings = self.allocator.realloc(self.strings, self.strings.len + 1)
+                    catch return Error.AllocatorFailure;
+                self.strings[self.strings.len - 1] = data;
+
+                try self.write(out, "typedef struct {s} {{ {s} {s}; }} {s};\n\n", .{
+                    name,
+                    try self.getCName(arr.child, @intCast(self.strings.len - 1), false, false),
+                    if (self.types.get(arr.child) == .Function) "" else data,
                     name
                 });
             },
@@ -586,10 +601,11 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
 
             var args: []const u8 = "";
             for (0.., typeInfo.argTypes) |i, typePtr| {
+                const paramType = self.types.get(typePtr);
                 args = std.fmt.allocPrint(self.allocator, "{s}{s} {s}{s}{s}", .{
                     args,
-                    try self.getCName(typePtr, null, false, false),
-                    self.strings[func.args[i]],
+                    try self.getCName(typePtr, func.args[i], false, false),
+                    if (paramType == .Function) "" else self.strings[func.args[i]],
                     if (i == typeInfo.argTypes.len - 1) "" else ",",
                     if (i == typeInfo.argTypes.len - 1) "" else " ",
                 }) catch return Error.AllocatorFailure;

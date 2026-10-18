@@ -712,39 +712,9 @@ fn logicalAnd(self: *Parser) ExpressionResult {
 }
 
 fn equality(self: *Parser) ExpressionResult {
-    var expr = try self.bitwiseOr();
-
-    while (self.match(&.{.EqualEqual, .BangEqual})) {
-        expr = try self.commonBinary(expr, Parser.bitwiseOr);
-    }
-
-    return expr;
-}
-
-fn bitwiseOr(self: *Parser) ExpressionResult {
-    var expr = try self.bitwiseXor();
-
-    while (self.match(&.{.Pipe})) {
-        expr = try self.commonBinary(expr, Parser.bitwiseXor);
-    }
-
-    return expr;
-}
-
-fn bitwiseXor(self: *Parser) ExpressionResult {
-    var expr = try self.bitwiseAnd();
-
-    while (self.match(&.{.Xor})) {
-        expr = try self.commonBinary(expr, Parser.bitwiseAnd);
-    }
-
-    return expr;
-}
-
-fn bitwiseAnd(self: *Parser) ExpressionResult {
     var expr = try self.comparison();
 
-    while (self.match(&.{.Ampersand})) {
+    while (self.match(&.{.EqualEqual, .BangEqual})) {
         expr = try self.commonBinary(expr, Parser.comparison);
     }
 
@@ -752,19 +722,9 @@ fn bitwiseAnd(self: *Parser) ExpressionResult {
 }
 
 fn comparison(self: *Parser) ExpressionResult {
-    var expr = try self.shift();
-
-    while (self.match(&.{.Lesser, .LesserEqual, .Greater, .GreaterEqual})) {
-        expr = try self.commonBinary(expr, Parser.shift);
-    }
-
-    return expr;
-}
-
-fn shift(self: *Parser) ExpressionResult {
     var expr = try self.term();
 
-    while (self.match(&.{.RightShift, .LeftShift})) {
+    while (self.match(&.{.Lesser, .LesserEqual, .Greater, .GreaterEqual})) {
         expr = try self.commonBinary(expr, Parser.term);
     }
 
@@ -772,19 +732,49 @@ fn shift(self: *Parser) ExpressionResult {
 }
 
 fn term(self: *Parser) ExpressionResult {
-    var expr = try self.factor();
+    var expr = try self.bitwiseXor();
 
     while (self.match(&.{.Plus, .Minus})) {
-        expr = try self.commonBinary(expr, Parser.factor);
+        expr = try self.commonBinary(expr, Parser.bitwiseXor);
     }
 
     return expr;
 }
 
-fn factor(self: *Parser) ExpressionResult {
+fn bitwiseXor(self: *Parser) ExpressionResult {
+    var expr = try self.bitwiseOr();
+
+    while (self.match(&.{.Xor})) {
+        expr = try self.commonBinary(expr, Parser.bitwiseOr);
+    }
+
+    return expr;
+}
+
+fn bitwiseOr(self: *Parser) ExpressionResult {
+    var expr = try self.bitwiseAnd();
+
+    while (self.match(&.{.Pipe})) {
+        expr = try self.commonBinary(expr, Parser.bitwiseAnd);
+    }
+
+    return expr;
+}
+
+fn bitwiseAnd(self: *Parser) ExpressionResult {
+    var expr = try self.shift();
+
+    while (self.match(&.{.Ampersand})) {
+        expr = try self.commonBinary(expr, Parser.shift);
+    }
+
+    return expr;
+}
+
+fn shift(self: *Parser) ExpressionResult {
     var expr = try self.modulo();
 
-    while (self.match(&.{.Slash, .Star})) {
+    while (self.match(&.{.RightShift, .LeftShift})) {
         expr = try self.commonBinary(expr, Parser.modulo);
     }
 
@@ -792,9 +782,19 @@ fn factor(self: *Parser) ExpressionResult {
 }
 
 fn modulo(self: *Parser) ExpressionResult {
-    var expr = try self.unary();
+    var expr = try self.factor();
 
     while (self.match(&.{.Modulo})) {
+        expr = try self.commonBinary(expr, Parser.factor);
+    }
+
+    return expr;
+}
+
+fn factor(self: *Parser) ExpressionResult {
+    var expr = try self.unary();
+
+    while (self.match(&.{.Slash, .Star})) {
         expr = try self.commonBinary(expr, Parser.unary);
     }
 

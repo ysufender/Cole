@@ -12,7 +12,7 @@ let pi = fn (n: c_long) -> void {
 let main = fn (args: [][]u8) -> i32 {
     let s: mut i32 = 0;
     for 0..6, |i| {
-        if i % 2 == 0 { continue; }
+        if (i % 2) == 0 { continue; }
         s = s + cast(i);
     }
     pi(s);

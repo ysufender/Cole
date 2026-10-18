@@ -56,10 +56,10 @@ pub let close = fn (handle: *mut void) -> Stream::Result {
 
 pub let open = fn (path: []u8, allocator: Allocator::Allocator, append: bool, readWrite: bool) -> OpenResult {
     let res =
-        if (readWrite and append) fopen(path.ptr, "a+")
-        else if (readWrite) fopen(path.ptr, "w+")
-        else if (append) fopen(path.ptr, "a")
-        else fopen(path.ptr, "w");
+        if (readWrite and append) fopen(cast(path.ptr), "a+")
+        else if (readWrite) fopen(cast(path.ptr), "w+")
+        else if (append) fopen(cast(path.ptr), "a")
+        else fopen(cast(path.ptr), "w");
 
     return
         if (res == undefined) (@Err, ())

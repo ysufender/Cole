@@ -3491,7 +3491,7 @@ pub fn sizeOf(self: *const Typechecker, of: TypeID) u32 {
         .Enum => @bitSizeOf(u32),
         .Float, .ComptimeFloat => @bitSizeOf(f32),
         .Integer => |int| int.size,
-        .Bool => @bitSizeOf(bool),
+        .Bool => @bitSizeOf(c_char),
         .Void, .Noreturn, .EnumLiteral, .Type, .Any => 0,
         .Array => |arr| arr.len * self.sizeOf(arr.child),
         .ComptimeInt => @bitSizeOf(i64),

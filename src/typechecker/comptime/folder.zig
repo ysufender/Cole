@@ -515,13 +515,13 @@ pub fn evalBinary(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Ty
             });
         },
         .EqualEqual, .BangEqual => |equality| {
-            const multiplier = equality == .EqualEqual;
-
             const lhs = self.getValue(try self.expectDefined(ast.extra[extraPtr], lhsType));
             const rhs = self.getValue(try self.expectDefined(ast.extra[extraPtr + 2], lhsType));
 
             return self.appendValue(.{
-                .Bool = multiplier and self.comptimeEq(lhs, rhs)
+                .Bool =
+                    if (equality == .EqualEqual) self.comptimeEq(lhs, rhs)
+                    else !self.comptimeEq(lhs, rhs)
             });
         },
         .LeftShift, .RightShift,
@@ -608,8 +608,8 @@ pub fn evalBinary(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Ty
                     else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
                 },
                 .Modulo => switch (lhs) {
-                    .Int => .{ .Int = @mod(lhs.Int, rhs.Int) },
-                    .Float => .{ .Float = @mod(lhs.Float, rhs.Float) },
+                    .Int => .{ .Int = @rem(lhs.Int, rhs.Int) },
+                    .Float => .{ .Float = @rem(lhs.Float, rhs.Float) },
                     else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
                 },
                 .Star => switch (lhs) {

@@ -278,7 +278,7 @@ pub inline fn not(self: *Builder, rhs: JIR.Ptr) Error!JIR.Ptr { return self.comm
 pub inline fn negate(self: *Builder, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonSingle(.Negation, rhs); }
 
 pub fn dot(self: *Builder, object: JIR.Ptr, field: StringPtr, objType: TypeID) Error!JIR.Ptr {
-    if (self.typechecker.getFlag(.LValue)) {
+    if (self.typechecker.getFlag(.LValue) or self.nodes.get(object).type == .Identifier) {
         return self.commonBinary(.Dot, object, field);
     }
 

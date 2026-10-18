@@ -653,9 +653,28 @@ fn rangeForLoop(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.
     );
     const rangeEndIdent = try self.typechecker.builder.identifier(rangeEndName);
 
-    const forStart = try self.typechecker.folder.generateRandomName(.ForStart);
-    const forEnd = try self.typechecker.folder.generateRandomName(.ForEnd);
+    const loopBase = try self.typechecker.folder.generateRandomNameString(.For);
+    const lloop = self.lastLoop;
+    self.lastLoop = loopBase;
+    defer self.lastLoop = lloop;
+
+    const forStartStr = std.fmt.allocPrint(self.typechecker.builder.allocator, "{s}_Start", .{
+        loopBase,
+    }) catch return Error.AllocatorFailure;
+
+    const forCheckStr = std.fmt.allocPrint(self.typechecker.builder.allocator, "{s}_Check", .{
+        loopBase,
+    }) catch return Error.AllocatorFailure;
+
+    const forEndStr = std.fmt.allocPrint(self.typechecker.builder.allocator, "{s}_End", .{
+        loopBase,
+    }) catch return Error.AllocatorFailure;
+
+    const forStart = try self.typechecker.builder.internString(forStartStr);
+    const forCheck = try self.typechecker.builder.internString(forCheckStr);
+    const forEnd = try self.typechecker.builder.internString(forEndStr);
     const forStartLabel = try self.typechecker.builder.label(forStart);
+    const forCheckLabel = try self.typechecker.builder.label(forCheck);
     const forEndLabel = try self.typechecker.builder.label(forEnd);
 
     const cnd = try self.typechecker.builder.greaterEqual(captureIdent, rangeEndIdent);
@@ -693,6 +712,7 @@ fn rangeForLoop(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.
                 forStartLabel,
                 cjump,
                 body,
+                forCheckLabel,
                 increment,
                 sjump,
                 forEndLabel,
@@ -708,6 +728,7 @@ fn rangeForLoop(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.
                 forStartLabel,
                 cjump,
                 body,
+                forCheckLabel,
                 increment,
                 sjump,
                 forEndLabel,
@@ -772,9 +793,28 @@ fn forLoop(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.AST) 
     );
     const idxIdent = try self.typechecker.builder.identifier(idxName);
 
-    const forStart = try self.typechecker.folder.generateRandomName(.ForStart);
-    const forEnd = try self.typechecker.folder.generateRandomName(.ForEnd);
+    const loopBase = try self.typechecker.folder.generateRandomNameString(.For);
+    const lloop = self.lastLoop;
+    self.lastLoop = loopBase;
+    defer self.lastLoop = lloop;
+
+    const forStartStr = std.fmt.allocPrint(self.typechecker.builder.allocator, "{s}_Start", .{
+        loopBase,
+    }) catch return Error.AllocatorFailure;
+
+    const forCheckStr = std.fmt.allocPrint(self.typechecker.builder.allocator, "{s}_Check", .{
+        loopBase,
+    }) catch return Error.AllocatorFailure;
+
+    const forEndStr = std.fmt.allocPrint(self.typechecker.builder.allocator, "{s}_End", .{
+        loopBase,
+    }) catch return Error.AllocatorFailure;
+
+    const forStart = try self.typechecker.builder.internString(forStartStr);
+    const forCheck = try self.typechecker.builder.internString(forCheckStr);
+    const forEnd = try self.typechecker.builder.internString(forEndStr);
     const forStartLabel = try self.typechecker.builder.label(forStart);
+    const forCheckLabel = try self.typechecker.builder.label(forCheck);
     const forEndLabel = try self.typechecker.builder.label(forEnd);
 
     const captureDeclPtr = self.typechecker.symbols.findDecl(.{
@@ -819,6 +859,7 @@ fn forLoop(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.AST) 
             cjump,
             capture,
             body,
+            forCheckLabel,
             increment,
             sjump,
             forEndLabel,
@@ -1732,10 +1773,11 @@ fn indexing(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     const exprPtr = ast.extra[extraPtr];
     const typeID = try self.typechecker.typecheckExpression(exprPtr, null);
 
-    const indexableBase = try self.expression(exprPtr, typeID);
-    const indexableBaseName = try self.typechecker.folder.generateRandomName(.IndexableBase);
-    const indexableBaseDef = try self.typechecker.builder.variableDef(false, typeID, indexableBaseName, false, indexableBase, null);
-    const indexableBaseIdent = try self.typechecker.builder.identifier(indexableBaseName);
+    const indexableBaseIdent = try self.expression(exprPtr, typeID);
+    // const indexableBase = try self.expression(exprPtr, typeID);
+    // const indexableBaseName = try self.typechecker.folder.generateRandomName(.IndexableBase);
+    // const indexableBaseDef = try self.typechecker.builder.variableDef(false, typeID, indexableBaseName, false, indexableBase, null);
+    // const indexableBaseIdent = try self.typechecker.builder.identifier(indexableBaseName);
 
     const indexable = blk: switch (self.typechecker.typeTable.get(typeID)) {
         .Array => break :blk try self.typechecker.builder.dot(indexableBaseIdent, try self.typechecker.builder.internString("data"), typeID),
@@ -1792,29 +1834,31 @@ fn indexing(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
 
         const boundsEndLabel = try self.typechecker.builder.label(boundsEnd);
 
-        const deref = try self.typechecker.builder.dereference(
-            try self.typechecker.builder.add(indexableIdent, indexIdent),
+        return self.typechecker.builder.dereference(
+            try self.typechecker.builder.stmtExpr(
+                try self.typechecker.builder.add(indexableIdent, indexIdent),
+                &.{
+                    // indexableBaseDef,
+                    indexableDef,
+                    indexDef,
+                    boundsJump,
+                    segfault,
+                    boundsEndLabel
+                }
+            ),
             indexedTypeChildPtr,
         );
-
-        return self.typechecker.builder.stmtExpr(deref, &.{
-            indexableBaseDef,
-            indexableDef,
-            indexDef,
-            boundsJump,
-            segfault,
-            boundsEndLabel
-        });
     }
     else {
-        const deref = try self.typechecker.builder.dereference(
-            try self.typechecker.builder.add(indexable, index),
-            indexedTypeChildPtr
+        return self.typechecker.builder.dereference(
+            try self.typechecker.builder.stmtExpr(
+                try self.typechecker.builder.add(indexable, index),
+                &.{
+                    // indexableBaseDef,
+                },
+            ),
+            indexedTypeChildPtr,
         );
-
-        return self.typechecker.builder.stmtExpr(deref, &.{
-            indexableBaseDef,
-        });
     }
 }
 
@@ -1989,7 +2033,7 @@ fn report(self: *Lowerer, comptime fmt: []const u8, args: anytype) void {
 pub fn handler(self: *Lowerer, comptime name: []const u8) Error!JIR.Ptr {
     return self.typechecker.builder.inlineC(
         try self.typechecker.builder.internString(
-            std.fmt.comptimePrint("{s}$$: {s}((long)&&{s}__);", .{name, name, name})
+            std.fmt.comptimePrint("{s}$$: {s}((long)&&{s}$$);", .{name, name, name})
         )
     );
 }

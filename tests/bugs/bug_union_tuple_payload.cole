@@ -22,7 +22,7 @@ let area = fn (s: Shape) -> i32 {
 };
 
 let main = fn (args: [][]u8) -> i32 {
-    pi(area(Shape(@Circle, 2)));
-    pi(area(Shape(@Rect, (3, 4))));
+    pi(area((@Circle, 2)));
+    pi(area((@Rect, (3, 4))));
     return 0;
 };
