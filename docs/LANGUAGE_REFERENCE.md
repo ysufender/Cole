@@ -39,7 +39,7 @@ The basic compiler structure is described in [CONTRIBUTING.md](../CONTRIBUTING.m
 keep in mind that as for now, Cole is transpiled into half-readable C and then compiled using
 a bundled TCC.
 
-Many thanks to Fabrice Bellar for his work on the [TCC](https://bellard.org/tcc/).
+Many thanks to Fabrice Bellard for his work on the [TCC](https://bellard.org/tcc/).
 
 ## Getting started
 
