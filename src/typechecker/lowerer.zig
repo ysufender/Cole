@@ -1893,8 +1893,7 @@ fn dot(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
                 switch (self.typechecker.typeTable.get(ptr.child)) {
                 .Struct, .Union, .Array =>
                     if (ref) { return self.typechecker.builder.reference(obj); }
-                    else if (deref) { return self.typechecker.builder.dereference(obj, exprType); }
-                    else if (self.typechecker.getFlag(.LValue)) { obj = try self.typechecker.builder.dereference(obj, exprType); },
+                    else if (deref) { return self.typechecker.builder.dereference(obj, exprType); },
                 else => { },
             }
         },

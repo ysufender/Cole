@@ -1251,7 +1251,10 @@ pub fn typecheckExpressionListRange(self: *Typechecker, range: defines.Range, ex
 
     if (range.len() == 1) switch (self.typeTable.get(expected)) {
         .Struct, .Union, .Array => {
-            const innerType = try self.typecheckExpression(ast.extra[range.at(0)], expected);
+            const innerType = self.typecheckExpression(ast.extra[range.at(0)], expected) catch |err| switch (err) {
+                Error.TypeMismatch => try self.typecheckExpression(ast.extra[range.at(0)], null),
+                else => return err,
+            };
             if (self.suitable(expected, innerType)) return expected;
         },
         else => {},
@@ -1275,8 +1278,14 @@ pub fn typecheckExpressionListRange(self: *Typechecker, range: defines.Range, ex
         },
         .Void => try self.typecheckGeneralInitialization(ast, expected, range),
         .Type => {
-            for (range.start..range.end) |ptr| {
-                _ = try self.expectType(ast.extra[ptr]);
+            if (range.len() == 1) {
+                try self.typecheckGeneralInitialization(ast, expected, range);
+                return expected;
+            }
+            else {
+                for (range.start..range.end) |ptr| {
+                    _ = try self.expectType(ast.extra[ptr]);
+                }
             }
         },
         .Noreturn,

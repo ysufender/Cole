@@ -1544,6 +1544,8 @@ pub fn evalSizeOf(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Val
 }
 
 pub fn evalNewTuple(self: *Folder, range: defines.Range) Error!Comptime.Value.Ptr {
+    // @TODO structural tuples instead of nominal ones
+
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
 
     const args = range;
@@ -2092,7 +2094,14 @@ pub fn constructFromList(self: *Folder, typeID: TypeID, _range: defines.Range) E
 
         .Pointer => self.eval(ast.extra[range.at(0)], typeID),
 
-        .Type => self.evalNewTuple(range),
+        .Type => {
+            if (range.len() == 1) {
+                return self.expectDefined(ast.extra[range.at(0)], typeID);
+            }
+            else {
+                return self.evalNewTuple(range);
+            }
+        },
 
         .Noreturn, .CChar, .CUChar, .CDouble, .CInt, .CLong,
         .CShort, .CSize, .CUInt, .CULong, .CUShort,

@@ -2,12 +2,12 @@ import std::c as C;
 import std::string as String;
 import std::io::console as Console;
 
-let foo = fn () -> Tuple(i32, i32) {
+let foo = fn () -> (i32, i32) {
 	return (2, 3);
 };
 
-let foo2 = fn () -> Tuple(i32, i32) {
-	return Tuple(i32, i32)(2, 3);
+let foo2 = fn () -> (i32, i32) {
+	return (i32, i32)(2, 3);
 };
 
 let main = fn (args: [][]u8) -> i32 {

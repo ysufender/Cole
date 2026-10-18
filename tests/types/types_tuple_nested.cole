@@ -9,7 +9,7 @@ let pi = fn (n: c_long) -> void {
 };
 
 let main = fn (args: [][]u8) -> i32 {
-    let t: Tuple(i32, Tuple(i32, i32)) = (1, (2, 3));
+    let t: (i32, (i32, i32)) = (1, (2, 3));
     pi(t._0);
     pi(t._1._0);
     pi(t._1._1);
