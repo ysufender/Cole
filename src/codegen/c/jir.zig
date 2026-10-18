@@ -842,14 +842,12 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
                             }
                         }
                     } else {
-                        var dataIdx: usize = 0;
-                        for (uni.fields) |field| {
-                            if (self.types.get(field.valueType).isZeroBit()) continue;
-                            if (dataIdx >= len) break;
-                            try self.write(out, ".{s} = ", .{self.strings[field.name]});
-                            try self.operation(out, self.data[@intCast(node.value + 2 + dataIdx)]);
-                            dataIdx += 1;
-                        }
+                        const tagValue = self.constants.get(self.data[node.value]).Integer.u32;
+
+                        if (typeInfo.isZeroBit()) return;
+
+                        try self.write(out, ".{s} = ", .{self.strings[uni.fields[tagValue].name]});
+                        try self.literal(out, @intCast(self.data[node.value + 1]));
                     }
                 },
                 .Struct => |str| {
@@ -987,15 +985,13 @@ fn literal(self: *JIR, out: *Writer, ptr: Constant.Ptr) Error!void {
                             }
                         }
                     } else {
-                        var dataIdx: usize = 0;
-                        for (uni.fields) |field| {
-                            if (self.types.get(field.valueType).isZeroBit()) continue;
-                            if (dataIdx >= dataLen) break;
-                            if (dataIdx != 0) try self.write(out, ", ", .{});
-                            try self.write(out, ".{s} = ", .{self.strings[field.name]});
-                            try self.literal(out, @intCast(agg.data.start + dataIdx));
-                            dataIdx += 1;
-                        }
+                        const typeInfo = self.types.get(agg.type);
+                        const tagValue = self.constants.get(agg.data.start).Integer.u32;
+
+                        if (typeInfo.isZeroBit()) return;
+
+                        try self.write(out, ".{s} = ", .{self.strings[uni.fields[tagValue].name]});
+                        try self.literal(out, @intCast(agg.data.start + 1));
                     }
                 },
                 .Struct => |str| {

@@ -501,17 +501,15 @@ pub fn evalBinary(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Ty
             const isOr = logic == .Or;
             const lhs = self.getValue(try self.expectDefined(ast.extra[extraPtr], lhsType));
 
-            if (lhs.Bool == if (isOr) true else false) {
+            if (lhs.Bool == isOr) {
                 return self.appendValue(.{
-                    .Bool = isOr,
+                    .Bool = lhs.Bool,
                 });
             }
 
-            const rhs = self.getValue(try self.expectDefined(ast.extra[extraPtr + 1], lhsType));
+            const rhs = self.getValue(try self.expectDefined(ast.extra[extraPtr + 2], lhsType));
             return self.appendValue(.{
-                .Bool =
-                    if (isOr) lhs.Bool or rhs.Bool
-                    else lhs.Bool and rhs.Bool,
+                .Bool = rhs.Bool,
             });
         },
         .EqualEqual, .BangEqual => |equality| {
@@ -2207,7 +2205,7 @@ fn evalScoping(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Value.
                 return self.appendValue(.{
                     .Enum = .{
                         .Type = res,
-                        .Value = found,
+                        .Value = enm.fields[found].value,
                     },
                 });
             }
