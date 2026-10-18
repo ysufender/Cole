@@ -11,7 +11,7 @@ let pi = fn (n: c_long) -> void {
 
 let Shape = union(enum) {
     Circle: i32,
-    Rect: Tuple(i32, i32),
+    Rect: (i32, i32),
 };
 
 let area = fn (s: Shape) -> i32 {

@@ -1270,7 +1270,7 @@ pub const builtins = [_][]const u8 {
     "undefined", "compileError",
     "bitSizeOf", "unreachable", "typeOf",
     "sizeOf", "cast", "unsafeCast",
-    "as", "compileLog", "typeName", "Tuple",
+    "as", "compileLog", "typeName",
     "alignOf", "compileBreak", "typeInfo",
     "src", "buildInfo", "inComptime",
 };

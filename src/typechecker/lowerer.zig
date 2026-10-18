@@ -1,5 +1,3 @@
-// @Beware expects all passed parameters to be already typechecked.
-
 const std = @import("std");
 const common = @import("../core/common.zig");
 const backend = @import("../codegen/backend.zig");
@@ -19,7 +17,7 @@ const Resolver = @import("../typechecker/resolver.zig");
 
 const assert = std.debug.assert;
 
-const Scope = u32; // defer count
+const Scope = u32;
 
 const Lowerer = @This();
 
@@ -39,8 +37,6 @@ pub fn init(typechecker: *Typechecker) Error!Lowerer {
 }
 
 pub fn topLevelDeclaration(self: *Lowerer, ptr: defines.DeclPtr, decl: *const Declaration) Error!void {
-    // @Beware Function definitions are registered by the Comptime to
-    // prevent ODR violations.
 
     const status = self.typechecker.lookup.get(ptr)
         orelse return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
@@ -62,13 +58,12 @@ pub fn topLevelDeclaration(self: *Lowerer, ptr: defines.DeclPtr, decl: *const De
            _ = try self.typechecker.builder.typeDef(typeDef);
         },
         else => {
-            // @Note Top-level comptimeness is checked in the typechecker.
             const node = try self.expression(decl.node, typeID);
             _ = try self.typechecker.builder.variableDef(
                 decl.topLevel,
                 typeID,
                 decl.name,
-                false, // @Note Top-level decls must always be initialized
+                false,
                 node,
                 decl.node,
             );
@@ -137,12 +132,12 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
             for (str.Fields.start..str.Fields.end, 0..) |fieldPtr, i| {
                 fieldConsts[i] = try self.addConstant(@intCast(fieldPtr), ofType.Struct.fields[i].valueType);
             }
- 
+
             const start = self.typechecker.builder.constants.len;
             for (fieldConsts) |c| {
                 _ = try self.typechecker.builder.addConstant(self.typechecker.builder.constants.get(c));
             }
- 
+
             break :@"struct" .{ .Aggregate = .{
                 .type = str.Type,
                 .data = .{
@@ -155,7 +150,7 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
             const cval = try self.typechecker.builder.addConstant(.{
                 .Integer = .{ .u32 = valu.Value },
             });
- 
+
             break :blk .{
                 .Aggregate = .{
                     .type = valu.Type,
@@ -169,11 +164,11 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
         .Union => |uni| uni: {
             const tagConst = try self.typechecker.builder.addConstant(.{ .Integer = .{ .u32 = uni.Tag } });
             const valueConst = try self.addConstant(uni.Value, ofType.Union.fields[uni.Tag + 1].valueType);
- 
+
             const start = self.typechecker.builder.constants.len;
             _ = try self.typechecker.builder.addConstant(self.typechecker.builder.constants.get(tagConst));
             _ = try self.typechecker.builder.addConstant(self.typechecker.builder.constants.get(valueConst));
- 
+
             break :uni .{ .Aggregate = .{
                 .type = uni.Type,
                 .data = .{
@@ -200,7 +195,7 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
             for (0..slice.Size) |index| {
                 elemConsts[index] = try self.addConstant(slice.at(@intCast(index)), child);
             }
- 
+
             const start = self.typechecker.builder.constants.len;
             for (elemConsts) |c| {
                 _ = try self.typechecker.builder.addConstant(self.typechecker.builder.constants.get(c));
@@ -211,12 +206,18 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
                     .type = slice.Type,
                     .data = .{
                         .start = @intCast(start),
-                        .end = @intCast(self.typechecker.builder.constants.len),
+                        .end = @intCast(start + slice.Size),
                     },
                 }},
-                .Pointer => .{ 
+                .Pointer => .{
                     .Aggregate = .{
-                        .type = slice.Type,
+                        .type = try self.typechecker.registerType(.{
+                            .Array = .{
+                                .mutable = ofType.Pointer.mutable,
+                                .child = ofType.Pointer.child,
+                                .len = slice.Size,
+                            },
+                        }),
                         .data = .{
                             .start = @intCast(start),
                             .end = @intCast(start + slice.Size),
@@ -252,8 +253,8 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
         }
         else .{ .Void = { } },
 
-        .Function => |func| fnc: { 
-            break :fnc .{ .Function = func.name }; 
+        .Function => |func| fnc: {
+            break :fnc .{ .Function = func.name };
         },
 
         .Type => |id| .{ .Type = id },
@@ -286,10 +287,6 @@ fn unwindDefers(self: *Lowerer, upTo: u32) Error!?defines.Range {
 
     return range;
 }
-
-//
-// Statement
-//
 
 pub fn statement(self: *Lowerer, statementPtr: defines.StatementPtr) Error!JIR.Ptr {
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
@@ -328,13 +325,22 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     const ast = typechecker.context.getAST(self.typechecker.currentFile);
 
     const enumOrUnionType = try typechecker.typecheckExpression(ast.extra[extraPtr], null);
-    const enumOrUnion = try self.expression(ast.extra[extraPtr], enumOrUnionType);
+    const enumOrUnionExpr = try self.expression(ast.extra[extraPtr], enumOrUnionType);
     const maybeComptimeEnumOrUnion =
         if (self.typechecker.context.settings.canFold())
             if (typechecker.folder.attemptEval(ast.extra[extraPtr], enumOrUnionType))
                 |ptr| typechecker.folder.getValue(ptr)
             else null
         else null;
+
+    var cachedDef: ?JIR.Ptr = null;
+    var enumOrUnion = enumOrUnionExpr;
+    if (maybeComptimeEnumOrUnion == null) {
+        const name = try typechecker.folder.generateRandomName(.SwitchValue);
+        cachedDef = try typechecker.builder.variableDef(false, enumOrUnionType, name, false, enumOrUnionExpr, null);
+        enumOrUnion = try typechecker.builder.identifier(name);
+    }
+
     const typeInfo = typechecker.typeTable.get(enumOrUnionType);
     const tag: struct { type: TypeID, fields: []const types.EnumField } = switch (typeInfo) {
         .Enum => |enm| .{ .type = enumOrUnionType, .fields = enm.fields },
@@ -349,10 +355,12 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
         .end = ast.extra[extraPtr + 2],
     };
 
-    var ptrs =
-        if (maybeComptimeEnumOrUnion) |_| @constCast(&.{}) 
-        else typechecker.arena.allocator().alloc(JIR.Ptr, @divFloor(caseRange.len(), 4) + 1)
+    var ops =
+        if (maybeComptimeEnumOrUnion) |_| @constCast(&.{})
+        else typechecker.arena.allocator().alloc(JIR.Ptr, @divFloor(caseRange.len(), 4) + 2)
             catch return Error.AllocatorFailure;
+    var ptrs = ops[@min(1, ops.len)..];
+    if (cachedDef) |def| ops[0] = def;
 
     var idx: u32 = 0;
     while (idx < caseRange.len()) : (idx += 4) {
@@ -410,7 +418,6 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
                     try typechecker.builder.dot(enumOrUnion, caseField.name, enumOrUnionType),
                     null,
                 );
-
 
                 if (maybeComptimeEnumOrUnion) |val| {
                     switch (val) {
@@ -479,12 +486,12 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
         ptrs[@divFloor(idx, 4)] = switchFull;
     }
 
-    const switchEndLabel = try typechecker.builder.label(switchEnd); 
+    const switchEndLabel = try typechecker.builder.label(switchEnd);
     ptrs[@divFloor(caseRange.len(), 4)] = switchEndLabel;
 
     return typechecker.builder.scope(
         try exec.generateRandomName(.Switch),
-        ptrs,
+        ops,
     );
 }
 
@@ -498,7 +505,7 @@ fn inlineC(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
 
     const res = try self.typechecker.builder.inlineC(code);
 
-    return res; 
+    return res;
 }
 
 fn assignment(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
@@ -519,7 +526,7 @@ fn assignment(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     const rhs = try self.expression(rexpr, vt);
 
     const res = try self.typechecker.builder.assignment(expr, rhs);
-    return res; 
+    return res;
 }
 
 fn variableDef(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
@@ -527,8 +534,6 @@ fn variableDef(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
 
     const declPtr = ast.extra[extraPtr + 2];
 
-    // @Beware typecheckDecl must be before getDecl because names are
-    // overwritten in typecheckDecl.
     const typeID = try self.typechecker.typecheckDecl(declPtr, null);
     const decl = self.typechecker.symbols.getDecl(declPtr);
 
@@ -560,7 +565,7 @@ fn variableDef(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
         node,
         decl.node,
     );
-    return def; 
+    return def;
 }
 
 fn @"defer"(self: *Lowerer, stmtPtr: defines.StatementPtr) Error!JIR.Ptr {
@@ -581,8 +586,6 @@ fn @"continue"(self: *Lowerer) Error!JIR.Ptr {
         },
     ) catch return Error.AllocatorFailure;
 
-    // _ = try self.unwindDefers(self.scopes.index - self.lastLoopDepth);
-
     const end = try self.typechecker.builder.jump(
         try self.typechecker.builder.internString(startLabel),
     );
@@ -597,8 +600,6 @@ fn @"break"(self: *Lowerer) Error!JIR.Ptr {
             self.lastLoop,
         },
     ) catch return Error.AllocatorFailure;
-
-    // const start = try self.unwindDefers(self.scopes.index - self.lastLoopDepth);
 
     const end = try self.typechecker.builder.jump(
         try self.typechecker.builder.internString(endLabel),
@@ -697,7 +698,7 @@ fn rangeForLoop(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.
     if (self.typechecker.context.settings.buildInfo.isDebug) {
         const safetyCnd = try self.typechecker.builder.lesserEqual(rangeStartIdent, rangeEndIdent);
         const safetyEnd = try self.typechecker.folder.generateRandomName(.ForSafetyEnd);
-        const safetyCheck = try self.typechecker.builder.cjump(safetyEnd, safetyCnd); 
+        const safetyCheck = try self.typechecker.builder.cjump(safetyEnd, safetyCnd);
         const panic = try self.handler("$$invalid_index");
         const safetyEndLabel = try self.typechecker.builder.label(safetyEnd);
 
@@ -758,7 +759,7 @@ fn forLoop(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.AST) 
         null
     );
     const rangeIdent = try self.typechecker.builder.identifier(rangeName);
-    
+
     const rangePtr = try self.typechecker.builder.dot(
         rangeIdent,
         switch (self.typechecker.typeTable.get(rangeType)) {
@@ -908,7 +909,6 @@ fn loop(
         ) catch return Error.AllocatorFailure
     );
 
-
     const conditionPtr = ast.extra[extraPtr];
 
     if (self.typechecker.context.settings.canFold()) {
@@ -1018,7 +1018,6 @@ fn expressionStmt(self: *Lowerer, expr: defines.ExpressionPtr) Error!JIR.Ptr {
 }
 
 fn @"return"(self: *Lowerer, _expr: defines.ExpressionPtr) Error!JIR.Ptr {
-    // const end = try self.unwindDefers(self.scopes.index);
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
 
     const noValue = ast.expressions.get(_expr).value == 0;
@@ -1043,10 +1042,6 @@ fn block(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     _ = self.typechecker.builder.data.addOne(self.typechecker.builder.allocator)
         catch return Error.AllocatorFailure;
 
-    // const start = try self.typechecker.builder.scope(
-    //    try self.typechecker.executer.generateRandomNameSanitized(.Block),
-    // );
-
     const stmts = self.typechecker.builder.allocator.alloc(JIR.Ptr, statements.len())
         catch return Error.AllocatorFailure;
 
@@ -1070,10 +1065,6 @@ fn block(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     );
 }
 
-
-//
-// Expression
-//
 pub fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID) Error!JIR.Ptr {
     if (self.typechecker.folder.attemptEval(exprPtr, ofType)) |_| {
         return self.literal(exprPtr, ofType);
@@ -1133,7 +1124,6 @@ fn tuple(self: *Lowerer, exprListPtr: defines.OpaquePtr, ofType: TypeID) Error!J
     assert(tupleType.isTuple);
 
     const exprList: defines.OpaquePtr = ast.expressions.items(.value)[exprListPtr];
-    // @Note ofType is the tuple here, or at least it should be.
 
     const argsRange = defines.Range{
         .start = ast.extra[exprList],
@@ -1152,8 +1142,6 @@ fn tuple(self: *Lowerer, exprListPtr: defines.OpaquePtr, ofType: TypeID) Error!J
 }
 
 fn scoping(self: *Lowerer, _extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
-    // @Beware @Bug This part causes integer overflow because of
-    // the namespace string being corrupted for some reason.
 
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
     const tokens = self.typechecker.context.getTokens(ast.tokens);
@@ -1167,7 +1155,7 @@ fn scoping(self: *Lowerer, _extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     while (true) {
         lhs = ast.extra[extraPtr];
         const rhs = ast.extra[extraPtr + 1];
-        
+
         const rtoken = tokens.get(rhs);
         rightMost = rtoken.end;
         leftMost = rtoken.start;
@@ -1257,13 +1245,22 @@ fn switchExpr(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error
     const ast = typechecker.context.getAST(self.typechecker.currentFile);
 
     const enumOrUnionType = try typechecker.typecheckExpression(ast.extra[extraPtr], null);
-    const enumOrUnion = try self.expression(ast.extra[extraPtr], enumOrUnionType);
+    const enumOrUnionExpr = try self.expression(ast.extra[extraPtr], enumOrUnionType);
     const maybeComptimeEnumOrUnion =
         if (self.typechecker.context.settings.canFold())
             if (typechecker.folder.attemptEval(ast.extra[extraPtr], enumOrUnionType))
                 |ptr| typechecker.folder.getValue(ptr)
             else null
         else null;
+
+    var cachedDef: ?JIR.Ptr = null;
+    var enumOrUnion = enumOrUnionExpr;
+    if (maybeComptimeEnumOrUnion == null) {
+        const name = try typechecker.folder.generateRandomName(.SwitchValue);
+        cachedDef = try typechecker.builder.variableDef(false, enumOrUnionType, name, false, enumOrUnionExpr, null);
+        enumOrUnion = try typechecker.builder.identifier(name);
+    }
+
     const typeInfo = typechecker.typeTable.get(enumOrUnionType);
     const tag: struct { type: TypeID, fields: []const types.EnumField } = switch (typeInfo) {
         .Enum => |enm| .{ .type = enumOrUnionType, .fields = enm.fields },
@@ -1279,9 +1276,9 @@ fn switchExpr(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error
 
     var ops =
         if (maybeComptimeEnumOrUnion) |_| @constCast(&.{})
-        else typechecker.builder.allocator.alloc(JIR.Ptr, numCases + 2)
+        else typechecker.builder.allocator.alloc(JIR.Ptr, numCases + 3)
             catch return Error.AllocatorFailure;
-    var ptrs = ops[@min(1, ops.len)..];
+    var ptrs = ops[@min(2, ops.len)..];
 
     const resName = try typechecker.folder.generateRandomName(.SwitchResult);
     const resIdent = try typechecker.builder.identifier(resName);
@@ -1290,6 +1287,7 @@ fn switchExpr(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error
         const ti = typechecker.typeTable.get(ofType);
         const newT = try typechecker.registerType(typechecker.makeMutable(ti));
         ops[0] = try typechecker.builder.variableDef(false, newT, resName, true, 0, null);
+        ops[1] = cachedDef.?;
     }
 
     const switchEnd = try typechecker.folder.generateRandomName(.SwitchEnd);
@@ -1303,11 +1301,11 @@ fn switchExpr(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error
             const bodyPtr = ast.extra[caseRange.at(idx + 3)];
 
             if (maybeComptimeEnumOrUnion) |_| {
-                const body = try self.expression(bodyPtr, ofType); 
+                const body = try self.expression(bodyPtr, ofType);
                 return body;
             }
             else {
-                const body = try self.expression(bodyPtr, ofType); 
+                const body = try self.expression(bodyPtr, ofType);
                 const placeholder = try typechecker.builder.label(try typechecker.folder.generateRandomName(.Placeholder));
                 const result = try typechecker.builder.assignment(resIdent, body);
 
@@ -1409,7 +1407,7 @@ fn switchExpr(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error
         ptrs[@divFloor(idx, 4)] = switchFull;
     }
 
-    const switchEndLabel = try typechecker.builder.label(switchEnd); 
+    const switchEndLabel = try typechecker.builder.label(switchEnd);
     ptrs[@divFloor(caseRange.len(), 4)] = switchEndLabel;
 
     return try typechecker.builder.stmtExpr(resIdent, ops);
@@ -1471,7 +1469,6 @@ fn call(
             break :blk self.typechecker.builder.construct(typeID, args);
         },
         .Function => |fnc|
-            // @TODO inline functions
             if (fnc.isComptime) res: {
                 const resultingValue = try self.typechecker.folder.eval(exprPtr, ofType);
                 const constant = try self.addConstant(resultingValue, ofType);
@@ -1548,13 +1545,12 @@ fn bitSizeOf(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!
 
     const t = try self.typechecker.typecheckExpression(ast.extra[args.at(0)], null);
 
-
     if (self.typechecker.folder.attemptEval(ast.extra[args.at(0)], t)) |res| blk: {
         return self.typechecker.builder.literal(
             try self.addConstant(
                 try self.typechecker.folder.appendValue(.{ .Int = switch (self.typechecker.folder.getValue(res)) {
                     .Type => |typeID| self.typechecker.sizeOf(typeID),
-                    else => break :blk, 
+                    else => break :blk,
                 }}),
                 ofType
             ),
@@ -1579,13 +1575,12 @@ fn sizeOf(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR
 
     const t = try self.typechecker.typecheckExpression(ast.extra[args.at(0)], null);
 
-
     if (self.typechecker.folder.attemptEval(ast.extra[args.at(0)], t)) |res| blk: {
         return self.typechecker.builder.literal(
             try self.addConstant(
                 try self.typechecker.folder.appendValue(.{ .Int = switch (self.typechecker.folder.getValue(res)) {
                     .Type => |typeID| self.typechecker.sizeOf(typeID) / @bitSizeOf(c_char),
-                    else => break :blk, 
+                    else => break :blk,
                 }}),
                 ofType
             ),
@@ -1610,13 +1605,12 @@ fn alignOf(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JI
 
     const t = try self.typechecker.typecheckExpression(ast.extra[args.at(0)], null);
 
-
     if (self.typechecker.folder.attemptEval(ast.extra[args.at(0)], t)) |res| blk: {
         return self.typechecker.builder.literal(
             try self.addConstant(
                 try self.typechecker.folder.appendValue(.{ .Int = switch (self.typechecker.folder.getValue(res)) {
                     .Type => |typeID| self.typechecker.alignOf(typeID),
-                    else => break :blk, 
+                    else => break :blk,
                 }}),
                 ofType
             ),
@@ -1688,7 +1682,6 @@ fn cast(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR.P
                         );
                     };
 
-                    
                     break :res self.typechecker.builder.stmtExpr(try self.typechecker.builder.construct(ofType, &.{ptr, newSize}), &.{
                         rDef,
                     });
@@ -1774,10 +1767,6 @@ fn indexing(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     const typeID = try self.typechecker.typecheckExpression(exprPtr, null);
 
     const indexableBaseIdent = try self.expression(exprPtr, typeID);
-    // const indexableBase = try self.expression(exprPtr, typeID);
-    // const indexableBaseName = try self.typechecker.folder.generateRandomName(.IndexableBase);
-    // const indexableBaseDef = try self.typechecker.builder.variableDef(false, typeID, indexableBaseName, false, indexableBase, null);
-    // const indexableBaseIdent = try self.typechecker.builder.identifier(indexableBaseName);
 
     const indexable = blk: switch (self.typechecker.typeTable.get(typeID)) {
         .Array => break :blk try self.typechecker.builder.dot(indexableBaseIdent, try self.typechecker.builder.internString("data"), typeID),
@@ -1838,7 +1827,6 @@ fn indexing(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
             try self.typechecker.builder.stmtExpr(
                 try self.typechecker.builder.add(indexableIdent, indexIdent),
                 &.{
-                    // indexableBaseDef,
                     indexableDef,
                     indexDef,
                     boundsJump,
@@ -1854,7 +1842,6 @@ fn indexing(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
             try self.typechecker.builder.stmtExpr(
                 try self.typechecker.builder.add(indexable, index),
                 &.{
-                    // indexableBaseDef,
                 },
             ),
             indexedTypeChildPtr,
@@ -1906,7 +1893,8 @@ fn dot(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
                 switch (self.typechecker.typeTable.get(ptr.child)) {
                 .Struct, .Union, .Array =>
                     if (ref) { return self.typechecker.builder.reference(obj); }
-                    else if (deref) { return self.typechecker.builder.dereference(obj, exprType); },
+                    else if (deref) { return self.typechecker.builder.dereference(obj, exprType); }
+                    else if (self.typechecker.getFlag(.LValue)) { obj = try self.typechecker.builder.dereference(obj, exprType); },
                 else => { },
             }
         },
@@ -1983,7 +1971,6 @@ fn binary(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR
     };
 }
 
-// @Note type names are also plain identifiers.
 fn identifier(self: *Lowerer, id: defines.ExpressionPtr) Error!JIR.Ptr {
     const decl = self.typechecker.symbols.findGetDecl(.{
         .file = self.typechecker.currentFile,
@@ -2018,7 +2005,6 @@ pub fn addMetadata(self: *Lowerer, to: JIR.Ptr, from: defines.ExpressionPtr) Err
 }
 
 fn literal(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID) Error!JIR.Ptr {
-    // @Note should already been evaluated before.
     const valuePtr = try self.typechecker.folder.eval(exprPtr, null);
     const constant = try self.addConstant(valuePtr, ofType);
     return self.typechecker.builder.literal(constant);

@@ -1251,7 +1251,7 @@ pub fn typecheckExpressionListRange(self: *Typechecker, range: defines.Range, ex
 
     if (range.len() == 1) switch (self.typeTable.get(expected)) {
         .Struct, .Union, .Array => {
-            const innerType = try self.typecheckExpression(ast.extra[range.at(0)], null);
+            const innerType = try self.typecheckExpression(ast.extra[range.at(0)], expected);
             if (self.suitable(expected, innerType)) return expected;
         },
         else => {},
@@ -1274,8 +1274,13 @@ pub fn typecheckExpressionListRange(self: *Typechecker, range: defines.Range, ex
             _ = try self.typecheckExpression(ast.extra[range.at(0)], expected);
         },
         .Void => try self.typecheckGeneralInitialization(ast, expected, range),
+        .Type => {
+            for (range.start..range.end) |ptr| {
+                _ = try self.expectType(ast.extra[ptr]);
+            }
+        },
         .Noreturn,
-        .Type, .Function,
+        .Function,
         .Bool, .Float, .Integer,
         .ComptimeInt, .ComptimeFloat => {
             if (range.len() != 1) {
@@ -1740,7 +1745,6 @@ pub fn typecheckBuiltinCall(self: *Typechecker, extraPtr: defines.ExpressionPtr,
         BI("bitSizeOf") => return comptime Comptime.Folder.Builtin.Type("u32"),
         BI("alignOf") => return comptime Comptime.Folder.Builtin.Type("u32"),
         BI("typeName") => return comptime Comptime.Folder.Builtin.Type("[]u8"),
-        BI("Tuple") => return comptime Comptime.Folder.Builtin.Type("type"),
         BI("compileBreak") => return comptime Comptime.Folder.Builtin.Type("void"),
         BI("compileLog") => {
             _ = try self.folder.evalCompileLog(extraPtr);

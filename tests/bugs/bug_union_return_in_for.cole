@@ -20,7 +20,7 @@ let find = fn (xs: []i32, target: i32) -> Maybe {
 };
 
 let main = fn (args: [][]u8) -> i32 {
-    let data = [3]i32(4, 5, 6);
+    let data = #(@noComptime) [3]i32(4, 5, 6);
     switch find(data[0..3], 5) {
         @Some -> |v| pi(v);
         @None -> Console::log("none");

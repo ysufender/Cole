@@ -875,7 +875,6 @@ fn evalBuiltinCall(self: *Folder, extraPtr: defines.OpaquePtr, declPtr: defines.
         BI("buildInfo") => self.evalBuildInfo(extraPtr),
         BI("compileError") => self.evalCompileError(extraPtr),
         BI("typeName") => self.evalTypeName(extraPtr),
-        BI("Tuple") => self.evalNewTuple(extraPtr),
         BI("sizeOf") => self.evalSizeOf(extraPtr),
         BI("bitSizeOf") => self.evalBitSizeOf(extraPtr),
         BI("alignOf") => self.evalAlignOf(extraPtr),
@@ -1544,14 +1543,10 @@ pub fn evalSizeOf(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Val
     return self.appendValue(.{ .Int = self.typechecker.sizeOf(t) / @bitSizeOf(c_char) });
 }
 
-pub fn evalNewTuple(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {
+pub fn evalNewTuple(self: *Folder, range: defines.Range) Error!Comptime.Value.Ptr {
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
 
-    const expressionList = ast.expressions.items(.value)[ast.extra[extraPtr + 1]];
-    const args = defines.Range{
-        .start = ast.extra[expressionList],
-        .end = ast.extra[expressionList + 1],
-    };
+    const args = range;
 
     var fields = self.typechecker.arena.allocator().alloc(types.FieldInfo, args.len())
         catch return Error.AllocatorFailure;
@@ -2097,9 +2092,11 @@ pub fn constructFromList(self: *Folder, typeID: TypeID, _range: defines.Range) E
 
         .Pointer => self.eval(ast.extra[range.at(0)], typeID),
 
+        .Type => self.evalNewTuple(range),
+
         .Noreturn, .CChar, .CUChar, .CDouble, .CInt, .CLong,
         .CShort, .CSize, .CUInt, .CULong, .CUShort,
-        .Type, .Function,
+        .Function,
         .Bool, .Float, .Integer,
         .ComptimeInt, .ComptimeFloat => self.expectDefined(ast.extra[range.at(0)], typeID),
         else => common.debug.ShouldBeImpossible(self.typechecker.context.log, @src())
@@ -2282,7 +2279,7 @@ pub fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Type
         catch return Error.AllocatorFailure;
 
     for (argsRange.start..argsRange.end, 0..) |ptr, idx| {
-        args[idx] = try self.eval(ast.extra[@intCast(ptr)], if (idx >= signature.argTypes.len) null else signature.argTypes[idx]);
+        args[idx] = try self.eval(ast.extra[@intCast(ptr)], signature.argTypes[idx]);
     }
 
     const prev = self.setFlag(.InComptimeCall, true);
