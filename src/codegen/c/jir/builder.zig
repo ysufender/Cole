@@ -279,7 +279,16 @@ pub inline fn negate(self: *Builder, rhs: JIR.Ptr) Error!JIR.Ptr { return self.c
 
 pub fn dot(self: *Builder, object: JIR.Ptr, field: StringPtr, objType: TypeID) Error!JIR.Ptr {
     if (self.typechecker.getFlag(.LValue) or self.nodes.get(object).type == .Identifier) {
-        return self.commonBinary(.Dot, object, field);
+        return self.commonBinary(.Dot,
+            switch (self.typechecker.typeTable.get(objType)) {
+                .Pointer => |ptr| switch (ptr.size) {
+                    .Slice => object,
+                    else => try self.dereference(object, objType),
+                },
+                else => object,
+            },
+            field
+        );
     }
 
     const objName = try self.typechecker.folder.generateRandomName(.Obj);

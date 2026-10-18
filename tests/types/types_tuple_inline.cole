@@ -1,0 +1,9 @@
+import std::io::console as Console;
+
+let T: type = (i32, u32, float);
+
+let main = fn (args: [][]u8) -> i32 {
+    Console::log(typeName(T));
+    Console::log(if (typeInfo(T).Struct.isTuple) "true" else "false");
+    return 0;
+};
