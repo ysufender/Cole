@@ -1,0 +1,9 @@
+import std::io::console as Console;
+
+let SomeType = struct { };
+
+let main = fn (args: [][]u8) -> i32 {
+    Console::log(typeName(SomeType));
+
+    return 0;
+};

@@ -1,4 +1,4 @@
-// @TODO: Garbage collecting or something similar
+// @TODO: Garbage collecting or something si
 
 const std = @import("std");
 const common = @import("../../core/common.zig");
@@ -1544,8 +1544,6 @@ pub fn evalSizeOf(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Val
 }
 
 pub fn evalNewTuple(self: *Folder, range: defines.Range) Error!Comptime.Value.Ptr {
-    // @TODO structural tuples instead of nominal ones
-
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
 
     const args = range;

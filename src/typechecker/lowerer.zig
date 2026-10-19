@@ -38,7 +38,7 @@ pub fn init(typechecker: *Typechecker) Error!Lowerer {
 
 pub fn topLevelDeclaration(self: *Lowerer, ptr: defines.DeclPtr, decl: *const Declaration) Error!void {
 
-    const status = self.typechecker.lookup.get(ptr)
+    const status = self.typechecker.declCache.get(ptr)
         orelse return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
 
     assert(status.status == .Checked);

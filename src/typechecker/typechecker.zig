@@ -39,7 +39,8 @@ pub const TypeTable = MultiArrayList(TypeInfo);
 pub const TypeMap = collections.HashMap(TypeInfo, TypeID);
 pub const TypeNameMap = std.AutoHashMapUnmanaged(TypeID, defines.StringPtr);
 pub const MetadataMap = collections.HashMap(Resolver.ResolutionKey, []const Comptime.Value.Ptr);
-const LookupMap = collections.HashMap(defines.DeclPtr, TypecheckStatus);
+const DeclCache = collections.HashMap(defines.DeclPtr, TypecheckStatus);
+const ExprCache = collections.HashMap(Resolver.ResolutionKey, TypeID);
 
 pub const Flags = enum(u8) {
     ConcreteValue = 0,
@@ -76,7 +77,8 @@ symbols: *Resolver.Resolution,
 
 typeTable: TypeTable,
 typeMap: TypeMap,
-lookup: LookupMap,
+declCache: DeclCache,
+exprCache: ExprCache,
 metadata: MetadataMap,
 
 folder: Comptime.Folder,
@@ -109,13 +111,15 @@ pub fn init(
         catch return Error.AllocatorFailure;
     var typeMap = TypeMap.empty;
     var metadata = MetadataMap.empty;
-    var lookup = LookupMap.empty;
+    var lookup = DeclCache.empty;
     var typenameMap = TypeNameMap.empty;
+    var exprCache = ExprCache.empty;
 
     typenameMap.ensureTotalCapacity(allocator, 50 + typeCount + @as(u32, @intCast(Comptime.Folder.builtinTypes.len))) catch return Error.AllocatorFailure;
     typeMap.ensureTotalCapacity(allocator, 50 + typeCount + @as(u32, @intCast(Comptime.Folder.builtinTypes.len))) catch return Error.AllocatorFailure;
     lookup.ensureTotalCapacity(allocator, symbolTable.declarations.len) catch return Error.AllocatorFailure;
     metadata.ensureTotalCapacity(allocator, counts.meta * 3) catch return Error.AllocatorFailure;
+    exprCache.ensureTotalCapacity(allocator, symbolTable.resolutionMap.count()) catch return Error.AllocatorFailure;
 
     return .{
         .context = context,
@@ -123,7 +127,8 @@ pub fn init(
         .typeTable = typeTable,
         .typeMap = typeMap,
         .metadata = metadata,
-        .lookup = lookup,
+        .declCache = lookup,
+        .exprCache = exprCache,
         .flags = FlagMap.initEmpty(),
         .folder = undefined,
         .executer = undefined,
@@ -1036,6 +1041,15 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
 
     const ast = self.context.getAST(self.currentFile);
 
+    const key = Resolver.ResolutionKey{
+        .file = self.currentFile,
+        .expr = expressionPtr,
+    };
+
+    if (self.exprCache.get(key)) |typeID| {
+        return typeID;
+    }
+
     const maybeExpected =
         if (_maybeExpected) |ex| ex
         else comptime Comptime.Folder.Builtin.Type("any");
@@ -1056,35 +1070,35 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
         return self.typecheckValue(result, maybeExpected);
     }
 
-    return switch (expr.type) {
+    const typeID = typeID: switch (expr.type) {
         .Identifier => {
             self.lastToken = expr.value;
             const decl = self.symbols.findDecl(.{ .file = self.currentFile, .expr = expressionPtr });
             const discoveredType = try self.typecheckDecl(decl, maybeExpected);
-            return discoveredType;
+            break :typeID discoveredType;
         },
-        .Indexing => return self.typecheckIndexing(expr.value),
-        .Call => self.typecheckCall(expr.value, maybeExpected),
-        .Scoping => return self.typecheckScoping(expressionPtr),
-        .ExpressionList => self.typecheckExpressionList(expr.value, maybeExpected),
+        .Indexing => try self.typecheckIndexing(expr.value),
+        .Call => try self.typecheckCall(expr.value, maybeExpected),
+        .Scoping => try self.typecheckScoping(expressionPtr),
+        .ExpressionList => try self.typecheckExpressionList(expr.value, maybeExpected),
 
         .Literal,
         .ArrayType, .CPointerType, .FunctionType,
         .MutableType, .PointerType, .SliceType, 
         .EnumDefinition, .UnionDefinition, .StructDefinition,
-        .FunctionDefinition => self.typecheckValue(try self.folder.eval(expressionPtr, maybeExpected), maybeExpected),
+        .FunctionDefinition => try self.typecheckValue(try self.folder.eval(expressionPtr, maybeExpected), maybeExpected),
 
-        .Conditional => self.typecheckIfExpression(expr.value, maybeExpected),
-        .Switch => self.typecheckSwitchExpression(expr.value, maybeExpected),
+        .Conditional => try self.typecheckIfExpression(expr.value, maybeExpected),
+        .Switch => try self.typecheckSwitchExpression(expr.value, maybeExpected),
 
-        .Unary => self.typecheckUnary(expr.value, maybeExpected),
-        .Binary => self.typecheckBinary(expr.value, maybeExpected),
+        .Unary => try self.typecheckUnary(expr.value, maybeExpected),
+        .Binary => try self.typecheckBinary(expr.value, maybeExpected),
 
-        .Slicing => self.typecheckSlicing(expr.value),
+        .Slicing => try self.typecheckSlicing(expr.value),
 
-        .Mark => self.typecheckMark(expressionPtr, expr.value, maybeExpected),
+        .Mark => try self.typecheckMark(expressionPtr, expr.value, maybeExpected),
 
-        .Dot => self.typecheckDot(expr.value),
+        .Dot => try self.typecheckDot(expr.value),
 
         .Assignment => |t| {
             self.report("Expected an expression, received '{s}' instead.", .{
@@ -1093,8 +1107,15 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
             return Error.IllegalSyntax;
         },
 
-        .TupleDefinition => self.typecheckTupleDefinition(expr.value),
+        .TupleDefinition => try self.typecheckTupleDefinition(expr.value),
     };
+
+    if (false and !self.folder.getFlag(.InComptimeCall)) {
+        self.exprCache.put(self.arena.allocator(), key, typeID)
+            catch return Error.AllocatorFailure;
+    }
+
+    return typeID;
 }
 
 pub fn typecheckTupleDefinition(self: *Typechecker, exprListPtr: defines.OpaquePtr) Error!TypeID {
@@ -1627,7 +1648,7 @@ pub fn typecheckCall(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpec
             return self.typecheckExpressionList(
                 ast.expressions.items(.value)[ast.extra[extraPtr + 1]],
                 switch (self.typeTable.get(typeToInit)) {
-                    .Type, .Noreturn, .Any,
+                    .Noreturn, .Any,
                     .Function, .EnumLiteral => {
                         self.report("Given type '{s}' is not initializable.", .{
                             try self.typeName(self.arena.allocator(), typeToInit),
@@ -1980,7 +2001,7 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
     defer self.currentFile = prevFile;
     defer self.currentScope = prevScope;
 
-    const isPresent = self.lookup.getOrPut(allocator, declPtr) catch return Error.AllocatorFailure;
+    const isPresent = self.declCache.getOrPut(allocator, declPtr) catch return Error.AllocatorFailure;
 
     self.callstack.push(declPtr);
     defer _ = self.callstack.pop();

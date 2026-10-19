@@ -7,7 +7,7 @@ let foo = fn () -> (i32, i32) {
 };
 
 let foo2 = fn () -> (i32, i32) {
-	return (i32, i32)(2, 3);
+	return type(i32, i32)(2, 3);
 };
 
 let main = fn (args: [][]u8) -> i32 {
