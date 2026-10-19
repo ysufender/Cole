@@ -148,4 +148,5 @@ pub const CompilerError = error {
     NonIntegerRange,
     LoopOverNonRange,
     Terminate,
+    ImportInSubLevel,
 };

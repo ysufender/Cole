@@ -479,6 +479,11 @@ fn resolveStatement(self: *Resolver, stmt: defines.StatementPtr, topLevel: bool)
             try self.resolveExpression(initializer);
         },
         .Import => {
+            if (self.scopes.get(self.currentScope).kind != .Module) {
+                self.report("Import statements are only allowed on top-level contexts.", .{});
+                return Error.ImportInSubLevel;
+            }
+
             const modulename = self.getModuleName(ast.extra[statement.value]);
             const moduleID = self.modules.get(modulename);
             const isAlias = ast.extra[statement.value + 1] == 1;
@@ -894,6 +899,10 @@ fn resolveScoping(
         }
     }
 
+    if (inside) {
+        return leftMost;
+    }
+
     const moduleName = self.getModuleName(lhsPtr);
 
     // TODO: I don't like this hardcoded
@@ -901,14 +910,11 @@ fn resolveScoping(
         return leftMost;
     }
 
-    // @Beware Causes strange bugs. See bug_import_std_root.cole
-    if (false) {
-        if (self.modules.ids.contains(moduleName)) {
-            self.report("Given module '{s}' is not imported into the current scope.", .{
-                moduleName,
-            });
-            return Error.ModuleNotInScope;
-        }
+    if (self.modules.ids.contains(moduleName)) {
+        self.report("Given module '{s}' is not imported into the current scope.", .{
+            moduleName,
+        });
+        return Error.ModuleNotInScope;
     }
 
     return leftMost;
