@@ -748,7 +748,8 @@ fn typecheckSwitchStatementOnUnion(
 
             const field = try self.builder.internString(fieldName);
             const captureType = uni.fields[
-                self.fieldIndex(itemTypeID, field) catch return common.debug.ShouldBeImpossible(self.context.log, @src())
+                self.fieldIndex(itemTypeID, field)
+                    catch return common.debug.ShouldBeImpossible(self.context.log, @src())
             ].valueType;
 
             _ = try self.typecheckDecl(captureDecl, captureType);

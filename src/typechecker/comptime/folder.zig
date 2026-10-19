@@ -665,7 +665,7 @@ fn evalSwitchExpression(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpecte
                     return self.expectDefined(ast.extra[case + 3], resultType);
                 }
 
-                const fieldPtr = try self.expectDefined(fieldExprPtr, varToSwitchOn);
+                const fieldPtr = try self.expectDefined(fieldExprPtr, enm.Type);
                 const field = self.getValue(fieldPtr);
                 
                 if (field.Enum.Value != enm.Value) {
@@ -706,7 +706,7 @@ fn evalSwitchExpression(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpecte
                     return self.expectDefined(ast.extra[case + 3], resultType);
                 }
 
-                const fieldPtr = try self.expectDefined(fieldExprPtr, varToSwitchOn);
+                const fieldPtr = try self.expectDefined(fieldExprPtr, self.typechecker.typeTable.get(uni.Type).Union.tag);
                 const field = self.getValue(fieldPtr);
 
                 if (field.Enum.Value != uni.Tag) {
@@ -725,7 +725,7 @@ fn evalSwitchExpression(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpecte
                         .expr = firstCapture,
                     });
 
-                    try self.cacheDecl(capture, varToSwitchOn);
+                    try self.cacheDecl(capture, uni.Type);
                 }
 
                 return self.expectDefined(ast.extra[case + 3], resultType);
