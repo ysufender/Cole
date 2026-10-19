@@ -878,6 +878,7 @@ fn evalBuiltinCall(self: *Folder, extraPtr: defines.OpaquePtr, declPtr: defines.
         BI("sizeOf") => self.evalSizeOf(extraPtr),
         BI("bitSizeOf") => self.evalBitSizeOf(extraPtr),
         BI("alignOf") => self.evalAlignOf(extraPtr),
+        BI("getMetadata") => self.evalGetMetadata(extraPtr),
         BI("compileBreak") => {
             @breakpoint();
             return @intFromEnum(Comptime.Value.Implicit.Void);
@@ -1457,6 +1458,12 @@ pub fn evalCompileLog(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime
     });
     token.printLocationInfo(self.arena.allocator(), self.typechecker.context, self.typechecker.currentFile, position, self.typechecker.callstack.size == 1);
     return @intFromEnum(Comptime.Value.Implicit.Void);
+}
+
+pub fn evalGetMetadata(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {
+    _ = self;
+    _ = extraPtr;
+    unreachable;
 }
 
 pub fn evalAlignOf(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {
@@ -2839,6 +2846,10 @@ fn buildEnumFieldSlice(self: *Folder, fields: []const types.EnumField) Error!Com
 }
 
 fn cacheValue(self: *Folder, ptr: FolderCacheKey, val: Comptime.Value.Ptr) Error!void {
+    if (self.getFlag(.InComptimeCall)) {
+        return;
+    }
+
     const value = self.getValue(val);
     switch (value) {
         .Function => |func| if (self.typechecker.typeTable.get(func.signature).Function.isComptime) {
@@ -2850,10 +2861,8 @@ fn cacheValue(self: *Folder, ptr: FolderCacheKey, val: Comptime.Value.Ptr) Error
         else => { },
     }
 
-    if (!self.getFlag(.InComptimeCall)) {
-        self.cache.put(self.arena.allocator(), ptr, val)
-            catch return Error.AllocatorFailure;
-    }
+    self.cache.put(self.arena.allocator(), ptr, val)
+        catch return Error.AllocatorFailure;
 }
 
 pub fn appendValue(self: *Folder, value: Comptime.Value) Error!Comptime.Value.Ptr {

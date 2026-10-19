@@ -118,6 +118,10 @@ pub fn executeCall(self: *Executer, func: *JIR.Function, args: []const Comptime.
                     ],
                 });
             },
+            .InlineC, .Import => {
+                self.report("'{s}' statements are not allowed in comptime scopes.", .{@tagName(statement.type)});
+                return Error.ComptimeNotPossible;
+            },
             else => {
                 self.report("Unreachable '{s}'.", .{@tagName(statement.type)});
                 return Error.ShouldBeImpossible;

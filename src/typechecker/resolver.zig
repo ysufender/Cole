@@ -901,11 +901,14 @@ fn resolveScoping(
         return leftMost;
     }
 
-    if (self.modules.ids.contains(moduleName)) {
-        self.report("Given module '{s}' is not imported into the current scope.", .{
-            moduleName,
-        });
-        return Error.ModuleNotInScope;
+    // @Beware Causes strange bugs. See bug_import_std_root.cole
+    if (false) {
+        if (self.modules.ids.contains(moduleName)) {
+            self.report("Given module '{s}' is not imported into the current scope.", .{
+                moduleName,
+            });
+            return Error.ModuleNotInScope;
+        }
     }
 
     return leftMost;
@@ -1273,6 +1276,7 @@ pub const builtins = [_][]const u8 {
     "as", "compileLog", "typeName",
     "alignOf", "compileBreak", "typeInfo",
     "src", "buildInfo", "inComptime",
+    "getMetadata",
 };
 
 pub fn BuiltinIndex(comptime builtin: []const u8) u32 {

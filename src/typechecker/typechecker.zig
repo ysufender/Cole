@@ -1770,7 +1770,11 @@ pub fn typecheckBuiltinCall(self: *Typechecker, extraPtr: defines.ExpressionPtr,
             const builtinInfo = try self.typecheckDecl(infoDecl, comptime Comptime.Folder.Builtin.Type("type"));
             return builtinInfo;
         },
-        BI("compileError") => return self.folder.evalCompileError(extraPtr),
+        BI("getMetadata") => {
+            unreachable;
+        },
+        BI("compileError") => comptime Comptime.Folder.Builtin.Type("noreturn"),
+            // return self.folder.evalCompileError(extraPtr),
         BI("sizeOf") => return comptime Comptime.Folder.Builtin.Type("u32"),
         BI("bitSizeOf") => return comptime Comptime.Folder.Builtin.Type("u32"),
         BI("alignOf") => return comptime Comptime.Folder.Builtin.Type("u32"),
