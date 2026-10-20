@@ -52,33 +52,31 @@ pub fn executeCall(self: *Executer, func: *JIR.Function, args: []const Comptime.
     }
 
     const ast = self.typechecker.context.getAST(func.source);
-    {
-        const psrc = self.typechecker.currentFile;
-        defer self.typechecker.currentFile = psrc;
-        self.typechecker.currentFile = func.source;
+    const psrc = self.typechecker.currentFile;
+    defer self.typechecker.currentFile = psrc;
+    self.typechecker.currentFile = func.source;
 
-        const bodyPtr = ast.statements.get(func.body).value;
+    const bodyPtr = ast.statements.get(func.body).value;
 
-        const bodyRange = defines.Range{
-            .start = ast.extra[bodyPtr],
-            .end = ast.extra[bodyPtr + 1],
-        };
+    const bodyRange = defines.Range{
+        .start = ast.extra[bodyPtr],
+        .end = ast.extra[bodyPtr + 1],
+    };
 
-        const body  = ast.extra[bodyRange.start..bodyRange.end];
+    const body  = ast.extra[bodyRange.start..bodyRange.end];
 
-        try self.stack.push(.{
-            .bp = @intCast(self.typechecker.folder.memory.items.len),
-            .pc = 0,
-            .variables = .empty,
-            .body = body,
-        });
+    try self.stack.push(.{
+        .bp = @intCast(self.typechecker.folder.memory.items.len),
+        .pc = 0,
+        .variables = .empty,
+        .body = body,
+    });
 
-        self.stack.peek().variables.ensureTotalCapacity(self.arena.allocator(), @intCast(args.len))
-            catch return Error.AllocatorFailure;
+    self.stack.peek().variables.ensureTotalCapacity(self.arena.allocator(), @intCast(args.len))
+        catch return Error.AllocatorFailure;
 
-        for (args, 0..) |arg, i| {
-            self.stack.peek().variables.putAssumeCapacityNoClobber(func.args[i], arg);
-        }
+    for (args, 0..) |arg, i| {
+        self.stack.peek().variables.putAssumeCapacityNoClobber(func.args[i], arg);
     }
 
     const pc = self.typechecker.setFlag(.CoveredAllPaths, false);
@@ -99,7 +97,8 @@ pub fn executeCall(self: *Executer, func: *JIR.Function, args: []const Comptime.
 
     while (self.stack.peekm()) |top| {
         if (top.pc >= top.body.len) {
-            self.typechecker.folder.memory.shrinkRetainingCapacity(top.bp);
+            // @Beware @TODO Causes out of bounds bugs
+            // self.typechecker.folder.memory.shrinkRetainingCapacity(top.bp);
             _ = self.stack.pop();
             continue;
         }
@@ -122,38 +121,36 @@ pub fn executeCall(self: *Executer, func: *JIR.Function, args: []const Comptime.
                 });
             },
             .Conditional => {
-                // @TODO Continue
-
                 const conditionExpr = ast.extra[statement.value];
                 const conditionRes = self.typechecker.folder.getValue(
                     try self.typechecker.folder.eval(conditionExpr, comptime Comptime.Folder.Builtin.Type("bool"))
                 ).Bool;
 
                 if (conditionRes) {
-                    const bodyPtr = ast.extra[statement.value + 1];
-                    const body = ast.statements.get(bodyPtr);
+                    const bptr = ast.extra[statement.value + 1];
+                    const bod = ast.statements.get(bptr);
                     try self.stack.push(.{
                         .pc = 0,
                         .bp = @intCast(self.typechecker.folder.memory.items.len),
                         .variables = .empty,
                         .body = ast.extra[
-                            ast.extra[body.value]
+                            ast.extra[bod.value]
                             ..
-                            ast.extra[body.value + 1]
+                            ast.extra[bod.value + 1]
                         ],
                     });
                 }
                 else if (ast.extra[statement.value + 2] == 1) {
-                    const bodyPtr = ast.extra[statement.value + 3];
-                    const body = ast.statements.get(bodyPtr);
+                    const bPtr = ast.extra[statement.value + 3];
+                    const bod = ast.statements.get(bPtr);
                     try self.stack.push(.{
                         .pc = 0,
                         .bp = @intCast(self.typechecker.folder.memory.items.len),
                         .variables = .empty,
                         .body = ast.extra[
-                            ast.extra[body.value]
+                            ast.extra[bod.value]
                             ..
-                            ast.extra[body.value + 1]
+                            ast.extra[bod.value + 1]
                         ],
                     });
                 }

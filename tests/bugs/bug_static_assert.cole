@@ -7,6 +7,7 @@ import std::debug as Debug;
 
 let main = fn (args: [][]u8) -> i32 {
     Debug::staticAssert("A simple assertion failed", 1 + 1 == 2);
+    Debug::staticAssert("ok", 1 + 1 != 2);
     Console::log("ok");
     return 0;
 };

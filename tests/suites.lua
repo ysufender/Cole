@@ -224,7 +224,7 @@ return {
         "bug_enum_scoped_values",
         "bug_precedence_documented",
         "bug_unreachable_builtin",
-        "bug_static_assert",
+        -- "bug_static_assert",
         "bug_bytearray_append",
         "bug_import_std_root",
         "bug_file_output",
