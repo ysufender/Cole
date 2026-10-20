@@ -46,15 +46,11 @@ fn addTestStep(b: *std.Build) void {
 
     opts.addOption(bool, "record", false);
 
-    const buildTests = b.addSystemCommand(&.{"efile"});
-    buildTests.setCwd(.{ .cwd_relative = "tests/" });
-
     const runTests = b.addSystemCommand(&.{
-        "testy",
+        "efile",
         if (b.option(bool, "record", "Run Testy in record mode") orelse false) "record" else "run",
     });
     runTests.setCwd(.{ .cwd_relative = "tests/" });
-    runTests.step.dependOn(&buildTests.step);
 
     const step = b.step("test", "Run unit tests reachable from src/main.zig");
     step.dependOn(&runTests.step);
@@ -116,20 +112,19 @@ fn addTargets(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
 
         const libPath = config.library_path orelse
             if (target.result.os.tag == .linux) "/usr/local/lib"
-            else {
-                std.log.err("Failed to add target '{s}', a library path is required. The target won't be available.", .{
-                    targetName,
-                });
-                return;
-            };
+            else "C:/Program Files";
 
+        exe.root_module.addLibraryPath(.{ .cwd_relative = b.pathJoin(&.{libPath, "tcc"}) });
         exe.root_module.addSystemIncludePath(.{ .cwd_relative = libPath });
+        exe.root_module.addSystemIncludePath(.{ .cwd_relative = b.pathJoin(&.{libPath, "tcc", "libtcc" }) });
         exe.root_module.linkSystemLibrary("tcc", .{ .preferred_link_mode = .static });
 
         const vendorCopy = b.addUpdateSourceFiles();
 
         for (files) |file| {
-            const srcPath = b.pathJoin(&.{libPath, "tcc", file});
+            const srcPath = 
+                if (target.result.os.tag == .linux) b.pathJoin(&.{libPath, "tcc", file})
+                else b.pathJoin(&.{libPath, "tcc", "lib", file});
             const destPath = b.path("src/res/vendor/tcc/")
                             .join(b.graph.arena, file) catch unreachable;
             _ = vendorCopy.addCopyFileToSource(.{ .cwd_relative = srcPath }, destPath.src_path.sub_path);
@@ -179,20 +174,19 @@ fn addDebugTarget(b: *std.Build) void {
 
     const libPath = config.library_path orelse
         if (config.native.result.os.tag == .linux) "/usr/local/lib"
-        else {
-            std.log.err("Failed to add target '{s}', a library path is required. The target won't be available.", .{
-                targetName,
-            });
-            return;
-        };
+        else "C:/Program Files";
 
+    exe.root_module.addLibraryPath(.{ .cwd_relative = b.pathJoin(&.{libPath, "tcc"}) });
     exe.root_module.addSystemIncludePath(.{ .cwd_relative = libPath });
+    exe.root_module.addSystemIncludePath(.{ .cwd_relative = b.pathJoin(&.{libPath, "tcc", "libtcc" }) });
     exe.root_module.linkSystemLibrary("tcc", .{ .preferred_link_mode = .static });
 
     const vendorCopy = b.addUpdateSourceFiles();
 
     for (files) |file| {
-        const srcPath = b.pathJoin(&.{libPath, "tcc", file});
+        const srcPath = 
+            if (config.native.result.os.tag == .linux) b.pathJoin(&.{libPath, "tcc", file})
+            else b.pathJoin(&.{libPath, "tcc", "lib", file});
         const destPath = b.path("src/res/vendor/tcc/")
                         .join(b.graph.arena, file) catch unreachable;
         _ = vendorCopy.addCopyFileToSource(.{ .cwd_relative = srcPath }, destPath.src_path.sub_path);
@@ -209,8 +203,6 @@ fn addDebugTarget(b: *std.Build) void {
 fn configureBuild(b: *std.Build) void {
     config = .{
         .native = b.standardTargetOptions(.{}),
-        .library_path = b.option([]const u8, "lib-path", "The library path to search for dependencies."),
-        .tools = .{
-        },
+        .tools = .{ },
     };
 }
