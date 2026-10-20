@@ -46,36 +46,39 @@ pub fn init(typechecker: *Typechecker, allocator: Allocator) Error!Executer {
 
 pub fn executeCall(self: *Executer, func: *JIR.Function, args: []const Comptime.Value.Ptr) Error!Comptime.Value.Ptr {
     const sign = self.typechecker.typeTable.get(func.signature).Function;
+
     if (!sign.isComptime) {
         return Error.ComptimeNotPossible;
     }
 
-    const psrc = self.typechecker.currentFile;
-    defer self.typechecker.currentFile = psrc;
-    self.typechecker.currentFile = func.source;
-
     const ast = self.typechecker.context.getAST(func.source);
-    const bodyPtr = ast.statements.get(func.body).value;
+    {
+        const psrc = self.typechecker.currentFile;
+        defer self.typechecker.currentFile = psrc;
+        self.typechecker.currentFile = func.source;
 
-    const bodyRange = defines.Range{
-        .start = ast.extra[bodyPtr],
-        .end = ast.extra[bodyPtr + 1],
-    };
+        const bodyPtr = ast.statements.get(func.body).value;
 
-    const body  = ast.extra[bodyRange.start..bodyRange.end];
+        const bodyRange = defines.Range{
+            .start = ast.extra[bodyPtr],
+            .end = ast.extra[bodyPtr + 1],
+        };
 
-    try self.stack.push(.{
-        .bp = @intCast(self.typechecker.folder.memory.items.len),
-        .pc = 0,
-        .variables = .empty,
-        .body = body,
-    });
+        const body  = ast.extra[bodyRange.start..bodyRange.end];
 
-    self.stack.peek().variables.ensureTotalCapacity(self.arena.allocator(), @intCast(args.len))
-        catch return Error.AllocatorFailure;
+        try self.stack.push(.{
+            .bp = @intCast(self.typechecker.folder.memory.items.len),
+            .pc = 0,
+            .variables = .empty,
+            .body = body,
+        });
 
-    for (args, 0..) |arg, i| {
-        self.stack.peek().variables.putAssumeCapacityNoClobber(func.args[i], arg);
+        self.stack.peek().variables.ensureTotalCapacity(self.arena.allocator(), @intCast(args.len))
+            catch return Error.AllocatorFailure;
+
+        for (args, 0..) |arg, i| {
+            self.stack.peek().variables.putAssumeCapacityNoClobber(func.args[i], arg);
+        }
     }
 
     const pc = self.typechecker.setFlag(.CoveredAllPaths, false);
@@ -117,6 +120,43 @@ pub fn executeCall(self: *Executer, func: *JIR.Function, args: []const Comptime.
                         ast.extra[statement.value + 1]
                     ],
                 });
+            },
+            .Conditional => {
+                // @TODO Continue
+
+                const conditionExpr = ast.extra[statement.value];
+                const conditionRes = self.typechecker.folder.getValue(
+                    try self.typechecker.folder.eval(conditionExpr, comptime Comptime.Folder.Builtin.Type("bool"))
+                ).Bool;
+
+                if (conditionRes) {
+                    const bodyPtr = ast.extra[statement.value + 1];
+                    const body = ast.statements.get(bodyPtr);
+                    try self.stack.push(.{
+                        .pc = 0,
+                        .bp = @intCast(self.typechecker.folder.memory.items.len),
+                        .variables = .empty,
+                        .body = ast.extra[
+                            ast.extra[body.value]
+                            ..
+                            ast.extra[body.value + 1]
+                        ],
+                    });
+                }
+                else if (ast.extra[statement.value + 2] == 1) {
+                    const bodyPtr = ast.extra[statement.value + 3];
+                    const body = ast.statements.get(bodyPtr);
+                    try self.stack.push(.{
+                        .pc = 0,
+                        .bp = @intCast(self.typechecker.folder.memory.items.len),
+                        .variables = .empty,
+                        .body = ast.extra[
+                            ast.extra[body.value]
+                            ..
+                            ast.extra[body.value + 1]
+                        ],
+                    });
+                }
             },
             .InlineC, .Import => {
                 self.report("'{s}' statements are not allowed in comptime scopes.", .{@tagName(statement.type)});
