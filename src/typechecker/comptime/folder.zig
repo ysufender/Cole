@@ -706,6 +706,11 @@ fn evalSwitchExpression(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpecte
                     return self.expectDefined(ast.extra[case + 3], resultType);
                 }
 
+                var boundCapture: ?defines.DeclPtr = null;
+                defer if (boundCapture) |bound| {
+                    _ = self.declCache.remove(bound);
+                };
+
                 const fieldPtr = try self.expectDefined(fieldExprPtr, self.typechecker.typeTable.get(uni.Type).Union.tag);
                 const field = self.getValue(fieldPtr);
 
@@ -725,7 +730,9 @@ fn evalSwitchExpression(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpecte
                         .expr = firstCapture,
                     });
 
-                    try self.cacheDecl(capture, uni.Type);
+                    self.declCache.put(self.arena.allocator(), capture, uni.Value)
+                        catch return Error.AllocatorFailure;
+                    boundCapture = capture;
                 }
 
                 return self.expectDefined(ast.extra[case + 3], resultType);

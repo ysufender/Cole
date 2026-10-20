@@ -912,7 +912,7 @@ fn literal(self: *JIR, out: *Writer, ptr: Constant.Ptr) Error!void {
     const cst = self.constants.get(ptr);
 
     try switch (cst) {
-        .Void => try self.write(out, "{{0}}", .{}),
+        .Void => try self.write(out, "", .{}),
         .Type => |id| try self.write(out, "{s}", .{try self.getCName(id, null, false, false)}),
         .Undefined => |typeID| switch (self.types.get(typeID)) {
             .Pointer => |pointer| switch (pointer.size) {

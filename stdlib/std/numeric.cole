@@ -87,7 +87,7 @@ pub let Numeric = struct {
 pub let Signed = struct {
     pub let Check = fn (T: type) -> bool {
         return switch typeInfo(T) {
-            @Integer -> |i| i.signed,
+            @Integer -> |i| i.isSigned,
             @Float -> true,
             @CInt -> true,
             @CChar -> true,

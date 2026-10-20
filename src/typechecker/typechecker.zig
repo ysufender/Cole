@@ -2026,7 +2026,14 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
                 }
                 return Error.DependencyCycle;
             },
-            else => { },
+            .NotChecked => {
+                if (
+                    decl.kind == .Capture and determineExpected(maybeExpected) == null
+                    and isPresent.value_ptr.result != comptime Comptime.Folder.Builtin.Type("$$incomplete")
+                ) {
+                    return isPresent.value_ptr.result;
+                }
+            },
         }
     }
 
@@ -3191,6 +3198,7 @@ pub fn assertCanCoerce(self: *Typechecker, this: TypeID, that: TypeID) Error!voi
             else => return Error.TypeMismatch,
         },
         else => switch (thisType) {
+            .Noreturn => { },
             .ComptimeInt, .Integer => functional.throwIf(!self.isInt(this) and !self.isFloat(this), Error.TypeMismatch),
             .ComptimeFloat, .Float => functional.throwIf(!self.isFloat(this) and !self.isInt(this), Error.TypeMismatch),
             .Struct, .Union, .Enum => {
