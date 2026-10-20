@@ -1,0 +1,114 @@
+import std::memory::allocator as Allocator;
+import std::c as C;
+
+let limit = 4.0;        // abs(z) < 2
+let maxIter = 50;       // number of iterations
+let defaultSize = 4000; // bitmap size if not given as command-line argument
+
+let rows: mut []mut []mut u8 = undefined;
+let bytesPerRow: mut i32 = 0;
+let initial_r: mut []mut c_double = undefined;
+let initial_i: mut []mut c_double = undefined;
+
+// renderRow returns rendered row of pixels
+// pixels packed in one byte for PBM image
+let renderRow = fn (y0: *mut i32) -> []mut u8 {
+    let i: mut i32 = 0;
+    let j: mut i32 = 0;
+    let x: mut i32 = 0;
+
+    let res: mut u8 = 0;
+    let b:   mut u8 = 0;
+
+    let Zr1: mut c_double = 0;
+    let Zr2: mut c_double = 0;
+    let Zi1: mut c_double = 0;
+    let Zi2: mut c_double = 0;
+    let Tr1: mut c_double = 0;
+    let Tr2: mut c_double = 0;
+    let Ti1: mut c_double = 0;
+    let Ti2: mut c_double = 0;
+
+    let row = Allocator::alloc(C::Allocator, bytesPerRow, sizeOf([]u8));
+
+    for row, |xByte| {
+        res = 0;
+        let Ci = initial_i[y0.*];
+        for 0..4, |_i| {
+            let i = 2 * _i;
+            x = xByte << 3;
+            let Cr1 = initial_r[x+i];
+            let Cr2 = initial_r[x+i+1];
+
+            Zr1 = Cr1;
+            Zi1 = Ci;
+
+            Zr2 = Cr2;
+            Zi2 = Ci;
+
+            b = 0;
+
+            for 0..maxIter, |j| {
+                Tr1 = Zr1 * Zr1;
+                Ti1 = Zi1 * Zi1;
+                Zi1 = 2*Zr1*Zi1 + Ci;
+                Zr1 = Tr1 - Ti1 + Cr1;
+
+                if Tr1+Ti1 > limit {
+                    b = b | 2;
+                    if b == 3 {
+                        break;
+                    }
+                }
+
+                Tr2 = Zr2 * Zr2;
+                Ti2 = Zi2 * Zi2;
+                Zi2 = 2*Zr2*Zi2 + Ci;
+                Zr2 = Tr2 - Ti2 + Cr2;
+
+                if Tr2+Ti2 > limit {
+                    b = b | 1;
+                    if b == 3 {
+                        break;
+                    }
+                }
+            }
+            res = (res << 2) | b;
+        }
+        row[xByte] = res.*;
+    }
+    return row;
+};
+
+let yAt: i32 = -1;
+
+let renderRows = fn (s32: i32) -> void {
+    for (yAt + 1)..s32, |y| {
+        rows[y] = renderRow(y.&);
+    }
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let pool = 16;
+    let size = defaultSize;
+    bytesPerRow = size >> 3;
+
+    // Precompute the initial real and imaginary values for each x and y
+    // coordinate in the image.
+    initial_r = cast(Allocator::alloc(C::Allocator, size, sizeOf(typeInfo(typeOf(initial_r)).Pointer.child)));
+    initial_i = cast(Allocator::alloc(C::Allocator, size, sizeOf(typeInfo(typeOf(initial_i)).Pointer.child)));
+    let inv: c_double = 2.0 / cast(size);
+    for 0..size, |xy| {
+        let i = inv * cast(xy);
+        initial_r[xy] = i - 1.5;
+        initial_i[xy] = i - 1.0;
+    }
+
+    rows = Allocator::alloc(C::Allocator, size, sizeOf(typeInfo(typeOf(rows)).Pointer.child));
+
+    for 0..pool, |i| {
+        renderRows(size);
+    }
+    
+    return 0;
+};
