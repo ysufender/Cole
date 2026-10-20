@@ -8,7 +8,9 @@ pub let assert = fn (cnd: bool, msg: []u8) -> void {
 };
 
 pub let staticAssert = #(@comptime) fn (msg: []u8, cnd: bool) -> void {
-    if !cnd {
+    // @Note workaround the unary comptime bug
+    if cnd { }
+    else {
         compileError(msg);
     }
 };

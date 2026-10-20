@@ -127,8 +127,6 @@ pub fn executeCall(self: *Executer, func: *JIR.Function, args: []const Comptime.
                     try self.typechecker.folder.eval(conditionExpr, comptime Comptime.Folder.Builtin.Type("bool"))
                 ).Bool;
 
-                common.log.debug("{}", .{conditionRes});
-
                 if (conditionRes) {
                     const bptr = ast.extra[statement.value + 1];
                     const bod = ast.statements.get(bptr);

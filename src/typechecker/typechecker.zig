@@ -1779,10 +1779,7 @@ pub fn typecheckBuiltinCall(self: *Typechecker, extraPtr: defines.ExpressionPtr,
         BI("alignOf") => return comptime Comptime.Folder.Builtin.Type("u32"),
         BI("typeName") => return comptime Comptime.Folder.Builtin.Type("[]u8"),
         BI("compileBreak") => return comptime Comptime.Folder.Builtin.Type("void"),
-        BI("compileLog") => {
-            _ = try self.folder.evalCompileLog(extraPtr);
-            return comptime Comptime.Folder.Builtin.Type("void");
-        },
+        BI("compileLog") => return comptime Comptime.Folder.Builtin.Type("void"),
         BI("unreachable") => comptime Comptime.Folder.Builtin.Type("noreturn"),
         else => {
             self.report("Builtin '{s}' is not usable in this context.", .{Resolver.builtins[declPtr]});
