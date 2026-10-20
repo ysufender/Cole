@@ -1,0 +1,11 @@
+let print = fn (fmt: []u8, argt: type) -> *fn (argt) -> void {
+    return fn (args: argt) -> void {
+    };
+};
+
+let Demo = struct {
+    let test = fn () -> void {
+        print("Hello % with number %",
+              ([]u8, u32))("World", 5);
+    };
+};

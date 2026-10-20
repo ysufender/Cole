@@ -37,7 +37,7 @@ arena: Arena,
 stack: Stack,
 
 pub fn init(typechecker: *Typechecker, allocator: Allocator) Error!Executer {
-    return Executer{
+    return .{
         .arena = Arena.init(allocator),
         .typechecker = typechecker,
         .stack = .{},
@@ -120,11 +120,14 @@ pub fn executeCall(self: *Executer, func: *JIR.Function, args: []const Comptime.
                     ],
                 });
             },
+            .Expression => _ = try self.typechecker.folder.eval(statement.value, null),
             .Conditional => {
                 const conditionExpr = ast.extra[statement.value];
                 const conditionRes = self.typechecker.folder.getValue(
                     try self.typechecker.folder.eval(conditionExpr, comptime Comptime.Folder.Builtin.Type("bool"))
                 ).Bool;
+
+                common.log.debug("{}", .{conditionRes});
 
                 if (conditionRes) {
                     const bptr = ast.extra[statement.value + 1];

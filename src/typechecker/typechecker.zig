@@ -40,7 +40,7 @@ pub const TypeMap = collections.HashMap(TypeInfo, TypeID);
 pub const TypeNameMap = std.AutoHashMapUnmanaged(TypeID, defines.StringPtr);
 pub const MetadataMap = collections.HashMap(Resolver.ResolutionKey, []const Comptime.Value.Ptr);
 const DeclCache = collections.HashMap(defines.DeclPtr, TypecheckStatus);
-const ExprCache = collections.HashMap(Resolver.ResolutionKey, TypeID);
+const ExprCache = collections.HashMap(Resolver.ResolutionKey, struct { TypeID, FlagMap });
 
 pub const Flags = enum(u8) {
     ConcreteValue = 0,
@@ -1047,8 +1047,9 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
         .expr = expressionPtr,
     };
 
-    if (self.exprCache.get(key)) |typeID| {
-        return typeID;
+    if (self.exprCache.get(key)) |tuple| {
+        self.flags = tuple.@"1";
+        return tuple.@"0";
     }
 
     const maybeExpected =
@@ -1056,63 +1057,60 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
         else comptime Comptime.Folder.Builtin.Type("any");
 
     const expr = ast.expressions.get(expressionPtr);
-    defer _ = self.setFlag(.ConcreteValue, switch (expr.type) {
+
+    const typeID =
+        if (self.hasMetadata(expressionPtr, "@comptime"))
+            try self.typecheckValue(try self.folder.eval(expressionPtr, maybeExpected), maybeExpected)
+        // @Note all literals, types and functions should be handled here.
+        else if (self.folder.attemptEval(expressionPtr, maybeExpected)) |result|
+            try self.typecheckValue(result, maybeExpected)
+        else typeID: switch (expr.type) {
+            .Identifier => {
+                self.lastToken = expr.value;
+                const decl = self.symbols.findDecl(.{ .file = self.currentFile, .expr = expressionPtr });
+                const discoveredType = try self.typecheckDecl(decl, maybeExpected);
+                break :typeID discoveredType;
+            },
+            .Indexing => try self.typecheckIndexing(expr.value),
+            .Call => try self.typecheckCall(expr.value, maybeExpected),
+            .Scoping => try self.typecheckScoping(expressionPtr),
+            .ExpressionList => try self.typecheckExpressionList(expr.value, maybeExpected),
+
+            .Literal,
+            .ArrayType, .CPointerType, .FunctionType,
+            .MutableType, .PointerType, .SliceType, 
+            .EnumDefinition, .UnionDefinition, .StructDefinition,
+            .FunctionDefinition => try self.typecheckValue(try self.folder.eval(expressionPtr, maybeExpected), maybeExpected),
+
+            .Conditional => try self.typecheckIfExpression(expr.value, maybeExpected),
+            .Switch => try self.typecheckSwitchExpression(expr.value, maybeExpected),
+
+            .Unary => try self.typecheckUnary(expr.value, maybeExpected),
+            .Binary => try self.typecheckBinary(expr.value, maybeExpected),
+
+            .Slicing => try self.typecheckSlicing(expr.value),
+
+            .Mark => try self.typecheckMark(expressionPtr, expr.value, maybeExpected),
+
+            .Dot => try self.typecheckDot(expr.value),
+
+            .Assignment => |t| {
+                self.report("Expected an expression, received '{s}' instead.", .{
+                    @tagName(t),
+                });
+                return Error.IllegalSyntax;
+            },
+
+            .TupleDefinition => try self.typecheckTupleDefinition(expr.value),
+        };
+
+    _ = self.setFlag(.ConcreteValue, switch (expr.type) {
         .Identifier, .Indexing, .Scoping, .Dot => true,
         else => false,
     });
 
-    if (self.hasMetadata(expressionPtr, "@comptime")) {
-        const val = try self.folder.eval(expressionPtr, maybeExpected);
-        return self.typecheckValue(val, maybeExpected);
-    }
-
-    // @Note all literals, types and functions should be handled here.
-    if (self.folder.attemptEval(expressionPtr, maybeExpected)) |result| {
-        return self.typecheckValue(result, maybeExpected);
-    }
-
-    const typeID = typeID: switch (expr.type) {
-        .Identifier => {
-            self.lastToken = expr.value;
-            const decl = self.symbols.findDecl(.{ .file = self.currentFile, .expr = expressionPtr });
-            const discoveredType = try self.typecheckDecl(decl, maybeExpected);
-            break :typeID discoveredType;
-        },
-        .Indexing => try self.typecheckIndexing(expr.value),
-        .Call => try self.typecheckCall(expr.value, maybeExpected),
-        .Scoping => try self.typecheckScoping(expressionPtr),
-        .ExpressionList => try self.typecheckExpressionList(expr.value, maybeExpected),
-
-        .Literal,
-        .ArrayType, .CPointerType, .FunctionType,
-        .MutableType, .PointerType, .SliceType, 
-        .EnumDefinition, .UnionDefinition, .StructDefinition,
-        .FunctionDefinition => try self.typecheckValue(try self.folder.eval(expressionPtr, maybeExpected), maybeExpected),
-
-        .Conditional => try self.typecheckIfExpression(expr.value, maybeExpected),
-        .Switch => try self.typecheckSwitchExpression(expr.value, maybeExpected),
-
-        .Unary => try self.typecheckUnary(expr.value, maybeExpected),
-        .Binary => try self.typecheckBinary(expr.value, maybeExpected),
-
-        .Slicing => try self.typecheckSlicing(expr.value),
-
-        .Mark => try self.typecheckMark(expressionPtr, expr.value, maybeExpected),
-
-        .Dot => try self.typecheckDot(expr.value),
-
-        .Assignment => |t| {
-            self.report("Expected an expression, received '{s}' instead.", .{
-                @tagName(t),
-            });
-            return Error.IllegalSyntax;
-        },
-
-        .TupleDefinition => try self.typecheckTupleDefinition(expr.value),
-    };
-
-    if (false and !self.folder.getFlag(.InComptimeCall)) {
-        self.exprCache.put(self.arena.allocator(), key, typeID)
+    if (!self.folder.getFlag(.InComptimeCall)) {
+        self.exprCache.put(self.arena.allocator(), key, .{typeID, self.flags})
             catch return Error.AllocatorFailure;
     }
 
