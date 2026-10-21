@@ -1644,8 +1644,6 @@ pub fn evalCompileError(self: *Folder, extraPtr: defines.OpaquePtr) Error {
         .end = ast.extra[expressionList + 1],
     };
 
-    _ = self.typechecker.setFlag(.AttemptingEval, false);
-
     if (args.len() != 1) {
         self.report("'compileError' expects a single expression argument, received {d}.", .{
             args.len(),

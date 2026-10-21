@@ -9,8 +9,6 @@
 #include <signal.h>
 #include <stdio.h>
 
-
-
 #ifdef COLE_WIN32
 #   include <windows.h>
 #   include <dbghelp.h>
@@ -24,37 +22,47 @@
 Slice_uint8_t       _Cole_implicit__executable_path;
 Slice_Slice_uint8_t _Cole_implicit__commandline_args;
 
+#ifdef COLE_DEBUG
+#ifndef COLE_BUILTINS
+    typedef struct builtin__StackFrame {{
+        Slice_uint8_t function;
+        Slice_uint8_t file;
+        uint32_t line;
+        uint32_t col;
+    }} builtin__StackFrame;
+
+    typedef struct builtin__StackTrace {{
+        builtin__StackFrame frame;
+        struct builtin__StackTrace const* next;
+    }} builtin__StackTrace;
+#endif
+
+builtin__StackTrace _Cole_implicit__stack_trace;
+
+static void $$print_stack_trace(void) {{
+    builtin__StackTrace const* node = &_Cole_implicit__stack_trace;
+    unsigned depth = 0;
+
+    fprintf(stderr, "Trace (most recent call first):\n");
+    for (unsigned guard = 0; node != NULL && guard < 4096; guard++, node = node->next) {{
+        if (node->frame.function.len == 0) {{
+            continue;
+        }}
+        fprintf(stderr, "  [%u] %.*s (%.*s:%u:%u)\n",
+            depth++,
+            (int)node->frame.function.len, (char const*)node->frame.function.ptr,
+            (int)node->frame.file.len, (char const*)node->frame.file.ptr,
+            (unsigned)node->frame.line, (unsigned)node->frame.col);
+    }}
+}}
+#endif
+
 void __attribute__((noreturn)) $$panic_handler(int const addr) {{
     fprintf(stderr, "General protection handler. %#018lx\n\n", addr);
 #ifdef COLE_DEBUG
-    fprintf(stderr, "Trace:\n");
-#   ifdef COLE_WIN32
-        HANDLE process = GetCurrentProcess();
-        SymInitialize(process, NULL, TRUE);
-
-        void *frames[64];
-        WORD n = CaptureStackBackTrace(0, 64, frames, NULL);
-
-        SYMBOL_INFO *sym = (SYMBOL_INFO *)calloc(
-            sizeof(SYMBOL_INFO) + 256 * sizeof(char), 1);
-        sym->MaxNameLen   = 255;
-        sym->SizeOfStruct = sizeof(SYMBOL_INFO);
-
-        for (WORD i = 0; i < n; i++) {{
-            SymFromAddr(process, (DWORD64)frames[i], 0, sym);
-            fprintf(stderr, "  [%u] %s — 0x%0llX\n",
-                    n - i - 1, sym->Name, sym->Address);
-        }}
-        free(sym);
-        SymCleanup(process);
-#   else
-        const framec = 128;
-        void *frames[framec];
-        int n = backtrace(frames, framec);
-        backtrace_symbols_fd(frames, n, STDERR_FILENO);
-#   endif
+    $$print_stack_trace();
 #else
-    fprintf(stderr, "Stack tracing not available.\n");
+    fprintf(stderr, "Stack tracing is not available.\n");
 #endif
     fflush(stderr);
     exit(EXIT_FAILURE);
@@ -85,6 +93,18 @@ void __attribute__((noreturn)) $$union_access(long const addr, char const* const
 #endif
 
 int main(int const argc, char const* const* const argv) {{
+#if COLE_DEBUG
+    _Cole_implicit__stack_trace = (builtin__StackTrace){{
+        .frame = (builtin__StackFrame){{
+            .function = (Slice_uint8_t){{(uint8_t*)"main", 4}},
+            .file = (Slice_uint8_t){{(uint8_t*)"hidden_main.c", 13}},
+            .line = 0,
+            .col = 0,
+        }},
+        .next = (builtin__StackTrace*)NULL,
+    }};
+#endif
+
     Slice_uint8_t* const strings = (Slice_uint8_t*)malloc(sizeof(Slice_uint8_t) * (argc - 1));
     for (int i = 1; i < argc; i++) {{
         strings[i - 1].ptr = (uint8_t*)argv[i];

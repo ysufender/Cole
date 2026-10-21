@@ -1,0 +1,4 @@
+let main = fn (args: [][]u8) -> i32 {
+    a;
+    return 0;
+};

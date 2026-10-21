@@ -138,6 +138,7 @@ pub const Function = struct {
     source: defines.FilePtr,
     scope: defines.ScopePtr,
     expr: defines.ExpressionPtr,
+    position: @import("../../lexer/lexer.zig").Position = .{ .line = 1, .column = 1 },
 };
 
 const JIR = @This();
@@ -215,7 +216,7 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
     for (self.topLevelAsms) |asmn| {
         const asmc = std.mem.trim(u8, self.strings[asmn], " \t\n\r");
 
-        if (std.mem.startsWith(u8, asmc, "#include")) {
+        if (std.mem.startsWith(u8, asmc, "#")) {
             try self.write(out, "{s}\n", .{asmc});
         }
         try self.write(out, "\n", .{});
@@ -562,17 +563,6 @@ fn sourceGen(self: *JIR, out: *Writer) Error!void {
     };
     try self.write(out, "\n\n", .{});
 
-    try self.write(out, "/* Top-level inserted code */\n", .{});
-    for (self.topLevelAsms) |asmn| {
-        const asmc = std.mem.trim(u8, self.strings[asmn], " \t\n\r");
-
-        if (!std.mem.startsWith(u8, asmc, "#include")) {
-            try self.write(out, "{s}", .{asmc});
-        }
-        try self.write(out, "\n", .{});
-    }
-    try self.write(out, "\n\n", .{});
-
     for (self.keyNodes) |keyNode| {
         const node = self.nodes.get(@intCast(keyNode));
         switch (node.type) {
@@ -616,8 +606,46 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
                 name,
                 args
             });
+
+            if (self.context.settings.buildInfo.isDebug) {
+                try self.writeln(out, "{{\n", .{});
+
+                const file = self.context.getFileName(func.source);
+                const fname = self.strings[func.name];
+
+                try self.write(
+                    out,
+                    \\
+                    \\builtin__StackTrace $$anon_trace_TMP = _Cole_implicit__stack_trace;
+                    \\_Cole_implicit__stack_trace = (builtin__StackTrace){{
+                    \\    .frame = (builtin__StackFrame){{
+                    \\        .function = (Slice_uint8_t){{(uint8_t*)"{s}", {d}}},
+                    \\        .file = (Slice_uint8_t){{(uint8_t*)"{s}", {d}}},
+                    \\        .line = {d},
+                    \\        .col = {d},
+                    \\    }},
+                    \\    .next = &$$anon_trace_TMP
+                    \\}};
+                    \\
+                    , .{
+                        fname,
+                        fname.len,
+                        file,
+                        file.len,
+                        func.position.line,
+                        func.position.column
+                    }
+                );
+            }
             
             try self.operation(out, func.body);
+
+            if (self.context.settings.buildInfo.isDebug) {
+                if (self.context.settings.buildInfo.isDebug) {
+                    try self.writeln(out, "_Cole_implicit__stack_trace = $$anon_trace_TMP;\n" , .{ });
+                }
+                try self.writeln(out, "}}\n", .{});
+            }
         },
         .VariableDef => {
             const typeID = self.data[node.value + 1];
@@ -735,6 +763,10 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
             try self.write(out, ") goto {s};\n", .{self.strings[self.data[node.value]]});
         },
         .Return => {
+            if (self.context.settings.buildInfo.isDebug) {
+                try self.writeln(out, "_Cole_implicit__stack_trace = $$anon_trace_TMP;\n" , .{ });
+            }
+
             try self.writeln(out, "return ", .{});
             if (self.data[node.value] != 0) {
                 try self.operation(out, self.data[node.value + 1]);

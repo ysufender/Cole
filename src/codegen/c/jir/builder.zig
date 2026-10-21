@@ -345,7 +345,8 @@ pub fn dot(self: *Builder, object: JIR.Ptr, field: StringPtr, objType: TypeID) E
 }
 
 pub inline fn dereference(self: *Builder, expr: JIR.Ptr, exprType: TypeID) Error!JIR.Ptr {
-    if (self.typechecker.context.settings.buildInfo.isDebug) {
+    // @Beware disabled for now
+    if (false and self.typechecker.context.settings.buildInfo.isDebug) {
         const ptrName = try self.typechecker.folder.generateRandomName(.Ptr);
         const ptrDef = try self.variableDef(false, exprType, ptrName, false, expr, null);
         const ptrIdent = try self.identifier(ptrName);
@@ -356,7 +357,7 @@ pub inline fn dereference(self: *Builder, expr: JIR.Ptr, exprType: TypeID) Error
         const cnd = try self.notEqual(ptrIdent, nullPtr);
         const safetyCheck = try self.cjump(safeLabelName, cnd);
 
-        const segfault = try self.typechecker.lowerer.handler("__null_deref");
+        const segfault = try self.typechecker.lowerer.handler("$$null_deref");
 
         const safeLabel = try self.label(safeLabelName);
 

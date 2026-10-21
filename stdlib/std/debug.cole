@@ -1,4 +1,8 @@
+import builtin;
+import std::io::stream as Stream;
 import std::io::console as Console;
+import std::memory::allocator as Allocator;
+import std::string;
 
 pub let assert = fn (cnd: bool, msg: []u8) -> void {
     if !cnd {
@@ -29,5 +33,37 @@ pub let breakpoint = fn () -> void {
     }
     else {
         _ = raise(cast(Signal::Trap));
+    }
+};
+
+let _Cole_implicit__stack_trace: mut builtin::StackTrace = #(@extern) undefined;
+
+pub let stackTrace = fn () -> builtin::StackTrace {
+    return
+        if (buildInfo().optimization == @Og) _Cole_implicit__stack_trace
+        else (("unknown", "unknown", 0, 0), undefined);
+};
+
+pub let dumpTrace = fn (
+    trace: builtin::StackTrace,
+    allocator: Allocator::Allocator,
+    stream: Stream::Output::Stream
+) -> void {
+    if buildInfo().optimization == @Og {
+        let current: mut any = trace.&;
+
+        _ = Stream::Output::writebuffer(stream, "Trace (most recent call first):\n");
+        while current != undefined {
+            _ = Stream::Output::writebuffer(stream, "    ");
+            _ = Stream::Output::writebuffer(stream, current.frame.function);
+            _ = Stream::Output::writebuffer(stream, "@");
+            _ = Stream::Output::writebuffer(stream, current.frame.file);
+            _ = Stream::Output::writebuffer(stream, ":");
+            _ = Stream::Output::writebuffer(stream, std::string::intToStr(current.frame.line, allocator));
+            _ = Stream::Output::writebuffer(stream, ":");
+            _ = Stream::Output::writebuffer(stream, std::string::intToStr(current.frame.col, allocator));
+            _ = Stream::Output::writebuffer(stream, "\n");
+            current = current.next;
+        }
     }
 };

@@ -1,3 +1,7 @@
+code {
+#define COLE_BUILTINS
+}
+
 pub let Optimization = enum {
     Og,
     O1,
@@ -43,6 +47,18 @@ pub let ColeInfo: struct {
         "Yusuf Ender Osmanoğlu <yusufenderosmanoglu@gmail.com>",
     )
 );
+
+pub let StackFrame = struct {
+    function: mut []u8,
+    file: mut []u8,
+    line: mut u32,
+    col: mut u32,
+};
+
+pub let StackTrace = struct {
+    frame: mut StackFrame,
+    next: mut *StackTrace,
+};
 
 pub let TypeInfo = union(enum) {
     Struct: Struct,

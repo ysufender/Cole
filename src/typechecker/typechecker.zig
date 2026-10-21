@@ -2148,6 +2148,7 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
             defer self.lowerer.lastReturnType = prt;
 
             func.body = try self.lowerer.statement(func.body);
+            func.position = tokens.get(decl.token).position(self.context, self.currentFile);
 
             const fun = try self.builder.addFunction(func);
             try self.builder.functionDef(func.name, fun);

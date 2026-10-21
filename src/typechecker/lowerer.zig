@@ -695,7 +695,7 @@ fn rangeForLoop(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.
 
     const body = try self.statement(ast.extra[extraPtr + 4]);
 
-    if (self.typechecker.context.settings.buildInfo.isDebug) {
+    if (false and self.typechecker.context.settings.buildInfo.isDebug) {
         const safetyCnd = try self.typechecker.builder.lesserEqual(rangeStartIdent, rangeEndIdent);
         const safetyEnd = try self.typechecker.folder.generateRandomName(.ForSafetyEnd);
         const safetyCheck = try self.typechecker.builder.cjump(safetyEnd, safetyCnd);
@@ -1769,7 +1769,11 @@ fn indexing(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     const indexableBaseIdent = try self.expression(exprPtr, typeID);
 
     const indexable = blk: switch (self.typechecker.typeTable.get(typeID)) {
-        .Array => break :blk try self.typechecker.builder.dot(indexableBaseIdent, try self.typechecker.builder.internString("data"), typeID),
+        .Array => {
+            const prev = self.typechecker.setFlag(.LValue, true);
+            defer _ = self.typechecker.setFlag(.LValue, prev);
+            break :blk try self.typechecker.builder.dot(indexableBaseIdent, try self.typechecker.builder.internString("data"), typeID);
+        },
         .Pointer => |ptr| switch (ptr.size) {
             .Slice => break :blk try self.typechecker.builder.dot(indexableBaseIdent, try self.typechecker.builder.internString("ptr"), typeID),
             else => try self.expression(exprPtr, typeID),
@@ -1796,7 +1800,7 @@ fn indexing(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
         },
     });
 
-    if (self.typechecker.context.settings.buildInfo.isDebug and !self.typechecker.isCPtr(typeID)) {
+    if (false and self.typechecker.context.settings.buildInfo.isDebug and !self.typechecker.isCPtr(typeID)) {
         const indexableName = try self.typechecker.folder.generateRandomName(.Indexable);
         const indexableDef = try self.typechecker.builder.variableDef(false, indexedTypeChildPtr, indexableName, false, indexable, null);
         const indexableIdent = try self.typechecker.builder.identifier(indexableName);
@@ -1834,6 +1838,12 @@ fn indexing(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
                     boundsEndLabel
                 }
             ),
+            indexedTypeChildPtr,
+        );
+    }
+    else if (self.typechecker.typeTable.get(typeID) == .Array) {
+        return self.typechecker.builder.dereference(
+            try self.typechecker.builder.add(indexable, index),
             indexedTypeChildPtr,
         );
     }
