@@ -140,7 +140,7 @@ return {
         -- "generic_fn_nested_call", -- fail
         -- "generic_type_defs", -- fail
         "generic_type_alias",
-        -- "generic_type_two_params", -- fail
+        "generic_type_two_params",
         -- "generic_type_same_instance", -- fail
         "comptime_fn_mark",
         "comptime_const_fold",

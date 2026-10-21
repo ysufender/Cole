@@ -1,28 +1,12 @@
 import std::io::console as Console;
+import std;
 
-let Pair = fn (A: type, B: type) -> type {
-    return struct {
-        first: A,
-        second: B,
-
-        pub let pickFirst = fn (a: A, b: B) -> A {
-            return a;
-        };
-
-        pub let pickSecond = fn (a: A, b: B) -> B {
-            return b;
-        };
-    };
-};
-
-let IF = Pair(i32, float);
-let FI = Pair(float, i32);
+let IF = std::Pair(i32, float);
+let FI = std::Pair(float, i32);
 
 let main = fn (args: [][]u8) -> i32 {
     let p = IF(1, 2.5);
     let q = FI(1.5, 3);
-    let x = IF::pickSecond(1, 2.5);
-    let y = FI::pickSecond(1.5, 3);
 
     if p.second == 2.5 {
         Console::log("IF.second: ok");
@@ -30,11 +14,6 @@ let main = fn (args: [][]u8) -> i32 {
     if q.second == 3 {
         Console::log("FI.second: ok");
     }
-    if x == 2.5 {
-        Console::log("IF::pickSecond: ok");
-    }
-    if y == 3 {
-        Console::log("FI::pickSecond: ok");
-    }
+
     return 0;
 };

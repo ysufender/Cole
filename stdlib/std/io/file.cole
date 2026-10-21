@@ -17,7 +17,9 @@
         File operation utilities.
 */
 code {
+#header_start
     #include <stdio.h>
+#header_end
 }
 
 import std::io::file::ifile as ifile;

@@ -11,3 +11,10 @@ pub let Option = fn (T: type) -> type {
         None: void,
     };
 };
+
+pub let Pair = fn (F: type, S: type) -> type {
+    return struct {
+        first: F,
+        second: S,
+    };
+};

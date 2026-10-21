@@ -4,13 +4,15 @@
  */
 
 code {
-#include <stdio.h>
-#include <time.h>
-#ifdef COLE_UNIX
-#   include <sys/stat.h>
-#else
-#   include <windows.h>
-#endif
+#header_start
+#   include <stdio.h>
+#   include <time.h>
+#   ifdef COLE_UNIX
+#       include <sys/stat.h>
+#   else
+#       include <windows.h>
+#   endif
+#hedaer_end
 }
 
 import std::io::stream as Stream;

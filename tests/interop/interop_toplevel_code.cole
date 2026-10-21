@@ -9,7 +9,9 @@ let pi = fn (n: c_long) -> void {
 };
 
 code {
-    static int twice_c(int x) { return x * 2; }
+#source_start
+    int const twice_c(int const x) { return x * 2; }
+#source_end
 }
 
 let twice_c = #(@extern) fn (x: c_int) -> c_int { };

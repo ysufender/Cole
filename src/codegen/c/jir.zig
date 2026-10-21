@@ -213,13 +213,23 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
     }
 
     try self.write(out, "/* Top-level inserted code */\n", .{});
+    var inHeader: bool = false;
     for (self.topLevelAsms) |asmn| {
-        const asmc = std.mem.trim(u8, self.strings[asmn], " \t\n\r");
+        const _asmc = std.mem.trim(u8, self.strings[asmn], " \t\n\r");
+        var lines = std.mem.splitScalar(u8, _asmc, '\n');
 
-        if (std.mem.startsWith(u8, asmc, "#")) {
-            try self.write(out, "{s}\n", .{asmc});
+        while (lines.next()) |asmc| {
+            if (std.mem.startsWith(u8, asmc, "#header_start")) {
+                inHeader = true;
+            }
+            else if (std.mem.startsWith(u8, asmc, "#header_end")) {
+                inHeader = false;
+            }
+            else if (inHeader) {
+                try self.write(out, "{s}\n", .{asmc});
+            }
+            try self.write(out, "\n", .{});
         }
-        try self.write(out, "\n", .{});
     }
     try self.write(out, "\n\n", .{});
 
@@ -565,6 +575,27 @@ fn sourceGen(self: *JIR, out: *Writer) Error!void {
     };
     try self.write(out, "\n\n", .{});
 
+    try self.write(out, "/* Top-level inserted code */\n", .{});
+    var inHeader: bool = false;
+    for (self.topLevelAsms) |asmn| {
+        const _asmc = std.mem.trim(u8, self.strings[asmn], " \t\n\r");
+        var lines = std.mem.splitScalar(u8, _asmc, '\n');
+
+        while (lines.next()) |asmc| {
+            if (std.mem.startsWith(u8, asmc, "#source_start")) {
+                inHeader = true;
+            }
+            else if (std.mem.startsWith(u8, asmc, "#source_end")) {
+                inHeader = false;
+            }
+            else if (inHeader) {
+                try self.write(out, "{s}\n", .{asmc});
+            }
+            try self.write(out, "\n", .{});
+        }
+    }
+    try self.write(out, "\n\n", .{});
+
     for (self.keyNodes) |keyNode| {
         const node = self.nodes.get(@intCast(keyNode));
         switch (node.type) {
@@ -877,13 +908,19 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
                                 try self.operation(out, self.data[@intCast(node.value + 3)]);
                             }
                         }
-                    } else {
-                        const tagValue = self.constants.get(self.data[node.value]).Integer.u32;
+                    }
+                    else {
+                        const tagValue = switch (self.constants.get(self.data[node.value]).Integer) {
+                            .u32 => |v| v,
+                            .c_long => |v| v,
+                            .u8 => |v| v,
+                            else => return common.debug.ShouldBeImpossible(undefined, @src()),
+                        };
 
                         if (typeInfo.isZeroBit()) return;
 
-                        try self.write(out, ".{s} = ", .{self.strings[uni.fields[tagValue].name]});
-                        try self.literal(out, @intCast(self.data[node.value + 1]));
+                        try self.write(out, ".{s} = ", .{self.strings[uni.fields[@intCast(tagValue)].name]});
+                        try self.operation(out, @intCast(self.data[node.value + 3]));
                     }
                 },
                 .Struct => |str| {

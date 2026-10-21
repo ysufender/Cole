@@ -1,5 +1,7 @@
 code {
+#header_start
     #include "raylib.h"
+#header_end
 }
 
 pub let Color = #(@extern) struct {

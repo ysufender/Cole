@@ -1,7 +1,9 @@
 code {
+#header_start
     #include <stdlib.h>
     #include <unistd.h>
     #include <errno.h>
+#header_end
 }
 
 import std::c::memory as Memory;

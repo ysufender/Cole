@@ -78,7 +78,7 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
         .Int => |val| switch (ofType) {
             .Integer, .ComptimeInt, =>switch (self.typechecker.sizeOf(ofTypePtr)) {
                 64 => .{ .Integer = .{
-                    .i32 = @intCast(val),
+                    .c_long = @intCast(val),
                 }},
                 32 => .{ .Integer = if (ofType.Integer.signed) .{
                     .i32 = @intCast(val),
