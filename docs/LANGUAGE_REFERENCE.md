@@ -203,7 +203,7 @@ or thinking about the order of files and declarations.
 ### Returning multiple values
 
 ```rust
-let foo = fn () -> Tuple(i32, i32) {
+let foo = fn () -> (i32, i32) {
 	return (2, 3);
 };
 
@@ -892,7 +892,7 @@ let compileLog = #(@comptime) fn (msg: []u8) -> void
 
 let typeName = #(@comptime) fn (T: type) -> []u8
 
-let Tuple = #(@variadic) fn (F1: type) -> type
+let  = #(@variadic) fn (F1: type) -> type
 
 let alignOf = fn (val: any) -> comptime_int
 
