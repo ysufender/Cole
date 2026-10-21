@@ -630,18 +630,18 @@ pub fn evalUnary(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Typ
     const operator: Lexer.TokenType = @enumFromInt(ast.extra[extraPtr]);
     const rhsPtr = try self.expectDefined(ast.extra[extraPtr + 1], maybeExpected);
     const rhs = self.getValue(rhsPtr);
-    switch (operator) {
+    const res = switch (operator) {
         .Minus => switch (rhs) {
-            .Float => |float| self.setValue(rhsPtr, .{ .Float = -float }),
-            .Int => |int| self.setValue(rhsPtr, .{ .Int = -int }),
+            .Float => |float| self.appendValue(.{ .Float = -float }),
+            .Int => |int| self.appendValue(.{ .Int = -int }),
             else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
         },
-        .Tilde => self.setValue(rhsPtr, .{ .Int = ~rhs.Int }),
-        .Bang => self.setValue(rhsPtr, .{ .Bool = !rhs.Bool }),
+        .Tilde => self.appendValue(.{ .Int = ~rhs.Int }),
+        .Bang => self.appendValue(.{ .Bool = !rhs.Bool }),
         else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
-    }
+    };
 
-    return rhsPtr;
+    return res;
 }
 
 fn evalSwitchExpression(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID) Error!Comptime.Value.Ptr {

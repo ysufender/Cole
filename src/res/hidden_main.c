@@ -23,24 +23,10 @@ Slice_uint8_t       _Cole_implicit__executable_path;
 Slice_Slice_uint8_t _Cole_implicit__commandline_args;
 
 #ifdef COLE_DEBUG
-#ifndef COLE_BUILTINS
-    typedef struct builtin__StackFrame {{
-        Slice_uint8_t function;
-        Slice_uint8_t file;
-        uint32_t line;
-        uint32_t col;
-    }} builtin__StackFrame;
-
-    typedef struct builtin__StackTrace {{
-        builtin__StackFrame frame;
-        struct builtin__StackTrace const* next;
-    }} builtin__StackTrace;
-#endif
-
-builtin__StackTrace _Cole_implicit__stack_trace;
+StackTrace _Cole_implicit__stack_trace;
 
 static void $$print_stack_trace(void) {{
-    builtin__StackTrace const* node = &_Cole_implicit__stack_trace;
+    StackTrace const* node = &_Cole_implicit__stack_trace;
     unsigned depth = 0;
 
     fprintf(stderr, "Trace (most recent call first):\n");
@@ -94,14 +80,14 @@ void __attribute__((noreturn)) $$union_access(long const addr, char const* const
 
 int main(int const argc, char const* const* const argv) {{
 #if COLE_DEBUG
-    _Cole_implicit__stack_trace = (builtin__StackTrace){{
-        .frame = (builtin__StackFrame){{
+    _Cole_implicit__stack_trace = (StackTrace){{
+        .frame = (StackFrame){{
             .function = (Slice_uint8_t){{(uint8_t*)"main", 4}},
             .file = (Slice_uint8_t){{(uint8_t*)"hidden_main.c", 13}},
             .line = 0,
             .col = 0,
         }},
-        .next = (builtin__StackTrace*)NULL,
+        .next = (StackTrace*)NULL,
     }};
 #endif
 

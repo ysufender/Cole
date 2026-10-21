@@ -114,12 +114,11 @@ pub const FieldInfo = struct {
         return
             (this.public and !that.public or this.public == that.public)
             and this.name == that.name
-            and typechecker.typeTable.items(.tags)[this.valueType] == typechecker.typeTable.items(.tags)[that.valueType]
+            and typechecker.nominallyIdentical(this.valueType, that.valueType)
             and (
                 typechecker.mutable(this.valueType) and !typechecker.mutable(that.valueType)
                 or typechecker.mutable(this.valueType) == typechecker.mutable(that.valueType)
             );
-        // @Maybe TODO: Structural FieldInfo.valueType check instead.
     }
 };
 

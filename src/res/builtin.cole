@@ -1,7 +1,3 @@
-code {
-#define COLE_BUILTINS
-}
-
 pub let Optimization = enum {
     Og,
     O1,
@@ -48,14 +44,14 @@ pub let ColeInfo: struct {
     )
 );
 
-pub let StackFrame = struct {
+pub let StackFrame = #(@extern) struct {
     function: mut []u8,
     file: mut []u8,
     line: mut u32,
     col: mut u32,
 };
 
-pub let StackTrace = struct {
+pub let StackTrace = #(@extern) struct {
     frame: mut StackFrame,
     next: mut *StackTrace,
 };

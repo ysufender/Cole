@@ -904,7 +904,7 @@ fn typecheckIfStatement(self: *Typechecker, extraPtr: defines.OpaquePtr, expecte
         else null;
 
     const conditionType = try self.typecheckExpression(conditionExpr, comptime Comptime.Folder.Builtin.Type("bool"));
-    if (!self.suitable(conditionType, comptime Comptime.Folder.Builtin.Type("bool"))) {
+    if (!self.suitable(comptime Comptime.Folder.Builtin.Type("bool"), conditionType)) {
         self.report("Expected a boolean for condition.", .{});
         return Error.TypeMismatch;
     }
@@ -1047,7 +1047,16 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
     };
 
     if (self.exprCache.get(key)) |tuple| {
+        const attempting = self.getFlag(.AttemptingEval);
+        const inLoop = self.getFlag(.InLoop);
+        const inDefer = self.getFlag(.InDefer);
+
         self.flags = tuple.@"1";
+
+        _ = self.setFlag(.AttemptingEval, attempting);
+        _ = self.setFlag(.InLoop, inLoop);
+        _ = self.setFlag(.InDefer, inDefer);
+
         return tuple.@"0";
     }
 
@@ -1713,6 +1722,10 @@ pub fn typecheckCall(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpec
             args.len,
         });
         return Error.ArgumentCountMismatch;
+    }
+
+    if (func.returnType == comptime Comptime.Folder.Builtin.Type("noreturn")) {
+        _ = self.setFlag(.CoveredAllPaths, true);
     }
 
     return func.returnType;
@@ -2978,7 +2991,7 @@ pub fn dumpCallStack(self: *Typechecker) void {
 
 pub fn assertCastable(self: *Typechecker, from: TypeID, to: TypeID, unsafe: bool) Error!void {
     blk: {
-        self.assertCanCoerce(from, to) catch {
+        self.assertCanCoerce(to, from) catch {
             break :blk;
         };
         return;
@@ -3122,10 +3135,50 @@ pub fn assertStructurallyIdentical(self: *const Typechecker, this: TypeID, that:
     }
 }
 
-/// Check if 'this' is structurally identical to 'this'
+/// Check if 'this' is structurally identical to 'that'
 pub fn structurallyIdentical(self: *const Typechecker, this: TypeID, that: TypeID) bool {
     self.assertStructurallyIdentical(this, that) catch return false;
     return true;
+}
+
+/// Check if 'this' is nominally identical to 'that'
+pub fn nominallyIdentical(self: *const Typechecker, this: TypeID, that: TypeID) bool {
+    if (this == that) return true;
+
+    const ta = self.typeTable.get(this);
+    const tb = self.typeTable.get(that);
+
+    if (std.meta.activeTag(ta) != std.meta.activeTag(tb)) {
+        return false;
+    }
+
+    return switch (ta) {
+        .Struct => |s| s.name == tb.Struct.name,
+        .Union => |u| u.name == tb.Union.name,
+        .Enum => |e| e.name == tb.Enum.name,
+        .Array => |arr|
+            arr.len == tb.Array.len
+            and self.nominallyIdentical(arr.child, tb.Array.child),
+        .Pointer => |ptr|
+            ptr.size == tb.Pointer.size
+            and self.nominallyIdentical(ptr.child, tb.Pointer.child),
+        .Function => |f| blk: {
+            const g = tb.Function;
+            if (
+                f.argTypes.len != g.argTypes.len
+                or f.variadic != g.variadic
+                or f.isComptime != g.isComptime
+            ) break :blk false;
+
+            for (f.argTypes, g.argTypes) |x, y| {
+                if (!self.nominallyIdentical(x, y)) break :blk false;
+            }
+
+            break :blk self.nominallyIdentical(f.returnType, g.returnType);
+        },
+        .Integer => |int| int.size == tb.Integer.size and int.signed == tb.Integer.signed,
+        else => true,
+    };
 }
 
 /// Check if 'this' can be assigned to 'that'
@@ -3193,8 +3246,8 @@ pub fn assertCanCoerce(self: *Typechecker, this: TypeID, that: TypeID) Error!voi
         },
         else => switch (thisType) {
             .Noreturn => { },
-            .ComptimeInt, .Integer => functional.throwIf(!self.isInt(this) and !self.isFloat(this), Error.TypeMismatch),
-            .ComptimeFloat, .Float => functional.throwIf(!self.isFloat(this) and !self.isInt(this), Error.TypeMismatch),
+            .ComptimeInt, .Integer => functional.throwIf(!self.isInt(that) and !self.isFloat(that), Error.TypeMismatch),
+            .ComptimeFloat, .Float => functional.throwIf(!self.isFloat(that) and !self.isInt(that), Error.TypeMismatch),
             .Struct, .Union, .Enum => {
                 try functional.throwIf(std.meta.activeTag(thisType) != std.meta.activeTag(thatType), Error.TypeMismatch);
                 const names: struct { usize, usize } = switch (thisType) {
@@ -3209,6 +3262,10 @@ pub fn assertCanCoerce(self: *Typechecker, this: TypeID, that: TypeID) Error!voi
                 try functional.throwIf(std.meta.activeTag(thisType) != std.meta.activeTag(thatType), Error.TypeMismatch);
                 try functional.throwIf(!std.mem.eql(u32, f1.argTypes, thatType.Function.argTypes), Error.TypeMismatch);
                 try functional.throwIf(f1.returnType != thatType.Function.returnType, Error.TypeMismatch);
+            },
+            .Array => {
+                try functional.throwIf(std.meta.activeTag(thatType) != .Array, Error.TypeMismatch);
+                try functional.throwIf(!self.nominallyIdentical(this, that), Error.TypeMismatch);
             },
             else => functional.throwIf(std.meta.activeTag(thisType) != std.meta.activeTag(thatType), Error.TypeMismatch),
         },

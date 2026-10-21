@@ -487,6 +487,8 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
         }
     }
 
+    try self.write(out, @embedFile("../../res/hidden_include.h"), .{});
+
     for (0..self.nodes.len) |node| {
         try self.discoverFunctionsAndVars(out, @intCast(node));
     }
@@ -609,6 +611,7 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
 
             if (self.context.settings.buildInfo.isDebug) {
                 try self.writeln(out, "{{\n", .{});
+                self.indent += 1;
 
                 const file = self.context.getFileName(func.source);
                 const fname = self.strings[func.name];
@@ -616,16 +619,16 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
                 try self.write(
                     out,
                     \\
-                    \\builtin__StackTrace $$anon_trace_TMP = _Cole_implicit__stack_trace;
-                    \\_Cole_implicit__stack_trace = (builtin__StackTrace){{
-                    \\    .frame = (builtin__StackFrame){{
-                    \\        .function = (Slice_uint8_t){{(uint8_t*)"{s}", {d}}},
-                    \\        .file = (Slice_uint8_t){{(uint8_t*)"{s}", {d}}},
-                    \\        .line = {d},
-                    \\        .col = {d},
-                    \\    }},
-                    \\    .next = &$$anon_trace_TMP
-                    \\}};
+                    \\    StackTrace $$anon_trace_TMP = _Cole_implicit__stack_trace;
+                    \\    _Cole_implicit__stack_trace = (StackTrace){{
+                    \\        .frame = (StackFrame){{
+                    \\            .function = (Slice_uint8_t){{(uint8_t*)"{s}", {d}}},
+                    \\            .file = (Slice_uint8_t){{(uint8_t*)"{s}", {d}}},
+                    \\            .line = {d},
+                    \\            .col = {d},
+                    \\        }},
+                    \\        .next = &$$anon_trace_TMP
+                    \\    }};
                     \\
                     , .{
                         fname,
@@ -644,6 +647,7 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
                 if (self.context.settings.buildInfo.isDebug) {
                     try self.writeln(out, "_Cole_implicit__stack_trace = $$anon_trace_TMP;\n" , .{ });
                 }
+                self.indent -= 1;
                 try self.writeln(out, "}}\n", .{});
             }
         },
