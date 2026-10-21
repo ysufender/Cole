@@ -910,10 +910,10 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
                         }
                     }
                     else {
-                        const tagValue = switch (self.constants.get(self.data[node.value]).Integer) {
-                            .u32 => |v| v,
+                        const tagValue: c_long = switch (self.constants.get(self.data[node.value]).Integer) {
+                            .u32 => |v| @intCast(v),
                             .c_long => |v| v,
-                            .u8 => |v| v,
+                            .u8 => |v| @intCast(v),
                             else => return common.debug.ShouldBeImpossible(undefined, @src()),
                         };
 
