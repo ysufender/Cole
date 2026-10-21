@@ -43,6 +43,7 @@ pub const Flags = enum(u3) {
     ComptimeBanned = 0,
     LValue = 1,
     InComptimeCall = 2,
+    VolatileResult = 3,
 
     pub fn flag(flagToGet: Flags) u3 {
         return @intFromEnum(flagToGet);
@@ -118,6 +119,9 @@ pub fn eval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeI
         and self.getFlag(.ComptimeBanned)
     );
     defer _ = self.setFlag(.ComptimeBanned, prevcb);
+
+    const prevv = self.setFlag(.VolatileResult, false);
+    defer _ = self.setFlag(.VolatileResult, prevv or self.getFlag(.VolatileResult));
 
     if (self.getFlag(.ComptimeBanned)) {
         self.report("Comptime execution is not possible in this context.", .{});
@@ -872,7 +876,10 @@ fn evalBuiltinCall(self: *Folder, extraPtr: defines.OpaquePtr, declPtr: defines.
     _ = try self.typechecker.typecheckBuiltinCall(extraPtr, declPtr, maybeExpected);
 
     return switch (declPtr) {
-        BI("inComptime") => self.appendValue(.{ .Bool = true }),
+        BI("inComptime") => inComptime: {
+            _ = self.setFlag(.VolatileResult, true);
+            break :inComptime self.appendValue(.{ .Bool = true });
+        },
         BI("cast") => self.evalCast(extraPtr, maybeExpected, false),
         BI("unsafeCast") => self.evalCast(extraPtr, maybeExpected, true),
         BI("as") => self.evalTypeForwarding(extraPtr, maybeExpected),
@@ -2853,7 +2860,7 @@ fn buildEnumFieldSlice(self: *Folder, fields: []const types.EnumField) Error!Com
 }
 
 fn cacheValue(self: *Folder, ptr: FolderCacheKey, val: Comptime.Value.Ptr) Error!void {
-    if (self.getFlag(.InComptimeCall)) {
+    if (self.getFlag(.InComptimeCall) or self.getFlag(.VolatileResult)) {
         return;
     }
 

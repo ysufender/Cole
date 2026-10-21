@@ -6,7 +6,5 @@ import std::c::process as Process;
 
 let main = fn (args: [][]u8) -> i32 {
     Console::log("before exit");
-    Process::exit(0);
-    Console::log("never printed");
-    return 0;
+    return Process::exit(0);
 };

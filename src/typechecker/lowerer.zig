@@ -1530,7 +1530,9 @@ fn builtinCall(
         BI("sizeOf") => self.sizeOf(extraPtr, ofType),
         BI("bitSizeOf") => self.bitSizeOf(extraPtr, ofType),
         BI("alignOf") => self.alignOf(extraPtr, ofType),
-        BI("compileLog"), BI("compileError") => 0,
+        BI("compileLog"), BI("compileError") => self.typechecker.builder.label(
+            try self.typechecker.folder.generateRandomName(.BuiltinCall),
+        ),
         else => common.debug.NotImplemented(self.typechecker.context.log, @src()),
     };
 }

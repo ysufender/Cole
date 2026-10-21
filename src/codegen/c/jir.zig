@@ -1164,7 +1164,7 @@ fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool
 
         .Noreturn => return
             if (noSymbol) "noreturn"
-            else "void __attribute__((noreturn))",
+            else "_Noreturn",
 
         .Bool => |v| name = std.fmt.allocPrint(self.allocator, "cole_bool{s}", .{
             if (v) ""

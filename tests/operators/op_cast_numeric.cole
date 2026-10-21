@@ -25,7 +25,7 @@ let main = fn (args: [][]u8) -> i32 {
     pf(g);
 
     let wide: i32 = #(@noComptime) 300;
-    let narrow: u8 = cast(wide);
+    let narrow: u8 = unsafeCast(wide);
     pi(narrow);
 
     let neg: i32 = #(@noComptime) -1;

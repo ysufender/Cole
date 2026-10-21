@@ -15,6 +15,7 @@ local function suite(name, files)
             table.insert(steps, Efile.Step
                 .init(path)
                 :dependOnFile(path)
+                :pre("mkdir -p .testy/.cache/"..name)
                 :action(exe_path..cflags..path.." -o "..file..".cole.exec"))
         end
 
