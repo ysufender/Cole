@@ -274,7 +274,6 @@ pub fn typecheckStatement(self: *Typechecker, statementPtr: defines.StatementPtr
 fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) Error!TypeID {
     const expected = try self.expectType(decl.type);
 
-    // @TODO Statements always fall to comptime path. Fix it.
     const initializer =
         if (decl.topLevel or expected == comptime Comptime.Folder.Builtin.Type("type"))
             try self.typecheckValue(try self.folder.eval(decl.node, expected), expected)
@@ -2226,7 +2225,6 @@ pub fn typecheckFieldAccess(self: *Typechecker, on: TypeID, field: []const u8) E
         .Union => |uni| uni.fields,
         .Struct => |str| str.fields,
         .Pointer => |ptr| switch (ptr.size) {
-            // @TODO dot on pointers to slices and pointers to arrays.
             .Single, .C => switch (self.typeTable.get(ptr.child)) {
                 .Struct, .Union => return self.typecheckFieldAccess(ptr.child, field),
                 .Pointer => |childPtr| switch (childPtr.size) {
