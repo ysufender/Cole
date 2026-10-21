@@ -1066,6 +1066,14 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
 
     const expr = ast.expressions.get(expressionPtr);
 
+    if (self.symbols.tryGetDecl(key)) |declPtr| {
+        self.callstack.push(declPtr);
+    }
+
+    defer if (self.symbols.tryGetDecl(key)) |declPtr| {
+        self.callstack.push(declPtr);
+    };
+
     const typeID =
         if (self.hasMetadata(expressionPtr, "@comptime"))
             try self.typecheckValue(try self.folder.eval(expressionPtr, maybeExpected), maybeExpected)
@@ -1735,6 +1743,9 @@ pub fn typecheckBuiltinCall(self: *Typechecker, extraPtr: defines.ExpressionPtr,
     const BI = Resolver.BuiltinIndex;
 
     const ast = self.context.getAST(self.currentFile);
+
+    self.callstack.push(declPtr);
+    defer _ = self.callstack.pop();
 
     const funcToken = ast.expressions.get(ast.extra[extraPtr]).value;
     self.lastToken = funcToken;

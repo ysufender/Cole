@@ -43,7 +43,6 @@ pub const Flags = enum(u3) {
     ComptimeBanned = 0,
     LValue = 1,
     InComptimeCall = 2,
-    VolatileResult = 3,
 
     pub fn flag(flagToGet: Flags) u3 {
         return @intFromEnum(flagToGet);
@@ -116,14 +115,14 @@ pub fn eval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeI
     const prevcb = self.setFlag(
         .ComptimeBanned,
         expr.type != .Literal
-        and self.getFlag(.ComptimeBanned)
+        and (
+            self.getFlag(.ComptimeBanned)
+            or self.typechecker.hasMetadata(exprPtr, "@noComptime")
+        )
     );
     defer _ = self.setFlag(.ComptimeBanned, prevcb);
 
-    const prevv = self.setFlag(.VolatileResult, false);
-    defer _ = self.setFlag(.VolatileResult, prevv or self.getFlag(.VolatileResult));
-
-    if (self.getFlag(.ComptimeBanned)) {
+    if (self.getFlag(.ComptimeBanned) ) {
         self.report("Comptime execution is not possible in this context.", .{});
         return Error.ComptimeNotPossible;
     }
@@ -195,7 +194,6 @@ pub fn eval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeI
 
     try self.cacheValue(key, addr);
 
-    defer self.dumpMem();
     return addr;
 }
 
@@ -877,7 +875,6 @@ fn evalBuiltinCall(self: *Folder, extraPtr: defines.OpaquePtr, declPtr: defines.
 
     return switch (declPtr) {
         BI("inComptime") => inComptime: {
-            _ = self.setFlag(.VolatileResult, true);
             break :inComptime self.appendValue(.{ .Bool = true });
         },
         BI("cast") => self.evalCast(extraPtr, maybeExpected, false),
@@ -2758,11 +2755,6 @@ pub fn getValue(self: *const Folder, address: defines.Offset) Comptime.Value {
     return self.memory.items[address];
 }
 
-fn setValue(self: *const Folder, address: defines.Offset, new: Comptime.Value) void {
-    assert(address <= self.memory.items.len);
-    self.memory.items[address] = new;
-}
-
 pub fn isIncomplete(self: *const Folder, typeID: TypeID) bool {
     return switch (self.typechecker.typeTable.get(typeID)) {
         .Pointer => |ptr| ptr.child == Builtin.Type("$$incomplete") 
@@ -2860,7 +2852,7 @@ fn buildEnumFieldSlice(self: *Folder, fields: []const types.EnumField) Error!Com
 }
 
 fn cacheValue(self: *Folder, ptr: FolderCacheKey, val: Comptime.Value.Ptr) Error!void {
-    if (self.getFlag(.InComptimeCall) or self.getFlag(.VolatileResult)) {
+    if (self.getFlag(.InComptimeCall)) {
         return;
     }
 
