@@ -141,7 +141,7 @@ return {
         -- "generic_type_defs", -- fail
         "generic_type_alias",
         "generic_type_two_params",
-        -- "generic_type_same_instance", -- fail
+        "generic_type_same_instance", -- fail
         "comptime_fn_mark",
         "comptime_const_fold",
         "comptime_array_length_expr",
