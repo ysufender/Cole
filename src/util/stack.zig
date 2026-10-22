@@ -43,11 +43,9 @@ fn InnerStaticStack(comptime T: type, comptime Size: usize) type {
         }
 
         pub fn revert(self: *Self, index: u32) void {
-            if (self.index <= index) {
-                return;
-            }
-
+            if (self.index <= index) return;
             self.index = index;
+            self.items = self.values[0..index];
         }
     };
 }
@@ -165,8 +163,9 @@ pub fn Stack(comptime T: type) type {
         }
 
         pub fn revert(self: *Self, index: u32) void {
-            std.debug.assert(self.index > index);
+            if (self.index <= index) return;
             self.index = index;
+            self.items = self.values[0..index];
         }
     };
 }

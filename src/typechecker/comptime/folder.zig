@@ -2271,15 +2271,15 @@ pub fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Type
         return self.evalBuiltinCall(extraPtr, decl.type, maybeExpected);
     }
 
-    var maybeFunction = &self.memory.items[(try self.expectDefined(ast.extra[extraPtr], null))];
-    const function = switch (maybeFunction.*) {
+    const maybeFunction = self.memory.items[(try self.expectDefined(ast.extra[extraPtr], null))];
+    const function = switch (maybeFunction) {
         .Type => |id| {
             return self.evalExpressionList(
                 ast.expressions.items(.value)[ast.extra[extraPtr + 1]],
                 id,
             );
         },
-        .Function => &maybeFunction.Function,
+        .Function => maybeFunction.Function,
         else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
     };
 

@@ -44,7 +44,7 @@ pub fn init(typechecker: *Typechecker, allocator: Allocator) Error!Executer {
     };
 }
 
-pub fn executeCall(self: *Executer, func: *JIR.Function, args: []const Comptime.Value.Ptr) Error!Comptime.Value.Ptr {
+pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.Value.Ptr) Error!Comptime.Value.Ptr {
     const sign = self.typechecker.typeTable.get(func.signature).Function;
 
     if (!sign.isComptime) {
@@ -95,7 +95,14 @@ pub fn executeCall(self: *Executer, func: *JIR.Function, args: []const Comptime.
         return Error.UncoveredCodePath;
     }
 
+    const base = self.stack.index;
+    defer self.stack.revert(base);
+
     while (self.stack.peekm()) |top| {
+        if (self.stack.index <= base) {
+            continue;
+        }
+
         if (top.pc >= top.body.len) {
             // @Beware @TODO Causes out of bounds bugs
             // self.typechecker.folder.memory.shrinkRetainingCapacity(top.bp);
@@ -107,7 +114,12 @@ pub fn executeCall(self: *Executer, func: *JIR.Function, args: []const Comptime.
         const statement = ast.statements.get(top.body[top.pc]);
 
         switch (statement.type) {
-            .Return => return self.typechecker.folder.eval(statement.value, returnType),
+            .Return => {
+                if (statement.value == Parser.AnyType) {
+                    return @intFromEnum(Comptime.Value.Implicit.Void);
+                }
+                return self.typechecker.folder.eval(statement.value, returnType);
+            },
             .Block => {
                 try self.stack.push(.{
                     .pc = 0,
