@@ -2,9 +2,13 @@ local Efile = require "efile"
 
 local suites = require "suites"
 
-local exe_path =
-    "../zig-out/debug-linux-x86_64/v0.0.1/cole"
-    -- "../zig-out/releasesafe-linux-x86_64/v0.0.1/cole"
+local cole_build =
+    "debug"
+    -- "releasesafe"
+    -- "releasefast"
+
+local exe_path = string.format("../zig-out/%s-linux-x86_64/v0.0.1/cole", cole_build)
+
 local cflags = " -I ../stdlib --supress-warnings "
 
 local function suite(name, files)

@@ -138,10 +138,10 @@ return {
         -- "generic_fn_body_uses_T", -- fail
         -- "generic_fn_two_params", -- fail
         -- "generic_fn_nested_call", -- fail
-        -- "generic_type_defs", -- fail
+        "generic_type_defs", -- fail
         "generic_type_alias",
         "generic_type_two_params",
-        -- "generic_type_same_instance", -- fail
+        "generic_type_same_instance",
         "comptime_fn_mark",
         "comptime_const_fold",
         "comptime_array_length_expr",
