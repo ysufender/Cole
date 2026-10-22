@@ -65,12 +65,15 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
 
     const body  = ast.extra[bodyRange.start..bodyRange.end];
 
+    const base = self.stack.index;
+
     try self.stack.push(.{
         .bp = @intCast(self.typechecker.folder.memory.items.len),
         .pc = 0,
         .variables = .empty,
         .body = body,
     });
+    defer self.stack.revert(base);
 
     self.stack.peek().variables.ensureTotalCapacity(self.arena.allocator(), @intCast(args.len))
         catch return Error.AllocatorFailure;
@@ -94,9 +97,6 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
         });
         return Error.UncoveredCodePath;
     }
-
-    const base = self.stack.index;
-    defer self.stack.revert(base);
 
     while (self.stack.peekm()) |top| {
         if (self.stack.index <= base) {
