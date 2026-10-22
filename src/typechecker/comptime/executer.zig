@@ -66,7 +66,6 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
     const body  = ast.extra[bodyRange.start..bodyRange.end];
 
     const base = self.stack.index;
-
     try self.stack.push(.{
         .bp = @intCast(self.typechecker.folder.memory.items.len),
         .pc = 0,

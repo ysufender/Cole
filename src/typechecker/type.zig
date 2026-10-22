@@ -193,25 +193,25 @@ pub const Function = struct {
 
 pub const Integer = struct {
     mutable: bool,
-    size: u6,
+    size: u8,
     signed: bool,
 
     // @CompilerOnly 
     pub const Range = struct { 
-        min: i64,
-        max: i64,
+        min: i128,
+        max: i128,
     };
 
     // @CompilerOnly 
     pub fn range(self: Integer) Range {
         const max =
             if (self.size == 0) 0
-            else (@as(i64, 1) << (self.size - @intFromBool(self.signed))) - 1;
+            else (@as(i128, 1) << @intCast(self.size - @intFromBool(self.signed))) - 1;
 
         const min =
             if (!self.signed) 0
             else if (self.size == 0) 0
-            else -(@as(i64, 1) << (self.size - 1));
+            else -(@as(i128, 1) << @intCast(self.size - 1));
 
         return .{
             .min = min,

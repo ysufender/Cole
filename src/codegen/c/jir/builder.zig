@@ -23,6 +23,7 @@ constants: std.MultiArrayList(JIR.Constant),
 functions: MultiArrayList(JIR.Function),
 functionCache: collections.HashMap(JIR.Ptr, JIR.Function.Ptr),
 functionDefCache: collections.HashMap(JIR.Function.Ptr, void),
+loweredBodies: collections.HashMap(defines.ScopePtr, void),
 metadata: MetadataMap,
 nodes: JIR.Node.List,
 data: std.ArrayList(u32),
@@ -45,6 +46,10 @@ pub fn init(allocator: Allocator, counts: common.CompilerContext.Counts, typeche
     functionDefCache.ensureTotalCapacity(allocator, counts.functions)
         catch return Error.AllocatorFailure;
 
+    var loweredBodies = collections.HashMap(JIR.Function.Ptr, void).empty;
+    loweredBodies.ensureTotalCapacity(allocator, counts.functions)
+        catch return Error.AllocatorFailure;
+
     var metadata = MetadataMap.empty;
     metadata.ensureTotalCapacity(allocator, counts.meta * 3) catch return Error.AllocatorFailure;
 
@@ -60,6 +65,7 @@ pub fn init(allocator: Allocator, counts: common.CompilerContext.Counts, typeche
         .topLevelAsms = try std.ArrayList(defines.StringPtr).initCapacity(allocator, 128),
         .functionCache = funcCache,
         .functionDefCache = functionDefCache,
+        .loweredBodies = loweredBodies,
         .strings = strings,
         .allocator = allocator,
         .typechecker = typechecker,
@@ -101,7 +107,10 @@ pub fn addConstant(self: *Builder, constant: JIR.Constant) Error!JIR.Constant.Pt
 }
 
 pub fn modifyInternedString(self: *Builder, strPtr: defines.StringPtr, new: []const u8) void {
-    self.strings.keys()[strPtr] = new;
+    _ = self;
+    _ = strPtr;
+    _ = new;
+    // self.strings.keys()[strPtr] = new;
 }
 
 pub fn internString(self: *Builder, str: []const u8) Error!defines.StringPtr {
@@ -161,6 +170,8 @@ pub inline fn functionDef(self: *Builder, name: defines.StringPtr, function: JIR
     }
 
     self.functionDefCache.putNoClobber(self.allocator, function, {})
+        catch return Error.AllocatorFailure;
+    self.loweredBodies.putNoClobber(self.allocator, self.functions.get(function).scope, {})
         catch return Error.AllocatorFailure;
     const node = try self.commonBinary(.FunctionDef, name, function);
     try self.typechecker.lowerer.addMetadata(node, self.functions.get(function).expr);
