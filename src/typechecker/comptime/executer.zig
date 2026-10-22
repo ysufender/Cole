@@ -98,10 +98,8 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
         return Error.UncoveredCodePath;
     }
 
-    while (self.stack.peekm()) |top| {
-        if (self.stack.index <= base) {
-            continue;
-        }
+    while (self.stack.index > base) {
+        const top = self.stack.peekm() orelse break;
 
         if (top.pc >= top.body.len) {
             // @Beware @TODO Causes out of bounds bugs
