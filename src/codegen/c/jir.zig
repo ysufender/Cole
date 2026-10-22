@@ -910,11 +910,22 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
                         }
                     }
                     else {
-                        const tagValue = switch (self.constants.get(self.data[node.value]).Integer) {
-                            .u32 => |v| v,
-                            .c_long => |v| v,
-                            .u8 => |v| v,
-                            else => return common.debug.ShouldBeImpossible(undefined, @src()),
+                        const tagNodePtr = self.data[@intCast(node.value + 2)];
+                        const tagNode = self.nodes.get(tagNodePtr);
+                        const tagConst = self.constants.get(tagNode.value);
+                        const tagValue: u32 = switch (tagConst) {
+                            .Integer => |i| switch (i) {
+                                .u32    => |v| v,
+                                .i32    => |v| @intCast(v),
+                                .u8     => |v| v,
+                                .i8     => |v| @intCast(v),
+                                .c_int  => |v| @intCast(v),
+                                .c_uint => |v| @intCast(v),
+                                .c_long => |v| @intCast(v),
+                                else    => 0,
+                            },
+                            .Aggregate => |agg| self.constants.get(agg.data.start).Integer.u32,
+                            else => 0,
                         };
 
                         if (typeInfo.isZeroBit()) return;

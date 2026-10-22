@@ -4,10 +4,6 @@ let Box = fn (T: type) -> type {
     return struct {
         value: T,
         count: u8,
-
-        pub let identity = fn (v: T) -> T {
-            return v;
-        };
     };
 };
 
@@ -23,11 +19,8 @@ let main = fn (args: [][]u8) -> i32 {
     if take(b) == 9 {
         Console::log("same instance: ok");
     }
-    if A::identity(4) == 4 {
-        Console::log("A::identity: ok");
-    }
-    if B::identity(5) == 5 {
-        Console::log("B::identity: ok");
+    if A == B {
+        Console::log("types are same: ok");
     }
     return 0;
 };

@@ -26,6 +26,7 @@ const FlagMap = std.bit_set.IntegerBitSet(8);
 pub const FolderCacheKey = struct {
     file: defines.FilePtr,
     expr: defines.ExpressionPtr,
+    instantiation: u32,
 };
 
 const Cache = collections.HashMap(FolderCacheKey, Comptime.Value.Ptr);
@@ -43,6 +44,7 @@ pub const Flags = enum(u3) {
     ComptimeBanned = 0,
     LValue = 1,
     InComptimeCall = 2,
+    Volatile = 3,
 
     pub fn flag(flagToGet: Flags) u3 {
         return @intFromEnum(flagToGet);
@@ -50,6 +52,8 @@ pub const Flags = enum(u3) {
 };
 
 const Folder = @This();
+
+currentInstantiation: u32 = 0,
 
 cache: Cache,
 declCache: DeclCache,
@@ -107,10 +111,14 @@ pub fn eval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeI
     const key = FolderCacheKey{
         .file = file,
         .expr = exprPtr,
+        .instantiation = self.currentInstantiation,
     };
 
     const ast = typechecker.context.getAST(file);
     const expr = ast.expressions.get(exprPtr);
+
+    const prevv = self.setFlag(.Volatile, false);
+    defer _ = self.setFlag(.Volatile, prevv or self.getFlag(.Volatile));
 
     const prevcb = self.setFlag(
         .ComptimeBanned,
@@ -764,16 +772,7 @@ fn evalIfExpression(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?
         else self.expectDefined(conditional.otherwise, maybeExpected);
 }
 
-pub fn evalDecl(self: *Folder, _declPtr: defines.DeclPtr, maybeExpected: ?TypeID) Error!Comptime.Value.Ptr {
-    const declPtr =
-        if (false and self.getFlag(.InComptimeCall)) fi: {
-            const dp = try self.typechecker.symbols.declarations.addOne(self.arena.allocator());
-            self.typechecker.symbols.declarations.set(dp, self.typechecker.symbols.declarations.get(_declPtr));
-            self.typechecker.symbols.declarations.items(.scope)[dp] = self.typechecker.currentScope;
-            break :fi dp;
-        }
-        else _declPtr;
-
+pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID) Error!Comptime.Value.Ptr {
     var decl  = self.typechecker.symbols.declarations.get(declPtr);
 
     const prevToken = self.typechecker.lastToken;
@@ -827,13 +826,7 @@ pub fn evalDecl(self: *Folder, _declPtr: defines.DeclPtr, maybeExpected: ?TypeID
             break :blk self.castValue(valuePtr, expected, false);
         },
         .Capture => {
-            if (!self.typechecker.getFlag(.AttemptingEval)) {
-                self.report("HARD comptime eval of capture '{s}' (InComptimeCall={}, ComptimeBanned={}).", .{
-                    self.typechecker.builder.getInternedString(decl.name),
-                    self.getFlag(.InComptimeCall),
-                    self.getFlag(.ComptimeBanned),
-                });
-            }
+            self.report("Attempt to evaluate captured variable in non-comptime scope.", .{});
             return Error.ComptimeNotPossible;
         },
         .Parameter =>
@@ -875,6 +868,7 @@ fn evalBuiltinCall(self: *Folder, extraPtr: defines.OpaquePtr, declPtr: defines.
 
     return switch (declPtr) {
         BI("inComptime") => inComptime: {
+            _ = self.setFlag(.Volatile, true);
             break :inComptime self.appendValue(.{ .Bool = true });
         },
         BI("cast") => self.evalCast(extraPtr, maybeExpected, false),
@@ -1187,9 +1181,11 @@ fn evalEnumType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Value
         },
     };
 
-    return self.appendValue(.{
+    const res = try self.appendValue(.{
         .Type = try self.typechecker.registerType(newType)
     });
+
+    return res;
 }
 
 fn evalStructType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Value.Ptr {
@@ -1260,13 +1256,6 @@ fn evalStructType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Val
     const res = try self.appendValue(.{
         .Type = try self.typechecker.registerType(newType),
     });
-
-    if (self.getFlag(.InComptimeCall)) {
-        self.cache.put(self.arena.allocator(), .{
-            .file = self.typechecker.currentFile,
-            .expr = expr,
-        }, res) catch return Error.AllocatorFailure;
-    }
 
     return res;
 }
@@ -1397,9 +1386,11 @@ fn evalUnionType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Valu
         }
     };
 
-    return self.appendValue(.{
+    const res = try self.appendValue(.{
         .Type = try self.typechecker.registerType(newType),
     });
+
+    return res;
 }
 
 fn evalTuple(self: *Folder, exprListPtr: defines.ExpressionPtr) Error!Comptime.Value.Ptr {
@@ -2271,15 +2262,15 @@ pub fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Type
         return self.evalBuiltinCall(extraPtr, decl.type, maybeExpected);
     }
 
-    var maybeFunction = &self.memory.items[(try self.expectDefined(ast.extra[extraPtr], null))];
-    const function = switch (maybeFunction.*) {
+    const maybeFunction = self.memory.items[(try self.expectDefined(ast.extra[extraPtr], null))];
+    const function = switch (maybeFunction) {
         .Type => |id| {
             return self.evalExpressionList(
                 ast.expressions.items(.value)[ast.extra[extraPtr + 1]],
                 id,
             );
         },
-        .Function => &maybeFunction.Function,
+        .Function => maybeFunction.Function,
         else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
     };
 
@@ -2852,7 +2843,7 @@ fn buildEnumFieldSlice(self: *Folder, fields: []const types.EnumField) Error!Com
 }
 
 fn cacheValue(self: *Folder, ptr: FolderCacheKey, val: Comptime.Value.Ptr) Error!void {
-    if (self.getFlag(.InComptimeCall)) {
+    if (self.getFlag(.InComptimeCall) or self.getFlag(.Volatile)) {
         return;
     }
 
@@ -2993,6 +2984,10 @@ pub const builtinTypes = [_]struct {
     .{ .name = "c_ushort", .info = .{ .CUShort = false }, },
     // c_size
     .{ .name = "c_size", .info = .{ .CSize = false }, },
+    // usize
+    .{ .name = "usize", .info = .{ .Integer = .{ .mutable = false, .size = @bitSizeOf(usize), .signed = false, } } },
+    // isize
+    .{ .name = "isize", .info = .{ .Integer = .{ .mutable = false, .size = @bitSizeOf(isize), .signed = true, } } },
     // flaot
     .{ .name = "float", .info = .{ .Float = false } },
     // void

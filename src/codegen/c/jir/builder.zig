@@ -23,7 +23,7 @@ constants: std.MultiArrayList(JIR.Constant),
 functions: MultiArrayList(JIR.Function),
 functionCache: collections.HashMap(JIR.Ptr, JIR.Function.Ptr),
 functionDefCache: collections.HashMap(JIR.Function.Ptr, void),
-loweredBodies: std.AutoHashMapUnmanaged(defines.StringPtr, void) = .empty,
+loweredBodies: collections.HashMap(defines.ScopePtr, void),
 metadata: MetadataMap,
 nodes: JIR.Node.List,
 data: std.ArrayList(u32),
@@ -46,6 +46,10 @@ pub fn init(allocator: Allocator, counts: common.CompilerContext.Counts, typeche
     functionDefCache.ensureTotalCapacity(allocator, counts.functions)
         catch return Error.AllocatorFailure;
 
+    var loweredBodies = collections.HashMap(JIR.Function.Ptr, void).empty;
+    loweredBodies.ensureTotalCapacity(allocator, counts.functions)
+        catch return Error.AllocatorFailure;
+
     var metadata = MetadataMap.empty;
     metadata.ensureTotalCapacity(allocator, counts.meta * 3) catch return Error.AllocatorFailure;
 
@@ -61,6 +65,7 @@ pub fn init(allocator: Allocator, counts: common.CompilerContext.Counts, typeche
         .topLevelAsms = try std.ArrayList(defines.StringPtr).initCapacity(allocator, 128),
         .functionCache = funcCache,
         .functionDefCache = functionDefCache,
+        .loweredBodies = loweredBodies,
         .strings = strings,
         .allocator = allocator,
         .typechecker = typechecker,
@@ -166,7 +171,7 @@ pub inline fn functionDef(self: *Builder, name: defines.StringPtr, function: JIR
 
     self.functionDefCache.putNoClobber(self.allocator, function, {})
         catch return Error.AllocatorFailure;
-    self.loweredBodies.put(self.allocator, self.functions.get(function).name, {})
+    self.loweredBodies.putNoClobber(self.allocator, self.functions.get(function).scope, {})
         catch return Error.AllocatorFailure;
     const node = try self.commonBinary(.FunctionDef, name, function);
     try self.typechecker.lowerer.addMetadata(node, self.functions.get(function).expr);

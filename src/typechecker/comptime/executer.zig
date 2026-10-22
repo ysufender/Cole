@@ -44,7 +44,7 @@ pub fn init(typechecker: *Typechecker, allocator: Allocator) Error!Executer {
     };
 }
 
-pub fn executeCall(self: *Executer, func: *JIR.Function, args: []const Comptime.Value.Ptr) Error!Comptime.Value.Ptr {
+pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.Value.Ptr) Error!Comptime.Value.Ptr {
     const sign = self.typechecker.typeTable.get(func.signature).Function;
 
     if (!sign.isComptime) {
@@ -65,12 +65,14 @@ pub fn executeCall(self: *Executer, func: *JIR.Function, args: []const Comptime.
 
     const body  = ast.extra[bodyRange.start..bodyRange.end];
 
+    const base = self.stack.index;
     try self.stack.push(.{
         .bp = @intCast(self.typechecker.folder.memory.items.len),
         .pc = 0,
         .variables = .empty,
         .body = body,
     });
+    defer self.stack.revert(base);
 
     self.stack.peek().variables.ensureTotalCapacity(self.arena.allocator(), @intCast(args.len))
         catch return Error.AllocatorFailure;
@@ -95,7 +97,9 @@ pub fn executeCall(self: *Executer, func: *JIR.Function, args: []const Comptime.
         return Error.UncoveredCodePath;
     }
 
-    while (self.stack.peekm()) |top| {
+    while (self.stack.index > base) {
+        const top = self.stack.peekm() orelse break;
+
         if (top.pc >= top.body.len) {
             // @Beware @TODO Causes out of bounds bugs
             // self.typechecker.folder.memory.shrinkRetainingCapacity(top.bp);
@@ -107,7 +111,12 @@ pub fn executeCall(self: *Executer, func: *JIR.Function, args: []const Comptime.
         const statement = ast.statements.get(top.body[top.pc]);
 
         switch (statement.type) {
-            .Return => return self.typechecker.folder.eval(statement.value, returnType),
+            .Return => {
+                if (statement.value == Parser.AnyType) {
+                    return @intFromEnum(Comptime.Value.Implicit.Void);
+                }
+                return self.typechecker.folder.eval(statement.value, returnType);
+            },
             .Block => {
                 try self.stack.push(.{
                     .pc = 0,
