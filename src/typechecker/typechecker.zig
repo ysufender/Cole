@@ -1487,11 +1487,13 @@ fn typecheckUnionInitialization(self: *Typechecker, ast: *const Parser.AST, uni:
 }
 
 pub fn typecheckScoping(self: *Typechecker, expr: defines.ExpressionPtr) Error!TypeID {
-    if (self.symbols.resolutionMap.get(.{
-        .file = self.currentFile,
-        .expr = expr,
-    })) |decl| {
-        return self.typecheckDecl(decl, null);
+    if (self.folder.currentInstantiation == 0) {
+        if (self.symbols.resolutionMap.get(.{
+            .file = self.currentFile,
+            .expr = expr,
+        })) |decl| {
+            return self.typecheckDecl(decl, null);
+        }
     }
 
     const ast = self.context.getAST(self.currentFile);
@@ -2144,8 +2146,10 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
         const sign = self.typeTable.get(func.signature).Function;
         const returnType = sign.returnType;
 
+        const alreadyLowered = self.builder.loweredBodies.contains(func.scope);
+
         // @Note See folder.zig:evalFunction
-        if (!self.folder.getFlag(.InComptimeCall) and !sign.isComptime) {
+        if (!self.folder.getFlag(.InComptimeCall) and !sign.isComptime and !alreadyLowered) {
             if (!self.hasMetadata(func.expr, "@extern")) {
                 const pc = self.setFlag(.CoveredAllPaths, false);
                 defer _ = self.setFlag(.CoveredAllPaths, pc);

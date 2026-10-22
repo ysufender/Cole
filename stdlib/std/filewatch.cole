@@ -12,7 +12,7 @@ code {
 #   else
 #       include <windows.h>
 #   endif
-#hedaer_end
+#header_end
 }
 
 import std::io::stream as Stream;

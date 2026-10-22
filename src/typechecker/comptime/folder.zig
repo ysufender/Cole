@@ -44,6 +44,7 @@ pub const Flags = enum(u3) {
     ComptimeBanned = 0,
     LValue = 1,
     InComptimeCall = 2,
+    Volatile = 3,
 
     pub fn flag(flagToGet: Flags) u3 {
         return @intFromEnum(flagToGet);
@@ -115,6 +116,9 @@ pub fn eval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeI
 
     const ast = typechecker.context.getAST(file);
     const expr = ast.expressions.get(exprPtr);
+
+    const prevv = self.setFlag(.Volatile, false);
+    defer _ = self.setFlag(.Volatile, prevv or self.getFlag(.Volatile));
 
     const prevcb = self.setFlag(
         .ComptimeBanned,
@@ -821,7 +825,10 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
             const valuePtr = try self.expectDefined(decl.node, maybeExpected);
             break :blk self.castValue(valuePtr, expected, false);
         },
-        .Capture => return common.debug.ShouldBeImpossible(undefined, @src()),
+        .Capture => {
+            self.report("Attempt to evaluate captured variable in non-comptime scope.", .{});
+            return Error.ComptimeNotPossible;
+        },
         .Parameter =>
             if (self.getFlag(.InComptimeCall)) {
                 _ = try self.typechecker.typecheckDecl(declPtr, maybeExpected);
@@ -861,6 +868,7 @@ fn evalBuiltinCall(self: *Folder, extraPtr: defines.OpaquePtr, declPtr: defines.
 
     return switch (declPtr) {
         BI("inComptime") => inComptime: {
+            _ = self.setFlag(.Volatile, true);
             break :inComptime self.appendValue(.{ .Bool = true });
         },
         BI("cast") => self.evalCast(extraPtr, maybeExpected, false),
@@ -1173,9 +1181,11 @@ fn evalEnumType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Value
         },
     };
 
-    return self.appendValue(.{
+    const res = try self.appendValue(.{
         .Type = try self.typechecker.registerType(newType)
     });
+
+    return res;
 }
 
 fn evalStructType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Value.Ptr {
@@ -1376,9 +1386,11 @@ fn evalUnionType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Valu
         }
     };
 
-    return self.appendValue(.{
+    const res = try self.appendValue(.{
         .Type = try self.typechecker.registerType(newType),
     });
+
+    return res;
 }
 
 fn evalTuple(self: *Folder, exprListPtr: defines.ExpressionPtr) Error!Comptime.Value.Ptr {
@@ -2831,7 +2843,7 @@ fn buildEnumFieldSlice(self: *Folder, fields: []const types.EnumField) Error!Com
 }
 
 fn cacheValue(self: *Folder, ptr: FolderCacheKey, val: Comptime.Value.Ptr) Error!void {
-    if (self.getFlag(.InComptimeCall)) {
+    if (self.getFlag(.InComptimeCall) or self.getFlag(.Volatile)) {
         return;
     }
 
@@ -2972,6 +2984,10 @@ pub const builtinTypes = [_]struct {
     .{ .name = "c_ushort", .info = .{ .CUShort = false }, },
     // c_size
     .{ .name = "c_size", .info = .{ .CSize = false }, },
+    // usize
+    .{ .name = "usize", .info = .{ .Integer = .{ .mutable = false, .size = @bitSizeOf(usize), .signed = false, } } },
+    // isize
+    .{ .name = "isize", .info = .{ .Integer = .{ .mutable = false, .size = @bitSizeOf(isize), .signed = true, } } },
     // flaot
     .{ .name = "float", .info = .{ .Float = false } },
     // void
