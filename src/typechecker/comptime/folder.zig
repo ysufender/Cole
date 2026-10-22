@@ -26,6 +26,7 @@ const FlagMap = std.bit_set.IntegerBitSet(8);
 pub const FolderCacheKey = struct {
     file: defines.FilePtr,
     expr: defines.ExpressionPtr,
+    instantiation: u32,
 };
 
 const Cache = collections.HashMap(FolderCacheKey, Comptime.Value.Ptr);
@@ -50,6 +51,8 @@ pub const Flags = enum(u3) {
 };
 
 const Folder = @This();
+
+currentInstantiation: u32 = 0,
 
 cache: Cache,
 declCache: DeclCache,
@@ -107,6 +110,7 @@ pub fn eval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeI
     const key = FolderCacheKey{
         .file = file,
         .expr = exprPtr,
+        .instantiation = self.currentInstantiation,
     };
 
     const ast = typechecker.context.getAST(file);
@@ -764,16 +768,7 @@ fn evalIfExpression(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?
         else self.expectDefined(conditional.otherwise, maybeExpected);
 }
 
-pub fn evalDecl(self: *Folder, _declPtr: defines.DeclPtr, maybeExpected: ?TypeID) Error!Comptime.Value.Ptr {
-    const declPtr =
-        if (false and self.getFlag(.InComptimeCall)) fi: {
-            const dp = try self.typechecker.symbols.declarations.addOne(self.arena.allocator());
-            self.typechecker.symbols.declarations.set(dp, self.typechecker.symbols.declarations.get(_declPtr));
-            self.typechecker.symbols.declarations.items(.scope)[dp] = self.typechecker.currentScope;
-            break :fi dp;
-        }
-        else _declPtr;
-
+pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID) Error!Comptime.Value.Ptr {
     var decl  = self.typechecker.symbols.declarations.get(declPtr);
 
     const prevToken = self.typechecker.lastToken;
@@ -826,16 +821,7 @@ pub fn evalDecl(self: *Folder, _declPtr: defines.DeclPtr, maybeExpected: ?TypeID
             const valuePtr = try self.expectDefined(decl.node, maybeExpected);
             break :blk self.castValue(valuePtr, expected, false);
         },
-        .Capture => {
-            if (!self.typechecker.getFlag(.AttemptingEval)) {
-                self.report("HARD comptime eval of capture '{s}' (InComptimeCall={}, ComptimeBanned={}).", .{
-                    self.typechecker.builder.getInternedString(decl.name),
-                    self.getFlag(.InComptimeCall),
-                    self.getFlag(.ComptimeBanned),
-                });
-            }
-            return Error.ComptimeNotPossible;
-        },
+        .Capture => return common.debug.ShouldBeImpossible(undefined, @src()),
         .Parameter =>
             if (self.getFlag(.InComptimeCall)) {
                 _ = try self.typechecker.typecheckDecl(declPtr, maybeExpected);
@@ -1260,13 +1246,6 @@ fn evalStructType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Val
     const res = try self.appendValue(.{
         .Type = try self.typechecker.registerType(newType),
     });
-
-    if (self.getFlag(.InComptimeCall)) {
-        self.cache.put(self.arena.allocator(), .{
-            .file = self.typechecker.currentFile,
-            .expr = expr,
-        }, res) catch return Error.AllocatorFailure;
-    }
 
     return res;
 }

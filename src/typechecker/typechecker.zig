@@ -425,10 +425,17 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
                 }, rres.value);
 
                 if (self.typeTable.get(def.valueType) == .Function) {
+                    const prevInst = self.folder.currentInstantiation;
+                    self.folder.currentInstantiation = scope;
+                    defer self.folder.currentInstantiation = prevInst;
+
                     const funcPtr = try self.folder.evalDecl(rres.value, def.valueType);
                     const func = &self.folder.memory.items[funcPtr].Function;
                     self.builder.modifyInternedString(func.name, nname);
                     func.name = nnname;
+
+                    self.folder.declCache.put(self.folder.arena.allocator(), rres.value, funcPtr)
+                        catch return Error.AllocatorFailure;
                 }
             }
         },
@@ -1046,18 +1053,20 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
         .expr = expressionPtr,
     };
 
-    if (self.exprCache.get(key)) |tuple| {
-        const attempting = self.getFlag(.AttemptingEval);
-        const inLoop = self.getFlag(.InLoop);
-        const inDefer = self.getFlag(.InDefer);
+    if (self.folder.currentInstantiation == 0) {
+        if (self.exprCache.get(key)) |tuple| {
+            const attempting = self.getFlag(.AttemptingEval);
+            const inLoop = self.getFlag(.InLoop);
+            const inDefer = self.getFlag(.InDefer);
 
-        self.flags = tuple.@"1";
+            self.flags = tuple.@"1";
 
-        _ = self.setFlag(.AttemptingEval, attempting);
-        _ = self.setFlag(.InLoop, inLoop);
-        _ = self.setFlag(.InDefer, inDefer);
+            _ = self.setFlag(.AttemptingEval, attempting);
+            _ = self.setFlag(.InLoop, inLoop);
+            _ = self.setFlag(.InDefer, inDefer);
 
-        return tuple.@"0";
+            return tuple.@"0";
+        }
     }
 
     const maybeExpected =
@@ -1065,14 +1074,6 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
         else comptime Comptime.Folder.Builtin.Type("any");
 
     const expr = ast.expressions.get(expressionPtr);
-
-    if (self.symbols.tryGetDecl(key)) |declPtr| {
-        self.callstack.push(declPtr);
-    }
-
-    defer if (self.symbols.tryGetDecl(key)) |declPtr| {
-        self.callstack.push(declPtr);
-    };
 
     const typeID =
         if (self.hasMetadata(expressionPtr, "@comptime"))
@@ -1125,7 +1126,7 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
         else => false,
     });
 
-    if (!self.folder.getFlag(.InComptimeCall)) {
+    if (self.folder.currentInstantiation == 0 and !self.folder.getFlag(.InComptimeCall)) {
         self.exprCache.put(self.arena.allocator(), key, .{typeID, self.flags})
             catch return Error.AllocatorFailure;
     }
@@ -1575,9 +1576,7 @@ pub fn discoverScopeDef(
     const discoveredType = try self.typecheckDecl(decl, null);
     const memberIndex = try self.definitionIndex(from, member.name);
 
-    if (!self.symbols.getDecl(decl).public) {
-        self.report("'{s}' is inaccessible due to its visibility level.", .{self.builder.getInternedString(member.name)});
-    }
+    assert(self.symbols.getDecl(decl).public);
 
     switch (self.typeTable.get(from)) {
         .Enum => |enm| {
@@ -2146,10 +2145,7 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
         const returnType = sign.returnType;
 
         // @Note See folder.zig:evalFunction
-        const loweredKey = func.name;
-        const alreadyLowered = self.builder.loweredBodies.contains(loweredKey);
-
-        if (!self.folder.getFlag(.InComptimeCall) and !sign.isComptime and !alreadyLowered) {
+        if (!self.folder.getFlag(.InComptimeCall) and !sign.isComptime) {
             if (!self.hasMetadata(func.expr, "@extern")) {
                 const pc = self.setFlag(.CoveredAllPaths, false);
                 defer _ = self.setFlag(.CoveredAllPaths, pc);
@@ -2175,9 +2171,6 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
 
             const fun = try self.builder.addFunction(func);
             try self.builder.functionDef(func.name, fun);
-
-            self.builder.loweredBodies.put(self.builder.allocator, loweredKey, {})
-                catch return Error.AllocatorFailure;
         }
     }
 
