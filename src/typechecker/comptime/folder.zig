@@ -1463,7 +1463,7 @@ pub fn evalCompileLog(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime
 }
 
 pub fn evalGetMetadata(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {
-    _ = try self.typechecker.typecheckGetMetadata(extraPtr);
+    const metaType = try self.typechecker.typecheckGetMetadata(extraPtr);
 
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
     const expressionList = ast.expressions.items(.value)[ast.extra[extraPtr + 1]];
@@ -1472,15 +1472,25 @@ pub fn evalGetMetadata(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptim
         .end = ast.extra[expressionList + 1],
     };
 
-    const index: u64 = @intCast(self.getValue(try self.eval(ast.extra[args.at(1)], null)).Int);
-
     const decl = self.typechecker.symbols.findGetDecl(.{
         .file = self.typechecker.currentFile,
         .expr = ast.extra[args.at(0)],
     });
 
-    const metadata = self.typechecker.getMetadata(decl.node).?;
-    return metadata[index];
+    const metadata = self.typechecker.getMetadata(decl.node) orelse {
+        self.report("This shouls've been handled in the typechecker.", .{});
+        return common.debug.ShouldBeImpossible(undefined, @src());
+    };
+
+    return self.appendValue(.{
+        .Struct = .{
+            .Type = metaType,
+            .Fields = .{
+                .start = metadata[0],
+                .end = metadata[metadata.len - 1] + 1,
+            },
+        },
+    });
 }
 
 pub fn evalAlignOf(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {

@@ -1814,8 +1814,8 @@ pub fn typecheckGetMetadata(self: *Typechecker, extraPtr: defines.OpaquePtr) Err
         .end = ast.extra[expressionList + 1],
     };
 
-    if (args.len() != 2) {
-        self.report("'getMetadata' expects 2 expression arguments, received {d}.", .{
+    if (args.len() != 1) {
+        self.report("'getMetadata' expects a single expression argument, received {d}.", .{
             args.len(),
         });
         return Error.ArgumentCountMismatch;
@@ -1826,21 +1826,6 @@ pub fn typecheckGetMetadata(self: *Typechecker, extraPtr: defines.OpaquePtr) Err
         });
         return Error.ArgumentCountMismatch;
     }
-
-    const metaIndex: u64 = if (self.folder.attemptEval(ast.extra[args.at(1)], null)) |indexPtr| switch (self.folder.getValue(indexPtr)) {
-        .Int => |v| if (v >= 0) @intCast(v) else {
-            self.report("Expected a non-negative index.", .{});
-            return Error.IndexOutOfBounds;
-        },
-        else => {
-            self.report("Expected an integer index.", .{});
-            return Error.NonIntegerIndex;
-        },
-    }
-    else {
-        self.report("Expected a comptime index.", .{});
-        return Error.ComptimeNotPossible;
-    };
 
     const decl = self.symbols.findGetDecl(.{
         .file = self.currentFile,
@@ -1859,16 +1844,34 @@ pub fn typecheckGetMetadata(self: *Typechecker, extraPtr: defines.OpaquePtr) Err
     const metadata = self.getMetadata(decl.node);
 
     if (metadata) |meta| {
-        if (metaIndex >= meta.len) {
-            self.report("Metadata index is out of bounds, index: {d} len: {d}", .{
-                metaIndex,
-                meta.len,
-            });
-            return Error.IndexOutOfBounds;
+        var fields = self.arena.allocator().alloc(Types.FieldInfo, meta.len)
+            catch return Error.AllocatorFailure;
+
+        for (meta, 0..) |data, idx| {
+            const dataType = try self.typecheckValue(data, null);
+
+            const name = std.fmt.allocPrint(self.arena.allocator(), "_{d}", .{idx})
+                catch return Error.AllocatorFailure;
+
+            fields[idx] = .{
+                .name = try self.builder.internString(name),
+                .isComptime = self.typeTable.get(dataType).isComptime(&self.typeTable.slice()),
+                .public = true,
+                .valueType = dataType,
+            };
         }
 
-        const res = try self.typecheckValue(meta[metaIndex], null);
-        return res;
+        return self.registerType(.{
+            .Struct = .{
+                .name = try self.folder.generateRandomName(.Metadata),
+                .fields = fields,
+                .definitions = &.{},
+                .expr = 0,
+                .mutable = false,
+                .scope = 0,
+                .isTuple = true,
+            }
+        });
     }
     else {
         self.report("Given definition '{s}' does not have any metadata attached to it.", .{
@@ -1974,7 +1977,7 @@ pub fn typecheckIndexing(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!
     const maybeIndexableId = try self.typecheckExpression(ast.extra[extraPtr], null);
 
     // @Note if trying to form an lvalue, maybeIndexable must be a concrete value.
-    if (!self.getFlag(.ConcreteValue)) {
+    if (!self.getFlag(.ConcreteValue) and self.getFlag(.LValue)) {
         self.report("Attempt to form an lvalue by indexing a non-concrete value.", .{ });
         return Error.UnexpectedRValue;
     }
