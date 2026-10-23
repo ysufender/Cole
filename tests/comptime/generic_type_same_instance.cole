@@ -20,5 +20,8 @@ let main = fn (args: [][]u8) -> i32 {
     if A != B {
         Console::log("types are not the same: ok");
     }
+    if Box(i32) == Box(i32) {
+        Console::log("anon types are the same: ok");
+    }
     return 0;
 };

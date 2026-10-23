@@ -2756,9 +2756,15 @@ pub fn comptimeEq(self: *const Folder, lhs: Comptime.Value, rhs: Comptime.Value)
             return lhs.Enum.Value == rhs.Enum.Value;
         },
         .Bool => lhs.Bool == rhs.Bool,
-        .Type => lhs.Type == rhs.Type,
+        .Type => self.typechecker.nominallyIdentical(lhs.Type, rhs.Type),
         .Function => lhs.Function.body == rhs.Function.body,
-        else => false,
+        .Pointer, .String => false,
+        .Void => true,
+        .Undefined => self.typechecker.nominallyIdentical(lhs.Undefined, rhs.Undefined),
+
+        // @Bug This part is completely wrong, should compare fields instead.
+        .Struct => self.typechecker.nominallyIdentical(lhs.Struct.Type, rhs.Struct.Type),
+        .Union => self.typechecker.nominallyIdentical(lhs.Union.Type, rhs.Union.Type),
     };
 }
 

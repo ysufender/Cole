@@ -892,8 +892,6 @@ let compileLog = #(@comptime) fn (msg: []u8) -> void
 
 let typeName = #(@comptime) fn (T: type) -> []u8
 
-let  = #(@variadic) fn (F1: type) -> type
-
 let alignOf = fn (val: any) -> comptime_int
 
 let compileBreak = #(@comptime) fn () -> noreturn

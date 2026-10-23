@@ -30,6 +30,7 @@ var config: struct {
     native: std.Build.ResolvedTarget = undefined,
     library_path: ?[]const u8 = null,
     tools: struct { } = .{ },
+    profile: bool = false,
 } = .{};
 
 pub fn build(b: *std.Build) void {
@@ -91,6 +92,7 @@ fn addTargets(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
         const opts = b.addOptions();
         opts.addOption(bool, "isDebug", optimize == .Debug);
         opts.addOption([]const u8, "version", versionString);
+        opts.addOption(bool, "profiling", config.profile);
 
         const exe = b.addExecutable(.{
             .name = "cole",
@@ -130,6 +132,14 @@ fn addTargets(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
             _ = vendorCopy.addCopyFileToSource(.{ .cwd_relative = srcPath }, destPath.src_path.sub_path);
         }
         exe.step.dependOn(&vendorCopy.step);
+
+        // Configure Tracy
+        const tracy = b.dependency("ztracy", .{
+            .enable_ztracy = config.profile,
+            .enable_fibers = false,
+        });
+        exe.root_module.addImport("tracy", tracy.module("root"));
+        exe.root_module.linkLibrary(tracy.artifact("tracy"));
 
         const install = b.addInstallArtifact(exe, .{
             .dest_dir = .{ .override = .{ .custom = b.pathJoin(&.{
@@ -203,6 +213,7 @@ fn addDebugTarget(b: *std.Build) void {
 fn configureBuild(b: *std.Build) void {
     config = .{
         .native = b.standardTargetOptions(.{}),
+        .profile = b.option(bool, "profile", "Enable profiling") orelse false,
         .tools = .{ },
     };
 }

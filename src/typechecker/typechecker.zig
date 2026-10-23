@@ -1748,6 +1748,9 @@ pub fn typecheckBuiltinCall(self: *Typechecker, extraPtr: defines.ExpressionPtr,
     const funcToken = ast.expressions.get(ast.extra[extraPtr]).value;
     self.lastToken = funcToken;
 
+    self.callstack.push(declPtr);
+    defer _ = self.callstack.pop();
+
     return switch (declPtr) {
         BI("inComptime") => comptime Comptime.Folder.Builtin.Type("bool"),
         BI("cast") => self.typecheckCast(extraPtr, maybeExpected, false),
@@ -2170,6 +2173,13 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
         },
     });
     decl = self.symbols.declarations.get(declPtr);
+
+    var zone = @import("tracy").ZoneN(
+        @src(),
+        std.fmt.allocPrintSentinel(self.arena.allocator(), "Typecheck {s}", .{self.builder.getInternedString(decl.name)}, 0)
+            catch return Error.AllocatorFailure,
+    );
+    defer zone.End();
 
     isPresent.value_ptr.* = .{
         .status = .InProgress,
@@ -2996,10 +3006,12 @@ pub fn registerType(self: *Typechecker, _newType: TypeInfo) Error!TypeID {
             break :res str.name;
         },
         .Union => |uni| {
+
             newType.Union.name = 0;
             break :res uni.name;
         },
         .Enum => |enm| {
+
             newType.Enum.name = 0;
             break :res enm.name;
         },
@@ -3015,9 +3027,11 @@ pub fn registerType(self: *Typechecker, _newType: TypeInfo) Error!TypeID {
 
         switch (newType) {
             .Struct => {
+
                 newType.Struct.name = name orelse newType.Struct.name;
             },
             .Union => {
+
                 newType.Union.name = name orelse newType.Union.name;
             },
             .Enum => {
@@ -3027,7 +3041,9 @@ pub fn registerType(self: *Typechecker, _newType: TypeInfo) Error!TypeID {
         }
 
         self.typeTable.set(typeID, newType);
+
         _ = try self.typeName(self.arena.allocator(), isPresent.value_ptr.*); // force intern type name
+
     }
 
     return isPresent.value_ptr.*;
@@ -3159,12 +3175,7 @@ pub fn assertCastablePtr(self: *const Typechecker, this: Types.Pointer, that: Ty
     try functional.throwIf(!self.mutable(this.child) and self.mutable(that.child) and !unsafe, Error.MutabilityViolation);
 }
 
-/// Assert that 'this' is structurally identical to 'this'
-/// Does no mutability check
-pub fn assertStructurallyIdentical(self: *const Typechecker, this: TypeID, that: TypeID) Error!void {
-    const fromType = self.typeTable.get(this);
-    const toType = self.typeTable.get(that);
-
+pub fn assertStructurallyIdenticalValue(self: *const Typechecker, fromType: TypeInfo, toType: TypeInfo) Error!void {
     if (std.meta.activeTag(fromType) != std.meta.activeTag(toType)) {
         return Error.IncompatibleTypes;
     }
@@ -3212,6 +3223,15 @@ pub fn assertStructurallyIdentical(self: *const Typechecker, this: TypeID, that:
         },
         else => return common.debug.ShouldBeImpossible(self.context.log, @src()),
     }
+
+}
+
+/// Assert that 'this' is structurally identical to 'this'
+/// Does no mutability check
+pub fn assertStructurallyIdentical(self: *const Typechecker, this: TypeID, that: TypeID) Error!void {
+    const fromType = self.typeTable.get(this);
+    const toType = self.typeTable.get(that);
+    return self.assertStructurallyIdenticalValue(fromType, toType);
 }
 
 /// Check if 'this' is structurally identical to 'that'
@@ -3232,9 +3252,18 @@ pub fn nominallyIdentical(self: *const Typechecker, this: TypeID, that: TypeID) 
     }
 
     return switch (ta) {
-        .Struct => |s| s.name == tb.Struct.name,
-        .Union => |u| u.name == tb.Union.name,
-        .Enum => |e| e.name == tb.Enum.name,
+        .Struct => |s|
+            if (std.mem.startsWith(u8, self.builder.getInternedString(s.name), "$$")) self.structurallyIdentical(this, that)
+            else if (std.mem.startsWith(u8, self.builder.getInternedString(tb.Struct.name), "$$")) return self.structurallyIdentical(this, that)
+            else s.name == tb.Struct.name,
+        .Union => |s|
+            if (std.mem.startsWith(u8, self.builder.getInternedString(s.name), "$$")) self.structurallyIdentical(this, that)
+            else if (std.mem.startsWith(u8, self.builder.getInternedString(tb.Union.name), "$$")) return self.structurallyIdentical(this, that)
+            else s.name == tb.Union.name,
+        .Enum => |s|
+            if (std.mem.startsWith(u8, self.builder.getInternedString(s.name), "$$")) self.structurallyIdentical(this, that)
+            else if (std.mem.startsWith(u8, self.builder.getInternedString(tb.Enum.name), "$$")) return self.structurallyIdentical(this, that)
+            else s.name == tb.Enum.name,
         .Array => |arr|
             arr.len == tb.Array.len
             and self.nominallyIdentical(arr.child, tb.Array.child),
@@ -3329,13 +3358,7 @@ pub fn assertCanCoerce(self: *Typechecker, this: TypeID, that: TypeID) Error!voi
             .ComptimeFloat, .Float => functional.throwIf(!self.isFloat(that) and !self.isInt(that), Error.TypeMismatch),
             .Struct, .Union, .Enum => {
                 try functional.throwIf(std.meta.activeTag(thisType) != std.meta.activeTag(thatType), Error.TypeMismatch);
-                const names: struct { usize, usize } = switch (thisType) {
-                    .Struct => .{ thisType.Struct.name, thatType.Struct.name },
-                    .Union => .{ thisType.Union.name, thatType.Union.name },
-                    .Enum => .{ thisType.Enum.name, thatType.Enum.name },
-                    else => return common.debug.ShouldBeImpossible(self.context.log, @src()),
-                };
-                try functional.throwIf(names.@"0" != names.@"1", Error.TypeMismatch);
+                try functional.throwIf(!self.nominallyIdentical(this, that), Error.TypeMismatch);
             },
             .Function => |f1| {
                 try functional.throwIf(std.meta.activeTag(thisType) != std.meta.activeTag(thatType), Error.TypeMismatch);
@@ -3346,7 +3369,8 @@ pub fn assertCanCoerce(self: *Typechecker, this: TypeID, that: TypeID) Error!voi
                 try functional.throwIf(std.meta.activeTag(thatType) != .Array, Error.TypeMismatch);
                 try functional.throwIf(!self.nominallyIdentical(this, that), Error.TypeMismatch);
             },
-            else => functional.throwIf(std.meta.activeTag(thisType) != std.meta.activeTag(thatType), Error.TypeMismatch),
+            else => try functional.throwIf(!self.nominallyIdentical(this, that), Error.TypeMismatch),
+            // else => functional.throwIf(std.meta.activeTag(thisType) != std.meta.activeTag(thatType), Error.TypeMismatch),
         },
     };
 }

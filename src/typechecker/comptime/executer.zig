@@ -45,6 +45,13 @@ pub fn init(typechecker: *Typechecker, allocator: Allocator) Error!Executer {
 }
 
 pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.Value.Ptr) Error!Comptime.Value.Ptr {
+    var zone = @import("tracy").ZoneN(
+        @src(),
+        std.fmt.allocPrintSentinel(self.arena.allocator(), "Execute {s}", .{self.typechecker.builder.getInternedString(func.name)}, 0)
+            catch return Error.AllocatorFailure,
+    );
+    defer zone.End();
+
     const sign = self.typechecker.typeTable.get(func.signature).Function;
 
     if (!sign.isComptime) {
