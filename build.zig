@@ -144,10 +144,7 @@ fn addTargets(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
         exe.root_module.linkLibrary(tracy.artifact("tracy"));
 
         const install = b.addInstallArtifact(exe, .{
-            .dest_dir = .{ .override = .{ .custom = b.pathJoin(&.{
-                targetName,
-                versionString,
-            }) } }
+            .dest_dir = .{ .override = .{ .custom = "" } }
         });
 
         const step = b.step(targetName, print(
