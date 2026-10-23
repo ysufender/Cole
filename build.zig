@@ -95,7 +95,9 @@ fn addTargets(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
         opts.addOption(bool, "profiling", config.profile);
 
         const exe = b.addExecutable(.{
-            .name = "cole",
+            .name = std.fmt.allocPrint(b.allocator, "cole-{s}", .{
+                targetName
+            }) catch unreachable,
             .version = version,
             .root_module = b.createModule(.{
                 .root_source_file = b.path("src/main.zig"),
