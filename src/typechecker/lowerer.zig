@@ -1999,7 +1999,7 @@ pub fn addMetadata(self: *Lowerer, to: JIR.Ptr, from: defines.ExpressionPtr) Err
     for (expressions, 0..) |valuePtr, idx| {
         const constant = try self.addConstant(
             valuePtr,
-            try self.typechecker.typecheckValue(valuePtr, comptime Comptime.Folder.Builtin.Type("$$builtin_metadata"))
+            try self.typechecker.typecheckValue(valuePtr, null),
         );
         metadata[idx] = constant;
     }

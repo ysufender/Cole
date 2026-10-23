@@ -24,6 +24,12 @@ const files = [_]struct{ []const u8, []const u8 }{
 };
 
 pub fn compile(outDir: Dir, allocator: std.mem.Allocator, context: *common.CompilerContext) Error!void {
+    var zone = @import("tracy").ZoneN(
+        @src(),
+        "Compilation"
+    );
+    defer zone.End();
+
     try createStdIncludes(outDir, context.io);
 
     // Create TCC

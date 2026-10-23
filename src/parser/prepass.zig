@@ -146,6 +146,13 @@ fn prepassImpl(self: *Prepass, ast: *const Parser.AST, name: []const u8) Error!v
     const tokens = self.context.getTokens(ast.tokens);
     const allocator = self.arena.allocator();
 
+    var zone = @import("tracy").ZoneN(
+        @src(),
+        std.fmt.allocPrintSentinel(self.arena.allocator(), "Prepass {s}", .{self.context.getFileName(tokens.items(.start)[0])}, 0)
+            catch return Error.AllocatorFailure,
+    );
+    defer zone.End();
+
     var file = Module{
         .dataIndex = tokens.items(.start)[0],
         .name = name,

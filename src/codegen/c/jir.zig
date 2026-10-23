@@ -172,6 +172,12 @@ pub fn dump(self: *const JIR) void {
 }
 
 pub fn codegen(self: *JIR, context: *Context, cOut: *std.Io.Dir) Error!void {
+    var zone = @import("tracy").ZoneN(
+        @src(),
+        "Codegen"
+    );
+    defer zone.End();
+
     self.allocator = context.arena.allocator();
     self.cstrings = .empty;
 

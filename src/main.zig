@@ -14,9 +14,13 @@ const Prepass = @import("parser/prepass.zig");
 const Resolver = @import("typechecker/resolver.zig");
 const Typechecker = @import("typechecker/typechecker.zig");
 
+const Tracy = @import("tracy");
+
 pub var start: std.Io.Timestamp = undefined;
 
 pub fn main(init: std.process.Init) void {
+    Tracy.FrameMark();
+
     start = std.Io.Clock.now(.real, init.io);
     MainProcInit = init;
 

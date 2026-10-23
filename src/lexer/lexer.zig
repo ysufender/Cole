@@ -277,6 +277,13 @@ pub fn initFromSource(base: std.mem.Allocator, context: *common.CompilerContext,
 }
 
 pub fn lex(self: *Lexer) common.CompilerError!defines.TokenListPtr {
+    var zone = @import("tracy").ZoneN(
+        @src(),
+        std.fmt.allocPrintSentinel(self.arena.allocator(), "Lex {s}", .{self.context.getFileName(self.file)}, 0)
+            catch return Error.AllocatorFailure,
+    );
+    defer zone.End();
+
     defer self.arena.deinit();
 
     while (!self.isAtEnd()) {

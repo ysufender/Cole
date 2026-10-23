@@ -1,3 +1,4 @@
+// Logically, they should be different
 import std::io::console as Console;
 
 let Box = fn (T: type) -> type {
@@ -16,11 +17,11 @@ let take = fn (b: A) -> i32 {
 
 let main = fn (args: [][]u8) -> i32 {
     let b = B(9, 1);
-    if take(b) == 9 {
-        Console::log("same instance: ok");
+    if A != B {
+        Console::log("types are not the same: ok");
     }
-    if A == B {
-        Console::log("types are same: ok");
+    if Box(i32) == Box(i32) {
+        Console::log("anon types are the same: ok");
     }
     return 0;
 };
