@@ -1463,9 +1463,24 @@ pub fn evalCompileLog(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime
 }
 
 pub fn evalGetMetadata(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {
-    _ = self;
-    _ = extraPtr;
-    unreachable;
+    _ = try self.typechecker.typecheckGetMetadata(extraPtr);
+
+    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+    const expressionList = ast.expressions.items(.value)[ast.extra[extraPtr + 1]];
+    const args = defines.Range{
+        .start = ast.extra[expressionList],
+        .end = ast.extra[expressionList + 1],
+    };
+
+    const index: u64 = @intCast(self.getValue(try self.eval(ast.extra[args.at(1)], null)).Int);
+
+    const decl = self.typechecker.symbols.findGetDecl(.{
+        .file = self.typechecker.currentFile,
+        .expr = ast.extra[args.at(0)],
+    });
+
+    const metadata = self.typechecker.getMetadata(decl.node).?;
+    return metadata[index];
 }
 
 pub fn evalAlignOf(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {

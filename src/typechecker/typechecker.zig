@@ -1745,9 +1745,6 @@ pub fn typecheckBuiltinCall(self: *Typechecker, extraPtr: defines.ExpressionPtr,
 
     const ast = self.context.getAST(self.currentFile);
 
-    self.callstack.push(declPtr);
-    defer _ = self.callstack.pop();
-
     const funcToken = ast.expressions.get(ast.extra[extraPtr]).value;
     self.lastToken = funcToken;
 
@@ -1793,11 +1790,8 @@ pub fn typecheckBuiltinCall(self: *Typechecker, extraPtr: defines.ExpressionPtr,
             const builtinInfo = try self.typecheckDecl(infoDecl, comptime Comptime.Folder.Builtin.Type("type"));
             return builtinInfo;
         },
-        BI("getMetadata") => {
-            unreachable;
-        },
+        BI("getMetadata") => self.typecheckGetMetadata(extraPtr),
         BI("compileError") => comptime Comptime.Folder.Builtin.Type("noreturn"),
-            // return self.folder.evalCompileError(extraPtr),
         BI("sizeOf") => return comptime Comptime.Folder.Builtin.Type("u32"),
         BI("bitSizeOf") => return comptime Comptime.Folder.Builtin.Type("u32"),
         BI("alignOf") => return comptime Comptime.Folder.Builtin.Type("u32"),
@@ -1810,6 +1804,78 @@ pub fn typecheckBuiltinCall(self: *Typechecker, extraPtr: defines.ExpressionPtr,
             return Error.ComptimeNotPossible;
         },
     };
+}
+
+pub fn typecheckGetMetadata(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!TypeID {
+    const ast = self.context.getAST(self.currentFile);
+    const expressionList = ast.expressions.items(.value)[ast.extra[extraPtr + 1]];
+    const args = defines.Range{
+        .start = ast.extra[expressionList],
+        .end = ast.extra[expressionList + 1],
+    };
+
+    if (args.len() != 2) {
+        self.report("'getMetadata' expects 2 expression arguments, received {d}.", .{
+            args.len(),
+        });
+        return Error.ArgumentCountMismatch;
+    }
+    else if (ast.expressions.get(ast.extra[args.at(0)]).type != .Identifier) {
+        self.report("'getMetadata' expects an identifier as first param, received '{s}'.", .{
+            @tagName(ast.expressions.get(ast.extra[args.at(0)]).type),
+        });
+        return Error.ArgumentCountMismatch;
+    }
+
+    const metaIndex: u64 = if (self.folder.attemptEval(ast.extra[args.at(1)], null)) |indexPtr| switch (self.folder.getValue(indexPtr)) {
+        .Int => |v| if (v >= 0) @intCast(v) else {
+            self.report("Expected a non-negative index.", .{});
+            return Error.IndexOutOfBounds;
+        },
+        else => {
+            self.report("Expected an integer index.", .{});
+            return Error.NonIntegerIndex;
+        },
+    }
+    else {
+        self.report("Expected a comptime index.", .{});
+        return Error.ComptimeNotPossible;
+    };
+
+    const decl = self.symbols.findGetDecl(.{
+        .file = self.currentFile,
+        .expr = ast.extra[args.at(0)],
+    });
+
+    if (decl.kind != .Variable) {
+        self.report("Attempt to get metadata from a non-variable definition of type '{s}'.", .{
+            @tagName(decl.kind),
+        });
+        return Error.MetadataOfNonVariable;
+    }
+
+    common.log.warn(self.context.log, "'getMetadata' can only get one-layered metadata.", .{});
+
+    const metadata = self.getMetadata(decl.node);
+
+    if (metadata) |meta| {
+        if (metaIndex >= meta.len) {
+            self.report("Metadata index is out of bounds, index: {d} len: {d}", .{
+                metaIndex,
+                meta.len,
+            });
+            return Error.IndexOutOfBounds;
+        }
+
+        const res = try self.typecheckValue(meta[metaIndex], null);
+        return res;
+    }
+    else {
+        self.report("Given definition '{s}' does not have any metadata attached to it.", .{
+            self.builder.getInternedString(decl.name),
+        });
+        return Error.MissngMetadata;
+    }
 }
 
 pub fn typecheckCast(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID, unsafe: bool) Error!TypeID {
@@ -2013,6 +2079,9 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
         };
     }
 
+    self.callstack.push(declPtr);
+    defer _ = self.callstack.pop();
+
     const allocator = self.arena.allocator();
 
     const prevToken = self.lastToken;
@@ -2026,9 +2095,6 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
     defer self.currentScope = prevScope;
 
     const isPresent = self.declCache.getOrPut(allocator, declPtr) catch return Error.AllocatorFailure;
-
-    self.callstack.push(declPtr);
-    defer _ = self.callstack.pop();
 
     if (isPresent.found_existing) {
         switch (isPresent.value_ptr.status) {
@@ -2407,10 +2473,12 @@ pub fn typecheckMark(
         catch return Error.AllocatorFailure;
 
     for (0..marks.len()) |index| {
-        metadata[index] = try self.folder.eval(
+        const meta = self.folder.attemptEval(
             ast.extra[marks.at(@intCast(index))],
             comptime Comptime.Folder.Builtin.Type("$$builtin_metadata")
         );
+
+        metadata[index] = if (meta) |m| m else try self.folder.eval(ast.extra[marks.at(@intCast(index))], null);
     }
 
     // @Note @Beware ugly workaround, forward the markings to the inner mark.
