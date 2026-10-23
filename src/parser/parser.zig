@@ -217,6 +217,13 @@ pub fn init(base: Allocator, context: *common.CompilerContext, tokensPtr: define
 /// Returns a final table containing all info about the parsing.
 /// Parser is undefined and should be reinitialized after the call.
 pub fn parse(self: *Parser) common.CompilerError!defines.ASTPtr {
+    var zone = @import("tracy").ZoneN(
+        @src(),
+        std.fmt.allocPrintSentinel(self.arena.allocator(), "Parse {s}", .{self.context.getFileName(self.file)}, 0)
+            catch return Error.AllocatorFailure,
+    );
+    defer zone.End();
+
     defer self.arena.deinit();
 
     var errCount: u32 = 0;

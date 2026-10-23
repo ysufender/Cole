@@ -35,6 +35,10 @@ end
 
 project
     :step(Efile.Step
+        .init("build-cole")
+        :action(string.format("zig build %s-linux-x86_64", cole_build)))
+
+    :step(Efile.Step
         .init("build")
         :dependOnSteps((function()
             local steps = { }

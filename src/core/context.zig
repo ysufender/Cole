@@ -74,6 +74,12 @@ settings: CompilerSettings,
 log: Log = undefined,
 
 pub fn init(baseAllocator: std.mem.Allocator, mainInit: std.process.Init) Error!Context {
+    var zone = @import("tracy").ZoneN(
+        @src(),
+        "Parse CLI",
+    );
+    defer zone.End();
+
     var arena = std.heap.ArenaAllocator.init(baseAllocator);
     errdefer arena.deinit();
 

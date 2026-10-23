@@ -1463,9 +1463,34 @@ pub fn evalCompileLog(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime
 }
 
 pub fn evalGetMetadata(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {
-    _ = self;
-    _ = extraPtr;
-    unreachable;
+    const metaType = try self.typechecker.typecheckGetMetadata(extraPtr);
+
+    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+    const expressionList = ast.expressions.items(.value)[ast.extra[extraPtr + 1]];
+    const args = defines.Range{
+        .start = ast.extra[expressionList],
+        .end = ast.extra[expressionList + 1],
+    };
+
+    const decl = self.typechecker.symbols.findGetDecl(.{
+        .file = self.typechecker.currentFile,
+        .expr = ast.extra[args.at(0)],
+    });
+
+    const metadata = self.typechecker.getMetadata(decl.node) orelse {
+        self.report("This shouls've been handled in the typechecker.", .{});
+        return common.debug.ShouldBeImpossible(undefined, @src());
+    };
+
+    return self.appendValue(.{
+        .Struct = .{
+            .Type = metaType,
+            .Fields = .{
+                .start = metadata[0],
+                .end = metadata[metadata.len - 1] + 1,
+            },
+        },
+    });
 }
 
 pub fn evalAlignOf(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {
@@ -2731,9 +2756,15 @@ pub fn comptimeEq(self: *const Folder, lhs: Comptime.Value, rhs: Comptime.Value)
             return lhs.Enum.Value == rhs.Enum.Value;
         },
         .Bool => lhs.Bool == rhs.Bool,
-        .Type => lhs.Type == rhs.Type,
+        .Type => self.typechecker.nominallyIdentical(lhs.Type, rhs.Type),
         .Function => lhs.Function.body == rhs.Function.body,
-        else => false,
+        .Pointer, .String => false,
+        .Void => true,
+        .Undefined => self.typechecker.nominallyIdentical(lhs.Undefined, rhs.Undefined),
+
+        // @Bug This part is completely wrong, should compare fields instead.
+        .Struct => self.typechecker.nominallyIdentical(lhs.Struct.Type, rhs.Struct.Type),
+        .Union => self.typechecker.nominallyIdentical(lhs.Union.Type, rhs.Union.Type),
     };
 }
 

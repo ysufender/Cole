@@ -90,10 +90,6 @@ pub let param = fn (self: *mut Args, name: []u8, def: Value, desc: []u8) -> bool
 };
 
 pub let help = fn (self: *Args, stream: IO::Output::Stream, allocator: Allocator::Allocator) -> void {
-    /* @Bug Stream::Output::writeline errors out */
-
-    _ = Output::writeline(stream, "usage: jedy [parameters]");
-
     for self.pairs, |pair| {
         _ = Output::writebuffer(stream, "    ");
         _ = Output::writebuffer(stream, pair.key);

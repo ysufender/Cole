@@ -291,6 +291,13 @@ pub fn resolve(self: *Resolver, allocator: Allocator) Error!Resolution {
 fn resolveModule(self: *Resolver) Error!void {
     const module = self.modules.modules.items(.name)[self.scopes.items(.module)[self.currentScope]];
 
+    var zone = @import("tracy").ZoneN(
+        @src(),
+        std.fmt.allocPrintSentinel(self.arena.allocator(), "Resolve {s}", .{module}, 0)
+            catch return Error.AllocatorFailure,
+    );
+    defer zone.End();
+
     const kind = self.scopes.items(.kind)[self.currentScope];
     if (kind != .Module) {
         return Error.UnexpectedScope;

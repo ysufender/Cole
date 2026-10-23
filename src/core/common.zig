@@ -147,6 +147,8 @@ pub const CompilerError = error {
     MissingCapture,
     NonIntegerRange,
     LoopOverNonRange,
-    Terminate,
     ImportInSubLevel,
+    MetadataOfNonVariable,
+    MissngMetadata,
+    Terminate,
 };
