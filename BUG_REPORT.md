@@ -1,5 +1,22 @@
 # Known Bugs
 
+## Major Performance Issues (46)
+
+The `bug_numeric_traits` test is passing in this commit, but has major performance
+issues. The reason is unbeknownst as for now.
+
+### Reproduction
+
+Just run the `bug_numeric_traits` test.
+
+### Expected Output
+
+A build time less than (or equal to) 1 seconds.
+
+### Received Output
+
+Around almost 1 minute build time, terrible.
+
 ## Illegal Memory Access (31)
 
 Run the raylib demo. The output source.c is garbled when using a non-preserving allocator
