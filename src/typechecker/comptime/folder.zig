@@ -523,8 +523,18 @@ pub fn evalBinary(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Ty
             });
         },
         .EqualEqual, .BangEqual => |equality| {
-            const lhs = self.getValue(try self.expectDefined(ast.extra[extraPtr], lhsType));
-            const rhs = self.getValue(try self.expectDefined(ast.extra[extraPtr + 2], lhsType));
+            var lhs = self.getValue(try self.expectDefined(ast.extra[extraPtr], lhsType));
+            var rhs = self.getValue(try self.expectDefined(ast.extra[extraPtr + 2], lhsType));
+
+            if (lhs == .Int and rhs == .Float) {
+                const lhsInt = lhs.Int;
+                lhs = .{ .Float = @floatFromInt(lhsInt) };
+            }
+            else if (lhs == .Float and rhs == .Int) {
+                const rhsInt = rhs.Int;
+                rhs = .{ .Float = @floatFromInt(rhsInt) };
+            }
+
 
             return self.appendValue(.{
                 .Bool =
@@ -549,37 +559,70 @@ pub fn evalBinary(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Ty
             });
         },
         .Greater, .LesserEqual => |comparison| {
-            const multiplier = comparison == .Greater;
+            const isGreater = comparison == .Greater;
 
-            const lhs = self.getValue(try self.expectDefined(ast.extra[extraPtr], lhsType));
-            const rhs = self.getValue(try self.expectDefined(ast.extra[extraPtr + 2], lhsType));
+            var lhs = self.getValue(try self.expectDefined(ast.extra[extraPtr], lhsType));
+            var rhs = self.getValue(try self.expectDefined(ast.extra[extraPtr + 2], lhsType));
+
+            if (lhs == .Int and rhs == .Float) {
+                const lhsInt = lhs.Int;
+                lhs = .{ .Float = @floatFromInt(lhsInt) };
+            }
+            else if (lhs == .Float and rhs == .Int) {
+                const rhsInt = rhs.Int;
+                rhs = .{ .Float = @floatFromInt(rhsInt) };
+            }
+
+
+            const greater = switch (lhs) {
+                .Int => lhs.Int > rhs.Int,
+                .Float => lhs.Float > rhs.Float,
+                else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
+            };
 
             return self.appendValue(.{
-                .Bool = multiplier and switch (lhs) {
-                    .Int => lhs.Int > rhs.Int,
-                    .Float => lhs.Float > rhs.Float,
-                    else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
-                }
+                .Bool = if (isGreater) greater else !greater,
             });
         },
         .Lesser, .GreaterEqual => |comparison| {
-            const multiplier = comparison == .Lesser;
+            const isLesser = comparison == .Lesser;
 
-            const lhs = self.getValue(try self.expectDefined(ast.extra[extraPtr], lhsType));
-            const rhs = self.getValue(try self.expectDefined(ast.extra[extraPtr + 2], lhsType));
+            var lhs = self.getValue(try self.expectDefined(ast.extra[extraPtr], lhsType));
+            var rhs = self.getValue(try self.expectDefined(ast.extra[extraPtr + 2], lhsType));
+
+            if (lhs == .Int and rhs == .Float) {
+                const lhsInt = lhs.Int;
+                lhs = .{ .Float = @floatFromInt(lhsInt) };
+            }
+            else if (lhs == .Float and rhs == .Int) {
+                const rhsInt = rhs.Int;
+                rhs = .{ .Float = @floatFromInt(rhsInt) };
+            }
+
+
+            const lesser = switch (lhs) {
+                .Int => lhs.Int < rhs.Int,
+                .Float => lhs.Float < rhs.Float,
+                else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
+            };
 
             return self.appendValue(.{
-                .Bool = multiplier and switch (lhs) {
-                    .Int => lhs.Int < rhs.Int,
-                    .Float => lhs.Float < rhs.Float,
-                    else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
-                }
+                .Bool = if (isLesser) lesser else !lesser,
             });
-
         },
         .Plus, .Minus, .Slash, .Star, .Modulo => |arithmetic| {
-            const lhs = self.getValue(try self.expectDefined(ast.extra[extraPtr], lhsType));
-            const rhs = self.getValue(try self.expectDefined(ast.extra[extraPtr + 2], null));
+            var lhs = self.getValue(try self.expectDefined(ast.extra[extraPtr], lhsType));
+            var rhs = self.getValue(try self.expectDefined(ast.extra[extraPtr + 2], null));
+
+            if (lhs == .Int and rhs == .Float) {
+                const lhsInt = lhs.Int;
+                lhs = .{ .Float = @floatFromInt(lhsInt) };
+            }
+            else if (lhs == .Float and rhs == .Int) {
+                const rhsInt = rhs.Int;
+                rhs = .{ .Float = @floatFromInt(rhsInt) };
+            }
+
 
             return self.appendValue(switch (arithmetic) {
                 .Plus => switch (lhs) {
@@ -2218,14 +2261,18 @@ fn constructStruct(
     str: *const types.Struct,
     range: defines.Range,
 ) Error!Comptime.Value.Ptr {
-    const start = self.memory.items.len;
+    const addrs = self.arena.allocator().alloc(Comptime.Value.Ptr, range.len())
+        catch return Error.AllocatorFailure;
 
     for (0..range.len()) |idx| {
-        const addr = try self.eval(
+        addrs[idx] = try self.eval(
             ast.extra[range.at(@intCast(idx))],
             str.fields[idx].valueType
         );
+    }
 
+    const start = self.memory.items.len;
+    for (addrs) |addr| {
         _ = try self.appendValue(self.getValue(addr));
     }
 
@@ -2263,11 +2310,15 @@ fn constructUnion(
 fn constructArrayFromList(self: *Folder, arr: TypeID, child: TypeID, range: defines.Range) Error!Comptime.Value.Ptr {
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
 
+    const addrs = self.arena.allocator().alloc(Comptime.Value.Ptr, range.len())
+        catch return Error.AllocatorFailure;
+
+    for (range.start..range.end, 0..) |ptr, idx| {
+        addrs[idx] = try self.eval(ast.extra[ptr], child);
+    }
+
     const address = self.memory.items.len;
-
-    for (range.start..range.end) |ptr| {
-        const addr = try self.eval(ast.extra[ptr], child);
-
+    for (addrs) |addr| {
         _ = try self.appendValue(self.getValue(addr));
     }
 
@@ -2365,6 +2416,18 @@ pub fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Type
         .Function => maybeFunction.Function,
         else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
     };
+
+    const prevs = self.typechecker.currentFile;
+    self.typechecker.currentFile = function.source;
+
+    if (self.typechecker.hasMetadata(function.expr, "@extern")) {
+        self.report("Attempt to comptime execute external function '{s}'", .{
+            self.typechecker.builder.getInternedString(function.name),
+        });
+        return Error.ComptimeNotPossible;
+    }
+
+    self.typechecker.currentFile = prevs;
 
     const signature = self.typechecker.typeTable.get(function.signature).Function;
 

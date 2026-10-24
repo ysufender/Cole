@@ -26,14 +26,10 @@ import std::numeric as Numeric;
 
 pub let Epsilon = 0.000000119209;
 
-pub let Math = fn (T: type) -> type {
-    return struct {
-        pub let abs = fn (val: T) -> T {
-            return sign(val) * val;
-        };
+pub let abs = fn (val: float) -> float {
+    return sign(val) * val;
+};
 
-        pub let sign = fn (val: T) -> T {
-            return if (val > 0) 1 else -1;
-        };
-    };
+pub let sign = fn (val: float) -> float {
+    return if (val > 0) 1 else -1;
 };

@@ -196,9 +196,9 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
 }
 
 pub fn executeAssignment(self: *Executer, exprPtr: defines.ExpressionPtr) Error!Comptime.Value.Ptr {
-    _ = self;
     _ = exprPtr;
-    unreachable;
+    self.report("Comptime mutable variables are not (yet) supportede.", .{});
+    return Error.ComptimeNotPossible;
 }
 
 pub fn getVar(self: *const Executer, name: defines.StringPtr) ?Comptime.Value.Ptr {

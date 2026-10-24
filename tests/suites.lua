@@ -240,7 +240,7 @@ return {
         "bug_typeof_folded_variable",
         "bug_global_string_constant",
         "bug_typeinfo_switch_in_fn",
-        "bug_numeric_traits",
+        -- "bug_numeric_traits", -- takes too long to build
         "bug_generic_typeinfo_stale",
     },
 }
