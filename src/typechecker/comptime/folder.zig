@@ -831,7 +831,10 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
     defer self.typechecker.currentScope = prevScope;
 
     if (self.declCache.get(declPtr)) |v| {
-        return v;
+        // @Bug can't seem to get this to work
+        if (!self.getFlag(.InComptimeCall)) {
+            return v;
+        }
     }
 
     const res = try switch (decl.kind) {
