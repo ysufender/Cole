@@ -1,4 +1,4 @@
-# Cole Language Reference
+# Cole Language Reference - v0.1.0
 
 This reference is heavily inspired by the [V Language Documentation](https://github.com/vlang/v/blob/master/doc/docs.md)
 
@@ -27,6 +27,7 @@ soon enough.
 
 The best way to get the latest and greatest Cole, is to install it from source.
 It is easy, and it takes only a few seconds:
+
 ```bash
 git clone --depth=1 https://github.com/ysufender/Cole.git
 cd v
@@ -122,7 +123,7 @@ For more details, do: `v check-md`
 import std::io::console as Console;
 
 let main = fn (args: [][]u8) -> i32 {
-	Console::log('hello world');
+	Console::log("hello world");
     return 0;
 };
 ```
@@ -417,8 +418,10 @@ UnsupportedTarget
 MissingCapture
 NonIntegerRange
 LoopOverNonRange
-Terminate
 ImportInSubLevel
+MetadataOfNonVariable
+MissngMetadata
+Terminate
 ```
 
 ## Cole Types
@@ -428,8 +431,8 @@ ImportInSubLevel
 ```rust
 bool
 
-i8 i32
-u8 u32
+i8 i32 isize
+u8 u32 usize
 
 float
 
@@ -857,6 +860,9 @@ You can switch on tagged unions.
 Varargs are only supported for external C functions as for now, but as soon as I get comptime
 execution working properly, I'll implement varargs.
 
+Use the builtin metadata `@variadic` to mark a function as variadic, note that this is only possible
+for `@extern` functions.
+
 ### Function Pointers
 
 Functions are implicitly function pointer types. So you can pass them around.
@@ -884,17 +890,17 @@ let sizeOf = fn (val: any) -> comptime_int
 
 let cast = fn (val: any) -> T
 
-let as = #(@comptime) fn (T: type, expr: any) -> T
+let as = fn (T: type, expr: any) -> T
 
 let unsafeCast = fn (val: any) -> T
 
-let compileLog = #(@comptime) fn (msg: []u8) -> void
+let compileLog = fn (msg: []u8) -> void
 
-let typeName = #(@comptime) fn (T: type) -> []u8
+let typeName = fn (T: type) -> []u8
 
 let alignOf = fn (val: any) -> comptime_int
 
-let compileBreak = #(@comptime) fn () -> noreturn
+let compileBreak = fn () -> noreturn
 
 let typeInfo = fn (T: type) -> builtin::TypeInfo
 
@@ -903,6 +909,12 @@ let src = fn () -> builtin::SourceInfo
 let buildInfo = fn () -> builtin::ColeInfo
 
 let inComptime = fn () -> bool
+
+let isComptime = fn (val: any) -> bool
+
+let this = fn () -> type
+
+let getMetadata = fn (decl: any) -> any
 ```
 
 # Advanced Topics
@@ -923,8 +935,280 @@ builtin enumerations for attributing purposes. Available ones are:
 @packed
 ```
 
-I will not go into detail with marks since they are not completely ready yet. But once done,
-I'll update this section.
+Cole supports attaching arbitrary compile-time data to expressions, yes, expressions. Any expression
+can have metadata attached to it, and some of them are used in typechecking, comptime execution and
+codege.
+
+You can reflect on the marks of a declaration, yes you can only reflect on marks of declarations, using
+the builtin `getMetadata` function.
+
+To mark an expression, use the `#(..exprs..)` syntax:
+
+```rust
+let printf = #(@extern, @variadic) fn (fmt: [@c]c_char) -> mut c_int { };
+
+let Color = #(@extern) {
+    r: c_uchar,
+    g: c_uchar,
+    b: c_uchar,
+    a: c_uchar,
+};
+
+let PI: float = #(@extern) undefined;
+```
+
+As you can see, defining external functions, types and variables is quite easy in Cole!
+
+With comptime reflection, you can inspect declaration metadata as well:
+
+```rust
+import std::io::console as Console;
+
+let main = #("Hello World") fn (args: [][]u8) -> i32 {
+    Console::log(getMetadata(main)._0); // Hello World
+    return 0;
+};
+```
+
+As you can see, the returned metadata is completely type-safe (hence a tuple), and can live into
+runtime if it is not an explicit comptime type.
+
+## Comptime Execution and Generics
+
+Cole does not have a separate syntax for generics, and compile-time execution unlike popular languages
+such as Rust or C++. Instead, Cole treats everything as values, including types. Due to this behaviour,
+you can call functions at compile time, with compile time parameters, and return compile time values.
+
+Below is an example, showing how to generate a generic `Math` module with `sign` and `abs` functions:
+
+```rust
+import std::numeric as Numeric;
+
+let Math = fn (T: type) -> type {
+    return struct {
+        pub let sign = fn (val: T) -> Numeric::Signed::Trait(T) {
+            return if (val < 0) 1 else -1;
+        };
+
+        pub let abs = fn (val: T) -> Numeric::Signed::Trait(T) {
+            return val * sign(val);
+        };
+    };
+};
+```
+
+The `Numeric::Signed::Trait(T)` itself is just a compile time function that reflects on the
+passed type, and returns it if it satisfies the traits.
+
+You can then use the module like so:
+
+```rust
+let Mathf = Math(float);
+let Mathi = Math(i32);
+```
+
+Pretty cool!
+
+## Comptime Type Reflection
+
+Cole provides you a couple builtin functions to reflect on types. The most useful one is `typeInfo`.
+It returns a `builtin::TypeInfo` union that you can inspect at compile time. Be aware that since it
+includes `type` fields, it can't leak into runtime!
+
+See below for the implementation of `builtin::TypeInfo`.
+
+## Builtin Module
+
+```rust
+pub let Optimization = enum {
+    Og,
+    O1,
+    O2,
+    O3,
+};
+
+pub let Backend = enum {
+    C,
+};
+
+pub let Platform = enum {
+    Windows,
+    Unix,
+};
+
+pub let BuildInfo = struct {
+    optimization: Optimization,
+    backend: Backend,
+    platform: Platform,
+};
+
+pub let SourceInfo = struct {
+    file: []u8,
+    line: u32,
+    col: u32,
+};
+
+pub let ColeInfo: struct {
+    name: []u8,
+    description: []u8,
+    versionString: []u8,
+    versionMajor: u8,
+    versionMinor: u8,
+    versionPatch: u8,
+    contributors: [1][]u8,
+} = (
+    "Cole",
+    "A statically typed, ahead of time compiled language with powerful metaprogramming.",
+    "0.1.0",
+    0, 1, 0,
+    (
+        "Yusuf Ender Osmanoğlu <yusufenderosmanoglu@gmail.com>",
+    )
+);
+
+pub let StackFrame = #(@extern) struct {
+    function: mut []u8,
+    file: mut []u8,
+    line: mut u32,
+    col: mut u32,
+};
+
+pub let StackTrace = #(@extern) struct {
+    frame: mut StackFrame,
+    next: mut *StackTrace,
+};
+
+pub let TypeInfo = union(enum) {
+    Struct: Struct,
+    Union: Union,
+    Enum: Enum,
+    Array: Array,
+    Function: Function,
+    Pointer: Pointer,
+    Integer: Integer,
+
+    Bool: bool, // mutability bool
+    Float: bool, // mutability bool
+    Void: bool, // mutability bool
+    CInt: bool,
+    CUInt: bool,
+    CChar: bool,
+    CUChar: bool,
+    CDouble: bool,
+    CLong: bool,
+    CULong: bool,
+    CShort: bool,
+    CUShort: bool,
+    CSize: bool,
+    Any: bool, // mutability bool
+
+    ComptimeInt: void, // Must be const
+    ComptimeFloat: void, // Must be const
+    EnumLiteral: void, // Must be const and comptime
+    Noreturn: void,
+    Type: void,
+};
+
+pub let FieldInfo = struct {
+    public: bool,
+    name: []u8,
+    valueType: type,
+    isComptime: bool,
+};
+
+pub let Struct = struct {
+    mutable: bool,
+    name: []u8,
+    fields: []FieldInfo,
+    definitions: []FieldInfo,
+    isTuple: bool,
+};
+
+pub let Union = struct {
+    isTagged: bool,
+    /// All unions must have field tags, but only
+    /// tagged unions contain them in their layout.
+    /// So runtime safety is only present for tagged
+    /// unions.
+    tag: type,
+    mutable: bool,
+    name: []u8,
+    fields: []FieldInfo,
+    definitions: []FieldInfo,
+};
+
+pub let EnumField = struct {
+    name: []u8,
+    value: u32,
+};
+
+pub let Enum = struct {
+    mutable: bool,
+    name: []u8,
+    fields: []EnumField,
+    definitions: []FieldInfo,
+};
+
+pub let Pointer = struct {
+    mutable: bool,
+    child: type,
+    size: enum {
+        Slice,
+        Single,
+        C,
+    },
+};
+
+pub let Array = struct {
+    mutable: bool,
+    child: type,
+    len: u32,
+};
+
+pub let Function = struct {
+    mutable: bool,
+    isComptime: bool, 
+    variadic: bool,
+    argTypes: []type,
+    returnType: type,
+};
+
+pub let Integer = struct {
+    mutable: bool,
+    size: u8,
+    isSigned: bool,
+};
+```
+
+## Stack Tracing
+
+On debug builds, Cole will insert some tiny bit of overhead to your program to add automatic stack
+tracing. At any point of your program, you can get this trace using the `std::debug` module like so:
+
+```rust
+import std::debug;
+import std::c;
+import std::io;
+
+let main = fn (args: [][]u8) -> i32 {
+    let trace = std::debug::stackTrace();
+
+    std::debug::dumpTrace(trace, std::c::Allocator, std::io::StdOut());
+
+    return 0;
+};
+```
+
+The output of this program will be:
+
+```bash
+Trace (most recent call first):
+    root__main@/home/joseph/Desktop/proj/Cole/test/main.cole:5:5
+    main@hidden_main.c:0:0
+```
+
+You can leave the code as-is, and on non-debug builds, the compiler will return an empty trace instead.
+So the output will be empty as well.
 
 # Appendices
 
