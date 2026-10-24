@@ -426,12 +426,12 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
 
                 if (self.typeTable.get(def.valueType) == .Function) {
                     const prevInst = self.folder.currentInstantiation;
-                    self.folder.currentInstantiation = scope;
+                    self.folder.currentInstantiation = newType;
                     defer self.folder.currentInstantiation = prevInst;
 
                     const funcPtr = try self.folder.evalDecl(rres.value, def.valueType);
                     const func = &self.folder.memory.items[funcPtr].Function;
-                    self.builder.modifyInternedString(func.name, nname);
+                    try self.builder.modifyInternedString(func.name, nname);
                     func.name = nnname;
 
                     self.folder.declCache.put(self.folder.arena.allocator(), rres.value, funcPtr)
@@ -484,7 +484,7 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
                 return Error.ExportOfMainFunction;
             }
 
-            self.builder.modifyInternedString(func.name, newName);
+            try self.builder.modifyInternedString(func.name, newName);
             func.name = try self.builder.internString(newName);
         },
         else => { },
@@ -1084,7 +1084,7 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
         else typeID: switch (expr.type) {
             .Identifier => {
                 self.lastToken = expr.value;
-                const decl = self.symbols.findDecl(.{ .file = self.currentFile, .expr = expressionPtr });
+                const decl = self.instanceDecl(self.symbols.findDecl(.{ .file = self.currentFile, .expr = expressionPtr }));
                 const discoveredType = try self.typecheckDecl(decl, maybeExpected);
                 break :typeID discoveredType;
             },
@@ -1802,6 +1802,7 @@ pub fn typecheckBuiltinCall(self: *Typechecker, extraPtr: defines.ExpressionPtr,
         BI("compileBreak") => return comptime Comptime.Folder.Builtin.Type("void"),
         BI("compileLog") => return comptime Comptime.Folder.Builtin.Type("void"),
         BI("unreachable") => comptime Comptime.Folder.Builtin.Type("noreturn"),
+        BI("this") => comptime Comptime.Folder.Builtin.Type("type"),
         else => {
             self.report("Builtin '{s}' is not usable in this context.", .{Resolver.builtins[declPtr]});
             return Error.ComptimeNotPossible;
@@ -2052,6 +2053,36 @@ pub fn typecheckIndexing(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!
         };
 }
 
+pub fn instanceDecl(self: *Typechecker, declPtr: defines.DeclPtr) defines.DeclPtr {
+    const inst = self.folder.currentInstantiation;
+    if (inst == 0) return declPtr;
+
+    const decl = self.symbols.getDecl(declPtr);
+
+    const ast = self.context.getAST(self.currentFile);
+    if (ast.expressions.items(.type)[decl.node] != .FunctionDefinition) return declPtr;
+
+    const scope = switch (self.typeTable.get(inst)) {
+        .Struct => |s| s.scope,
+        .Union => |u| u.scope,
+        .Enum => |e| e.scope,
+        else => return declPtr,
+    };
+    if (decl.scope == scope) return declPtr;
+
+    const tokens = self.context.getTokens(ast.tokens);
+    const name = tokens.get(decl.token).lexeme(self.context, self.currentFile);
+    const tname = self.builder.getInternedString(switch (self.typeTable.get(inst)) {
+        .Struct => |s| s.name, .Union => |u| u.name, .Enum => |e| e.name,
+        else => unreachable,
+    });
+    const key = std.fmt.allocPrint(self.arena.allocator(), "{s}::{s}", .{ tname, name }) catch return declPtr;
+
+    const found = self.symbols.lookup.get(.{ .scope = scope, .name = key }) orelse
+        self.symbols.lookup.get(.{ .scope = scope, .name = name }) orelse return declPtr;
+    return if (self.symbols.getDecl(found).node == decl.node) found else declPtr;
+}
+
 pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected: ?TypeID) Error!TypeID {
     var decl = self.symbols.declarations.get(declPtr);
 
@@ -2211,8 +2242,13 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
 
     // @Note preventing the caching of declarations when inside a comptime call.
     // Since they'll get their own declarations and scopes, it is fine.
+    const instanceDependent =
+        self.folder.getFlag(.InComptimeCall)
+        or decl.kind == .Parameter
+        or (self.folder.currentInstantiation != 0 and !decl.topLevel);
+
     isPresent.value_ptr.* = .{
-        .status = if (self.folder.getFlag(.InComptimeCall)) .NotChecked else .Checked,
+        .status = if (instanceDependent) .NotChecked else .Checked,
         .result = declType,
     };
 

@@ -28,13 +28,13 @@ let main = fn (args: [][]u8) -> i32 {
     if a == 41 {
         Console::log("IntBox::twice: ok");
     }
-    if Math::abs(b - 2.5) <= Math::Epsilon {
+    if b == 2.5 {
         Console::log("FloatBox::twice: ok");
     }
     if ib.value == 5 {
         Console::log("IntBox.value: ok");
     }
-    if Math::abs(fb.value - 0.5) <= Math::Epsilon {
+    if fb.value == 0.5 {
         Console::log("FloatBox.value: ok");
     }
     return 0;

@@ -1975,10 +1975,9 @@ fn binary(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR
 }
 
 fn identifier(self: *Lowerer, id: defines.ExpressionPtr) Error!JIR.Ptr {
-    const decl = self.typechecker.symbols.findGetDecl(.{
-        .file = self.typechecker.currentFile,
-        .expr = id,
-    });
+    const decl = self.typechecker.symbols.getDecl(self.typechecker.instanceDecl(
+        self.typechecker.symbols.findDecl(.{ .file = self.typechecker.currentFile, .expr = id })));
+
     return self.typechecker.builder.identifier(decl.name);
 }
 

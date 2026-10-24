@@ -13,7 +13,8 @@ const TypeID = Types.TypeID;
 const Declaration = @import("../../../typechecker/resolver.zig").Declaration;
 const Comptime = @import("../../../typechecker/comptime.zig");
 
-pub const InternTable = std.array_hash_map.String(void);
+pub const InternTable = std.hash_map.StringHashMapUnmanaged(u32);
+pub const InternArray = std.ArrayList([]const u8);
 pub const StringPtr = defines.Offset;
 pub const MetadataMap = collections.HashMap(JIR.Ptr, []const JIR.Constant.Ptr);
 
@@ -30,6 +31,7 @@ data: std.ArrayList(u32),
 allocator: Allocator,
 keyNodes: std.ArrayList(JIR.Ptr),
 strings: InternTable,
+stringList: InternArray,
 topLevelAsms: std.ArrayList(defines.StringPtr),
 typechecker: *Typechecker,
 
@@ -69,6 +71,8 @@ pub fn init(allocator: Allocator, counts: common.CompilerContext.Counts, typeche
         .strings = strings,
         .allocator = allocator,
         .typechecker = typechecker,
+        .stringList = InternArray.initCapacity(allocator, counts.string + counts.types * 4 + counts.functions)
+            catch return Error.AllocatorFailure,
         .metadata = metadata,
     };
 }
@@ -77,7 +81,7 @@ pub fn build(self: *const Builder, allocator: Allocator) Error!JIR {
     return .{
         .types = try collections.deepCopy(self.typechecker.typeTable.slice(), allocator),
         .typeNames = try collections.deepCopy(self.typechecker.typenameMap, allocator),
-        .strings = try collections.deepCopy(self.strings.keys(), allocator),
+        .strings = try collections.deepCopy(self.stringList.items, allocator),
         .constants = try collections.deepCopy(self.constants.slice(), allocator),
         .functions = try collections.deepCopy(self.functions.slice(), allocator),
         .nodes = try collections.deepCopy(self.nodes.slice(), allocator),
@@ -106,21 +110,30 @@ pub fn addConstant(self: *Builder, constant: JIR.Constant) Error!JIR.Constant.Pt
     return @intCast(res);
 }
 
-pub fn modifyInternedString(self: *Builder, strPtr: defines.StringPtr, new: []const u8) void {
-    _ = self;
-    _ = strPtr;
-    _ = new;
-    // self.strings.keys()[strPtr] = new;
+pub fn modifyInternedString(self: *Builder, strPtr: defines.StringPtr, new: []const u8) Error!void {
+    _ = self.strings.remove(self.stringList.items[strPtr]);
+    self.stringList.items[strPtr] = new;
+    const gop = self.strings.getOrPut(self.allocator, new) catch return Error.AllocatorFailure;
+    if (!gop.found_existing) gop.value_ptr.* = strPtr;
 }
 
 pub fn internString(self: *Builder, str: []const u8) Error!defines.StringPtr {
-    const res = self.strings.getOrPutValue(self.allocator, str, {})
+    const res = self.strings.getOrPut(self.allocator, str)
         catch return Error.AllocatorFailure;
-    return @intCast(res.index);
+
+    if (res.found_existing) {
+        return res.value_ptr.*;
+    }
+    else {
+        res.value_ptr.* = @intCast(self.stringList.items.len);
+        self.stringList.append(self.allocator, str)
+            catch return Error.AllocatorFailure;
+        return @intCast(res.value_ptr.*);
+    }
 }
 
 pub inline fn getInternedString(self: *const Builder, index: defines.StringPtr)  []const u8 {
-    return self.strings.keys()[index];
+    return self.stringList.items[index];
 }
 
 pub inline fn addMetadata(self: *Builder, node: JIR.Ptr, metadata: []const JIR.Constant.Ptr) Error!void {
