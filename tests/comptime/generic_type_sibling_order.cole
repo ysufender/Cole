@@ -1,0 +1,35 @@
+// comptime/generic_type_sibling_order
+// Instantiation order must not decide which instance a sibling call binds to.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+let pf = fn (f: float) -> void {
+    Console::log(String::floatToStr(f, C::Allocator));
+};
+
+let Box = fn (T: type) -> type {
+    return struct {
+        value: T,
+        count: u8,
+
+        pub let identity = fn (v: T) -> T { return v; };
+        pub let twice = fn (v: T) -> T { return identity(identity(v)); };
+    };
+};
+
+let FloatBox = Box(float);
+let IntBox = Box(i32);
+let ByteBox = Box(u8);
+
+let main = fn (args: [][]u8) -> i32 {
+    pi(IntBox::twice(41));
+    pf(FloatBox::twice(2.5));
+    pi(ByteBox::twice(200));
+    pf(FloatBox::twice(0.75));
+    pi(IntBox::twice(-3));
+    return 0;
+};

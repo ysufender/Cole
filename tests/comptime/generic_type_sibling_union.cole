@@ -1,0 +1,41 @@
+// comptime/generic_type_sibling_union
+// Sibling definitions inside generic unions bind per instance too.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+let pf = fn (f: float) -> void {
+    Console::log(String::floatToStr(f, C::Allocator));
+};
+
+let Opt = fn (T: type) -> type {
+    return union(enum) {
+        Some: T,
+        None: void,
+
+        pub let zero = fn (v: T) -> T { return v; };
+        pub let pass = fn (v: T) -> T { return zero(zero(v)); };
+    };
+};
+
+let I = Opt(i32);
+let F = Opt(float);
+
+let main = fn (args: [][]u8) -> i32 {
+    pi(I::pass(9));
+    pf(F::pass(2.5));
+    let a: I = (@Some, 7);
+    switch a {
+        @Some -> |v| pi(v);
+        @None -> Console::log("none");
+    }
+    let b: F = (@Some, 0.5);
+    switch b {
+        @Some -> |v| pf(v);
+        @None -> Console::log("none");
+    }
+    return 0;
+};
