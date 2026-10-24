@@ -426,7 +426,7 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
 
                 if (self.typeTable.get(def.valueType) == .Function) {
                     const prevInst = self.folder.currentInstantiation;
-                    self.folder.currentInstantiation = scope;
+                    self.folder.currentInstantiation = newType;
                     defer self.folder.currentInstantiation = prevInst;
 
                     const funcPtr = try self.folder.evalDecl(rres.value, def.valueType);
@@ -1574,7 +1574,7 @@ pub fn discoverScopeDef(
         .file = self.currentFile,
         .expr = expr,
     }, decl) catch return Error.AllocatorFailure;
-
+    
     const discoveredType = try self.typecheckDecl(decl, null);
     const memberIndex = try self.definitionIndex(from, member.name);
 

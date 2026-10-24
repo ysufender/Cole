@@ -95,8 +95,9 @@ fn addTargets(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
         opts.addOption(bool, "profiling", config.profile);
 
         const exe = b.addExecutable(.{
-            .name = std.fmt.allocPrint(b.allocator, "cole-{s}", .{
-                targetName
+            .name = std.fmt.allocPrint(b.allocator, "cole-{s}-{s}", .{
+                versionString,
+                targetName,
             }) catch unreachable,
             .version = version,
             .root_module = b.createModule(.{
