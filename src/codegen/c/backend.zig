@@ -102,6 +102,13 @@ pub fn compile(outDir: Dir, allocator: std.mem.Allocator, context: *common.Compi
         }
     }
 
+    for (context.settings.includeDirs) |dir| {
+        if (tcc.tcc_add_include_path(state, dir.ptr) == -1) {
+            report("Failed to include paths.");
+            return Error.BackendError;
+        }
+    }
+
     // Add source file
     const input = outDir.realPathFileAlloc(context.io, "source.c", allocator)
         catch return Error.AllocatorFailure;

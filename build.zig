@@ -235,6 +235,14 @@ fn addDebugTarget(b: *std.Build) void {
     }
     exe.step.dependOn(&vendorCopy.step);
 
+    // Configure Tracy
+    const tracy = b.dependency("ztracy", .{
+        .enable_ztracy = config.profile,
+        .enable_fibers = false,
+    });
+    exe.root_module.addImport("tracy", tracy.module("root"));
+    exe.root_module.linkLibrary(tracy.artifact("tracy"));
+
     const install = b.addInstallArtifact(exe, .{});
 
     const step = b.step(targetName, "Build for debug on native platform");

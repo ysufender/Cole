@@ -486,7 +486,7 @@ fn resolveStatement(self: *Resolver, stmt: defines.StatementPtr, topLevel: bool)
             try self.resolveExpression(initializer);
         },
         .Import => {
-            if (self.scopes.get(self.currentScope).kind != .Module) {
+            if (false and self.scopes.get(self.currentScope).kind != .Module) {
                 self.report("Import statements are only allowed on top-level contexts.", .{});
                 return Error.ImportInSubLevel;
             }
