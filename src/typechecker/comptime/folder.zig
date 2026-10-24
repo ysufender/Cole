@@ -146,7 +146,7 @@ pub fn eval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeI
             break :addr
                 if (expr.value == 0) @intFromEnum(Comptime.Value.Implicit.Type.Any)
                 else if (typechecker.symbols.tryGetDecl(.{ .file = file, .expr = exprPtr })) |decl|
-                    try self.evalDecl(decl, maybeExpected)
+                    try self.evalDecl(self.typechecker.instanceDecl(decl), maybeExpected)
                 else {
                     self.report("Unable to resolve identifier '{s}'.", .{
                         self.typechecker.context
@@ -893,6 +893,7 @@ fn evalBuiltinCall(self: *Folder, extraPtr: defines.OpaquePtr, declPtr: defines.
             return Error.UnreachableCodePath;
         },
         BI("compileLog") => self.evalCompileLog(extraPtr),
+        BI("this") => self.evalThis(extraPtr),
         else => {
             self.report("Builtin '{s}' is not usable in this context.", .{Resolver.builtins[declPtr]});
             return Error.ComptimeNotPossible;
@@ -1441,6 +1442,31 @@ fn evalCast(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID, 
     const thingToCast = try self.expectDefined(ast.extra[thingToCastRange.at(0)], null);
 
     return self.castValue(thingToCast, targetType, false);
+}
+
+pub fn evalThis(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {
+    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+
+    const expressionList = ast.expressions.items(.value)[ast.extra[extraPtr + 1]];
+    const args = defines.Range{
+        .start = ast.extra[expressionList],
+        .end = ast.extra[expressionList + 1],
+    };
+
+    if (args.len() != 0) {
+        self.report("'this' expects not arguments, received {d}.", .{
+            args.len(),
+        });
+        return Error.ArgumentCountMismatch;
+    }
+    if (self.currentInstantiation == 0) {
+        self.report("Use of 'this' outisde typed scope.", .{});
+        return Error.IllegalSyntax;
+    }
+
+    return self.appendValue(.{
+        .Type = self.currentInstantiation,
+    });
 }
 
 pub fn evalCompileLog(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {
