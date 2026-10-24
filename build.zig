@@ -22,8 +22,8 @@ var targets = [_]std.Target.Query{
 
 const version = std.SemanticVersion{
     .major = 0,
-    .minor = 1,
-    .patch = 0,
+    .minor = 0,
+    .patch = 1,
 };
 
 var config: struct {
@@ -62,6 +62,26 @@ fn buildCompiler(b: *std.Build) void {
     addTargets(b, .ReleaseFast);
     addTargets(b, .ReleaseSafe);
     addTargets(b, .ReleaseSmall);
+}
+
+fn addMsvcrtImports(b: *std.Build, exe: *std.Build.Step.Compile) void {
+    const wf = b.addWriteFiles();
+    const def = wf.add("msvcrt.def",
+        \\LIBRARY msvcrt.dll
+        \\EXPORTS
+        \\_snprintf
+        \\_vsnprintf
+        \\_setjmp
+        \\
+    );
+
+    const dlltool = b.addSystemCommand(&.{ b.graph.zig_exe, "dlltool", "-m", "i386:x86-64", "-d" });
+    dlltool.addFileArg(def);
+    dlltool.addArg("-l");
+    const lib = dlltool.addOutputFileArg("msvcrt.lib");
+
+    exe.root_module.addObjectFile(lib);
+    exe.step.dependOn(&dlltool.step);
 }
 
 fn addTargets(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
@@ -122,6 +142,12 @@ fn addTargets(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
         exe.root_module.addLibraryPath(.{ .cwd_relative = b.pathJoin(&.{libPath, "tcc"}) });
         exe.root_module.addSystemIncludePath(.{ .cwd_relative = libPath });
         exe.root_module.addSystemIncludePath(.{ .cwd_relative = b.pathJoin(&.{libPath, "tcc", "libtcc" }) });
+       
+        if (target.result.os.tag == .windows) {
+            exe.root_module.addLibraryPath(.{ .cwd_relative = b.pathJoin(&.{libPath, "tcc", "libtcc"}) });
+            addMsvcrtImports(b, exe);
+        }
+        
         exe.root_module.linkSystemLibrary("tcc", .{ .preferred_link_mode = .static });
 
         const vendorCopy = b.addUpdateSourceFiles();
@@ -189,6 +215,12 @@ fn addDebugTarget(b: *std.Build) void {
     exe.root_module.addLibraryPath(.{ .cwd_relative = b.pathJoin(&.{libPath, "tcc"}) });
     exe.root_module.addSystemIncludePath(.{ .cwd_relative = libPath });
     exe.root_module.addSystemIncludePath(.{ .cwd_relative = b.pathJoin(&.{libPath, "tcc", "libtcc" }) });
+   
+    if (config.native.result.os.tag == .windows) {
+        exe.root_module.addLibraryPath(.{ .cwd_relative = b.pathJoin(&.{libPath, "tcc", "libtcc"}) });
+        addMsvcrtImports(b, exe);
+    }
+    
     exe.root_module.linkSystemLibrary("tcc", .{ .preferred_link_mode = .static });
 
     const vendorCopy = b.addUpdateSourceFiles();
@@ -202,14 +234,6 @@ fn addDebugTarget(b: *std.Build) void {
         _ = vendorCopy.addCopyFileToSource(.{ .cwd_relative = srcPath }, destPath.src_path.sub_path);
     }
     exe.step.dependOn(&vendorCopy.step);
-
-    // Configure Tracy
-    const tracy = b.dependency("ztracy", .{
-        .enable_ztracy = config.profile,
-        .enable_fibers = false,
-    });
-    exe.root_module.addImport("tracy", tracy.module("root"));
-    exe.root_module.linkLibrary(tracy.artifact("tracy"));
 
     const install = b.addInstallArtifact(exe, .{});
 
