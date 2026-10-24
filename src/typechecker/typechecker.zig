@@ -431,7 +431,7 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
 
                     const funcPtr = try self.folder.evalDecl(rres.value, def.valueType);
                     const func = &self.folder.memory.items[funcPtr].Function;
-                    self.builder.modifyInternedString(func.name, nname);
+                    try self.builder.modifyInternedString(func.name, nname);
                     func.name = nnname;
 
                     self.folder.declCache.put(self.folder.arena.allocator(), rres.value, funcPtr)
@@ -484,7 +484,7 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
                 return Error.ExportOfMainFunction;
             }
 
-            self.builder.modifyInternedString(func.name, newName);
+            try self.builder.modifyInternedString(func.name, newName);
             func.name = try self.builder.internString(newName);
         },
         else => { },
@@ -2242,8 +2242,13 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
 
     // @Note preventing the caching of declarations when inside a comptime call.
     // Since they'll get their own declarations and scopes, it is fine.
+    const instanceDependent =
+        self.folder.getFlag(.InComptimeCall)
+        or decl.kind == .Parameter
+        or (self.folder.currentInstantiation != 0 and !decl.topLevel);
+
     isPresent.value_ptr.* = .{
-        .status = if (self.folder.getFlag(.InComptimeCall)) .NotChecked else .Checked,
+        .status = if (instanceDependent) .NotChecked else .Checked,
         .result = declType,
     };
 

@@ -1,0 +1,36 @@
+// regression/reg_same_def_names_across_types
+// Different types sharing def names (identity/twice) must not cross-bind.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+let pf = fn (f: float) -> void {
+    Console::log(String::floatToStr(f, C::Allocator));
+};
+
+let Plain = struct {
+    pub let identity = fn (v: i32) -> i32 { return v + 100; };
+    pub let twice = fn (v: i32) -> i32 { return identity(identity(v)); };
+};
+
+let Box = fn (T: type) -> type {
+    return struct {
+        value: T,
+        count: u8,
+
+        pub let identity = fn (v: T) -> T { return v; };
+        pub let twice = fn (v: T) -> T { return identity(identity(v)); };
+    };
+};
+
+let IntBox = Box(i32);
+
+let main = fn (args: [][]u8) -> i32 {
+    pi(Plain::twice(1));
+    pi(IntBox::twice(1));
+    pi(Plain::twice(2));
+    return 0;
+};

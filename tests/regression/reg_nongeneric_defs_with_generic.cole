@@ -1,0 +1,60 @@
+// regression/reg_nongeneric_defs_with_generic
+// Non generic enum/struct/union with defs must keep working next to generic
+// types (lazy def discovery must not re-evaluate the shared definition scope).
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+let pf = fn (f: float) -> void {
+    Console::log(String::floatToStr(f, C::Allocator));
+};
+
+let Kind = enum {
+    A, B, C,
+
+    pub let describe = fn (k: Kind) -> []u8 {
+        return switch k {
+            @A -> "a",
+            @B -> "b",
+            @C -> "c",
+        };
+    };
+    pub let shout = fn (k: Kind) -> []u8 { return describe(k); };
+};
+
+let Math2 = struct {
+    pub let identity = fn (v: i32) -> i32 { return v; };
+    pub let twice = fn (v: i32) -> i32 { return identity(identity(v)); };
+};
+
+let Tagged = union(enum) {
+    Some: void,
+    None: u32,
+
+    pub let label = "tagged";
+};
+
+let Box = fn (T: type) -> type {
+    return struct {
+        value: T,
+        count: u8,
+
+        pub let identity = fn (v: T) -> T { return v; };
+        pub let twice = fn (v: T) -> T { return identity(identity(v)); };
+    };
+};
+
+let FloatBox = Box(float);
+
+let main = fn (args: [][]u8) -> i32 {
+    Console::log(Kind::shout(Kind(@C)));
+    pf(FloatBox::twice(2.5));
+    pi(Math2::twice(41));
+    Console::log(Kind::describe(Kind(@A)));
+    pi(Math2::identity(1));
+    Console::log(Tagged::label);
+    return 0;
+};
