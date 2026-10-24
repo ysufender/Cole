@@ -2588,9 +2588,8 @@ fn handleScopeDecls(
         }, newDecl) catch return Error.AllocatorFailure;
 
         const valueType =
-            // if (self.getFlag(.InComptimeCall)) try self.typechecker.typecheckDecl(newDecl, null)
-            // else Builtin.Type("$$incomplete");
-            Builtin.Type("$$incomplete");
+            if (self.getFlag(.InComptimeCall)) try self.typechecker.typecheckDecl(newDecl, null)
+            else Builtin.Type("$$incomplete");
             
         const newName = try self.typechecker.builder.internString(symbolName);
         defs.appendAssumeCapacity(.{
