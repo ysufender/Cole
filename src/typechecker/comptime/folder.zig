@@ -1184,7 +1184,13 @@ fn evalEnumType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Value
     const res = try self.appendValue(.{
         .Type = try self.typechecker.registerType(newType)
     });
-
+    
+    self.cache.put(self.arena.allocator(), .{
+        .file = self.typechecker.currentFile,
+        .expr = expr,
+        .instantiation = res,
+    }, res) catch return Error.AllocatorFailure;
+    
     return res;
 }
 
@@ -1256,7 +1262,13 @@ fn evalStructType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Val
     const res = try self.appendValue(.{
         .Type = try self.typechecker.registerType(newType),
     });
-
+    
+    self.cache.put(self.arena.allocator(), .{
+        .file = self.typechecker.currentFile,
+        .expr = expr,
+        .instantiation = res,
+    }, res) catch return Error.AllocatorFailure;
+    
     return res;
 }
 
@@ -1389,7 +1401,13 @@ fn evalUnionType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Valu
     const res = try self.appendValue(.{
         .Type = try self.typechecker.registerType(newType),
     });
-
+    
+    self.cache.put(self.arena.allocator(), .{
+        .file = self.typechecker.currentFile,
+        .expr = expr,
+        .instantiation = res,
+    }, res) catch return Error.AllocatorFailure;
+    
     return res;
 }
 
@@ -2570,9 +2588,10 @@ fn handleScopeDecls(
         }, newDecl) catch return Error.AllocatorFailure;
 
         const valueType =
-            if (self.getFlag(.InComptimeCall)) try self.typechecker.typecheckDecl(newDecl, null)
-            else Builtin.Type("$$incomplete");
-
+            // if (self.getFlag(.InComptimeCall)) try self.typechecker.typecheckDecl(newDecl, null)
+            // else Builtin.Type("$$incomplete");
+            Builtin.Type("$$incomplete");
+            
         const newName = try self.typechecker.builder.internString(symbolName);
         defs.appendAssumeCapacity(.{
             .public = sig.public,
