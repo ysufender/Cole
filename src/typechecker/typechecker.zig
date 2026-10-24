@@ -1574,7 +1574,7 @@ pub fn discoverScopeDef(
         .file = self.currentFile,
         .expr = expr,
     }, decl) catch return Error.AllocatorFailure;
-    
+
     const discoveredType = try self.typecheckDecl(decl, null);
     const memberIndex = try self.definitionIndex(from, member.name);
 
