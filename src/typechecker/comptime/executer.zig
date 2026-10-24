@@ -54,11 +54,9 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
 
     const sign = self.typechecker.typeTable.get(func.signature).Function;
 
-    if (!sign.isComptime) {
-        return Error.ComptimeNotPossible;
-    }
-
     const ast = self.typechecker.context.getAST(func.source);
+    const tokens = self.typechecker.context.getTokens(ast.tokens);
+
     const psrc = self.typechecker.currentFile;
     defer self.typechecker.currentFile = psrc;
     self.typechecker.currentFile = func.source;
@@ -118,6 +116,17 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
         const statement = ast.statements.get(top.body[top.pc]);
 
         switch (statement.type) {
+            .VariableDefinition => {
+                const signature = ast.signatures.get(ast.extra[statement.value]);
+                const varType = if (signature.type == Parser.AnyType) null else try self.typechecker.expectType(signature.type);
+                const value = try self.typechecker.folder.eval(ast.extra[statement.value + 1], varType);
+
+                const name = try self.typechecker.builder.internString(tokens.get(signature.name).lexeme(self.typechecker.context, tokens.items(.start)[0]));
+
+                top.variables.put(self.arena.allocator(), name, value)
+                    catch return Error.AllocatorFailure;
+            },
+            .Discard => _ = try self.typechecker.folder.eval(statement.value, null),
             .Return => {
                 if (statement.value == Parser.AnyType) {
                     return @intFromEnum(Comptime.Value.Implicit.Void);
@@ -184,6 +193,12 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
     }
 
     return @intFromEnum(Comptime.Value.Implicit.Void);
+}
+
+pub fn executeAssignment(self: *Executer, exprPtr: defines.ExpressionPtr) Error!Comptime.Value.Ptr {
+    _ = self;
+    _ = exprPtr;
+    unreachable;
 }
 
 pub fn getVar(self: *const Executer, name: defines.StringPtr) ?Comptime.Value.Ptr {

@@ -189,7 +189,7 @@ pub fn eval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeI
         .FunctionDefinition => try self.evalFunction(exprPtr, expr.value),
 
         // @Note should be handled with the statements.
-        .Assignment => try self.typechecker.typecheckExpression(exprPtr, maybeExpected),
+        .Assignment => try self.typechecker.executer.executeAssignment(exprPtr),
     };
 
     if (
@@ -788,9 +788,7 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
     defer self.typechecker.currentScope = prevScope;
 
     if (self.declCache.get(declPtr)) |v| {
-        if (decl.kind != .Parameter or !self.getFlag(.InComptimeCall)) {
-            return v;
-        }
+        return v;
     }
 
     const res = try switch (decl.kind) {
@@ -2369,13 +2367,6 @@ pub fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Type
     };
 
     const signature = self.typechecker.typeTable.get(function.signature).Function;
-
-    if (!signature.isComptime) {
-        self.report("Attempt to comptime execute non-comptime function '{s}'.", .{
-            self.typechecker.builder.getInternedString(function.name),
-        });
-        return Error.ComptimeNotPossible;
-    }
 
     const argsListPtr = ast.extra[extraPtr + 1];
     const argsList: defines.OpaquePtr = ast.expressions.items(.value)[argsListPtr];
