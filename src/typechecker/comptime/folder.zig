@@ -894,6 +894,7 @@ fn evalBuiltinCall(self: *Folder, extraPtr: defines.OpaquePtr, declPtr: defines.
         },
         BI("compileLog") => self.evalCompileLog(extraPtr),
         BI("this") => self.evalThis(extraPtr),
+        BI("isComptime") => self.evalIsComptime(extraPtr),
         else => {
             self.report("Builtin '{s}' is not usable in this context.", .{Resolver.builtins[declPtr]});
             return Error.ComptimeNotPossible;
@@ -1442,6 +1443,30 @@ fn evalCast(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID, 
     const thingToCast = try self.expectDefined(ast.extra[thingToCastRange.at(0)], null);
 
     return self.castValue(thingToCast, targetType, false);
+}
+
+pub fn evalIsComptime(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {
+    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+
+    const expressionList = ast.expressions.items(.value)[ast.extra[extraPtr + 1]];
+    const args = defines.Range{
+        .start = ast.extra[expressionList],
+        .end = ast.extra[expressionList + 1],
+    };
+
+    if (args.len() != 1) {
+        self.report("'this' expects a single expression argument, received {d}.", .{
+            args.len(),
+        });
+        return Error.ArgumentCountMismatch;
+    }
+
+    const argType = try self.typechecker.typecheckExpression(ast.extra[args.at(0)], null);
+
+    return self.appendValue(.{ .Bool =
+        if (self.attemptEval(ast.extra[args.at(0)], argType)) |_| true
+        else false,
+    });
 }
 
 pub fn evalThis(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {

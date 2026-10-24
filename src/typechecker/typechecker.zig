@@ -1803,6 +1803,7 @@ pub fn typecheckBuiltinCall(self: *Typechecker, extraPtr: defines.ExpressionPtr,
         BI("compileLog") => return comptime Comptime.Folder.Builtin.Type("void"),
         BI("unreachable") => comptime Comptime.Folder.Builtin.Type("noreturn"),
         BI("this") => comptime Comptime.Folder.Builtin.Type("type"),
+        BI("isComptime") => comptime Comptime.Folder.Builtin.Type("bool"),
         else => {
             self.report("Builtin '{s}' is not usable in this context.", .{Resolver.builtins[declPtr]});
             return Error.ComptimeNotPossible;
