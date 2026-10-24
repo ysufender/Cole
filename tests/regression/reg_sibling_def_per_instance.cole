@@ -1,0 +1,39 @@
+// regression/reg_sibling_def_per_instance
+// A bare sibling reference inside a generic type must bind to the same
+// instance, not to the first one instantiated. A wrong binding truncates 2.5.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+let pf = fn (f: float) -> void {
+    Console::log(String::floatToStr(f, C::Allocator));
+};
+
+let Box = fn (T: type) -> type {
+    return struct {
+        value: T,
+        count: u8,
+
+        pub let identity = fn (v: T) -> T {
+            return v;
+        };
+
+        pub let twice = fn (v: T) -> T {
+            return identity(identity(v));
+        };
+    };
+};
+
+let IntBox = Box(i32);
+let FloatBox = Box(float);
+
+let main = fn (args: [][]u8) -> i32 {
+    pi(IntBox::twice(41));
+    pf(FloatBox::twice(2.5));
+    pf(FloatBox::identity(0.25));
+    pi(IntBox::identity(7));
+    return 0;
+};

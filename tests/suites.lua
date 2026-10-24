@@ -138,10 +138,15 @@ return {
         -- "generic_fn_body_uses_T", -- fail
         -- "generic_fn_two_params", -- fail
         -- "generic_fn_nested_call", -- fail
-        "generic_type_defs", -- fail
+        "generic_type_defs",
         "generic_type_alias",
         "generic_type_two_params",
         "generic_type_same_instance",
+        "generic_type_sibling_order",
+        "generic_type_sibling_chain",
+        "generic_type_sibling_forward_ref",
+        "generic_type_sibling_same_args",
+        "generic_type_sibling_union",
         "comptime_fn_mark",
         "comptime_const_fold",
         "comptime_array_length_expr",
@@ -199,7 +204,11 @@ return {
         "reg_recursive_union_slice",
         "reg_member_fn_defined_once",
         "reg_generic_param_not_stale",
+        "reg_sibling_def_per_instance",
+        "reg_nongeneric_defs_with_generic",
+        "reg_same_def_names_across_types",
         "reg_global_int_constants",
+        "reg_generic_ordering",
     },
 
     ["bugs"] = {

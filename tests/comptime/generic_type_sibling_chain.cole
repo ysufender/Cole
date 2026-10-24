@@ -1,0 +1,36 @@
+// comptime/generic_type_sibling_chain
+// Multi level sibling chains (quad -> dbl -> id) must stay inside one instance.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+let pf = fn (f: float) -> void {
+    Console::log(String::floatToStr(f, C::Allocator));
+};
+
+let Num = fn (T: type) -> type {
+    return struct {
+        value: T,
+        count: u8,
+
+        pub let id = fn (x: T) -> T { return x; };
+        pub let dbl = fn (x: T) -> T { return id(x) + id(x); };
+        pub let quad = fn (x: T) -> T { return dbl(dbl(x)); };
+    };
+};
+
+let I = Num(i32);
+let F = Num(float);
+let U = Num(u8);
+
+let main = fn (args: [][]u8) -> i32 {
+    pi(I::quad(3));
+    pf(F::quad(0.75));
+    pi(U::quad(5));
+    pf(F::dbl(1.25));
+    pi(I::dbl(21));
+    return 0;
+};

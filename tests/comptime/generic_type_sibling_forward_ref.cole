@@ -1,0 +1,31 @@
+// comptime/generic_type_sibling_forward_ref
+// A sibling referenced before its definition must still bind per instance.
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+let pf = fn (f: float) -> void {
+    Console::log(String::floatToStr(f, C::Allocator));
+};
+
+let Box = fn (T: type) -> type {
+    return struct {
+        value: T,
+        count: u8,
+
+        pub let identity = fn (v: T) -> T { return v; };
+        pub let twice = fn (v: T) -> T { return identity(identity(v)); };
+    };
+};
+
+let FloatBox = Box(float);
+let IntBox = Box(i32);
+
+let main = fn (args: [][]u8) -> i32 {
+    pf(FloatBox::twice(2.5));
+    pi(IntBox::twice(41));
+    return 0;
+};
