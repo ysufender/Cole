@@ -831,8 +831,8 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
     defer self.typechecker.currentScope = prevScope;
 
     if (self.declCache.get(declPtr)) |v| {
-        // @Bug can't seem to get this to work
-        if (!self.getFlag(.InComptimeCall)) {
+        // @Bug can't seem to get this to work it has some unexpected behaviour to it
+        if (!self.getFlag(.InComptimeCall) or decl.kind == .Capture) {
             return v;
         }
     }
