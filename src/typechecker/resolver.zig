@@ -834,7 +834,7 @@ fn resolveScoping(
     expr: defines.ExpressionPtr,
     inside: bool,
 ) Error!?defines.Offset {
-    // TODO: A non-allocating scope resolution function
+    // @TODO: A non-allocating scope resolution function
 
     const extra: defines.OpaquePtr = ast.expressions.items(.value)[expr];
     
@@ -924,8 +924,15 @@ fn resolveScoping(
         return Error.ModuleNotInScope;
     }
 
-    return leftMost;
-}
+    if (
+        leftMost != null
+        and self.resolved.get(.{ .file = ast.tokens, .expr = lhsPtr }) == null
+    ) {
+        self.report("Couldn't resolve given identifier '{s}'.", .{moduleName});
+        return Error.InvalidIdentifier;
+    }
+
+    return leftMost;}
 
 fn resolveSignature(
     self: *Resolver,
