@@ -411,6 +411,23 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
 
                 const caseField = typeInfo.Union.fields[caseValue + 1];
 
+                if (maybeComptimeEnumOrUnion) |val| {
+                    switch (val) {
+                        .Union => |uni|
+                            if (uni.Tag == caseValue) {
+                                return try self.statement(bodyPtr);
+                            },
+
+                        .Enum => |enm|
+                            if (enm.Value == caseValue) {
+                                return try self.statement(bodyPtr);
+                            },
+
+                        else => return common.debug.ShouldBeImpossible(undefined, @src()),
+                    }
+                    continue;
+                }
+
                 const capture = try typechecker.builder.variableDef(
                     false,
                     caseField.valueType,
@@ -419,33 +436,6 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
                     try typechecker.builder.dot(enumOrUnion, caseField.name, enumOrUnionType),
                     null,
                 );
-
-                if (maybeComptimeEnumOrUnion) |val| {
-                    switch (val) {
-                        .Union => |uni|
-                            if (uni.Tag == caseValue) {
-                                return typechecker.builder.scope(
-                                    try exec.generateRandomName(.Case), &.{
-                                        capture,
-                                        try self.statement(bodyPtr),
-                                    },
-                                );
-                            },
-
-                        .Enum => |enm|
-                            if (enm.Value == caseValue) {
-                                return typechecker.builder.scope(
-                                    try exec.generateRandomName(.Case), &.{
-                                        capture,
-                                        try self.statement(bodyPtr),
-                                    },
-                                );
-                            },
-
-                        else => return common.debug.ShouldBeImpossible(undefined, @src()),
-                    }
-                    continue;
-                }
 
                 const body = try self.statement(bodyPtr);
                 const caseEndLbl = try typechecker.builder.label(caseEnd);

@@ -737,7 +737,8 @@ fn evalSwitchExpression(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpecte
                         .expr = firstCapture,
                     });
                     
-                    try self.cacheDecl(capture, varToSwitchOn);
+                    self.declCache.put(self.arena.allocator(), capture, varToSwitchOn)
+                        catch return Error.AllocatorFailure;
                 }
 
                 return self.expectDefined(ast.extra[case + 3], resultType);
