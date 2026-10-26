@@ -485,7 +485,7 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
             }
 
             try self.builder.modifyInternedString(func.name, newName);
-            func.name = try self.builder.internString(newName);
+            // func.name = try self.builder.internString(newName);
         },
         else => { },
     }
@@ -1039,13 +1039,6 @@ pub fn typecheckParameter(self: *Typechecker, decl: *const Resolver.Declaration,
 }
 
 pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.ExpressionPtr, _maybeExpected: ?TypeID) Error!TypeID {
-    defer if (self.folder.getFlag(.InComptimeCall)) {
-        _ = self.metadata.remove(.{
-            .file = self.currentFile,
-            .expr = expressionPtr,
-        });
-    };
-
     const ast = self.context.getAST(self.currentFile);
 
     const key = Resolver.ResolutionKey{
@@ -2246,14 +2239,18 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
     const instanceDependent =
         self.folder.getFlag(.InComptimeCall)
         or decl.kind == .Parameter
-        or (self.folder.currentInstantiation != 0 and !decl.topLevel);
+        or decl.kind == .Capture
+        or (
+            self.folder.currentInstantiation != 0
+            and !decl.topLevel
+        );
 
     isPresent.value_ptr.* = .{
         .status = if (instanceDependent) .NotChecked else .Checked,
         .result = declType,
     };
 
-    if (self.folder.attemptEval(decl.node, declType)) |val| fi: {
+    if (if (decl.kind == .Variable) self.folder.attemptEval(decl.node, declType) else null) |val| fi: {
         var func = switch (self.folder.memory.items[val]) {
             .Function => |f| f,
             else => break :fi,
@@ -2266,6 +2263,10 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
 
         // @Note See folder.zig:evalFunction
         if (!self.folder.getFlag(.InComptimeCall) and !sign.isComptime and !alreadyLowered) {
+            const prevs = self.currentFile;
+            self.currentFile = func.source;
+            defer self.currentFile = prevs;
+
             if (!self.hasMetadata(func.expr, "@extern")) {
                 const pc = self.setFlag(.CoveredAllPaths, false);
                 defer _ = self.setFlag(.CoveredAllPaths, pc);
@@ -2294,7 +2295,7 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
         }
     }
 
-    if (declType == comptime Comptime.Folder.Builtin.Type("type")) {
+    if (declType == (comptime Comptime.Folder.Builtin.Type("type")) and decl.kind == .Variable) {
         const typeID = self.folder.getValue(try self.folder.eval(decl.node, declType)).Type;
         const node = self.typeTable.get(typeID);
 
@@ -2500,18 +2501,7 @@ pub fn typecheckDot(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!TypeI
     return self.typecheckFieldAccess(objectTypeID, memberName);
 }
 
-pub fn typecheckMark(
-    self: *Typechecker,
-    ptr: defines.ExpressionPtr,
-    extraPtr: defines.OpaquePtr,
-    maybeExpected: ?TypeID
-) Error!TypeID {
-    // @Note In case of the mark of a mark, ptr is the marked this, which is the
-    // current mark.
-    const existingMeta =
-        if (self.getMetadata(ptr)) |meta| meta
-        else &.{};
-
+pub fn applyMark(self: *Typechecker, ptr: defines.ExpressionPtr, extraPtr: defines.OpaquePtr) Error!void {
     const ast = self.context.getAST(self.currentFile);
 
     const marks = defines.Range{
@@ -2519,8 +2509,10 @@ pub fn typecheckMark(
         .end = ast.extra[extraPtr + 1], 
     };
 
-    const metadata = self.arena.allocator().alloc(Comptime.Value.Ptr, marks.len() + existingMeta.len)
-        catch return Error.AllocatorFailure;
+    const metadata =
+        if (self.getMetadata(ptr)) |meta| @constCast(meta)
+        else self.arena.allocator().alloc(Comptime.Value.Ptr, marks.len())
+            catch return Error.AllocatorFailure;
 
     for (0..marks.len()) |index| {
         const meta = self.folder.attemptEval(
@@ -2531,12 +2523,20 @@ pub fn typecheckMark(
         metadata[index] = if (meta) |m| m else try self.folder.eval(ast.extra[marks.at(@intCast(index))], null);
     }
 
-    // @Note @Beware ugly workaround, forward the markings to the inner mark.
-    @memcpy(metadata[marks.len()..], existingMeta);
-
     const marked = ast.extra[extraPtr + 2];
     try self.setMetadata(marked, metadata);
     try self.setMetadata(ptr, metadata);
+}
+
+pub fn typecheckMark(
+    self: *Typechecker,
+    ptr: defines.ExpressionPtr,
+    extraPtr: defines.OpaquePtr,
+    maybeExpected: ?TypeID
+) Error!TypeID {
+    try self.applyMark(ptr, extraPtr);
+    const ast = self.context.getAST(self.currentFile);
+    const marked = ast.extra[extraPtr + 2];
     return self.typecheckExpression(marked, maybeExpected);
 }
 

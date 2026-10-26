@@ -2424,6 +2424,7 @@ pub fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Type
     self.typechecker.currentFile = function.source;
 
     if (self.typechecker.hasMetadata(function.expr, "@extern")) {
+        self.typechecker.currentFile = prevs;
         self.report("Attempt to comptime execute external function '{s}'", .{
             self.typechecker.builder.getInternedString(function.name),
         });
@@ -2883,7 +2884,7 @@ pub fn comptimeEq(self: *const Folder, lhs: Comptime.Value, rhs: Comptime.Value)
         },
         .Bool => lhs.Bool == rhs.Bool,
         .Type => self.typechecker.nominallyIdentical(lhs.Type, rhs.Type),
-        .Function => lhs.Function.body == rhs.Function.body,
+        .Function => lhs.Function.name == rhs.Function.name,
         .Pointer, .String => false,
         .Void => true,
         .Undefined => self.typechecker.nominallyIdentical(lhs.Undefined, rhs.Undefined),
