@@ -326,12 +326,13 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
 
     const enumOrUnionType = try typechecker.typecheckExpression(ast.extra[extraPtr], null);
     const enumOrUnionExpr = try self.expression(ast.extra[extraPtr], enumOrUnionType);
+    const maybeComptimeEnumOrUnionPtr = typechecker.folder.cache.get(.{
+        .file = typechecker.currentFile,
+        .expr = ast.extra[extraPtr],
+        .instantiation = self.typechecker.folder.currentInstantiation,
+    });
     const maybeComptimeEnumOrUnion =
-        if (typechecker.folder.cache.get(.{
-            .file = typechecker.currentFile,
-            .expr = ast.extra[extraPtr],
-            .instantiation = self.typechecker.folder.currentInstantiation,
-        })) |ptr| typechecker.folder.getValue(ptr)
+        if (maybeComptimeEnumOrUnionPtr) |ptr| typechecker.folder.getValue(ptr)
         else null;
 
     var cachedDef: ?JIR.Ptr = null;
@@ -415,11 +416,17 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
                     switch (val) {
                         .Union => |uni|
                             if (uni.Tag == caseValue) {
+                                exec.declCache.put(exec.arena.allocator(), captureDeclPtr, uni.Value)
+                                    catch return Error.AllocatorFailure;
+                                defer _ = exec.declCache.remove(captureDeclPtr);
                                 return try self.statement(bodyPtr);
                             },
 
                         .Enum => |enm|
                             if (enm.Value == caseValue) {
+                                exec.declCache.put(exec.arena.allocator(), captureDeclPtr, maybeComptimeEnumOrUnionPtr.?)
+                                    catch return Error.AllocatorFailure;
+                                defer _ = exec.declCache.remove(captureDeclPtr);
                                 return try self.statement(bodyPtr);
                             },
 

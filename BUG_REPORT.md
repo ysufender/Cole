@@ -1,46 +1,5 @@
 # Known Bugs
 
-## Switch Capture Folding
-
-Comptime switch captures leak into runtime code.
-
-### Reproduction
-
-```rust
-import std::io::console as Console;
-
-let Print = fn (T: type) -> any {
-    return fn (item: T) -> void {
-        switch typeInfo(T) {
-            @Pointer -> |ptr| switch ptr.size {
-                else -> {}
-            }
-            else -> { }
-        }
-    };
-};
-
-let P = Print([]u8);
-
-let main = fn (args: [][]u8) -> i32 {
-    P("Hello");
-    return 0;
-};
-```
-
-### Expected Output
-
-Successful compilation.
-
-### Received Output
-
-```bash
-error: ~/proj/Cole/test/build/c/source.c:127: error: 'ptr' undeclared
-error: BACKEND: Failed to compile source file.
-
-error: Compiler exited with code 231 <BackendError>
-```
-
 ## Comptime Definition Lowering (47)
 
 Because comptime definitions are lowered lazily, some comptime parameters are left as
@@ -115,3 +74,4 @@ else is holding a reference to the said memory.
 ## Comptime Caching (43)
 ## Initializer List Typechecking Mismatch (44)
 ## Scoped Definition Access (45)
+## Switch Capture Folding (48)

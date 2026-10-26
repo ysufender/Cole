@@ -673,9 +673,11 @@ fn typecheckSwitchStatement(self: *Typechecker, extraPtr: defines.OpaquePtr, exp
         .end = ast.extra[extraPtr + 2],
     };
 
+    const comptimeItem = self.folder.attemptEval(item, itemTypeID);
+
     return switch (itemType) {
-        .Enum => |enm| self.typecheckSwitchStatementOnEnum(ast, itemTypeID, &enm, range, expected),
-        .Union => |uni| self.typecheckSwitchStatementOnUnion(ast, itemTypeID, &uni, range, expected),
+        .Enum => |enm| self.typecheckSwitchStatementOnEnum(ast, itemTypeID, &enm, range, expected, comptimeItem),
+        .Union => |uni| self.typecheckSwitchStatementOnUnion(ast, itemTypeID, &uni, range, expected, comptimeItem),
         else => return common.debug.ShouldBeImpossible(self.context.log, @src()),
     };
 }
@@ -687,6 +689,7 @@ fn typecheckSwitchStatementOnUnion(
     uni: *const Types.Union,
     range: defines.Range,
     expected: TypeID,
+    comptimeItem: ?Comptime.Value.Ptr,
 ) Error!void {
     // @Beware Hardcoded field size, must be kept in sync with parser.(union|struct|enum)Definition
     var fieldBuffer: [512]u32 = undefined;
@@ -697,6 +700,12 @@ fn typecheckSwitchStatementOnUnion(
     var fieldMap = std.DynamicBitSet.initEmpty(bufferAllocator.allocator(), tag.fields.len)
         catch return common.debug.ShouldBeImpossible(self.context.log, @src());
 
+    const liveTag: ?u32 = if (comptimeItem) |p| switch (self.folder.getValue(p)) {
+        .Union => |u| @intCast(u.Tag),
+        else => null,
+    } else null;
+    var liveMatched = false;
+
     var case = range.start;
     while (case < range.end) : (case += 4) {
         if (fieldMap.count() == fieldMap.capacity()) {
@@ -704,6 +713,7 @@ fn typecheckSwitchStatementOnUnion(
             return Error.UnreachableCodePath;
         }
 
+        var labelIdx: ?usize = null;
         const caseLabel = ast.extra[case];
         const fieldName = 
             if (caseLabel == 0) blk: {
@@ -736,8 +746,15 @@ fn typecheckSwitchStatementOnUnion(
                 }
 
                 fieldMap.set(enumeration);
+                labelIdx = enumeration;
                 break :blk tag.fields[enumeration].name;
             };
+
+        if (liveTag) |lt| {
+            const live = if (labelIdx) |l| l == lt else !liveMatched;
+            if (!live) continue;
+            liveMatched = true;
+        }
 
         const prev = self.currentScope;
         defer self.currentScope = prev;
@@ -759,7 +776,20 @@ fn typecheckSwitchStatementOnUnion(
             ].valueType;
 
             _ = try self.typecheckDecl(captureDecl, captureType);
+
+            // Bind the capture to its comptime payload so the body can fold on it.
+            if (comptimeItem) |p| switch (self.folder.getValue(p)) {
+                .Union => |u| self.folder.declCache.put(self.folder.arena.allocator(), captureDecl, u.Value)
+                    catch return Error.AllocatorFailure,
+                else => {},
+            };
         }
+        defer if (hasCapture and comptimeItem != null) {
+            _ = self.folder.declCache.remove(self.symbols.findDecl(.{
+                .file = self.currentFile,
+                .expr = ast.extra[case + 2],
+            }));
+        };
 
         const prevc = self.setFlag(.CoveredAllPaths, false);
         try self.typecheckStatement(ast.extra[case + 3], expected);
@@ -793,6 +823,7 @@ fn typecheckSwitchStatementOnEnum(
     enm: *const Types.Enum,
     range: defines.Range,
     expected: TypeID,
+    comptimeItem: ?Comptime.Value.Ptr,
 ) Error!void {
     // @Beware Hardcoded field size, must be kept in sync with parser.(union|struct|enum)Definition
     var fieldBuffer: [512]u32 = undefined;
@@ -801,6 +832,12 @@ fn typecheckSwitchStatementOnEnum(
     var fieldMap = std.DynamicBitSet.initEmpty(bufferAllocator.allocator(), enm.fields.len)
         catch return common.debug.ShouldBeImpossible(self.context.log, @src());
 
+    const liveTag: ?u32 = if (comptimeItem) |p| switch (self.folder.getValue(p)) {
+        .Enum => |e| @intCast(e.Value),
+        else => null,
+    } else null;
+    var liveMatched = false;
+
     var case = range.start;
     while (case < range.end) : (case += 4) {
         if (fieldMap.count() == fieldMap.capacity()) {
@@ -808,6 +845,7 @@ fn typecheckSwitchStatementOnEnum(
             return Error.UnreachableCodePath;
         }
 
+        var labelIdx: ?usize = null;
         const caseLabel = ast.extra[case];
         if (caseLabel == 0) {
             fieldMap.setRangeValue(.{
@@ -837,6 +875,13 @@ fn typecheckSwitchStatementOnEnum(
             }
 
             fieldMap.set(enumeration);
+            labelIdx = enumeration;
+        }
+
+        if (liveTag) |lt| {
+            const live = if (labelIdx) |l| l == lt else !liveMatched;
+            if (!live) continue;
+            liveMatched = true;
         }
 
         const hasCapture = ast.extra[case + 1] == 1;
