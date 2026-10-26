@@ -3805,7 +3805,18 @@ pub fn alignOf(self: *const Typechecker, of: TypeID) u32 {
 }
 
 pub fn tryGetDefinitionIndex(self: *Typechecker, from: TypeID, memberNamePtr: defines.StringPtr) Error!?defines.Offset {
-    const member = self.builder.getInternedString(memberNamePtr);
+    const fromName = self.builder.getInternedString(self.typenameMap.get(from)
+        orelse return common.debug.ShouldBeImpossible(undefined, @src()));
+    const isAnon = fromName[0] == '$';
+
+    const member =
+        if (isAnon) member: {
+            const memberName = self.builder.getInternedString(memberNamePtr);
+            const lastPtr = if (std.mem.lastIndexOfScalar(u8, memberName, ':')) |idx| idx + 1 else 0;
+            break :member memberName[lastPtr..];
+        }
+        else self.builder.getInternedString(memberNamePtr);
+
     const decls = switch (self.typeTable.get(from)) {
         .Enum => |enm| enm.definitions,
         .Struct => |str| str.definitions,

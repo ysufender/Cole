@@ -2350,11 +2350,18 @@ fn evalScoping(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Value.
     _ = try self.typechecker.typecheckScoping(expr);
     const res = self.getValue(try self.expectType(ast.extra[extraPtr])).Type;
 
-    const member = std.fmt.allocPrint(self.arena.allocator(),
-        "{s}::{s}", .{
-        try self.typechecker.typeName(self.arena.allocator(), res),
-        tokens.get(ast.extra[extraPtr + 1]).lexeme(self.typechecker.context, ast.tokens),
-    }) catch return Error.AllocatorFailure;
+    const isAnon = self.typechecker.builder.getInternedString(
+        self.typechecker.typenameMap.get(res)
+            orelse return common.debug.ShouldBeImpossible(undefined, @src()),
+    )[0] == '$';
+
+    const member =
+        if (isAnon) tokens.get(ast.extra[extraPtr + 1]).lexeme(self.typechecker.context, ast.tokens)
+        else std.fmt.allocPrint(self.arena.allocator(),
+            "{s}::{s}", .{
+            try self.typechecker.typeName(self.arena.allocator(), res),
+            tokens.get(ast.extra[extraPtr + 1]).lexeme(self.typechecker.context, ast.tokens),
+        }) catch return Error.AllocatorFailure;
 
     const scope = switch (self.typechecker.typeTable.get(res)) {
         .Enum => |enm| ret: {
