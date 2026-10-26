@@ -327,7 +327,7 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
                     });
                 }
                 else if (decl.topLevel) self.modules.modules.get(self.symbols.scopes.items(.module)[decl.scope]).name
-                else try self.folder.generateRandomNameString(.Type);
+                else (try self.folder.generateRandomNameString(.Type))[2..];
 
             const newName =
                 if (self.hasMetadata(decl.node, "@extern") and decl.topLevel) symName
