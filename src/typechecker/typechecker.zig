@@ -129,7 +129,7 @@ pub fn init(
         .metadata = metadata,
         .declCache = lookup,
         .exprCache = exprCache,
-        .flags = FlagMap.initEmpty(),
+        .flags = FlagMap.empty,
         .folder = undefined,
         .executer = undefined,
         .builder = undefined,
@@ -806,7 +806,7 @@ fn typecheckSwitchStatementOnUnion(
         });
         while (iterator.next()) |field| {
             const fieldName = tag.fields[field];
-            common.log.err(("." ** 4) ++ " {s}", .{
+            common.log.err(".... {s}", .{
                 fieldName.name,
             });
         }
@@ -911,7 +911,7 @@ fn typecheckSwitchStatementOnEnum(
         });
         while (iterator.next()) |field| {
             const fieldName = enm.fields[field];
-            common.log.err(("." ** 4) ++ " {s}", .{
+            common.log.err(".... {s}", .{
                 fieldName.name,
             });
         }
@@ -2244,13 +2244,6 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
     });
     decl = self.symbols.declarations.get(declPtr);
 
-    var zone = @import("tracy").ZoneN(
-        @src(),
-        std.fmt.allocPrintSentinel(self.arena.allocator(), "Typecheck {s}", .{self.builder.getInternedString(decl.name)}, 0)
-            catch return Error.AllocatorFailure,
-    );
-    defer zone.End();
-
     isPresent.value_ptr.* = .{
         .status = .InProgress,
         .result = comptime Comptime.Folder.Builtin.Type("$$incomplete"),
@@ -2958,7 +2951,7 @@ fn typecheckSwitchOnUnion(
         });
         while (iterator.next()) |field| {
             const fieldName = tag.fields[field];
-            common.log.err(("." ** 4) ++ " {s}", .{
+            common.log.err(".... {s}", .{
                 fieldName.name,
             });
         }
@@ -3066,7 +3059,7 @@ fn typecheckSwitchOnEnum(
         });
         while (iterator.next()) |field| {
             const fieldName = enm.fields[field];
-            common.log.err(("." ** 4) ++ " {s}", .{
+            common.log.err(".... {s}", .{
                 fieldName.name,
             });
         }
@@ -3140,7 +3133,7 @@ pub fn report(self: *Typechecker, comptime fmt: []const u8, args: anytype) void 
     const token = self.context.getTokens(self.currentFile).get(self.lastToken);
     const position = token.position(self.context, self.currentFile);
 
-    common.log.err(("." ** 4) ++ " In {s} {d}:{d}", .{
+    common.log.err(".... In {s} {d}:{d}", .{
         self.context.getFileName(self.currentFile),
         position.line,
         position.column,
@@ -3157,7 +3150,7 @@ pub fn dumpCallStack(self: *Typechecker) void {
         const module = self.modules.modules.get(modulePtr);
         const token = self.context.getTokens(module.dataIndex).get(lastDecl.token);
         const position = token.position(self.context, module.dataIndex);
-        common.log.err(("." ** 8) ++ " Required from '{s} {d}:{d}'", .{
+        common.log.err("........ Required from '{s} {d}:{d}'", .{
             self.context.getFileName(module.dataIndex),
             position.line,
             position.column,

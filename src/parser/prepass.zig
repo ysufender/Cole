@@ -146,13 +146,6 @@ fn prepassImpl(self: *Prepass, ast: *const Parser.AST, name: []const u8) Error!v
     const tokens = self.context.getTokens(ast.tokens);
     const allocator = self.arena.allocator();
 
-    var zone = @import("tracy").ZoneN(
-        @src(),
-        std.fmt.allocPrintSentinel(self.arena.allocator(), "Prepass {s}", .{self.context.getFileName(tokens.items(.start)[0])}, 0)
-            catch return Error.AllocatorFailure,
-    );
-    defer zone.End();
-
     var file = Module{
         .dataIndex = tokens.items(.start)[0],
         .name = name,
@@ -441,11 +434,11 @@ fn report(self: *Prepass, comptime fmt: []const u8, args: anytype, file: u32, to
         if (t_idx < self.context.getTokens(self.context.getAST(file).tokens).len) {
             const tt = self.context.getTokens(self.context.getAST(file).tokens).get(t_idx);
             const position = tt.position(self.context, file);
-            common.log.err(("." ** 4) ++ " In {s} {d}:{d}", .{self.context.getFileName(file), position.line, position.column});
+            common.log.err(".... In {s} {d}:{d}", .{self.context.getFileName(file), position.line, position.column});
             tt.printLocation(self.arena.allocator(), self.context, file, position, true);
             return;
         }
     }
     
-    common.log.err(("." ** 4) ++ " In {s} (no location available)\n", .{self.context.getFileName(file)});
+    common.log.err(".... In {s} (no location available)\n", .{self.context.getFileName(file)});
 }

@@ -1,6 +1,5 @@
 const std = @import("std");
 const common = @import("core/common.zig");
-// const perfAllc = @import("util/allocator.zig");
 const collections = @import("util/collections.zig");
 const defines = @import("core/defines.zig");
 const debug = @import("debug/debug.zig");
@@ -14,18 +13,13 @@ const Prepass = @import("parser/prepass.zig");
 const Resolver = @import("typechecker/resolver.zig");
 const Typechecker = @import("typechecker/typechecker.zig");
 
-const Tracy = @import("tracy");
-
 pub var start: std.Io.Timestamp = undefined;
 
 pub fn main(init: std.process.Init) void {
-    Tracy.FrameMark();
-
     start = std.Io.Clock.now(.real, init.io);
     MainProcInit = init;
 
     innerMain(
-        // perfAllc.init(),
         // std.heap.c_allocator,
         // init.gpa,
         init.arena.allocator(),

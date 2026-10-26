@@ -6,10 +6,7 @@ pub const JIR = @import("jir.zig");
 const Error = @import("../../core/common.zig").CompilerError;
 const Dir = std.Io.Dir;
 
-const tcc = @cImport({
-    @cInclude("libtcc.h");
-    @cInclude("libtcc.h");
-});
+const tcc = @import("tcc");
 
 const files = [_]struct{ []const u8, []const u8 }{
     .{ "stdnoreturn.h", @embedFile("../../res/vendor/tcc/include/stdnoreturn.h") },
@@ -24,12 +21,6 @@ const files = [_]struct{ []const u8, []const u8 }{
 };
 
 pub fn compile(outDir: Dir, allocator: std.mem.Allocator, context: *common.CompilerContext) Error!void {
-    var zone = @import("tracy").ZoneN(
-        @src(),
-        "Compilation"
-    );
-    defer zone.End();
-
     try createStdIncludes(outDir, context.io);
 
     // Create TCC

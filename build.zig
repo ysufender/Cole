@@ -34,7 +34,7 @@ var config: struct {
 } = .{};
 
 pub fn build(b: *std.Build) void {
-    _ = configureBuild(b);
+    configureBuild(b);
     buildCompiler(b);
     addDebugTarget(b);
     addTestStep(b);
@@ -58,10 +58,10 @@ fn addTestStep(b: *std.Build) void {
 }
 
 fn buildCompiler(b: *std.Build) void {
-    addTargets(b, .Debug);
-    addTargets(b, .ReleaseFast);
-    addTargets(b, .ReleaseSafe);
-    addTargets(b, .ReleaseSmall);
+    addTargets(b, .debug);
+    addTargets(b, .fast);
+    addTargets(b, .safe);
+    addTargets(b, .small);
 }
 
 fn addMsvcrtImports(b: *std.Build, exe: *std.Build.Step.Compile) void {
@@ -110,7 +110,7 @@ fn addTargets(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
         }) catch unreachable;
 
         const opts = b.addOptions();
-        opts.addOption(bool, "isDebug", optimize == .Debug);
+        opts.addOption(bool, "isDebug", optimize == .debug);
         opts.addOption([]const u8, "version", versionString);
         opts.addOption(bool, "profiling", config.profile);
 
@@ -127,8 +127,14 @@ fn addTargets(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
                 .strip = true,
                 .code_model = .small,
                 .link_libc = true,
-                .error_tracing = optimize == .Debug,
-                .omit_frame_pointer = optimize != .Debug,
+                .error_tracing = optimize == .debug,
+                .omit_frame_pointer = optimize != .debug,
+                .imports = &.{
+                    .{
+                        .name = "tcc",
+                        .module = tccHeaders(b, target, optimize),
+                    },
+                }
             }),
         });
 
@@ -162,14 +168,6 @@ fn addTargets(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
         }
         exe.step.dependOn(&vendorCopy.step);
 
-        // Configure Tracy
-        const tracy = b.dependency("ztracy", .{
-            .enable_ztracy = config.profile,
-            .enable_fibers = false,
-        });
-        exe.root_module.addImport("tracy", tracy.module("root"));
-        exe.root_module.linkLibrary(tracy.artifact("tracy"));
-
         const install = b.addInstallArtifact(exe, .{
             .dest_dir = .{ .override = .{ .custom = "" } }
         });
@@ -198,7 +196,7 @@ fn addDebugTarget(b: *std.Build) void {
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/main.zig"),
             .target = config.native,
-            .optimize = .Debug,
+            .optimize = .debug,
             .link_libc  = true,
             .error_tracing = true,
             .omit_frame_pointer = false,
@@ -235,19 +233,27 @@ fn addDebugTarget(b: *std.Build) void {
     }
     exe.step.dependOn(&vendorCopy.step);
 
-    // Configure Tracy
-    const tracy = b.dependency("ztracy", .{
-        .enable_ztracy = config.profile,
-        .enable_fibers = false,
-    });
-    exe.root_module.addImport("tracy", tracy.module("root"));
-    exe.root_module.linkLibrary(tracy.artifact("tracy"));
-
     const install = b.addInstallArtifact(exe, .{});
 
     const step = b.step(targetName, "Build for debug on native platform");
     step.dependOn(&install.step);
     step.dependOn(b.getInstallStep());
+}
+
+fn tccHeaders(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Module {
+    const CTranslator = @import("translate_c").Translator;
+    const translate_c = b.dependency("translate_c", .{});
+
+    const headerPath = config.library_path orelse
+        if (target.result.os.tag == .linux) "/usr/local/include/libtcc.h"
+        else "C:/Program Files/tcc/libtcc/libtcc.h";
+
+    const ctranslator = CTranslator.init(translate_c, .{
+        .c_source_file = .{ .cwd_relative = headerPath },
+        .target = target,
+        .optimize = optimize,
+    });
+    return ctranslator.mod;
 }
 
 fn configureBuild(b: *std.Build) void {

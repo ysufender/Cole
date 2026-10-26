@@ -88,7 +88,7 @@ pub fn init(typechecker: *Typechecker, gpa: Allocator) Error!Folder {
         .cache = cache,
         .declCache = declCache,
         .memory = memory,
-        .flags = FlagMap.initEmpty(),
+        .flags = FlagMap.empty,
         .rng = std.Random.DefaultPrng.init(5315),
         .arena = arena,
     };
@@ -1567,7 +1567,7 @@ pub fn evalCompileLog(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime
     const token = self.typechecker.context.getTokens(self.typechecker.currentFile).get(self.typechecker.lastToken);
     const position = token.position(self.typechecker.context, self.typechecker.currentFile);
 
-    common.log.info(("." ** 4) ++ " In {s} {d}:{d}", .{
+    common.log.info(".... In {s} {d}:{d}", .{
         self.typechecker.context.getFileName(self.typechecker.currentFile),
         position.line,
         position.column,

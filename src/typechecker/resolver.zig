@@ -291,13 +291,6 @@ pub fn resolve(self: *Resolver, allocator: Allocator) Error!Resolution {
 fn resolveModule(self: *Resolver) Error!void {
     const module = self.modules.modules.items(.name)[self.scopes.items(.module)[self.currentScope]];
 
-    var zone = @import("tracy").ZoneN(
-        @src(),
-        std.fmt.allocPrintSentinel(self.arena.allocator(), "Resolve {s}", .{module}, 0)
-            catch return Error.AllocatorFailure,
-    );
-    defer zone.End();
-
     const kind = self.scopes.items(.kind)[self.currentScope];
     if (kind != .Module) {
         return Error.UnexpectedScope;
@@ -1245,7 +1238,7 @@ fn report(self: *Resolver, comptime fmt: []const u8, args: anytype) void {
     common.log.err(fmt, args);
     const token = self.context.getTokens(self.dataIndex()).get(self.lastToken);
     const position = token.position(self.context, self.dataIndex());
-    common.log.err(("." ** 4) ++ " In {s} {d}:{d}", .{ self.context.getFileName(self.dataIndex()), position.line, position.column});
+    common.log.err(".... In {s} {d}:{d}", .{ self.context.getFileName(self.dataIndex()), position.line, position.column});
     token.printLocation(self.arena.allocator(), self.context, self.dataIndex(), position, true);
 }
 
