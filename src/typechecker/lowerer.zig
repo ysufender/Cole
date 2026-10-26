@@ -1147,6 +1147,16 @@ fn scoping(self: *Lowerer, _extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
         lhs = ast.extra[extraPtr];
         const rhs = ast.extra[extraPtr + 1];
 
+        switch (ast.expressions.get(lhs).type) {
+            .Identifier, .Scoping => { },
+            else => |t| {
+                self.report("Attempt to scope on temporary expression of type '{s}'.", .{
+                    @tagName(t),
+                });
+                return Error.ScopingOnNonScopedType;
+            },
+        }
+
         const rtoken = tokens.get(rhs);
         rightMost = rtoken.end;
         leftMost = rtoken.start;

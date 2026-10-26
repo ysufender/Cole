@@ -1539,6 +1539,16 @@ pub fn typecheckScoping(self: *Typechecker, expr: defines.ExpressionPtr) Error!T
 
     const extraPtr: defines.OpaquePtr = ast.expressions.items(.value)[expr];
 
+    switch (ast.expressions.get(ast.extra[extraPtr]).type) {
+        .Identifier, .Scoping => { },
+        else => |t| {
+            self.report("Attempt to scope on temporary expression of type '{s}'.", .{
+                @tagName(t),
+            });
+            return Error.ScopingOnNonScopedType;
+        },
+    }
+
     const lhsTypeID = try self.expectType(ast.extra[extraPtr]);
     const lhsType = self.typeTable.get(lhsTypeID);
 
