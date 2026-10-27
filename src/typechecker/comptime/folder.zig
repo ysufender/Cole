@@ -55,9 +55,7 @@ pub const Flags = enum(u3) {
 const Folder = @This();
 
 currentInstantiation: ?defines.ScopePtr = null,
-
 scopeTypes: std.AutoHashMapUnmanaged(defines.ScopePtr, TypeID) = .empty,
-
 captures: std.AutoHashMapUnmanaged(defines.ScopePtr, Executer.Scope.Variables) = .empty,
 
 cache: Cache,

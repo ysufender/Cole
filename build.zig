@@ -200,6 +200,12 @@ fn addDebugTarget(b: *std.Build) void {
             .link_libc  = true,
             .error_tracing = true,
             .omit_frame_pointer = false,
+            .imports = &.{
+                .{
+                    .name = "tcc",
+                    .module = tccHeaders(b, config.native, .debug),
+                }
+            }
         }),
         .use_llvm = true,
     });
