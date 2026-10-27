@@ -131,13 +131,13 @@ return {
     },
 
     ["comptime"] = {
-        -- "generic_fn_basic", -- fail
-        -- "generic_fn_void", -- fail
-        -- "generic_fn_multi", -- fail
+        "generic_fn_basic", -- fail
+        "generic_fn_void", -- fail
+        "generic_fn_multi", -- fail
         "generic_fn_bound",
-        -- "generic_fn_body_uses_T", -- fail
-        -- "generic_fn_two_params", -- fail
-        -- "generic_fn_nested_call", -- fail
+        "generic_fn_body_uses_T", -- fail
+        "generic_fn_two_params", -- fail
+        "generic_fn_nested_call", -- fail
         "generic_type_defs",
         "generic_type_alias",
         "generic_type_two_params",
