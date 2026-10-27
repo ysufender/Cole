@@ -18,17 +18,17 @@ pub fn MultiArrayList(comptime T: type) type {
 fn StructMultiArrayList(comptime T: type) type {
     const info = @typeInfo(T).@"struct";
 
-    const fields = info.fields;
+    const fieldsLen = info.field_names.len;
 
-    comptime var newFieldsNames: [fields.len][]const u8 = undefined;
-    comptime var newFieldsTypes: [fields.len]type = undefined;
-    comptime var newFieldsAttrs: [fields.len]std.builtin.Type.StructField.Attributes = undefined;
+    comptime var newFieldsNames: [fieldsLen][]const u8 = undefined;
+    comptime var newFieldsTypes: [fieldsLen]type = undefined;
+    comptime var newFieldsAttrs: [fieldsLen]std.builtin.Type.Struct.FieldAttributes = undefined;
     
-    for (fields, 0..) |field, i| {
-        newFieldsNames[i] = field.name;
-        newFieldsTypes[i] = []field.type;
-        newFieldsAttrs[i] = std.builtin.Type.StructField.Attributes{
-            .@"align" = @alignOf([]field.type),
+    for (0..fieldsLen) |i| {
+        newFieldsNames[i] = info.field_names[i];
+        newFieldsTypes[i] = []info.field_types[i];
+        newFieldsAttrs[i] = std.builtin.Type.Struct.FieldAttributes{
+            .@"align" = @alignOf([]info.field_types[i]),
             .@"comptime" = false,
             .default_value_ptr = null,
         };
@@ -99,21 +99,21 @@ fn StructMultiArrayList(comptime T: type) type {
 
                 var ret: T = undefined;
 
-                inline for (fields) |field| {
-                    @field(ret, field.name) = @field(self.inner, field.name)[0..self.len][index];
+                inline for (info.field_names) |field| {
+                    @field(ret, field) = @field(self.inner, field)[0..self.len][index];
                 }
 
                 return ret;
             }
 
             pub fn capacity(self: *const Slice) u32 {
-                return @intCast(@field(self.inner, fields[0].name).len);
+                return @intCast(@field(self.inner, info.field_names[0]).len);
             }
 
             /// Frees all owned memory, slice shouldn't be used after free.
             pub fn free(self: *Slice, allocator: Allocator) void {
-                inline for (fields) |field| {
-                    allocator.free(@field(self.inner, field.name));
+                inline for (info.field_names) |field| {
+                    allocator.free(@field(self.inner, field));
                 }
 
                 self = .{
@@ -134,9 +134,9 @@ fn StructMultiArrayList(comptime T: type) type {
                 }
 
                 for (0..self.len) |i| {
-                    inline for (fields) |field| {
+                    inline for (info.field_names) |field| {
                         if (
-                            @field(self.inner, field.name)[i] != @field(other.inner, field.name)[i]
+                            @field(self.inner, field)[i] != @field(other.inner, field)[i]
                         ) {
                             return false;
                         }
@@ -168,8 +168,8 @@ fn StructMultiArrayList(comptime T: type) type {
                 .inner = undefined,
             };
 
-            inline for (fields) |field| {
-                @field(self.inner, field.name) = allocator.alloc(field.type, cap) catch return Error.AllocatorFailure;
+            inline for (info.field_names, 0..) |field, i| {
+                @field(self.inner, field) = allocator.alloc(info.field_types[i], cap) catch return Error.AllocatorFailure;
             }
 
             try self.ensureTotalCapacity(allocator, cap);
@@ -182,25 +182,25 @@ fn StructMultiArrayList(comptime T: type) type {
                 return;
             }
 
-            inline for (fields) |field| {
-                var new: []field.type = undefined;
+            inline for (info.field_names, 0..) |field, i| {
+                var new: []info.field_types[i] = undefined;
 
-                if (@field(self.inner, field.name).len != 0) {
-                    if (allocator.remap(@field(self.inner, field.name), cap)) |mem| {
+                if (@field(self.inner, field).len != 0) {
+                    if (allocator.remap(@field(self.inner, field), cap)) |mem| {
                         new = mem;
                     }
                     else {
-                        const mem = allocator.alloc(field.type, cap) catch return Error.AllocatorFailure;
-                        @memcpy(mem.ptr, @field(self.inner, field.name)[0..self.len]);
-                        allocator.free(@field(self.inner, field.name));
+                        const mem = allocator.alloc(info.field_types[i], cap) catch return Error.AllocatorFailure;
+                        @memcpy(mem.ptr, @field(self.inner, field)[0..self.len]);
+                        allocator.free(@field(self.inner, field));
                         new = mem;
                     }
                 }
                 else {
-                    new = allocator.alloc(field.type, cap) catch return Error.AllocatorFailure;
+                    new = allocator.alloc(info.field_types[i], cap) catch return Error.AllocatorFailure;
                 }
 
-                @field(self.inner, field.name) = new;
+                @field(self.inner, field) = new;
             }
         }
 
@@ -227,8 +227,8 @@ fn StructMultiArrayList(comptime T: type) type {
 
         pub fn appendAssumeCapacity(self: *Self, element: T) void {
             defer self.len += 1;
-            inline for (fields) |array| {
-                @field(self.inner, array.name)[self.len] = @field(element, array.name);
+            inline for (info.field_names) |array| {
+                @field(self.inner, array)[self.len] = @field(element, array);
             }
         }
 
@@ -242,13 +242,13 @@ fn StructMultiArrayList(comptime T: type) type {
 
         pub fn set(self: *Self, index: u32, value: T) void {
             assert(index < self.len);
-            inline for (fields) |field| {
-                @field(self.inner, field.name)[index] = @field(value, field.name);
+            inline for (info.field_names) |field| {
+                @field(self.inner, field)[index] = @field(value, field);
             }
         }
 
         pub fn capacity(self: *Self) u32 {
-            return @intCast(@field(self.inner, fields[0].name).len);
+            return @intCast(@field(self.inner, info.field_names[0]).len);
         }
 
         /// Clears all internal data and releases the ownership
@@ -258,8 +258,8 @@ fn StructMultiArrayList(comptime T: type) type {
             defer {
                 self.len = 0;
 
-                inline for (fields) |field| {
-                    @field(self.inner, field.name) = &.{};
+                inline for (info.field_names) |field| {
+                    @field(self.inner, field) = &.{};
                 }
             }
             return .{
@@ -276,8 +276,8 @@ fn StructMultiArrayList(comptime T: type) type {
         pub fn slice(self: *const Self) Slice {
             var inner: Inner = undefined;
 
-            inline for (fields) |field| {
-                @field(inner, field.name) = @field(self.inner, field.name)[0..self.len];
+            inline for (info.field_names) |field| {
+                @field(inner, field) = @field(self.inner, field)[0..self.len];
             }
 
             return .{
@@ -289,8 +289,8 @@ fn StructMultiArrayList(comptime T: type) type {
         pub fn mutableSlice(self: *const Self) Self {
             var ret: Inner = undefined;
 
-            inline for (fields) |field| {
-                @field(ret, field.name) = @field(self.inner, field.name)[0..self.len];
+            inline for (info.field_names) |field| {
+                @field(ret, field) = @field(self.inner, field)[0..self.len];
             }
 
             return .{

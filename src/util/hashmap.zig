@@ -26,8 +26,8 @@ fn Context(comptime Key: type) type {
             fn deepEql(comptime T: type, a: T, b: T) bool {
                 return switch (@typeInfo(T)) {
                     .@"struct" => |s| blk: {
-                        inline for (s.fields) |f| {
-                            if (!deepEql(f.type, @field(a, f.name), @field(b, f.name))) break :blk false;
+                        inline for (s.field_names, 0..) |f, i| {
+                            if (!deepEql(s.field_types[i], @field(a, f), @field(b, f))) break :blk false;
                         }
                         break :blk true;
                     },
@@ -49,9 +49,9 @@ fn Context(comptime Key: type) type {
                         if (u.tag_type == null) break :blk std.mem.eql(u8, std.mem.asBytes(&a), std.mem.asBytes(&b)); const Tag = u.tag_type.?;
                         const ta: Tag = a;
                         if (ta != @as(Tag, b)) break :blk false;
-                        inline for (u.fields) |f| {
-                            if (ta == @field(Tag, f.name)) {
-                                break :blk deepEql(f.type, @field(a, f.name), @field(b, f.name));
+                        inline for (u.field_names, 0..) |f, i| {
+                            if (ta == @field(Tag, f)) {
+                                break :blk deepEql(u.field_types[i], @field(a, f), @field(b, f));
                             }
                         }
                         break :blk false;

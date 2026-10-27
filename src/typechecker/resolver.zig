@@ -291,13 +291,6 @@ pub fn resolve(self: *Resolver, allocator: Allocator) Error!Resolution {
 fn resolveModule(self: *Resolver) Error!void {
     const module = self.modules.modules.items(.name)[self.scopes.items(.module)[self.currentScope]];
 
-    var zone = @import("tracy").ZoneN(
-        @src(),
-        std.fmt.allocPrintSentinel(self.arena.allocator(), "Resolve {s}", .{module}, 0)
-            catch return Error.AllocatorFailure,
-    );
-    defer zone.End();
-
     const kind = self.scopes.items(.kind)[self.currentScope];
     if (kind != .Module) {
         return Error.UnexpectedScope;
@@ -486,7 +479,7 @@ fn resolveStatement(self: *Resolver, stmt: defines.StatementPtr, topLevel: bool)
             try self.resolveExpression(initializer);
         },
         .Import => {
-            if (self.scopes.get(self.currentScope).kind != .Module) {
+            if (false and self.scopes.get(self.currentScope).kind != .Module) {
                 self.report("Import statements are only allowed on top-level contexts.", .{});
                 return Error.ImportInSubLevel;
             }
@@ -834,7 +827,7 @@ fn resolveScoping(
     expr: defines.ExpressionPtr,
     inside: bool,
 ) Error!?defines.Offset {
-    // TODO: A non-allocating scope resolution function
+    // @TODO: A non-allocating scope resolution function
 
     const extra: defines.OpaquePtr = ast.expressions.items(.value)[expr];
     
@@ -924,8 +917,15 @@ fn resolveScoping(
         return Error.ModuleNotInScope;
     }
 
-    return leftMost;
-}
+    if (
+        leftMost != null
+        and self.resolved.get(.{ .file = ast.tokens, .expr = lhsPtr }) == null
+    ) {
+        self.report("Couldn't resolve given identifier '{s}'.", .{moduleName});
+        return Error.InvalidIdentifier;
+    }
+
+    return leftMost;}
 
 fn resolveSignature(
     self: *Resolver,
@@ -1238,7 +1238,7 @@ fn report(self: *Resolver, comptime fmt: []const u8, args: anytype) void {
     common.log.err(fmt, args);
     const token = self.context.getTokens(self.dataIndex()).get(self.lastToken);
     const position = token.position(self.context, self.dataIndex());
-    common.log.err(("." ** 4) ++ " In {s} {d}:{d}", .{ self.context.getFileName(self.dataIndex()), position.line, position.column});
+    common.log.err(".... In {s} {d}:{d}", .{ self.context.getFileName(self.dataIndex()), position.line, position.column});
     token.printLocation(self.arena.allocator(), self.context, self.dataIndex(), position, true);
 }
 

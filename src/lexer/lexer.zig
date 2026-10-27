@@ -277,13 +277,6 @@ pub fn initFromSource(base: std.mem.Allocator, context: *common.CompilerContext,
 }
 
 pub fn lex(self: *Lexer) common.CompilerError!defines.TokenListPtr {
-    var zone = @import("tracy").ZoneN(
-        @src(),
-        std.fmt.allocPrintSentinel(self.arena.allocator(), "Lex {s}", .{self.context.getFileName(self.file)}, 0)
-            catch return Error.AllocatorFailure,
-    );
-    defer zone.End();
-
     defer self.arena.deinit();
 
     while (!self.isAtEnd()) {
@@ -435,40 +428,30 @@ fn scanToken(self: *Lexer) common.CompilerError!void {
         },
         '@' => break :blk self.addToken(.LiteralPrefix),
         else => |ch| {
-            const alpha = comptime "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_#";
-            const num = comptime "0123456789";
-            const alphanum = comptime (alpha ++ num);
-
-            if (std.mem.containsAtLeastScalar(u8, num, 1, ch)) {
-                while (std.mem.containsAtLeastScalar(u8, num, 1, self.peek())) {
+            if (std.ascii.isDigit(ch)) {
+                while (std.ascii.isDigit(self.peek())) {
                     _ = self.advance();
                 }
 
-                if (self.check('.') and std.mem.containsAtLeastScalar(u8, num, 1, self.peekn(1))) {
+                if (self.check('.') and std.ascii.isDigit(self.peekn(1))) {
                     _ = self.advance();
 
-                    while (std.mem.containsAtLeastScalar(u8, num, 1, self.peek())) {
+                    while (std.ascii.isDigit(self.peek())) {
                         _ = self.advance();
                     }
 
                     break :blk self.addToken(.Float);
                 }
-                //else if (self.check('.')) {
-                //    _ = self.advance();
-                //    self.report("Trailing dots (.) after numeric literals are not allowed.", .{});
-                //    break :blk Error.DotPostfixedNumericLiteral;
-                //}
 
                 break :blk self.addToken(.Integer);
             }
-            else if (std.mem.containsAtLeastScalar(u8, alpha, 1, ch) or ch == '_'){
-                const index =
-                    if (std.mem.indexOfNonePos(u8, self.source, self.current, alphanum))
-                        |idx| idx 
-                    else
-                        self.end;
-
-                self.current = @intCast(index);
+            else if (std.ascii.isAlphabetic(ch) or ch == '_' or ch == '#') {
+                while (
+                    std.ascii.isAlphanumeric(self.peek())
+                    or self.peek() == '_' or self.peek() == '#'
+                ) {
+                    _ = self.advance();
+                }
 
                 const str = self.source[self.start..self.current];
                 break :blk self.addToken(getType(str));
@@ -571,7 +554,7 @@ fn report(self: *Lexer, comptime fmt: []const u8, args: anytype) void {
     const pos = errToken.position(self.context, self.file);
 
     common.log.err(fmt, args);
-    common.log.err(("." ** 4) ++ " In {s} {d}:{d}", .{self.context.getFileName(self.file), pos.line, pos.column});
+    common.log.err("...." ++ " In {s} {d}:{d}", .{self.context.getFileName(self.file), pos.line, pos.column});
     errToken.printLocation(self.allocator(), self.context, self.file, pos, true);
 }
 

@@ -1,10 +1,16 @@
+# Scoping On Non-Primary Expressions
+
+Like
+
+```
+import std;
+
+std::Option(u32)::testDef
+```
+
 # Performance Fixes
 
 Especially seen in `bug_numeric_traits.cole`.
-
-# Comptime Function Calls
-
-Self explanatory.
 
 # Slice Literals
 

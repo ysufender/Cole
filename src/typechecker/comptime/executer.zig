@@ -21,8 +21,8 @@ const JIR = @import("../../codegen/c/jir.zig");
 
 const Stack = collections.StaticStack(Scope, defines.comptimeStackLimit);
 
-const Scope = struct {
-    const Variables = collections.HashMap(defines.StringPtr, Comptime.Value.Ptr);
+pub const Scope = struct {
+    pub const Variables = collections.HashMap(defines.StringPtr, Comptime.Value.Ptr);
 
     pc: defines.Offset,
     bp: defines.Offset,
@@ -45,17 +45,14 @@ pub fn init(typechecker: *Typechecker, allocator: Allocator) Error!Executer {
 }
 
 pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.Value.Ptr) Error!Comptime.Value.Ptr {
-    var zone = @import("tracy").ZoneN(
-        @src(),
-        std.fmt.allocPrintSentinel(self.arena.allocator(), "Execute {s}", .{self.typechecker.builder.getInternedString(func.name)}, 0)
-            catch return Error.AllocatorFailure,
-    );
-    defer zone.End();
-
     const sign = self.typechecker.typeTable.get(func.signature).Function;
 
     const ast = self.typechecker.context.getAST(func.source);
     const tokens = self.typechecker.context.getTokens(ast.tokens);
+
+    const pscope = self.typechecker.currentScope;
+    defer self.typechecker.currentScope = pscope;
+    self.typechecker.currentScope = func.scope;
 
     const psrc = self.typechecker.currentFile;
     defer self.typechecker.currentFile = psrc;
@@ -196,9 +193,19 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
 }
 
 pub fn executeAssignment(self: *Executer, exprPtr: defines.ExpressionPtr) Error!Comptime.Value.Ptr {
-    _ = self;
     _ = exprPtr;
-    unreachable;
+    self.report("Comptime mutable variables are not (yet) supportede.", .{});
+    return Error.ComptimeNotPossible;
+}
+
+pub fn snapshot(self: *const Executer, allocator: Allocator) Error!Scope.Variables {
+    var out: Scope.Variables = .empty;
+    for (self.stack.items) |scope| {
+        var it = scope.variables.iterator();
+        while (it.next()) |e|
+            out.put(allocator, e.key_ptr.*, e.value_ptr.*) catch return Error.AllocatorFailure;
+    }
+    return out;
 }
 
 pub fn getVar(self: *const Executer, name: defines.StringPtr) ?Comptime.Value.Ptr {

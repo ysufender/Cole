@@ -129,7 +129,7 @@ pub fn init(
         .metadata = metadata,
         .declCache = lookup,
         .exprCache = exprCache,
-        .flags = FlagMap.initEmpty(),
+        .flags = FlagMap.empty,
         .folder = undefined,
         .executer = undefined,
         .builder = undefined,
@@ -327,7 +327,7 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
                     });
                 }
                 else if (decl.topLevel) self.modules.modules.get(self.symbols.scopes.items(.module)[decl.scope]).name
-                else try self.folder.generateRandomNameString(.Type);
+                else (try self.folder.generateRandomNameString(.Type))[2..];
 
             const newName =
                 if (self.hasMetadata(decl.node, "@extern") and decl.topLevel) symName
@@ -426,7 +426,7 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
 
                 if (self.typeTable.get(def.valueType) == .Function) {
                     const prevInst = self.folder.currentInstantiation;
-                    self.folder.currentInstantiation = newType;
+                    self.folder.currentInstantiation = scope;
                     defer self.folder.currentInstantiation = prevInst;
 
                     const funcPtr = try self.folder.evalDecl(rres.value, def.valueType);
@@ -485,7 +485,7 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
             }
 
             try self.builder.modifyInternedString(func.name, newName);
-            func.name = try self.builder.internString(newName);
+            // func.name = try self.builder.internString(newName);
         },
         else => { },
     }
@@ -673,9 +673,11 @@ fn typecheckSwitchStatement(self: *Typechecker, extraPtr: defines.OpaquePtr, exp
         .end = ast.extra[extraPtr + 2],
     };
 
+    const comptimeItem = self.folder.attemptEval(item, itemTypeID);
+
     return switch (itemType) {
-        .Enum => |enm| self.typecheckSwitchStatementOnEnum(ast, itemTypeID, &enm, range, expected),
-        .Union => |uni| self.typecheckSwitchStatementOnUnion(ast, itemTypeID, &uni, range, expected),
+        .Enum => |enm| self.typecheckSwitchStatementOnEnum(ast, itemTypeID, &enm, range, expected, comptimeItem),
+        .Union => |uni| self.typecheckSwitchStatementOnUnion(ast, itemTypeID, &uni, range, expected, comptimeItem),
         else => return common.debug.ShouldBeImpossible(self.context.log, @src()),
     };
 }
@@ -687,6 +689,7 @@ fn typecheckSwitchStatementOnUnion(
     uni: *const Types.Union,
     range: defines.Range,
     expected: TypeID,
+    comptimeItem: ?Comptime.Value.Ptr,
 ) Error!void {
     // @Beware Hardcoded field size, must be kept in sync with parser.(union|struct|enum)Definition
     var fieldBuffer: [512]u32 = undefined;
@@ -697,6 +700,12 @@ fn typecheckSwitchStatementOnUnion(
     var fieldMap = std.DynamicBitSet.initEmpty(bufferAllocator.allocator(), tag.fields.len)
         catch return common.debug.ShouldBeImpossible(self.context.log, @src());
 
+    const liveTag: ?u32 = if (comptimeItem) |p| switch (self.folder.getValue(p)) {
+        .Union => |u| @intCast(u.Tag),
+        else => null,
+    } else null;
+    var liveMatched = false;
+
     var case = range.start;
     while (case < range.end) : (case += 4) {
         if (fieldMap.count() == fieldMap.capacity()) {
@@ -704,6 +713,7 @@ fn typecheckSwitchStatementOnUnion(
             return Error.UnreachableCodePath;
         }
 
+        var labelIdx: ?usize = null;
         const caseLabel = ast.extra[case];
         const fieldName = 
             if (caseLabel == 0) blk: {
@@ -736,8 +746,15 @@ fn typecheckSwitchStatementOnUnion(
                 }
 
                 fieldMap.set(enumeration);
+                labelIdx = enumeration;
                 break :blk tag.fields[enumeration].name;
             };
+
+        if (liveTag) |lt| {
+            const live = if (labelIdx) |l| l == lt else !liveMatched;
+            if (!live) continue;
+            liveMatched = true;
+        }
 
         const prev = self.currentScope;
         defer self.currentScope = prev;
@@ -759,7 +776,20 @@ fn typecheckSwitchStatementOnUnion(
             ].valueType;
 
             _ = try self.typecheckDecl(captureDecl, captureType);
+
+            // Bind the capture to its comptime payload so the body can fold on it.
+            if (comptimeItem) |p| switch (self.folder.getValue(p)) {
+                .Union => |u| self.folder.declCache.put(self.folder.arena.allocator(), captureDecl, u.Value)
+                    catch return Error.AllocatorFailure,
+                else => {},
+            };
         }
+        defer if (hasCapture and comptimeItem != null) {
+            _ = self.folder.declCache.remove(self.symbols.findDecl(.{
+                .file = self.currentFile,
+                .expr = ast.extra[case + 2],
+            }));
+        };
 
         const prevc = self.setFlag(.CoveredAllPaths, false);
         try self.typecheckStatement(ast.extra[case + 3], expected);
@@ -776,7 +806,7 @@ fn typecheckSwitchStatementOnUnion(
         });
         while (iterator.next()) |field| {
             const fieldName = tag.fields[field];
-            common.log.err(("." ** 4) ++ " {s}", .{
+            common.log.err(".... {s}", .{
                 fieldName.name,
             });
         }
@@ -793,6 +823,7 @@ fn typecheckSwitchStatementOnEnum(
     enm: *const Types.Enum,
     range: defines.Range,
     expected: TypeID,
+    comptimeItem: ?Comptime.Value.Ptr,
 ) Error!void {
     // @Beware Hardcoded field size, must be kept in sync with parser.(union|struct|enum)Definition
     var fieldBuffer: [512]u32 = undefined;
@@ -801,6 +832,12 @@ fn typecheckSwitchStatementOnEnum(
     var fieldMap = std.DynamicBitSet.initEmpty(bufferAllocator.allocator(), enm.fields.len)
         catch return common.debug.ShouldBeImpossible(self.context.log, @src());
 
+    const liveTag: ?u32 = if (comptimeItem) |p| switch (self.folder.getValue(p)) {
+        .Enum => |e| @intCast(e.Value),
+        else => null,
+    } else null;
+    var liveMatched = false;
+
     var case = range.start;
     while (case < range.end) : (case += 4) {
         if (fieldMap.count() == fieldMap.capacity()) {
@@ -808,6 +845,7 @@ fn typecheckSwitchStatementOnEnum(
             return Error.UnreachableCodePath;
         }
 
+        var labelIdx: ?usize = null;
         const caseLabel = ast.extra[case];
         if (caseLabel == 0) {
             fieldMap.setRangeValue(.{
@@ -837,6 +875,13 @@ fn typecheckSwitchStatementOnEnum(
             }
 
             fieldMap.set(enumeration);
+            labelIdx = enumeration;
+        }
+
+        if (liveTag) |lt| {
+            const live = if (labelIdx) |l| l == lt else !liveMatched;
+            if (!live) continue;
+            liveMatched = true;
         }
 
         const hasCapture = ast.extra[case + 1] == 1;
@@ -866,7 +911,7 @@ fn typecheckSwitchStatementOnEnum(
         });
         while (iterator.next()) |field| {
             const fieldName = enm.fields[field];
-            common.log.err(("." ** 4) ++ " {s}", .{
+            common.log.err(".... {s}", .{
                 fieldName.name,
             });
         }
@@ -1039,13 +1084,6 @@ pub fn typecheckParameter(self: *Typechecker, decl: *const Resolver.Declaration,
 }
 
 pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.ExpressionPtr, _maybeExpected: ?TypeID) Error!TypeID {
-    defer if (self.folder.getFlag(.InComptimeCall)) {
-        _ = self.metadata.remove(.{
-            .file = self.currentFile,
-            .expr = expressionPtr,
-        });
-    };
-
     const ast = self.context.getAST(self.currentFile);
 
     const key = Resolver.ResolutionKey{
@@ -1053,7 +1091,7 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
         .expr = expressionPtr,
     };
 
-    if (self.folder.currentInstantiation == 0) {
+    if (self.folder.currentInstantiation == null) {
         if (self.exprCache.get(key)) |tuple| {
             const attempting = self.getFlag(.AttemptingEval);
             const inLoop = self.getFlag(.InLoop);
@@ -1126,7 +1164,7 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
         else => false,
     });
 
-    if (self.folder.currentInstantiation == 0 and !self.folder.getFlag(.InComptimeCall)) {
+    if (self.folder.currentInstantiation == null and !self.folder.getFlag(.InComptimeCall)) {
         self.exprCache.put(self.arena.allocator(), key, .{typeID, self.flags})
             catch return Error.AllocatorFailure;
     }
@@ -1487,7 +1525,7 @@ fn typecheckUnionInitialization(self: *Typechecker, ast: *const Parser.AST, uni:
 }
 
 pub fn typecheckScoping(self: *Typechecker, expr: defines.ExpressionPtr) Error!TypeID {
-    if (self.folder.currentInstantiation == 0) {
+    if (self.folder.currentInstantiation == null) {
         if (self.symbols.resolutionMap.get(.{
             .file = self.currentFile,
             .expr = expr,
@@ -1500,6 +1538,16 @@ pub fn typecheckScoping(self: *Typechecker, expr: defines.ExpressionPtr) Error!T
     const tokens = self.context.getTokens(ast.tokens);
 
     const extraPtr: defines.OpaquePtr = ast.expressions.items(.value)[expr];
+
+    switch (ast.expressions.get(ast.extra[extraPtr]).type) {
+        .Identifier, .Scoping => { },
+        else => |t| {
+            self.report("Attempt to scope on temporary expression of type '{s}'.", .{
+                @tagName(t),
+            });
+            return Error.ScopingOnNonScopedType;
+        },
+    }
 
     const lhsTypeID = try self.expectType(ast.extra[extraPtr]);
     const lhsType = self.typeTable.get(lhsTypeID);
@@ -2055,27 +2103,21 @@ pub fn typecheckIndexing(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!
 }
 
 pub fn instanceDecl(self: *Typechecker, declPtr: defines.DeclPtr) defines.DeclPtr {
-    const inst = self.folder.currentInstantiation;
-    if (inst == 0) return declPtr;
+    const scope = self.folder.currentInstantiation orelse return declPtr;
+    const inst = self.folder.scopeTypes.get(scope) orelse return declPtr;
 
     const decl = self.symbols.getDecl(declPtr);
 
     const ast = self.context.getAST(self.currentFile);
     if (ast.expressions.items(.type)[decl.node] != .FunctionDefinition) return declPtr;
 
-    const scope = switch (self.typeTable.get(inst)) {
-        .Struct => |s| s.scope,
-        .Union => |u| u.scope,
-        .Enum => |e| e.scope,
-        else => return declPtr,
-    };
     if (decl.scope == scope) return declPtr;
 
     const tokens = self.context.getTokens(ast.tokens);
     const name = tokens.get(decl.token).lexeme(self.context, self.currentFile);
     const tname = self.builder.getInternedString(switch (self.typeTable.get(inst)) {
         .Struct => |s| s.name, .Union => |u| u.name, .Enum => |e| e.name,
-        else => unreachable,
+        else => return declPtr,
     });
     const key = std.fmt.allocPrint(self.arena.allocator(), "{s}::{s}", .{ tname, name }) catch return declPtr;
 
@@ -2206,13 +2248,6 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
     });
     decl = self.symbols.declarations.get(declPtr);
 
-    var zone = @import("tracy").ZoneN(
-        @src(),
-        std.fmt.allocPrintSentinel(self.arena.allocator(), "Typecheck {s}", .{self.builder.getInternedString(decl.name)}, 0)
-            catch return Error.AllocatorFailure,
-    );
-    defer zone.End();
-
     isPresent.value_ptr.* = .{
         .status = .InProgress,
         .result = comptime Comptime.Folder.Builtin.Type("$$incomplete"),
@@ -2246,14 +2281,18 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
     const instanceDependent =
         self.folder.getFlag(.InComptimeCall)
         or decl.kind == .Parameter
-        or (self.folder.currentInstantiation != 0 and !decl.topLevel);
+        or decl.kind == .Capture
+        or (
+            self.folder.currentInstantiation != null
+            and !decl.topLevel
+        );
 
     isPresent.value_ptr.* = .{
         .status = if (instanceDependent) .NotChecked else .Checked,
         .result = declType,
     };
 
-    if (self.folder.attemptEval(decl.node, declType)) |val| fi: {
+    if (if (decl.kind == .Variable) self.folder.attemptEval(decl.node, declType) else null) |val| fi: {
         var func = switch (self.folder.memory.items[val]) {
             .Function => |f| f,
             else => break :fi,
@@ -2266,6 +2305,15 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
 
         // @Note See folder.zig:evalFunction
         if (!self.folder.getFlag(.InComptimeCall) and !sign.isComptime and !alreadyLowered) {
+            const prevs = self.currentFile;
+            self.currentFile = func.source;
+            defer self.currentFile = prevs;
+
+            const prevInst = self.folder.currentInstantiation;
+            if (prevInst == null and self.folder.captures.contains(func.scope))
+                self.folder.currentInstantiation = func.scope;
+            defer self.folder.currentInstantiation = prevInst;
+
             if (!self.hasMetadata(func.expr, "@extern")) {
                 const pc = self.setFlag(.CoveredAllPaths, false);
                 defer _ = self.setFlag(.CoveredAllPaths, pc);
@@ -2294,7 +2342,7 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
         }
     }
 
-    if (declType == comptime Comptime.Folder.Builtin.Type("type")) {
+    if (declType == (comptime Comptime.Folder.Builtin.Type("type")) and decl.kind == .Variable) {
         const typeID = self.folder.getValue(try self.folder.eval(decl.node, declType)).Type;
         const node = self.typeTable.get(typeID);
 
@@ -2500,18 +2548,7 @@ pub fn typecheckDot(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!TypeI
     return self.typecheckFieldAccess(objectTypeID, memberName);
 }
 
-pub fn typecheckMark(
-    self: *Typechecker,
-    ptr: defines.ExpressionPtr,
-    extraPtr: defines.OpaquePtr,
-    maybeExpected: ?TypeID
-) Error!TypeID {
-    // @Note In case of the mark of a mark, ptr is the marked this, which is the
-    // current mark.
-    const existingMeta =
-        if (self.getMetadata(ptr)) |meta| meta
-        else &.{};
-
+pub fn applyMark(self: *Typechecker, ptr: defines.ExpressionPtr, extraPtr: defines.OpaquePtr) Error!void {
     const ast = self.context.getAST(self.currentFile);
 
     const marks = defines.Range{
@@ -2519,8 +2556,10 @@ pub fn typecheckMark(
         .end = ast.extra[extraPtr + 1], 
     };
 
-    const metadata = self.arena.allocator().alloc(Comptime.Value.Ptr, marks.len() + existingMeta.len)
-        catch return Error.AllocatorFailure;
+    const metadata =
+        if (self.getMetadata(ptr)) |meta| @constCast(meta)
+        else self.arena.allocator().alloc(Comptime.Value.Ptr, marks.len())
+            catch return Error.AllocatorFailure;
 
     for (0..marks.len()) |index| {
         const meta = self.folder.attemptEval(
@@ -2531,12 +2570,20 @@ pub fn typecheckMark(
         metadata[index] = if (meta) |m| m else try self.folder.eval(ast.extra[marks.at(@intCast(index))], null);
     }
 
-    // @Note @Beware ugly workaround, forward the markings to the inner mark.
-    @memcpy(metadata[marks.len()..], existingMeta);
-
     const marked = ast.extra[extraPtr + 2];
     try self.setMetadata(marked, metadata);
     try self.setMetadata(ptr, metadata);
+}
+
+pub fn typecheckMark(
+    self: *Typechecker,
+    ptr: defines.ExpressionPtr,
+    extraPtr: defines.OpaquePtr,
+    maybeExpected: ?TypeID
+) Error!TypeID {
+    try self.applyMark(ptr, extraPtr);
+    const ast = self.context.getAST(self.currentFile);
+    const marked = ast.extra[extraPtr + 2];
     return self.typecheckExpression(marked, maybeExpected);
 }
 
@@ -2913,7 +2960,7 @@ fn typecheckSwitchOnUnion(
         });
         while (iterator.next()) |field| {
             const fieldName = tag.fields[field];
-            common.log.err(("." ** 4) ++ " {s}", .{
+            common.log.err(".... {s}", .{
                 fieldName.name,
             });
         }
@@ -3021,7 +3068,7 @@ fn typecheckSwitchOnEnum(
         });
         while (iterator.next()) |field| {
             const fieldName = enm.fields[field];
-            common.log.err(("." ** 4) ++ " {s}", .{
+            common.log.err(".... {s}", .{
                 fieldName.name,
             });
         }
@@ -3095,7 +3142,7 @@ pub fn report(self: *Typechecker, comptime fmt: []const u8, args: anytype) void 
     const token = self.context.getTokens(self.currentFile).get(self.lastToken);
     const position = token.position(self.context, self.currentFile);
 
-    common.log.err(("." ** 4) ++ " In {s} {d}:{d}", .{
+    common.log.err(".... In {s} {d}:{d}", .{
         self.context.getFileName(self.currentFile),
         position.line,
         position.column,
@@ -3112,7 +3159,7 @@ pub fn dumpCallStack(self: *Typechecker) void {
         const module = self.modules.modules.get(modulePtr);
         const token = self.context.getTokens(module.dataIndex).get(lastDecl.token);
         const position = token.position(self.context, module.dataIndex);
-        common.log.err(("." ** 8) ++ " Required from '{s} {d}:{d}'", .{
+        common.log.err("........ Required from '{s} {d}:{d}'", .{
             self.context.getFileName(module.dataIndex),
             position.line,
             position.column,
@@ -3805,7 +3852,18 @@ pub fn alignOf(self: *const Typechecker, of: TypeID) u32 {
 }
 
 pub fn tryGetDefinitionIndex(self: *Typechecker, from: TypeID, memberNamePtr: defines.StringPtr) Error!?defines.Offset {
-    const member = self.builder.getInternedString(memberNamePtr);
+    const fromName = self.builder.getInternedString(self.typenameMap.get(from)
+        orelse return common.debug.ShouldBeImpossible(undefined, @src()));
+    const isAnon = fromName[0] == '$';
+
+    const member =
+        if (isAnon) member: {
+            const memberName = self.builder.getInternedString(memberNamePtr);
+            const lastPtr = if (std.mem.lastIndexOfScalar(u8, memberName, ':')) |idx| idx + 1 else 0;
+            break :member memberName[lastPtr..];
+        }
+        else self.builder.getInternedString(memberNamePtr);
+
     const decls = switch (self.typeTable.get(from)) {
         .Enum => |enm| enm.definitions,
         .Struct => |str| str.definitions,

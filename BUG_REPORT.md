@@ -33,3 +33,5 @@ else is holding a reference to the said memory.
 ## Comptime Caching (43)
 ## Initializer List Typechecking Mismatch (44)
 ## Scoped Definition Access (45)
+## Comptime Definition Lowering (47)
+## Switch Capture Folding (48)

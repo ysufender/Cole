@@ -85,7 +85,7 @@ pub fn deepCopy(item: anytype, allocator: Allocator) Error!@TypeOf(item) {
                 const args = std.meta.ArgsTuple(copyFunc);
 
                 return (
-                    if (@typeInfo(args).@"struct".fields[0].type == *const T)
+                    if (@typeInfo(args).@"struct".field_types[0] == *const T)
                         @call(.auto, @field(T, func), .{&item, allocator})
                     else
                         @call(.auto, @field(T, func), .{item, allocator})
@@ -95,9 +95,9 @@ pub fn deepCopy(item: anytype, allocator: Allocator) Error!@TypeOf(item) {
             else {
                 var ret: T = undefined;
 
-                inline for (obj.fields) |field| {
-                    @field(ret, field.name) =
-                        try deepCopy(@field(item, field.name), allocator);
+                inline for (obj.field_names) |field| {
+                    @field(ret, field) =
+                        try deepCopy(@field(item, field), allocator);
                 }
 
                 return ret;

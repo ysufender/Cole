@@ -7,7 +7,9 @@ local cole_build =
     -- "releasesafe"
     -- "releasefast"
 
-local exe_path = string.format("../zig-out/cole-v0.0.1-%s-linux-x86_64", cole_build)
+local cole_version = "v0.1.0"
+
+local exe_path = string.format("../zig-out/cole-%s-%s-linux-x86_64", cole_version, cole_build)
 
 local cflags = " -I ../stdlib --supress-warnings "
 

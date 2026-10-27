@@ -326,12 +326,13 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
 
     const enumOrUnionType = try typechecker.typecheckExpression(ast.extra[extraPtr], null);
     const enumOrUnionExpr = try self.expression(ast.extra[extraPtr], enumOrUnionType);
+    const maybeComptimeEnumOrUnionPtr = typechecker.folder.cache.get(.{
+        .file = typechecker.currentFile,
+        .expr = ast.extra[extraPtr],
+        .instantiation = self.typechecker.folder.instKey(),
+    });
     const maybeComptimeEnumOrUnion =
-        if (typechecker.folder.cache.get(.{
-            .file = typechecker.currentFile,
-            .expr = ast.extra[extraPtr],
-            .instantiation = self.typechecker.folder.currentInstantiation,
-        })) |ptr| typechecker.folder.getValue(ptr)
+        if (maybeComptimeEnumOrUnionPtr) |ptr| typechecker.folder.getValue(ptr)
         else null;
 
     var cachedDef: ?JIR.Ptr = null;
@@ -411,6 +412,29 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
 
                 const caseField = typeInfo.Union.fields[caseValue + 1];
 
+                if (maybeComptimeEnumOrUnion) |val| {
+                    switch (val) {
+                        .Union => |uni|
+                            if (uni.Tag == caseValue) {
+                                exec.declCache.put(exec.arena.allocator(), captureDeclPtr, uni.Value)
+                                    catch return Error.AllocatorFailure;
+                                defer _ = exec.declCache.remove(captureDeclPtr);
+                                return try self.statement(bodyPtr);
+                            },
+
+                        .Enum => |enm|
+                            if (enm.Value == caseValue) {
+                                exec.declCache.put(exec.arena.allocator(), captureDeclPtr, maybeComptimeEnumOrUnionPtr.?)
+                                    catch return Error.AllocatorFailure;
+                                defer _ = exec.declCache.remove(captureDeclPtr);
+                                return try self.statement(bodyPtr);
+                            },
+
+                        else => return common.debug.ShouldBeImpossible(undefined, @src()),
+                    }
+                    continue;
+                }
+
                 const capture = try typechecker.builder.variableDef(
                     false,
                     caseField.valueType,
@@ -419,33 +443,6 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
                     try typechecker.builder.dot(enumOrUnion, caseField.name, enumOrUnionType),
                     null,
                 );
-
-                if (maybeComptimeEnumOrUnion) |val| {
-                    switch (val) {
-                        .Union => |uni|
-                            if (uni.Tag == caseValue) {
-                                return typechecker.builder.scope(
-                                    try exec.generateRandomName(.Case), &.{
-                                        capture,
-                                        try self.statement(bodyPtr),
-                                    },
-                                );
-                            },
-
-                        .Enum => |enm|
-                            if (enm.Value == caseValue) {
-                                return typechecker.builder.scope(
-                                    try exec.generateRandomName(.Case), &.{
-                                        capture,
-                                        try self.statement(bodyPtr),
-                                    },
-                                );
-                            },
-
-                        else => return common.debug.ShouldBeImpossible(undefined, @src()),
-                    }
-                    continue;
-                }
 
                 const body = try self.statement(bodyPtr);
                 const caseEndLbl = try typechecker.builder.label(caseEnd);
@@ -548,7 +545,7 @@ fn variableDef(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     }
 
     const node =
-        if (self.typechecker.folder.cache.get(.{ .instantiation = self.typechecker.folder.currentInstantiation, .file = self.typechecker.currentFile, .expr = decl.node })) |someVal|
+        if (self.typechecker.folder.cache.get(.{ .instantiation = self.typechecker.folder.instKey(), .file = self.typechecker.currentFile, .expr = decl.node })) |someVal|
             try self.typechecker.builder.literal(try self.addConstant(someVal, typeID))
         else
             try self.expression(decl.node, typeID);
@@ -557,7 +554,7 @@ fn variableDef(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
         decl.topLevel,
         typeID,
         decl.name,
-        if (self.typechecker.folder.cache.get(.{ .instantiation = self.typechecker.folder.currentInstantiation, .file = self.typechecker.currentFile, .expr = decl.node })) |i|
+        if (self.typechecker.folder.cache.get(.{ .instantiation = self.typechecker.folder.instKey(), .file = self.typechecker.currentFile, .expr = decl.node })) |i|
             self.typechecker.folder.getValue(i) == .Undefined
         else false,
         node,
@@ -909,7 +906,7 @@ fn loop(
 
     const conditionPtr = ast.extra[extraPtr];
 
-    if (self.typechecker.folder.cache.get(.{ .instantiation = self.typechecker.folder.currentInstantiation, .file = self.typechecker.currentFile, .expr = conditionPtr })) |res| {
+    if (self.typechecker.folder.cache.get(.{ .instantiation = self.typechecker.folder.instKey(), .file = self.typechecker.currentFile, .expr = conditionPtr })) |res| {
         if (self.typechecker.folder.getValue(res).Bool) {
             var loopData: [5]JIR.Ptr = undefined;
 
@@ -954,7 +951,7 @@ fn loop(
 fn conditional(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.AST) Error!JIR.Ptr {
     const conditionExpr = ast.extra[extraPtr];
 
-    if (self.typechecker.folder.cache.get(.{ .instantiation = self.typechecker.folder.currentInstantiation, .file = self.typechecker.currentFile, .expr = conditionExpr })) |comptimeConditionPtr| {
+    if (self.typechecker.folder.cache.get(.{ .instantiation = self.typechecker.folder.instKey(), .file = self.typechecker.currentFile, .expr = conditionExpr })) |comptimeConditionPtr| {
         const comptimeCondition = self.typechecker.folder.getValue(comptimeConditionPtr).Bool;
 
         if (comptimeCondition) {
@@ -1150,6 +1147,16 @@ fn scoping(self: *Lowerer, _extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
         lhs = ast.extra[extraPtr];
         const rhs = ast.extra[extraPtr + 1];
 
+        switch (ast.expressions.get(lhs).type) {
+            .Identifier, .Scoping => { },
+            else => |t| {
+                self.report("Attempt to scope on temporary expression of type '{s}'.", .{
+                    @tagName(t),
+                });
+                return Error.ScopingOnNonScopedType;
+            },
+        }
+
         const rtoken = tokens.get(rhs);
         rightMost = rtoken.end;
         leftMost = rtoken.start;
@@ -1241,7 +1248,7 @@ fn switchExpr(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error
     const enumOrUnionType = try typechecker.typecheckExpression(ast.extra[extraPtr], null);
     const enumOrUnionExpr = try self.expression(ast.extra[extraPtr], enumOrUnionType);
     const maybeComptimeEnumOrUnion =
-        if (self.typechecker.folder.cache.get(.{ .instantiation = self.typechecker.folder.currentInstantiation, .file = self.typechecker.currentFile, .expr = ast.extra[extraPtr] })) |ptr|
+        if (self.typechecker.folder.cache.get(.{ .instantiation = self.typechecker.folder.instKey(), .file = self.typechecker.currentFile, .expr = ast.extra[extraPtr] })) |ptr|
             typechecker.folder.getValue(ptr)
         else null;
 

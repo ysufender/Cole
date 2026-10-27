@@ -13,6 +13,7 @@ const Lexer = @import("../../lexer/lexer.zig");
 const Parser = @import("../../parser/parser.zig");
 const Typechecker = @import("../typechecker.zig");
 const Resolver = @import("../resolver.zig");
+const Executer = @import("executer.zig");
 const Allocator = std.mem.Allocator;
 const Arena = std.heap.ArenaAllocator;
 const Error = common.CompilerError;
@@ -53,7 +54,11 @@ pub const Flags = enum(u3) {
 
 const Folder = @This();
 
-currentInstantiation: u32 = 0,
+currentInstantiation: ?defines.ScopePtr = null,
+
+scopeTypes: std.AutoHashMapUnmanaged(defines.ScopePtr, TypeID) = .empty,
+
+captures: std.AutoHashMapUnmanaged(defines.ScopePtr, Executer.Scope.Variables) = .empty,
 
 cache: Cache,
 declCache: DeclCache,
@@ -88,7 +93,7 @@ pub fn init(typechecker: *Typechecker, gpa: Allocator) Error!Folder {
         .cache = cache,
         .declCache = declCache,
         .memory = memory,
-        .flags = FlagMap.initEmpty(),
+        .flags = FlagMap.empty,
         .rng = std.Random.DefaultPrng.init(5315),
         .arena = arena,
     };
@@ -111,7 +116,7 @@ pub fn eval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeI
     const key = FolderCacheKey{
         .file = file,
         .expr = exprPtr,
-        .instantiation = self.currentInstantiation,
+        .instantiation = self.instKey(),
     };
 
     const ast = typechecker.context.getAST(file);
@@ -349,6 +354,8 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
         .expr = exprPtr,
     };
 
+    if (self.getFlag(.InComptimeCall)) try self.captureLocals(scope);
+
     return self.appendValue(.{
         .Function = functionDef,
     });
@@ -523,8 +530,18 @@ pub fn evalBinary(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Ty
             });
         },
         .EqualEqual, .BangEqual => |equality| {
-            const lhs = self.getValue(try self.expectDefined(ast.extra[extraPtr], lhsType));
-            const rhs = self.getValue(try self.expectDefined(ast.extra[extraPtr + 2], lhsType));
+            var lhs = self.getValue(try self.expectDefined(ast.extra[extraPtr], lhsType));
+            var rhs = self.getValue(try self.expectDefined(ast.extra[extraPtr + 2], lhsType));
+
+            if (lhs == .Int and rhs == .Float) {
+                const lhsInt = lhs.Int;
+                lhs = .{ .Float = @floatFromInt(lhsInt) };
+            }
+            else if (lhs == .Float and rhs == .Int) {
+                const rhsInt = rhs.Int;
+                rhs = .{ .Float = @floatFromInt(rhsInt) };
+            }
+
 
             return self.appendValue(.{
                 .Bool =
@@ -549,37 +566,70 @@ pub fn evalBinary(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Ty
             });
         },
         .Greater, .LesserEqual => |comparison| {
-            const multiplier = comparison == .Greater;
+            const isGreater = comparison == .Greater;
 
-            const lhs = self.getValue(try self.expectDefined(ast.extra[extraPtr], lhsType));
-            const rhs = self.getValue(try self.expectDefined(ast.extra[extraPtr + 2], lhsType));
+            var lhs = self.getValue(try self.expectDefined(ast.extra[extraPtr], lhsType));
+            var rhs = self.getValue(try self.expectDefined(ast.extra[extraPtr + 2], lhsType));
+
+            if (lhs == .Int and rhs == .Float) {
+                const lhsInt = lhs.Int;
+                lhs = .{ .Float = @floatFromInt(lhsInt) };
+            }
+            else if (lhs == .Float and rhs == .Int) {
+                const rhsInt = rhs.Int;
+                rhs = .{ .Float = @floatFromInt(rhsInt) };
+            }
+
+
+            const greater = switch (lhs) {
+                .Int => lhs.Int > rhs.Int,
+                .Float => lhs.Float > rhs.Float,
+                else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
+            };
 
             return self.appendValue(.{
-                .Bool = multiplier and switch (lhs) {
-                    .Int => lhs.Int > rhs.Int,
-                    .Float => lhs.Float > rhs.Float,
-                    else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
-                }
+                .Bool = if (isGreater) greater else !greater,
             });
         },
         .Lesser, .GreaterEqual => |comparison| {
-            const multiplier = comparison == .Lesser;
+            const isLesser = comparison == .Lesser;
 
-            const lhs = self.getValue(try self.expectDefined(ast.extra[extraPtr], lhsType));
-            const rhs = self.getValue(try self.expectDefined(ast.extra[extraPtr + 2], lhsType));
+            var lhs = self.getValue(try self.expectDefined(ast.extra[extraPtr], lhsType));
+            var rhs = self.getValue(try self.expectDefined(ast.extra[extraPtr + 2], lhsType));
+
+            if (lhs == .Int and rhs == .Float) {
+                const lhsInt = lhs.Int;
+                lhs = .{ .Float = @floatFromInt(lhsInt) };
+            }
+            else if (lhs == .Float and rhs == .Int) {
+                const rhsInt = rhs.Int;
+                rhs = .{ .Float = @floatFromInt(rhsInt) };
+            }
+
+
+            const lesser = switch (lhs) {
+                .Int => lhs.Int < rhs.Int,
+                .Float => lhs.Float < rhs.Float,
+                else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
+            };
 
             return self.appendValue(.{
-                .Bool = multiplier and switch (lhs) {
-                    .Int => lhs.Int < rhs.Int,
-                    .Float => lhs.Float < rhs.Float,
-                    else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
-                }
+                .Bool = if (isLesser) lesser else !lesser,
             });
-
         },
         .Plus, .Minus, .Slash, .Star, .Modulo => |arithmetic| {
-            const lhs = self.getValue(try self.expectDefined(ast.extra[extraPtr], lhsType));
-            const rhs = self.getValue(try self.expectDefined(ast.extra[extraPtr + 2], null));
+            var lhs = self.getValue(try self.expectDefined(ast.extra[extraPtr], lhsType));
+            var rhs = self.getValue(try self.expectDefined(ast.extra[extraPtr + 2], null));
+
+            if (lhs == .Int and rhs == .Float) {
+                const lhsInt = lhs.Int;
+                lhs = .{ .Float = @floatFromInt(lhsInt) };
+            }
+            else if (lhs == .Float and rhs == .Int) {
+                const rhsInt = rhs.Int;
+                rhs = .{ .Float = @floatFromInt(rhsInt) };
+            }
+
 
             return self.appendValue(switch (arithmetic) {
                 .Plus => switch (lhs) {
@@ -694,7 +744,8 @@ fn evalSwitchExpression(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpecte
                         .expr = firstCapture,
                     });
                     
-                    try self.cacheDecl(capture, varToSwitchOn);
+                    self.declCache.put(self.arena.allocator(), capture, varToSwitchOn)
+                        catch return Error.AllocatorFailure;
                 }
 
                 return self.expectDefined(ast.extra[case + 3], resultType);
@@ -772,6 +823,25 @@ fn evalIfExpression(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?
         else self.expectDefined(conditional.otherwise, maybeExpected);
 }
 
+pub fn instKey(self: *const Folder) u32 {
+    return if (self.currentInstantiation) |s| s + 1 else 0;
+}
+
+fn captureLocals(self: *Folder, scope: defines.ScopePtr) Error!void {
+    const snap = try self.typechecker.executer.snapshot(self.arena.allocator());
+    self.captures.put(self.arena.allocator(), scope, snap) catch return Error.AllocatorFailure;
+}
+
+fn registerInstance(self: *Folder, scope: defines.ScopePtr, ty: TypeID) Error!void {
+    self.scopeTypes.put(self.arena.allocator(), scope, ty) catch return Error.AllocatorFailure;
+    if (self.getFlag(.InComptimeCall)) try self.captureLocals(scope);
+}
+
+fn capturedLocal(self: *Folder, name: defines.StringPtr) ?Comptime.Value.Ptr {
+    const vars = self.captures.get(self.currentInstantiation orelse return null) orelse return null;
+    return vars.get(name);
+}
+
 pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID) Error!Comptime.Value.Ptr {
     var decl  = self.typechecker.symbols.declarations.get(declPtr);
 
@@ -788,7 +858,19 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
     defer self.typechecker.currentScope = prevScope;
 
     if (self.declCache.get(declPtr)) |v| {
-        return v;
+        // @Bug can't seem to get this to work it has some unexpected behaviour to it
+        if (!self.getFlag(.InComptimeCall) or decl.kind == .Capture) {
+            return v;
+        }
+    }
+
+    if (!self.getFlag(.InComptimeCall) and
+        (decl.kind == .Parameter or (decl.kind == .Variable and !decl.topLevel)))
+    {
+        if (self.capturedLocal(decl.name)) |v| {
+            _ = self.setFlag(.Volatile, true);
+            return v;
+        }
     }
 
     const res = try switch (decl.kind) {
@@ -1184,6 +1266,7 @@ fn evalEnumType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Value
     const res = try self.appendValue(.{
         .Type = try self.typechecker.registerType(newType)
     });
+    try self.registerInstance(scope, self.getValue(res).Type);
     
     self.cache.put(self.arena.allocator(), .{
         .file = self.typechecker.currentFile,
@@ -1262,6 +1345,7 @@ fn evalStructType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Val
     const res = try self.appendValue(.{
         .Type = try self.typechecker.registerType(newType),
     });
+    try self.registerInstance(scope, self.getValue(res).Type);
     
     self.cache.put(self.arena.allocator(), .{
         .file = self.typechecker.currentFile,
@@ -1401,6 +1485,7 @@ fn evalUnionType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Valu
     const res = try self.appendValue(.{
         .Type = try self.typechecker.registerType(newType),
     });
+    try self.registerInstance(scope, self.getValue(res).Type);
     
     self.cache.put(self.arena.allocator(), .{
         .file = self.typechecker.currentFile,
@@ -1482,13 +1567,14 @@ pub fn evalThis(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value
         });
         return Error.ArgumentCountMismatch;
     }
-    if (self.currentInstantiation == 0) {
+    const ty = if (self.currentInstantiation) |s| self.scopeTypes.get(s) else null;
+    if (ty == null) {
         self.report("Use of 'this' outisde typed scope.", .{});
         return Error.IllegalSyntax;
     }
 
     return self.appendValue(.{
-        .Type = self.currentInstantiation,
+        .Type = ty.?,
     });
 }
 
@@ -1520,7 +1606,7 @@ pub fn evalCompileLog(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime
     const token = self.typechecker.context.getTokens(self.typechecker.currentFile).get(self.typechecker.lastToken);
     const position = token.position(self.typechecker.context, self.typechecker.currentFile);
 
-    common.log.info(("." ** 4) ++ " In {s} {d}:{d}", .{
+    common.log.info(".... In {s} {d}:{d}", .{
         self.typechecker.context.getFileName(self.typechecker.currentFile),
         position.line,
         position.column,
@@ -2218,14 +2304,18 @@ fn constructStruct(
     str: *const types.Struct,
     range: defines.Range,
 ) Error!Comptime.Value.Ptr {
-    const start = self.memory.items.len;
+    const addrs = self.arena.allocator().alloc(Comptime.Value.Ptr, range.len())
+        catch return Error.AllocatorFailure;
 
     for (0..range.len()) |idx| {
-        const addr = try self.eval(
+        addrs[idx] = try self.eval(
             ast.extra[range.at(@intCast(idx))],
             str.fields[idx].valueType
         );
+    }
 
+    const start = self.memory.items.len;
+    for (addrs) |addr| {
         _ = try self.appendValue(self.getValue(addr));
     }
 
@@ -2263,11 +2353,15 @@ fn constructUnion(
 fn constructArrayFromList(self: *Folder, arr: TypeID, child: TypeID, range: defines.Range) Error!Comptime.Value.Ptr {
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
 
+    const addrs = self.arena.allocator().alloc(Comptime.Value.Ptr, range.len())
+        catch return Error.AllocatorFailure;
+
+    for (range.start..range.end, 0..) |ptr, idx| {
+        addrs[idx] = try self.eval(ast.extra[ptr], child);
+    }
+
     const address = self.memory.items.len;
-
-    for (range.start..range.end) |ptr| {
-        const addr = try self.eval(ast.extra[ptr], child);
-
+    for (addrs) |addr| {
         _ = try self.appendValue(self.getValue(addr));
     }
 
@@ -2296,11 +2390,18 @@ fn evalScoping(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Value.
     _ = try self.typechecker.typecheckScoping(expr);
     const res = self.getValue(try self.expectType(ast.extra[extraPtr])).Type;
 
-    const member = std.fmt.allocPrint(self.arena.allocator(),
-        "{s}::{s}", .{
-        try self.typechecker.typeName(self.arena.allocator(), res),
-        tokens.get(ast.extra[extraPtr + 1]).lexeme(self.typechecker.context, ast.tokens),
-    }) catch return Error.AllocatorFailure;
+    const isAnon = self.typechecker.builder.getInternedString(
+        self.typechecker.typenameMap.get(res)
+            orelse return common.debug.ShouldBeImpossible(undefined, @src()),
+    )[0] == '$';
+
+    const member =
+        if (isAnon) tokens.get(ast.extra[extraPtr + 1]).lexeme(self.typechecker.context, ast.tokens)
+        else std.fmt.allocPrint(self.arena.allocator(),
+            "{s}::{s}", .{
+            try self.typechecker.typeName(self.arena.allocator(), res),
+            tokens.get(ast.extra[extraPtr + 1]).lexeme(self.typechecker.context, ast.tokens),
+        }) catch return Error.AllocatorFailure;
 
     const scope = switch (self.typechecker.typeTable.get(res)) {
         .Enum => |enm| ret: {
@@ -2365,6 +2466,19 @@ pub fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Type
         .Function => maybeFunction.Function,
         else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
     };
+
+    const prevs = self.typechecker.currentFile;
+    self.typechecker.currentFile = function.source;
+
+    if (self.typechecker.hasMetadata(function.expr, "@extern")) {
+        self.typechecker.currentFile = prevs;
+        self.report("Attempt to comptime execute external function '{s}'", .{
+            self.typechecker.builder.getInternedString(function.name),
+        });
+        return Error.ComptimeNotPossible;
+    }
+
+    self.typechecker.currentFile = prevs;
 
     const signature = self.typechecker.typeTable.get(function.signature).Function;
 
@@ -2817,7 +2931,7 @@ pub fn comptimeEq(self: *const Folder, lhs: Comptime.Value, rhs: Comptime.Value)
         },
         .Bool => lhs.Bool == rhs.Bool,
         .Type => self.typechecker.nominallyIdentical(lhs.Type, rhs.Type),
-        .Function => lhs.Function.body == rhs.Function.body,
+        .Function => lhs.Function.name == rhs.Function.name,
         .Pointer, .String => false,
         .Void => true,
         .Undefined => self.typechecker.nominallyIdentical(lhs.Undefined, rhs.Undefined),
@@ -3116,4 +3230,5 @@ pub const builtinMetadata = [_][]const u8 {
     "@variadic",
     "@opaque",
     "@packed",
+    "@inline"
 };
