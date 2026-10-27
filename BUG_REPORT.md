@@ -1,46 +1,5 @@
 # Known Bugs
 
-## Comptime Definition Lowering (47)
-
-Because comptime definitions are lowered lazily, some comptime parameters are left as
-identifiers instead of being folded.
-
-### Reproduction
-
-```rust
-import std::io::console as Console;
-
-let Format = fn (fmt: []u8, T: type) -> type {
-    return struct {
-        pub let print = fn (args: T) -> void {
-            Console::log(fmt);
-        };
-    };
-};
-
-let StrFormat = Format("Hello", []u8);
-
-let main = fn (args: [][]u8) -> i32 {
-    StrFormat::print("Hello");
-    return 0;
-};
-```
-
-### Expected Output
-
-```bash
-Hello
-```
-
-### Received Output
-
-```bash
-error: ~/proj/Cole/test/build/c/source.c:134: error: 'fmt' undeclared
-error: BACKEND: Failed to compile source file.
-
-error: Compiler exited with code 231 <BackendError>
-```
-
 ## Major Performance Issues (46)
 
 The `bug_numeric_traits` test is passing in this commit, but has major performance
@@ -74,4 +33,5 @@ else is holding a reference to the said memory.
 ## Comptime Caching (43)
 ## Initializer List Typechecking Mismatch (44)
 ## Scoped Definition Access (45)
+## Comptime Definition Lowering (47)
 ## Switch Capture Folding (48)
