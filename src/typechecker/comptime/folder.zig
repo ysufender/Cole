@@ -13,6 +13,7 @@ const Lexer = @import("../../lexer/lexer.zig");
 const Parser = @import("../../parser/parser.zig");
 const Typechecker = @import("../typechecker.zig");
 const Resolver = @import("../resolver.zig");
+const Executer = @import("executer.zig");
 const Allocator = std.mem.Allocator;
 const Arena = std.heap.ArenaAllocator;
 const Error = common.CompilerError;
@@ -53,7 +54,11 @@ pub const Flags = enum(u3) {
 
 const Folder = @This();
 
-currentInstantiation: u32 = 0,
+currentInstantiation: ?defines.ScopePtr = null,
+
+scopeTypes: std.AutoHashMapUnmanaged(defines.ScopePtr, TypeID) = .empty,
+
+captures: std.AutoHashMapUnmanaged(defines.ScopePtr, Executer.Scope.Variables) = .empty,
 
 cache: Cache,
 declCache: DeclCache,
@@ -111,7 +116,7 @@ pub fn eval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeI
     const key = FolderCacheKey{
         .file = file,
         .expr = exprPtr,
-        .instantiation = self.currentInstantiation,
+        .instantiation = self.instKey(),
     };
 
     const ast = typechecker.context.getAST(file);
@@ -348,6 +353,8 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
         .scope = scope,
         .expr = exprPtr,
     };
+
+    if (self.getFlag(.InComptimeCall)) try self.captureLocals(scope);
 
     return self.appendValue(.{
         .Function = functionDef,
@@ -816,6 +823,25 @@ fn evalIfExpression(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?
         else self.expectDefined(conditional.otherwise, maybeExpected);
 }
 
+pub fn instKey(self: *const Folder) u32 {
+    return if (self.currentInstantiation) |s| s + 1 else 0;
+}
+
+fn captureLocals(self: *Folder, scope: defines.ScopePtr) Error!void {
+    const snap = try self.typechecker.executer.snapshot(self.arena.allocator());
+    self.captures.put(self.arena.allocator(), scope, snap) catch return Error.AllocatorFailure;
+}
+
+fn registerInstance(self: *Folder, scope: defines.ScopePtr, ty: TypeID) Error!void {
+    self.scopeTypes.put(self.arena.allocator(), scope, ty) catch return Error.AllocatorFailure;
+    if (self.getFlag(.InComptimeCall)) try self.captureLocals(scope);
+}
+
+fn capturedLocal(self: *Folder, name: defines.StringPtr) ?Comptime.Value.Ptr {
+    const vars = self.captures.get(self.currentInstantiation orelse return null) orelse return null;
+    return vars.get(name);
+}
+
 pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID) Error!Comptime.Value.Ptr {
     var decl  = self.typechecker.symbols.declarations.get(declPtr);
 
@@ -834,6 +860,15 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
     if (self.declCache.get(declPtr)) |v| {
         // @Bug can't seem to get this to work it has some unexpected behaviour to it
         if (!self.getFlag(.InComptimeCall) or decl.kind == .Capture) {
+            return v;
+        }
+    }
+
+    if (!self.getFlag(.InComptimeCall) and
+        (decl.kind == .Parameter or (decl.kind == .Variable and !decl.topLevel)))
+    {
+        if (self.capturedLocal(decl.name)) |v| {
+            _ = self.setFlag(.Volatile, true);
             return v;
         }
     }
@@ -1231,6 +1266,7 @@ fn evalEnumType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Value
     const res = try self.appendValue(.{
         .Type = try self.typechecker.registerType(newType)
     });
+    try self.registerInstance(scope, self.getValue(res).Type);
     
     self.cache.put(self.arena.allocator(), .{
         .file = self.typechecker.currentFile,
@@ -1309,6 +1345,7 @@ fn evalStructType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Val
     const res = try self.appendValue(.{
         .Type = try self.typechecker.registerType(newType),
     });
+    try self.registerInstance(scope, self.getValue(res).Type);
     
     self.cache.put(self.arena.allocator(), .{
         .file = self.typechecker.currentFile,
@@ -1448,6 +1485,7 @@ fn evalUnionType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Valu
     const res = try self.appendValue(.{
         .Type = try self.typechecker.registerType(newType),
     });
+    try self.registerInstance(scope, self.getValue(res).Type);
     
     self.cache.put(self.arena.allocator(), .{
         .file = self.typechecker.currentFile,
@@ -1529,13 +1567,14 @@ pub fn evalThis(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value
         });
         return Error.ArgumentCountMismatch;
     }
-    if (self.currentInstantiation == 0) {
+    const ty = if (self.currentInstantiation) |s| self.scopeTypes.get(s) else null;
+    if (ty == null) {
         self.report("Use of 'this' outisde typed scope.", .{});
         return Error.IllegalSyntax;
     }
 
     return self.appendValue(.{
-        .Type = self.currentInstantiation,
+        .Type = ty.?,
     });
 }
 

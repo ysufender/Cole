@@ -426,7 +426,7 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
 
                 if (self.typeTable.get(def.valueType) == .Function) {
                     const prevInst = self.folder.currentInstantiation;
-                    self.folder.currentInstantiation = newType;
+                    self.folder.currentInstantiation = scope;
                     defer self.folder.currentInstantiation = prevInst;
 
                     const funcPtr = try self.folder.evalDecl(rres.value, def.valueType);
@@ -1091,7 +1091,7 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
         .expr = expressionPtr,
     };
 
-    if (self.folder.currentInstantiation == 0) {
+    if (self.folder.currentInstantiation == null) {
         if (self.exprCache.get(key)) |tuple| {
             const attempting = self.getFlag(.AttemptingEval);
             const inLoop = self.getFlag(.InLoop);
@@ -1164,7 +1164,7 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
         else => false,
     });
 
-    if (self.folder.currentInstantiation == 0 and !self.folder.getFlag(.InComptimeCall)) {
+    if (self.folder.currentInstantiation == null and !self.folder.getFlag(.InComptimeCall)) {
         self.exprCache.put(self.arena.allocator(), key, .{typeID, self.flags})
             catch return Error.AllocatorFailure;
     }
@@ -1525,7 +1525,7 @@ fn typecheckUnionInitialization(self: *Typechecker, ast: *const Parser.AST, uni:
 }
 
 pub fn typecheckScoping(self: *Typechecker, expr: defines.ExpressionPtr) Error!TypeID {
-    if (self.folder.currentInstantiation == 0) {
+    if (self.folder.currentInstantiation == null) {
         if (self.symbols.resolutionMap.get(.{
             .file = self.currentFile,
             .expr = expr,
@@ -2103,27 +2103,21 @@ pub fn typecheckIndexing(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!
 }
 
 pub fn instanceDecl(self: *Typechecker, declPtr: defines.DeclPtr) defines.DeclPtr {
-    const inst = self.folder.currentInstantiation;
-    if (inst == 0) return declPtr;
+    const scope = self.folder.currentInstantiation orelse return declPtr;
+    const inst = self.folder.scopeTypes.get(scope) orelse return declPtr;
 
     const decl = self.symbols.getDecl(declPtr);
 
     const ast = self.context.getAST(self.currentFile);
     if (ast.expressions.items(.type)[decl.node] != .FunctionDefinition) return declPtr;
 
-    const scope = switch (self.typeTable.get(inst)) {
-        .Struct => |s| s.scope,
-        .Union => |u| u.scope,
-        .Enum => |e| e.scope,
-        else => return declPtr,
-    };
     if (decl.scope == scope) return declPtr;
 
     const tokens = self.context.getTokens(ast.tokens);
     const name = tokens.get(decl.token).lexeme(self.context, self.currentFile);
     const tname = self.builder.getInternedString(switch (self.typeTable.get(inst)) {
         .Struct => |s| s.name, .Union => |u| u.name, .Enum => |e| e.name,
-        else => unreachable,
+        else => return declPtr,
     });
     const key = std.fmt.allocPrint(self.arena.allocator(), "{s}::{s}", .{ tname, name }) catch return declPtr;
 
@@ -2289,7 +2283,7 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
         or decl.kind == .Parameter
         or decl.kind == .Capture
         or (
-            self.folder.currentInstantiation != 0
+            self.folder.currentInstantiation != null
             and !decl.topLevel
         );
 
@@ -2314,6 +2308,11 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
             const prevs = self.currentFile;
             self.currentFile = func.source;
             defer self.currentFile = prevs;
+
+            const prevInst = self.folder.currentInstantiation;
+            if (prevInst == null and self.folder.captures.contains(func.scope))
+                self.folder.currentInstantiation = func.scope;
+            defer self.folder.currentInstantiation = prevInst;
 
             if (!self.hasMetadata(func.expr, "@extern")) {
                 const pc = self.setFlag(.CoveredAllPaths, false);
