@@ -8,47 +8,84 @@ Although it is usable as is right now, Cole far from being a completely finished
 There are a couple bugs with compile time execution, typechecking, and C interop. But I'm
 working steadily to fix and implement them as soon as I can.
 
-> Note: Cole is not a cross-compiler, meaning every Cole compiler is only useful for the
-> architecture it was compiled for.
+For more information about the language and installation, see the [Cole website](https://cole.yusufenderosmanoglu.tech)
 
-## Building From the Source
+## Sample
 
-### Prerequisites
+(from [demo/raylib/main.cole](demo/raylib/main.cole))
 
-Cole has only two prerequisites:
+```rust
+import std::memory::allocator as Allocator;
+import std::string as String;
+import std::c as C;
+import std::io::console as Console;
+import std::math as Math;
 
-- The Zig toolchain,
-- TinyCC headers and static library on the system library path.
+import extra::ini as INI;
+import extra::filewatch as FW;
 
-TinyCC is needed for the current C backend. Cole transpiles into human readable lowered C
-and uses the embedded TinyCC to compile the source.
+import raylib as RayLib;
 
-### Building
+/*
+ * Types
+ */
+let Player = struct {
+    x    : mut float,
+    y    : mut float,
+    w    : float,
+    h    : float,
+    score: mut u32,
+};
 
-Simply execute ´zig build <target>´ where ´target´ can be:
+let Ball = struct {
+    x: mut float,
+    y: mut float,
+    bx: mut float,
+    by: mut float,
+    r: float,
+}; 
+
+let main = fn (args: [][]u8) -> i32 {
+    let _ini: mut any = INI::loadFile(C::Allocator, "demo/raylib/settings.ini");
+    if _ini.tag != @Ok {
+        Console::error("Failed to load settings.");
+        return 1;
+    }
+    let ini: mut any = _ini.Ok;
+
+    let iniWatcher: mut any = FW::createWatcher("demo/raylib/settings.ini");
+
+    let WIDTH : mut float = getSettingOrelse(ini.&, "window", "width", 640);
+    let HEIGHT: mut float = getSettingOrelse(ini.&, "window", "height", 480);
+
+    let player: mut Player = (20, 100, 20, 70, 0);
+    let cpu: mut Player = (cast(WIDTH-35), 100, 20, 70, 0);
+    let ball: mut Ball = (WIDTH/2.0 - 10.0, 120.0, -1.0, -1.0, 10.0);
+
+    RayLib::InitWindow(cast(WIDTH), cast(HEIGHT), "Pong");
+    RayLib::SetTargetFPS(60);
+
+    while !RayLib::WindowShouldClose() {
+        // Load INI
+        if FW::poll(iniWatcher.&) {
+            _ini = INI::loadFile(C::Allocator, "demo/raylib/settings.ini");
+            if _ini.tag == @Ok {
+                ini = _ini.Ok;
+            }
+        }
+
+        // Poll Events
+        let direction = 
+            if (RayLib::IsKeyDown(RayLib::KeyboardKey::W) or RayLib::IsKeyDown(RayLib::KeyboardKey::UP)) -1.0
+            else if (RayLib::IsKeyDown(RayLib::KeyboardKey::S) or RayLib::IsKeyDown(RayLib::KeyboardKey::DOWN)) 1.0
+            else 0.0;
+            ...
+    }
+    ...
+}
+
 
 ```
-debug-linux-x86_64
-debug-windows-x86_64
-releasefast-linux-x86_64
-releasefast-windows-x86_64
-releasesafe-linux-x86_64
-releasesafe-windows-x86_64
-releasesmall-linux-x86_64
-releasesmall-windows-x86_64
-debug
-```
-
-And the Cole compiler will be at `zig-out/<target>/<version>/cole(.exe)`.
-
-> Note: Keep in mind that building for Windows on Linux might not work well because
-> Cole will be built using the local TCC builds. And because of the same reason,
-> on Windows builds you must provide a library path leading to TCC headers and
-> libraries
-
-## Language Reference
-
-See [Language Reference](docs/LANGUAGE_REFERENCE.md)
 
 ## Contributing
 
@@ -57,7 +94,7 @@ Check out the [CONTRIBUTING.md](./CONTRIBUTING.md) and [BUG_REPORT.md](./BUG_REP
 ## Testing
 
 There is a small test suite under `tests/`, written in the [Testy](https://codeberg.org/ysufender/Testy)
-framework of mine.
+and [Efile](https://codeberg.org/ysufender/Efile) frameworks of mine.
 
 You can run the tests by first changing your working directory to `tests/`
 and then executing `efile run`.

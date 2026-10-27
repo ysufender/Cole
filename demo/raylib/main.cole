@@ -1,10 +1,11 @@
 import std::memory::allocator as Allocator;
 import std::string as String;
 import std::c as C;
-import std::ini as INI;
 import std::io::console as Console;
 import std::math as Math;
-import std::filewatch as FW;
+
+import extra::ini as INI;
+import extra::filewatch as FW;
 
 import raylib as RayLib;
 
@@ -127,8 +128,8 @@ let main = fn (args: [][]u8) -> i32 {
                 
     	RayLib::EndDrawing();
 
-        Allocator::dealloc(C::Allocator, cast(pscore));
-        Allocator::dealloc(C::Allocator, cast(cscore));
+        Allocator::dealloc(C::Allocator, unsafeCast(pscore));
+        Allocator::dealloc(C::Allocator, unsafeCast(cscore));
     }
 
     RayLib::CloseWindow();
