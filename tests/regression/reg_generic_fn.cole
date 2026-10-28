@@ -1,0 +1,11 @@
+import std::io::console as Console;
+import std::c as C;
+import std::fmt as Format;
+
+let main = fn (args: [][]u8) -> i32 {
+    Console::log(switch Format::toStr(u32)(C::Allocator, 442) {
+        @Some -> |s| s,
+        @None -> "<unknown>",
+    });
+    return 0;
+};

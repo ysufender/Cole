@@ -23,7 +23,7 @@ var targets = [_]std.Target.Query{
 const version = std.SemanticVersion{
     .major = 0,
     .minor = 1,
-    .patch = 0,
+    .patch = 2,
 };
 
 var config: struct {
@@ -200,6 +200,12 @@ fn addDebugTarget(b: *std.Build) void {
             .link_libc  = true,
             .error_tracing = true,
             .omit_frame_pointer = false,
+            .imports = &.{
+                .{
+                    .name = "tcc",
+                    .module = tccHeaders(b, config.native, .debug),
+                }
+            }
         }),
         .use_llvm = true,
     });

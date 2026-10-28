@@ -39,8 +39,11 @@ pub const TypeTable = MultiArrayList(TypeInfo);
 pub const TypeMap = collections.HashMap(TypeInfo, TypeID);
 pub const TypeNameMap = std.AutoHashMapUnmanaged(TypeID, defines.StringPtr);
 pub const MetadataMap = collections.HashMap(Resolver.ResolutionKey, []const Comptime.Value.Ptr);
+
 const DeclCache = collections.HashMap(defines.DeclPtr, TypecheckStatus);
 const ExprCache = collections.HashMap(Resolver.ResolutionKey, struct { TypeID, FlagMap });
+const AnonFuncList = collections.MultiArrayList(JIR.Function);
+const AnonQueue = collections.HashMap(defines.ScopePtr, void);
 
 pub const Flags = enum(u8) {
     ConcreteValue = 0,
@@ -79,6 +82,10 @@ typeTable: TypeTable,
 typeMap: TypeMap,
 declCache: DeclCache,
 exprCache: ExprCache,
+
+anonFunctions: AnonFuncList,
+anonQueued: AnonQueue,
+
 metadata: MetadataMap,
 
 folder: Comptime.Folder,
@@ -114,12 +121,14 @@ pub fn init(
     var lookup = DeclCache.empty;
     var typenameMap = TypeNameMap.empty;
     var exprCache = ExprCache.empty;
+    var anonQueued = AnonQueue.empty;
 
     typenameMap.ensureTotalCapacity(allocator, 50 + typeCount + @as(u32, @intCast(Comptime.Folder.builtinTypes.len))) catch return Error.AllocatorFailure;
     typeMap.ensureTotalCapacity(allocator, 50 + typeCount + @as(u32, @intCast(Comptime.Folder.builtinTypes.len))) catch return Error.AllocatorFailure;
     lookup.ensureTotalCapacity(allocator, symbolTable.declarations.len) catch return Error.AllocatorFailure;
     metadata.ensureTotalCapacity(allocator, counts.meta * 3) catch return Error.AllocatorFailure;
     exprCache.ensureTotalCapacity(allocator, symbolTable.resolutionMap.count()) catch return Error.AllocatorFailure;
+    anonQueued.ensureTotalCapacity(allocator, counts.functions) catch return Error.AllocatorFailure;
 
     return .{
         .context = context,
@@ -141,6 +150,8 @@ pub fn init(
         .callstack = .{},
         .typenameMap = typenameMap,
         .arena = arena,
+        .anonFunctions = try AnonFuncList.init(allocator, counts.functions),
+        .anonQueued = .empty,
     };
 }
 
@@ -245,6 +256,13 @@ pub fn typecheck(self: *Typechecker, allocator: Allocator) Error!JIR {
             try self.typeName(allocator, mainType),
         });
         return Error.TypeMismatch;
+    }
+
+    var i: usize = 0;
+    while (i < self.anonFunctions.len) : (i += 1) {
+        const func = self.anonFunctions.get(@intCast(i));
+        try self.lowerFunction(func, null);
+        self.clearFlags();
     }
 
     return self.builder.build(allocator);
@@ -2126,6 +2144,65 @@ pub fn instanceDecl(self: *Typechecker, declPtr: defines.DeclPtr) defines.DeclPt
     return if (self.symbols.getDecl(found).node == decl.node) found else declPtr;
 }
 
+pub fn queueFunction(self: *Typechecker, func: JIR.Function) Error!void {
+    if (self.typeTable.get(func.signature).Function.isComptime) return;
+    if (self.builder.loweredBodies.contains(func.scope)) return;
+
+    const gop = self.anonQueued.getOrPut(self.arena.allocator(), func.scope)
+        catch return Error.AllocatorFailure;
+    if (gop.found_existing) return;
+
+    self.anonFunctions.append(self.arena.allocator(), func) catch return Error.AllocatorFailure;
+}
+
+pub fn lowerFunction(self: *Typechecker, function: JIR.Function, token: ?defines.TokenPtr) Error!void {
+    var func = function;
+
+    const sign = self.typeTable.get(func.signature).Function;
+    const returnType = sign.returnType;
+
+    if (self.folder.getFlag(.InComptimeCall) or sign.isComptime) return;
+    if (self.builder.loweredBodies.contains(func.scope)) return;
+
+    const prevs = self.currentFile;
+    self.currentFile = func.source;
+    defer self.currentFile = prevs;
+
+    const prevInst = self.folder.currentInstantiation;
+    if (prevInst == null and self.folder.captures.contains(func.scope))
+        self.folder.currentInstantiation = func.scope;
+    defer self.folder.currentInstantiation = prevInst;
+
+    if (!self.hasMetadata(func.expr, "@extern")) {
+        const pc = self.setFlag(.CoveredAllPaths, false);
+        defer _ = self.setFlag(.CoveredAllPaths, pc);
+
+        try self.typecheckStatement(func.body, returnType);
+        if (!(
+            self.typeTable.get(returnType).isZeroBit()
+            or self.getFlag(.CoveredAllPaths)
+        )) {
+            self.report("Function with return type '{s}' does not return a value in all code paths.", .{
+                try self.typeName(self.arena.allocator(), returnType),
+            });
+            return Error.UncoveredCodePath;
+        }
+    }
+
+    const prt = self.lowerer.lastReturnType;
+    self.lowerer.lastReturnType = returnType;
+    defer self.lowerer.lastReturnType = prt;
+
+    func.body = try self.lowerer.statement(func.body);
+    if (token) |t| {
+        const tokens = self.context.getTokens(self.currentFile);
+        func.position = tokens.get(t).position(self.context, self.currentFile);
+    }
+
+    const fun = try self.builder.addFunction(func);
+    try self.builder.functionDef(func.name, fun);
+}
+
 pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected: ?TypeID) Error!TypeID {
     var decl = self.symbols.declarations.get(declPtr);
 
@@ -2293,53 +2370,12 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
     };
 
     if (if (decl.kind == .Variable) self.folder.attemptEval(decl.node, declType) else null) |val| fi: {
-        var func = switch (self.folder.memory.items[val]) {
+        const func = switch (self.folder.memory.items[val]) {
             .Function => |f| f,
             else => break :fi,
         };
 
-        const sign = self.typeTable.get(func.signature).Function;
-        const returnType = sign.returnType;
-
-        const alreadyLowered = self.builder.loweredBodies.contains(func.scope);
-
-        // @Note See folder.zig:evalFunction
-        if (!self.folder.getFlag(.InComptimeCall) and !sign.isComptime and !alreadyLowered) {
-            const prevs = self.currentFile;
-            self.currentFile = func.source;
-            defer self.currentFile = prevs;
-
-            const prevInst = self.folder.currentInstantiation;
-            if (prevInst == null and self.folder.captures.contains(func.scope))
-                self.folder.currentInstantiation = func.scope;
-            defer self.folder.currentInstantiation = prevInst;
-
-            if (!self.hasMetadata(func.expr, "@extern")) {
-                const pc = self.setFlag(.CoveredAllPaths, false);
-                defer _ = self.setFlag(.CoveredAllPaths, pc);
-
-                try self.typecheckStatement(func.body, returnType);
-                if (!(
-                    self.typeTable.get(returnType).isZeroBit()
-                    or self.getFlag(.CoveredAllPaths)
-                )) {
-                    self.report("Function with return type '{s}' does not return a value in all code paths.", .{
-                        try self.typeName(self.arena.allocator(), returnType),
-                    });
-                    return Error.UncoveredCodePath;
-                }
-            }
-
-            const prt = self.lowerer.lastReturnType;
-            self.lowerer.lastReturnType = returnType;
-            defer self.lowerer.lastReturnType = prt;
-
-            func.body = try self.lowerer.statement(func.body);
-            func.position = tokens.get(decl.token).position(self.context, self.currentFile);
-
-            const fun = try self.builder.addFunction(func);
-            try self.builder.functionDef(func.name, fun);
-        }
+        try self.lowerFunction(func, decl.token);
     }
 
     if (declType == (comptime Comptime.Folder.Builtin.Type("type")) and decl.kind == .Variable) {

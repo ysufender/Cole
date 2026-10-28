@@ -55,9 +55,7 @@ pub const Flags = enum(u3) {
 const Folder = @This();
 
 currentInstantiation: ?defines.ScopePtr = null,
-
 scopeTypes: std.AutoHashMapUnmanaged(defines.ScopePtr, TypeID) = .empty,
-
 captures: std.AutoHashMapUnmanaged(defines.ScopePtr, Executer.Scope.Variables) = .empty,
 
 cache: Cache,
@@ -832,9 +830,20 @@ fn captureLocals(self: *Folder, scope: defines.ScopePtr) Error!void {
     self.captures.put(self.arena.allocator(), scope, snap) catch return Error.AllocatorFailure;
 }
 
-fn registerInstance(self: *Folder, scope: defines.ScopePtr, ty: TypeID) Error!void {
+// @Note prevents duplication of types
+fn needsOwnScope(self: *Folder, scope: defines.ScopePtr) bool {
+    const scopes = self.typechecker.symbols.scopes;
+    var maybeCurrent: ?defines.ScopePtr = scope;
+    while (maybeCurrent) |current| {
+        if (scopes.items(.kind)[current] == .Block) return true;
+        maybeCurrent = scopes.items(.parent)[current];
+    }
+    return false;
+}
+
+fn registerInstance(self: *Folder, scope: defines.ScopePtr, ty: TypeID, ownScope: bool) Error!void {
     self.scopeTypes.put(self.arena.allocator(), scope, ty) catch return Error.AllocatorFailure;
-    if (self.getFlag(.InComptimeCall)) try self.captureLocals(scope);
+    if (ownScope) try self.captureLocals(scope);
 }
 
 fn capturedLocal(self: *Folder, name: defines.StringPtr) ?Comptime.Value.Ptr {
@@ -857,11 +866,14 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
     defer self.typechecker.currentFile = prevFile;
     defer self.typechecker.currentScope = prevScope;
 
-    if (self.declCache.get(declPtr)) |v| {
-        // @Bug can't seem to get this to work it has some unexpected behaviour to it
-        if (!self.getFlag(.InComptimeCall) or decl.kind == .Capture) {
-            return v;
-        }
+    if (self.capturedLocal(decl.name)) |local| {
+        return local;
+    }
+    else if (self.declCache.get(declPtr)) |v| {
+        if ((!self.getFlag(.InComptimeCall) or decl.kind == .Capture)) {
+             return v;
+         }
+
     }
 
     if (!self.getFlag(.InComptimeCall) and
@@ -1241,14 +1253,15 @@ fn evalEnumType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Value
         .expr = expr,
     }).?;
 
-    if (self.getFlag(.InComptimeCall)) {
+    const ownScope = self.getFlag(.InComptimeCall) and self.needsOwnScope(oldScope);
+    if (ownScope) {
         const newScope = try self.typechecker.symbols.scopes.addOne(self.typechecker.arena.allocator());
         self.typechecker.symbols.scopes.set(newScope, self.typechecker.symbols.scopes.get(oldScope));
         self.typechecker.currentScope = newScope;
     }
 
     const scope =
-        if (self.getFlag(.InComptimeCall)) self.typechecker.currentScope
+        if (ownScope) self.typechecker.currentScope
         else oldScope;
 
     const name = try self.generateRandomName(.Enum);
@@ -1266,7 +1279,7 @@ fn evalEnumType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Value
     const res = try self.appendValue(.{
         .Type = try self.typechecker.registerType(newType)
     });
-    try self.registerInstance(scope, self.getValue(res).Type);
+    try self.registerInstance(scope, self.getValue(res).Type, ownScope);
     
     self.cache.put(self.arena.allocator(), .{
         .file = self.typechecker.currentFile,
@@ -1319,14 +1332,15 @@ fn evalStructType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Val
         .expr = expr,
     }).?;
 
-    if (self.getFlag(.InComptimeCall)) {
+    const ownScope = self.getFlag(.InComptimeCall) and self.needsOwnScope(oldScope);
+    if (ownScope) {
         const newScope = try self.typechecker.symbols.scopes.addOne(self.typechecker.arena.allocator());
         self.typechecker.symbols.scopes.set(newScope, self.typechecker.symbols.scopes.get(oldScope));
         self.typechecker.currentScope = newScope;
     }
 
     const scope =
-        if (self.getFlag(.InComptimeCall)) self.typechecker.currentScope
+        if (ownScope) self.typechecker.currentScope
         else oldScope;
 
     const name = try self.generateRandomName(.Struct);
@@ -1345,7 +1359,7 @@ fn evalStructType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Val
     const res = try self.appendValue(.{
         .Type = try self.typechecker.registerType(newType),
     });
-    try self.registerInstance(scope, self.getValue(res).Type);
+    try self.registerInstance(scope, self.getValue(res).Type, ownScope);
     
     self.cache.put(self.arena.allocator(), .{
         .file = self.typechecker.currentFile,
@@ -1458,14 +1472,15 @@ fn evalUnionType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Valu
         .expr = expr,
     }).?;
 
-    if (self.getFlag(.InComptimeCall)) {
+    const ownScope = self.getFlag(.InComptimeCall) and self.needsOwnScope(oldScope);
+    if (ownScope) {
         const newScope = try self.typechecker.symbols.scopes.addOne(self.typechecker.arena.allocator());
         self.typechecker.symbols.scopes.set(newScope, self.typechecker.symbols.scopes.get(oldScope));
         self.typechecker.currentScope = newScope;
     }
 
     const scope =
-        if (self.getFlag(.InComptimeCall) )self.typechecker.currentScope
+        if (ownScope) self.typechecker.currentScope
         else oldScope;
 
     const name = try self.generateRandomName(.Union);
@@ -1485,7 +1500,7 @@ fn evalUnionType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Valu
     const res = try self.appendValue(.{
         .Type = try self.typechecker.registerType(newType),
     });
-    try self.registerInstance(scope, self.getValue(res).Type);
+    try self.registerInstance(scope, self.getValue(res).Type, ownScope);
     
     self.cache.put(self.arena.allocator(), .{
         .file = self.typechecker.currentFile,

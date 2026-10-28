@@ -254,6 +254,7 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
         else .{ .Void = { } },
 
         .Function => |func| fnc: {
+            try self.typechecker.queueFunction(func);
             break :fnc .{ .Function = func.name };
         },
 

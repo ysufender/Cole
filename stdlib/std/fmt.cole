@@ -1,11 +1,10 @@
-let print = fn (fmt: []u8, argt: type) -> *fn (argt) -> void {
-    return fn (args: argt) -> void {
-    };
-};
+import std;
+import std::memory::allocator as Allocator;
 
-let Demo = struct {
-    let test = fn () -> void {
-        print("Hello % with number %",
-              ([]u8, u32))("World", 5);
+pub let toStr = fn (T: type) -> any {
+    return fn (allocator: Allocator::Allocator, arg: T) -> std::Option([]u8) {
+        return switch typeInfo(T) {
+            else -> (@Some, "none"),
+        };
     };
 };

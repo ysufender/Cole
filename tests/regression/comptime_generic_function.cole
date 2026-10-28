@@ -1,0 +1,13 @@
+import std::io::console as Console;
+
+let format = fn (fmt: []u8, T: type) -> any {
+    return fn (arg: T) -> void {
+        Console::write(fmt);
+        Console::log(arg);
+    };
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    format("Hello ", []u8)("World");
+    return 0;
+};
