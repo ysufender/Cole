@@ -866,6 +866,23 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
     defer self.typechecker.currentFile = prevFile;
     defer self.typechecker.currentScope = prevScope;
 
+    const sharedFunction =
+        decl.kind == .Variable
+        and decl.topLevel
+        and self.typechecker.symbols.scopes.items(.kind)[decl.scope] == .Module
+        and self.typechecker.context.getAST(self.typechecker.currentFile).expressions.items(.type)[decl.node] == .FunctionDefinition;
+
+    const prevInstantiation = self.currentInstantiation;
+    const prevComptimeCall = self.getFlag(.InComptimeCall);
+    if (sharedFunction) {
+        self.currentInstantiation = null;
+        _ = self.setFlag(.InComptimeCall, false);
+    }
+    defer if (sharedFunction) {
+        self.currentInstantiation = prevInstantiation;
+        _ = self.setFlag(.InComptimeCall, prevComptimeCall);
+    };
+
     if (self.capturedLocal(decl.name)) |local| {
         return local;
     }
@@ -915,6 +932,7 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
             }
 
             const valuePtr = try self.expectDefined(decl.node, maybeExpected);
+
             break :blk self.castValue(valuePtr, expected, false);
         },
         .Capture => {
@@ -1190,10 +1208,28 @@ fn evalFuncType(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
     });
 }
 
+fn sharedTypeKey(self: *Folder, expr: defines.ExpressionPtr) ?FolderCacheKey {
+    const file = self.typechecker.currentFile;
+    const scope = self.typechecker.symbols.resolutionMap.get(.{ .file = file, .expr = expr }).?;
+
+    if (self.needsOwnScope(scope)) {
+        return null;
+    }
+
+    return .{ .file = file, .expr = expr, .instantiation = 0 };
+}
+
 fn evalEnumType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Value.Ptr {
     const allocator = self.arena.allocator();
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
     const tokens = self.typechecker.context.getTokens(ast.tokens);
+
+    const sharedKey = self.sharedTypeKey(expr);
+    if (sharedKey) |key| {
+        if (self.cache.get(key)) |cached| {
+            return cached;
+        }
+    }
 
     const extraPtr: defines.OpaquePtr = ast.expressions.items(.value)[expr];
 
@@ -1279,6 +1315,11 @@ fn evalEnumType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Value
     const res = try self.appendValue(.{
         .Type = try self.typechecker.registerType(newType)
     });
+
+    if (sharedKey) |key| {
+        self.cache.put(self.arena.allocator(), key, res) catch return Error.AllocatorFailure;
+    }
+
     try self.registerInstance(scope, self.getValue(res).Type, ownScope);
     
     self.cache.put(self.arena.allocator(), .{
@@ -1294,6 +1335,13 @@ fn evalStructType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Val
     const allocator = self.arena.allocator();
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
     const tokens = self.typechecker.context.getTokens(ast.tokens);
+
+    const sharedKey = self.sharedTypeKey(expr);
+    if (sharedKey) |key| {
+        if (self.cache.get(key)) |cached| {
+            return cached;
+        }
+    }
 
     const extraPtr: defines.OpaquePtr = ast.expressions.items(.value)[expr];
 
@@ -1359,6 +1407,11 @@ fn evalStructType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Val
     const res = try self.appendValue(.{
         .Type = try self.typechecker.registerType(newType),
     });
+
+    if (sharedKey) |key| {
+        self.cache.put(self.arena.allocator(), key, res) catch return Error.AllocatorFailure;
+    }
+
     try self.registerInstance(scope, self.getValue(res).Type, ownScope);
     
     self.cache.put(self.arena.allocator(), .{
@@ -1376,6 +1429,13 @@ fn evalUnionType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Valu
     const allocator = self.arena.allocator();
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
     const tokens = self.typechecker.context.getTokens(ast.tokens);
+
+    const sharedKey = self.sharedTypeKey(expr);
+    if (sharedKey) |key| {
+        if (self.cache.get(key)) |cached| {
+            return cached;
+        }
+    }
 
     const extraPtr: defines.OpaquePtr = ast.expressions.items(.value)[expr];
 
@@ -1500,6 +1560,11 @@ fn evalUnionType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Valu
     const res = try self.appendValue(.{
         .Type = try self.typechecker.registerType(newType),
     });
+
+    if (sharedKey) |key| {
+        self.cache.put(self.arena.allocator(), key, res) catch return Error.AllocatorFailure;
+    }
+
     try self.registerInstance(scope, self.getValue(res).Type, ownScope);
     
     self.cache.put(self.arena.allocator(), .{
@@ -2758,8 +2823,12 @@ fn handleScopeDecls(
             .name = symbolName,
         }, newDecl) catch return Error.AllocatorFailure;
 
+        const parentBusy = if (decl.parent) |p|
+            if (self.typechecker.declCache.get(p)) |e| e.status == .InProgress else false
+        else false;
+
         const valueType =
-            if (self.getFlag(.InComptimeCall)) try self.typechecker.typecheckDecl(newDecl, null)
+            if (self.getFlag(.InComptimeCall) and !parentBusy) try self.typechecker.typecheckDecl(newDecl, null)
             else Builtin.Type("$$incomplete");
             
         const newName = try self.typechecker.builder.internString(symbolName);

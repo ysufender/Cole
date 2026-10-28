@@ -1,10 +1,13 @@
 import std;
 import std::memory::allocator as Allocator;
+import std::io::stream as Stream;
+import std::string as String;
 
 pub let print = fn (T: type) -> any {
-    return fn (arg: T) -> std::Option([]u8) {
-        return switch typeInfo(T) {
-            else -> (@Some, "none"),
-        };
+    return fn (arg: T, allocator: Allocator::Allocator, out: Stream::Output::Stream) -> void {
+        switch typeInfo(T) {
+            @Integer -> _ = Stream::Output::writebuffer(out, String::intToStr(arg, allocator));
+            else -> { }
+        }
     };
 };

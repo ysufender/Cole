@@ -1556,11 +1556,22 @@ fn typecheckUnionInitialization(self: *Typechecker, ast: *const Parser.AST, uni:
 }
 
 pub fn typecheckScoping(self: *Typechecker, expr: defines.ExpressionPtr) Error!TypeID {
-    if (self.folder.currentInstantiation == null) {
-        if (self.symbols.resolutionMap.get(.{
-            .file = self.currentFile,
-            .expr = expr,
-        })) |decl| {
+    if (self.symbols.resolutionMap.get(.{
+        .file = self.currentFile,
+        .expr = expr,
+    })) |decl| {
+        if (self.folder.currentInstantiation == null) {
+            return self.typecheckDecl(decl, null);
+        }
+
+        if (self.symbols.scopes.items(.kind)[self.symbols.getDecl(decl).scope] == .Module) {
+            const prevInstantiation = self.folder.currentInstantiation;
+            self.folder.currentInstantiation = null;
+            defer self.folder.currentInstantiation = prevInstantiation;
+
+            const prevComptimeCall = self.folder.setFlag(.InComptimeCall, false);
+            defer _ = self.folder.setFlag(.InComptimeCall, prevComptimeCall);
+
             return self.typecheckDecl(decl, null);
         }
     }
