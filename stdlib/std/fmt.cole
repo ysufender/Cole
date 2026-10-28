@@ -5,9 +5,9 @@ import std::string as String;
 
 pub let print = fn (T: type) -> any {
     return fn (arg: T, allocator: Allocator::Allocator, out: Stream::Output::Stream) -> void {
-        switch typeInfo(T) {
-            @Integer -> _ = Stream::Output::writebuffer(out, String::intToStr(arg, allocator));
-            else -> { }
-        }
+        _  = Stream::Output::writebuffer(out, switch String::toStr(T)(arg, allocator) {
+            @Some -> |s| s,
+            @None -> "<out_of_memory>",
+        });
     };
 };

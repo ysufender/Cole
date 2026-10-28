@@ -846,8 +846,19 @@ fn registerInstance(self: *Folder, scope: defines.ScopePtr, ty: TypeID, ownScope
     if (ownScope) try self.captureLocals(scope);
 }
 
-fn capturedLocal(self: *Folder, name: defines.StringPtr) ?Comptime.Value.Ptr {
+fn declInInstance(self: *Folder, declScope: defines.ScopePtr) bool {
+    const scopes = self.typechecker.symbols.scopes;
+    var maybeCurrent: ?defines.ScopePtr = self.currentInstantiation;
+    while (maybeCurrent) |current| {
+        if (current == declScope) return true;
+        maybeCurrent = scopes.items(.parent)[current];
+    }
+    return false;
+}
+
+fn capturedLocal(self: *Folder, name: defines.StringPtr, declScope: defines.ScopePtr) ?Comptime.Value.Ptr {
     const vars = self.captures.get(self.currentInstantiation orelse return null) orelse return null;
+    if (!self.declInInstance(declScope)) return null;
     return vars.get(name);
 }
 
@@ -883,7 +894,7 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
         _ = self.setFlag(.InComptimeCall, prevComptimeCall);
     };
 
-    if (self.capturedLocal(decl.name)) |local| {
+    if (self.capturedLocal(decl.name, decl.scope)) |local| {
         return local;
     }
     else if (self.declCache.get(declPtr)) |v| {
@@ -896,7 +907,7 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
     if (!self.getFlag(.InComptimeCall) and
         (decl.kind == .Parameter or (decl.kind == .Variable and !decl.topLevel)))
     {
-        if (self.capturedLocal(decl.name)) |v| {
+        if (self.capturedLocal(decl.name, decl.scope)) |v| {
             _ = self.setFlag(.Volatile, true);
             return v;
         }
@@ -2582,6 +2593,7 @@ pub fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Type
 
     return self.typechecker.executer.executeCall(function, args);
 }
+
 
 fn evalIndexing(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {
     _ = try self.typechecker.typecheckIndexing(extraPtr);

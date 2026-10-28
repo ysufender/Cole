@@ -1,12 +1,12 @@
 ## Do Before Pushing
 
-- Rebuild the compiler in debug mode
 - `cd tests && efile clean && efile run`
 - Make sure all tests pass
 - Modify the version in:
     - `build.zig`
     - `builtin.cole`
     - `build.zig.zon`
+    - `tests/build.lua`
 
 ## If Pushing Minor Version Change
 

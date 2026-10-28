@@ -1,8 +1,39 @@
 import std::memory::allocator as Allocator;
-
 import std::io::console as Console;
+import std;
 
-pub let intToStr = fn (num: c_long, allocator: Allocator::Allocator) -> []u8 {
+/*
+ * PUBLIC
+ */
+
+pub let equals = fn (str1: []u8, str2: []u8) -> bool {
+    if str1.len != str2.len {
+        return false;
+    }
+
+    for 0..str1.len, |idx| {
+        if str1[idx] != str2[idx] {
+            return false;
+        }
+    }
+
+    return true;
+};
+
+pub let toStr = fn (T: type) -> any {
+    return fn (arg: T, allocator: Allocator::Allocator) -> std::Option([]u8) {
+        return switch typeInfo(T) {
+            @Integer -> intToStr(arg, allocator),
+            else -> (@None, ()),
+        };
+    };
+};
+
+/*
+ * PRIVATE
+ */
+
+let intToStr = fn (num: c_long, allocator: Allocator::Allocator) -> std::Option([]u8) {
     let isSigned = num < 0;
     let tmp: mut any = num * (if (isSigned) -1 else 1);
     let digitCount: mut u32 = 0;
@@ -14,6 +45,10 @@ pub let intToStr = fn (num: c_long, allocator: Allocator::Allocator) -> []u8 {
     digitCount = if (digitCount == 0) 1 else digitCount + (if (isSigned) 1 else 0);
     let result: []mut u8 = cast(Allocator::alloc(allocator, digitCount + 1, 1));
 
+    if result.ptr == undefined {
+        return (@None, ());
+    }
+
     tmp = num * (if (isSigned) -1 else 1);
     let index: mut u32 = digitCount;
     while index > (if (isSigned) 1 else 0) {
@@ -24,10 +59,10 @@ pub let intToStr = fn (num: c_long, allocator: Allocator::Allocator) -> []u8 {
     result[0] = if (num < 0) '-' else result[0];
     result[result.len - 1] = 0;
 
-    return cast(result);
+    return (@Some, result);
 };
 
-pub let strToInt = fn (str: mut []u8) -> c_long {
+let strToInt = fn (str: mut []u8) -> c_long {
     let isSigned = str[0] == '-';
     let res: mut c_long = 0;
     for (if (isSigned) 1 else 0)..str.len, |index| {
@@ -37,7 +72,7 @@ pub let strToInt = fn (str: mut []u8) -> c_long {
 };
 
 // Expects [-]<num>.<num> format.
-pub let strToFloat = fn (str: mut []u8) -> float {
+let strToFloat = fn (str: mut []u8) -> float {
     let negative = str[0] == '-';
     if negative {
         str = str[1..str.len];
@@ -61,7 +96,7 @@ pub let strToFloat = fn (str: mut []u8) -> float {
     return (as(float, cast(base)) + decimal) * (if (negative) -1 else 1);
 };
 
-pub let floatToStr = fn (num: float, allocator: Allocator::Allocator) -> []u8 {
+let floatToStr = fn (num: float, allocator: Allocator::Allocator) -> std::Option([]u8) {
     let precision: u32 = 9;
     let negative: bool = num < 0;
     let value: mut c_double = cast(num);
@@ -77,7 +112,7 @@ pub let floatToStr = fn (num: float, allocator: Allocator::Allocator) -> []u8 {
             text[i] = special[i];
         }
         text[special.len] = 0;
-        return cast(text[0..special.len]);
+        return (@Some, text[0..special.len]);
     }
 
     let whole: mut c_ulong = cast(value);
@@ -109,6 +144,10 @@ pub let floatToStr = fn (num: float, allocator: Allocator::Allocator) -> []u8 {
     let length: u32 = (if (negative) 1 else 0) + wholeDigits + 1 + precision;
     let result: []mut u8 = cast(Allocator::alloc(allocator, length + 1, 1));
 
+    if result.ptr == undefined {
+        return (@None, ());
+    }
+
     let pos: mut u32 = length;
     result[pos] = 0;
 
@@ -132,27 +171,5 @@ pub let floatToStr = fn (num: float, allocator: Allocator::Allocator) -> []u8 {
 
     if negative { result[0] = '-'; }
 
-    return cast(result[0..length]);
-};
-
-pub let equals = fn (str1: []u8, str2: []u8) -> bool {
-    if str1.len != str2.len {
-        return false;
-    }
-
-    for 0..str1.len, |idx| {
-        if str1[idx] != str2[idx] {
-            return false;
-        }
-    }
-
-    return true;
-};
-
-pub let boolToStr = fn (b: bool) -> []u8 {
-    return if (b) "true" else "false";
-};
-
-pub let strToBool = fn (str: []u8) -> bool {
-    return equals(str, "true");
+    return (@Some, result[0..length]);
 };

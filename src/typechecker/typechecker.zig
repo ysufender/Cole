@@ -44,6 +44,7 @@ const DeclCache = collections.HashMap(defines.DeclPtr, TypecheckStatus);
 const ExprCache = collections.HashMap(Resolver.ResolutionKey, struct { TypeID, FlagMap });
 const AnonFuncList = collections.MultiArrayList(JIR.Function);
 const AnonQueue = collections.HashMap(defines.ScopePtr, void);
+const AnonTypeList = std.ArrayList(TypeID);
 
 pub const Flags = enum(u8) {
     ConcreteValue = 0,
@@ -80,6 +81,7 @@ symbols: *Resolver.Resolution,
 
 typeTable: TypeTable,
 typeMap: TypeMap,
+anonTypes: AnonTypeList,
 declCache: DeclCache,
 exprCache: ExprCache,
 
@@ -151,6 +153,8 @@ pub fn init(
         .typenameMap = typenameMap,
         .arena = arena,
         .anonFunctions = try AnonFuncList.init(allocator, counts.functions),
+        .anonTypes = AnonTypeList.initCapacity(allocator, typeCount * 2)
+            catch return Error.AllocatorFailure,
         .anonQueued = .empty,
     };
 }
@@ -3162,11 +3166,41 @@ pub fn registerType(self: *Typechecker, _newType: TypeInfo) Error!TypeID {
         else => null,
     };
 
+    // @Note Dedup anon types
+    const anonymous = if (name) |n| std.mem.startsWith(u8, self.builder.getInternedString(n), "$$") else false;
+    if (anonymous) {
+        const expr = switch (newType) {
+            .Struct => |str| str.expr,
+            .Union => |uni| uni.expr,
+            .Enum => |enm| enm.expr,
+            else => unreachable,
+        };
+
+        for (self.anonTypes.items) |candidate| {
+            const info = self.typeTable.get(candidate);
+            if (std.meta.activeTag(info) != std.meta.activeTag(newType)) continue;
+
+            const candidateName, const candidateExpr = switch (info) {
+                .Struct => |str| .{ str.name, str.expr },
+                .Union => |uni| .{ uni.name, uni.expr },
+                .Enum => |enm| .{ enm.name, enm.expr },
+                else => unreachable,
+            };
+
+            if (candidateExpr != expr) continue;
+            if (!std.mem.startsWith(u8, self.builder.getInternedString(candidateName), "$$")) continue;
+            if (self.assertStructurallyIdenticalValue(info, newType)) |_| {
+                return candidate;
+            } else |_| {}
+        }
+    }
+
     const isPresent = self.typeMap.getOrPut(self.arena.allocator(), newType)
         catch return Error.AllocatorFailure;
 
     if (!isPresent.found_existing) {
         const typeID = try self.typeTable.addOne(self.arena.allocator());
+        if (anonymous) self.anonTypes.append(self.arena.allocator(), @intCast(typeID)) catch return Error.AllocatorFailure;
         isPresent.value_ptr.* = @intCast(typeID);
 
         switch (newType) {

@@ -7,7 +7,7 @@ local cole_build =
     -- "releasesafe"
     -- "releasefast"
 
-local cole_version = "v0.1.2"
+local cole_version = "v0.1.3"
 
 local exe_path = string.format("../zig-out/cole-%s-%s-linux-x86_64", cole_version, cole_build)
 
@@ -21,6 +21,7 @@ local function suite(name, files)
             table.insert(steps, Efile.Step
                 .init(path)
                 :dependOnFile(path)
+                :dependOnStep("build-cole")
                 :pre("mkdir -p .testy/.cache/"..name)
                 :action(exe_path..cflags..path.." -o "..file..".cole.exec"))
         end
