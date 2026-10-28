@@ -573,6 +573,11 @@ fn typecheckFor(self: *Typechecker, extraPtr: defines.OpaquePtr, expected: TypeI
             return Error.NonIntegerRange;
         }
 
+        if (self.hasMetadata(range.start, "@inline")) {
+            _ = try self.folder.eval(range.start, rstartT);
+            _ = try self.folder.eval(range.end, rendT);
+        }
+
         const captureDecl = self.symbols.findDecl(.{
             .file = self.currentFile,
             .expr = captureExpr,
@@ -591,6 +596,11 @@ fn typecheckFor(self: *Typechecker, extraPtr: defines.OpaquePtr, expected: TypeI
         const body = ast.extra[extraPtr + 4];
 
         const exprT = try self.typecheckExpression(loopExpr, null);
+
+        if (self.hasMetadata(loopExpr, "@inline")) {
+            _ = try self.folder.eval(loopExpr, exprT);
+        }
+
         const exprInfo = self.typeTable.get(exprT);
         const innerCaptureType = switch (exprInfo) {
             .Array => |arr| arr.child,

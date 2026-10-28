@@ -737,6 +737,11 @@ fn rangeForLoop(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.
 fn forLoop(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.AST) Error!JIR.Ptr {
     const isRange = ast.extra[extraPtr + 1] == 1;
 
+    // @Note the typechecker already verified that an '@inline' range/iterable is comptime known.
+    if (self.typechecker.hasMetadata(ast.extra[extraPtr], "@inline")) {
+        return self.inlineForLoop(extraPtr, ast, isRange);
+    }
+
     if (isRange) {
         return self.rangeForLoop(extraPtr, ast);
     }
@@ -862,6 +867,161 @@ fn forLoop(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.AST) 
             sjump,
             forEndLabel,
         },
+    );
+}
+
+/// Unrolls a for loop whose range/iterable is marked with '@inline'. The body is lowered once
+/// per iteration, each copy in its own block with its own capture variable. Every iteration
+/// gets its own `_Check` (continue) and `_End` (break) labels, the `_End` labels are all placed
+/// after the last iteration so that `break` leaves the whole unrolled loop.
+fn inlineForLoop(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.AST, isRange: bool) Error!JIR.Ptr {
+    const captureExpr = ast.extra[extraPtr + 3];
+    const bodyPtr = ast.extra[extraPtr + 4];
+    const byPointer = !isRange and ast.extra[extraPtr + 5] == 1;
+
+    const captureDeclPtr = self.typechecker.symbols.findDecl(.{
+        .file = self.typechecker.currentFile,
+        .expr = captureExpr,
+    });
+    const captureName = self.typechecker.symbols.declarations.items(.name)[captureDeclPtr];
+
+    var first: i64 = 0;
+    var count: usize = 0;
+    var captureType: TypeID = undefined;
+    var rangeDef: ?JIR.Ptr = null;
+    var dataPtr: JIR.Ptr = undefined;
+
+    if (isRange) {
+        const startExpr = ast.extra[extraPtr];
+        const endExpr = ast.extra[extraPtr + 2];
+
+        const startT = try self.typechecker.typecheckExpression(startExpr, null);
+        const endT = try self.typechecker.typecheckExpression(endExpr, null);
+
+        const start = self.typechecker.folder.getValue(try self.typechecker.folder.eval(startExpr, startT));
+        const end = self.typechecker.folder.getValue(try self.typechecker.folder.eval(endExpr, endT));
+
+        if (start != .Int or end != .Int) {
+            self.report("Inline for loop range must be comptime known integers.", .{});
+            return Error.ComptimeNotPossible;
+        }
+
+        first = start.Int;
+        count = if (end.Int > start.Int) @intCast(end.Int - start.Int) else 0;
+        captureType = comptime Comptime.Folder.Builtin.Type("u32");
+    }
+    else {
+        const expr = ast.extra[extraPtr];
+        const rangeType = try self.typechecker.typecheckExpression(expr, null);
+
+        const rangeName = try self.typechecker.folder.generateRandomName(.RangePtr);
+        rangeDef = try self.typechecker.builder.variableDef(
+            false,
+            rangeType,
+            rangeName,
+            false,
+            try self.expression(expr, rangeType),
+            null,
+        );
+        const rangeIdent = try self.typechecker.builder.identifier(rangeName);
+
+        dataPtr = try self.typechecker.builder.dot(
+            rangeIdent,
+            switch (self.typechecker.typeTable.get(rangeType)) {
+                .Pointer => try self.typechecker.builder.internString("ptr"),
+                .Array => try self.typechecker.builder.internString("data"),
+                else => return common.debug.ShouldBeImpossible(undefined, @src()),
+            },
+            rangeType,
+        );
+
+        count = switch (self.typechecker.typeTable.get(rangeType)) {
+            .Array => |arr| arr.len,
+            .Pointer => blk: {
+                const value = self.typechecker.folder.getValue(try self.typechecker.folder.eval(expr, rangeType));
+                break :blk switch (value) {
+                    .Slice => |slice| slice.Size,
+                    .String => |string| string.str.len,
+                    else => {
+                        self.report("Inline for loop over a slice requires a comptime known slice.", .{});
+                        return Error.ComptimeNotPossible;
+                    },
+                };
+            },
+            else => return common.debug.ShouldBeImpossible(undefined, @src()),
+        };
+
+        captureType = try self.typechecker.typecheckDecl(captureDeclPtr, null);
+    }
+
+    const prevLoop = self.lastLoop;
+    defer self.lastLoop = prevLoop;
+
+    const arena = self.typechecker.arena.allocator();
+    const preCount: usize = if (rangeDef != null) 1 else 0;
+    const endCount: usize = if (count == 0) 1 else count;
+    const items = arena.alloc(JIR.Ptr, preCount + count + endCount) catch return Error.AllocatorFailure;
+
+    if (rangeDef) |def| items[0] = def;
+
+    for (0..count) |k| {
+        const base = try self.typechecker.folder.generateRandomNameString(.For);
+        const checkName = try self.typechecker.builder.internString(
+            std.fmt.allocPrint(arena, "{s}_Check", .{ base }) catch return Error.AllocatorFailure,
+        );
+        const endName = try self.typechecker.builder.internString(
+            std.fmt.allocPrint(arena, "{s}_End", .{ base }) catch return Error.AllocatorFailure,
+        );
+
+        const captureInit = if (isRange) blk: {
+            const value = std.math.cast(u32, first + @as(i64, @intCast(k))) orelse {
+                self.report("Inline for loop range value is out of 'u32' bounds.", .{});
+                return Error.ComptimeNotPossible;
+            };
+            break :blk try self.typechecker.builder.literal(
+                try self.typechecker.builder.addConstant(.{ .Integer = .{ .u32 = value } }),
+            );
+        } else blk: {
+            const index = try self.typechecker.builder.literal(
+                try self.typechecker.builder.addConstant(.{ .Integer = .{ .u32 = @intCast(k) } }),
+            );
+            const elementPtr = try self.typechecker.builder.add(dataPtr, index);
+            break :blk if (byPointer) elementPtr
+                else try self.typechecker.builder.dereference(elementPtr, captureType);
+        };
+
+        const capture = try self.typechecker.builder.variableDef(
+            false,
+            captureType,
+            captureName,
+            false,
+            captureInit,
+            null,
+        );
+
+        self.lastLoop = base;
+        const body = try self.statement(bodyPtr);
+
+        items[preCount + k] = try self.typechecker.builder.scope(
+            try self.typechecker.folder.generateRandomName(.Block),
+            &.{
+                capture,
+                body,
+                try self.typechecker.builder.label(checkName),
+            },
+        );
+        items[preCount + count + k] = try self.typechecker.builder.label(endName);
+    }
+
+    if (count == 0) {
+        items[preCount] = try self.typechecker.builder.label(
+            try self.typechecker.folder.generateRandomName(.OptimizedLoop),
+        );
+    }
+
+    return self.typechecker.builder.scope(
+        try self.typechecker.folder.generateRandomName(.For),
+        items,
     );
 }
 
