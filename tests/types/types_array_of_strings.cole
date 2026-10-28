@@ -11,7 +11,7 @@ let pi = fn (n: c_long) -> void {
 let main = fn (args: [][]u8) -> i32 {
     let w: [3][]u8 = ("x", "yy", "zzz");
     for w, |s| {
-        Console::log(s.*);
+        Console::log(s);
     }
     pi(w[2].len);
     return 0;

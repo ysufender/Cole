@@ -1,8 +1,8 @@
 import std;
 import std::memory::allocator as Allocator;
 
-pub let toStr = fn (T: type) -> any {
-    return fn (allocator: Allocator::Allocator, arg: T) -> std::Option([]u8) {
+pub let print = fn (T: type) -> any {
+    return fn (arg: T) -> std::Option([]u8) {
         return switch typeInfo(T) {
             else -> (@Some, "none"),
         };
