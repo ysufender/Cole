@@ -827,7 +827,8 @@ fn forLoop(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.AST) 
         captureType,
         name,
         false,
-        try self.typechecker.builder.add(rangePtr, idxIdent),
+        if (ast.extra[extraPtr + 5] == 1) try self.typechecker.builder.add(rangePtr, idxIdent)
+        else try self.typechecker.builder.dereference(try self.typechecker.builder.add(rangePtr, idxIdent), captureType),
         null,
     );
 

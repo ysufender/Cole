@@ -611,13 +611,16 @@ fn typecheckFor(self: *Typechecker, extraPtr: defines.OpaquePtr, expected: TypeI
             },
         };
 
-        const captureType = try self.registerType(.{
-            .Pointer = .{
-                .size = .Single,
-                .child = innerCaptureType,
-                .mutable = false,
-            },
-        });
+        const captureType =
+            if (ast.extra[extraPtr + 5] == 1)
+                try self.registerType(.{
+                    .Pointer = .{
+                        .size = .Single,
+                        .child = innerCaptureType,
+                        .mutable = false,
+                    },
+                })
+            else innerCaptureType;
 
         const captureDecl = self.symbols.findDecl(.{
             .file = self.currentFile,

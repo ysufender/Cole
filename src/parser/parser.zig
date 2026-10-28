@@ -467,6 +467,14 @@ fn forLoop(self: *Parser) StatementResult {
 
     _ = try self.consume(.Comma, Error.MissingCapture, "Expected comma.");
     _ = try self.consume(.Pipe, Error.MissingCapture, "Expected a capture variable.");
+
+    const isPtr = self.match(&.{.Star});
+
+    if (isPtr and isRange) {
+        self.report("Pointer capturing is not possible with range based for loops.", .{});
+        return Error.IllegalSyntax;
+    }
+
     const capture = capture: {
         const ptr = try self.alloc(Expression);
         self.expressionMap.set(ptr, .{
@@ -485,6 +493,7 @@ fn forLoop(self: *Parser) StatementResult {
     self.extra.append(self.allocator(), rangeEndOrGarbage) catch return error.AllocatorFailure;
     self.extra.append(self.allocator(), capture) catch return error.AllocatorFailure;
     self.extra.append(self.allocator(), body) catch return error.AllocatorFailure;
+    self.extra.append(self.allocator(), @intFromBool(isPtr)) catch return error.AllocatorFailure;
 
     const result = try self.alloc(Statement);
     self.statementMap.set(result, .{
