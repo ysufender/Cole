@@ -23,7 +23,7 @@ pub let equals = fn (str1: []u8, str2: []u8) -> bool {
 pub let toStr = fn (T: type) -> any {
     return fn (arg: T, allocator: Allocator::Allocator) -> std::Option([]u8) {
         return switch typeInfo(T) {
-            @Integer -> intToStr(arg, allocator),
+            @Integer -> safeIntToStr(arg, allocator),
             else -> (@None, ()),
         };
     };
@@ -33,7 +33,7 @@ pub let toStr = fn (T: type) -> any {
  * PRIVATE
  */
 
-let intToStr = fn (num: c_long, allocator: Allocator::Allocator) -> std::Option([]u8) {
+let safeIntToStr = fn (num: c_long, allocator: Allocator::Allocator) -> std::Option([]u8) {
     let isSigned = num < 0;
     let tmp: mut any = num * (if (isSigned) -1 else 1);
     let digitCount: mut u32 = 0;
@@ -62,7 +62,7 @@ let intToStr = fn (num: c_long, allocator: Allocator::Allocator) -> std::Option(
     return (@Some, result);
 };
 
-let strToInt = fn (str: mut []u8) -> c_long {
+pub let strToInt = fn (str: mut []u8) -> c_long {
     let isSigned = str[0] == '-';
     let res: mut c_long = 0;
     for (if (isSigned) 1 else 0)..str.len, |index| {
@@ -72,7 +72,7 @@ let strToInt = fn (str: mut []u8) -> c_long {
 };
 
 // Expects [-]<num>.<num> format.
-let strToFloat = fn (str: mut []u8) -> float {
+pub let strToFloat = fn (str: mut []u8) -> float {
     let negative = str[0] == '-';
     if negative {
         str = str[1..str.len];
@@ -96,7 +96,7 @@ let strToFloat = fn (str: mut []u8) -> float {
     return (as(float, cast(base)) + decimal) * (if (negative) -1 else 1);
 };
 
-let floatToStr = fn (num: float, allocator: Allocator::Allocator) -> std::Option([]u8) {
+let safeFloatToStr = fn (num: float, allocator: Allocator::Allocator) -> std::Option([]u8) {
     let precision: u32 = 9;
     let negative: bool = num < 0;
     let value: mut c_double = cast(num);
@@ -172,4 +172,20 @@ let floatToStr = fn (num: float, allocator: Allocator::Allocator) -> std::Option
     if negative { result[0] = '-'; }
 
     return (@Some, result[0..length]);
+};
+
+pub let floatToStr = fn (num: float, allocator: Allocator::Allocator) -> []u8 {
+    return safeFloatToStr(num, allocator).Some;
+};
+
+pub let intToStr = fn (num: c_long, allocator: Allocator::Allocator) -> []u8 {
+    return safeIntToStr(num, allocator).Some;
+};
+
+pub let boolToStr = fn (b: bool) -> []u8 {
+    return if (b) "true" else "false";
+};
+
+pub let strToBool = fn (str: []u8) -> bool {
+    return equals(str, "true");
 };

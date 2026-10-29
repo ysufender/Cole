@@ -21,6 +21,7 @@ pub const MetadataMap = collections.HashMap(JIR.Ptr, []const JIR.Constant.Ptr);
 const Builder = @This();
 
 constants: std.MultiArrayList(JIR.Constant),
+typeToJirMap: collections.HashMap(TypeID, JIR.Ptr),
 functions: MultiArrayList(JIR.Function),
 functionCache: collections.HashMap(JIR.Ptr, JIR.Function.Ptr),
 functionDefCache: collections.HashMap(JIR.Function.Ptr, void),
@@ -55,6 +56,9 @@ pub fn init(allocator: Allocator, counts: common.CompilerContext.Counts, typeche
     var metadata = MetadataMap.empty;
     metadata.ensureTotalCapacity(allocator, counts.meta * 3) catch return Error.AllocatorFailure;
 
+    var typeToJirMap = collections.HashMap(TypeID, JIR.Ptr).empty;
+    typeToJirMap.ensureTotalCapacity(allocator, counts.types) catch return Error.AllocatorFailure;
+
     return .{
         .nodes = try JIR.Node.List.init(allocator, counts.statements + counts.expressions),
         .keyNodes = std.ArrayList(JIR.Ptr).initCapacity(allocator, counts.statements + counts.expressions)
@@ -71,6 +75,7 @@ pub fn init(allocator: Allocator, counts: common.CompilerContext.Counts, typeche
         .strings = strings,
         .allocator = allocator,
         .typechecker = typechecker,
+        .typeToJirMap = typeToJirMap,
         .stringList = InternArray.initCapacity(allocator, counts.string + counts.types * 4 + counts.functions)
             catch return Error.AllocatorFailure,
         .metadata = metadata,
@@ -90,6 +95,7 @@ pub fn build(self: *const Builder, allocator: Allocator) Error!JIR {
         .topLevelAsms = try collections.deepCopy(self.topLevelAsms.items, allocator),
         .context = self.typechecker.context,
         .metadata = self.metadata.clone(allocator) catch return Error.AllocatorFailure,
+        .typeToJirMap = self.typeToJirMap.clone(allocator) catch return Error.AllocatorFailure,
     };
 }
 
@@ -207,6 +213,11 @@ pub inline fn typeDef(self: *Builder, typeID: TypeID) Error!JIR.Ptr {
     if (_expr) |expr| {
         try self.typechecker.lowerer.addMetadata(res, expr.*);
         expr.* = res;
+    }
+
+    if (!self.typeToJirMap.contains(typeID)) {
+        self.typeToJirMap.putNoClobber(self.allocator, typeID, res)
+            catch return Error.AllocatorFailure;
     }
 
     return res;

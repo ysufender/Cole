@@ -151,6 +151,7 @@ constants: Constant.List,
 functions: Function.List,
 nodes: Node.List.Slice,
 metadata: Builder.MetadataMap,
+typeToJirMap: collections.HashMap(TypeID, Ptr),
 topLevelAsms: std.ArrayList(defines.StringPtr).Slice,
 keyNodes: []const Ptr,
 data: []const u32,
@@ -247,12 +248,14 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
             continue;
         }
 
-        switch (typeInfo) {
-            .Struct => |str| {
-                if (self.hasMetadata(str.expr, "@extern")) {
-                    continue;
-                }
+        if (self.typeToJirMap.get(@intCast(typeID))) |ptr| {
+            if (self.hasMetadata(ptr, "@extern")) {
+                continue;
+            }
+        }
 
+        switch (typeInfo) {
+            .Struct => {
                 const name = try self.getCName(@intCast(typeID), null, true, false);
                 const res = visited.getOrPut(self.allocator, name)
                     catch return Error.AllocatorFailure;
@@ -265,10 +268,6 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
             },
 
             .Union => |uni| {
-                if (self.hasMetadata(uni.expr, "@extern")) {
-                    continue;
-                }
-
                 const name = try self.getCName(@intCast(typeID), null, true, false);
                 const res = visited.getOrPut(self.allocator, name)
                     catch return Error.AllocatorFailure;
@@ -302,6 +301,12 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
         // @Beware I don't like this.
         if (typeInfo.isZeroBit() or typeInfo.isComptime(&self.types)) {
             continue;
+        }
+
+        if (self.typeToJirMap.get(@intCast(typeID))) |ptr| {
+            if (self.hasMetadata(ptr, "@extern")) {
+                continue;
+            }
         }
 
         switch (typeInfo) {
@@ -368,10 +373,6 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
             },
 
             .Struct => |str| {
-                if (self.hasMetadata(str.expr, "@extern")) {
-                    continue;
-                }
-
                 const name = try self.getCName(@intCast(typeID), null, true, false);
                 const res = visited.getOrPut(self.allocator, name)
                     catch return Error.AllocatorFailure;
@@ -401,10 +402,6 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
             },
 
             .Union => |uni| {
-                if (self.hasMetadata(uni.expr, "@extern")) {
-                    continue;
-                }
-
                 const name = try self.getCName(@intCast(typeID), null, true, false);
                 const res = visited.getOrPut(self.allocator, name)
                     catch return Error.AllocatorFailure;
@@ -465,10 +462,6 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
             },
 
             .Enum => |enm| {
-                if (self.hasMetadata(enm.expr, "@extern")) {
-                    continue;
-                }
-
                 const name = try self.getCName(@intCast(typeID), null, true, false);
                 const res = visited.getOrPut(self.allocator, name)
                     catch return Error.AllocatorFailure;
@@ -1250,10 +1243,9 @@ fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool
                 else if (typeInfo == .Union) typeInfo.Union.name
                 else typeInfo.Enum.name;
 
-            const nodePtr =
-                if (typeInfo == .Struct) typeInfo.Struct.expr
-                else if (typeInfo == .Union) typeInfo.Union.expr
-                else typeInfo.Enum.expr;
+            const isOpaque =
+                if (self.typeToJirMap.get(@intCast(typeID))) |ptr| self.hasMetadata(ptr, "@opaque")
+                else false;
 
             name = self.strings[namePtr];
 
@@ -1265,7 +1257,7 @@ fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool
                 else typeInfo.Enum.mutable;
 
             name = std.fmt.allocPrint(self.allocator, "{s}{s}{s}", .{
-                if (self.hasMetadata(nodePtr, "@opaque"))
+                if (isOpaque)
                     if (noSymbol) "struct_"
                     else "struct "
                 else "",

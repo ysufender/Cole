@@ -1,5 +1,9 @@
 # Known Bugs
 
+## Extern Structs Keep Getting Codegen'd (49)
+
+See `tests/stdlib/stdlib_filewatch.cole`.
+
 ## Major Performance Issues (46)
 
 The `bug_numeric_traits` test is passing in this commit, but has major performance
