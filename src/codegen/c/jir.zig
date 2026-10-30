@@ -162,7 +162,7 @@ indent: u32 = 0,
 pub fn dump(self: *const JIR) void {
     common.log.debug("Registered types:", .{});
     for (0..self.types.len) |index| {
-        common.log.debug("    {d}", .{ index });
+        common.log.debug("    {d}: {s}", .{index,  self.strings[self.typeNames.get(@intCast(index)) orelse 0]});
     }
 
     common.log.debug("Lowered IR:", .{});
@@ -250,6 +250,8 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
 
         if (self.typeToJirMap.get(@intCast(typeID))) |ptr| {
             if (self.hasMetadata(ptr, "@extern")) {
+                visited.put(self.allocator, self.strings[self.typeNames.get(@intCast(typeID)).?], {})
+                    catch return Error.AllocatorFailure;
                 continue;
             }
         }
@@ -305,6 +307,8 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
 
         if (self.typeToJirMap.get(@intCast(typeID))) |ptr| {
             if (self.hasMetadata(ptr, "@extern")) {
+                visited.put(self.allocator, self.strings[self.typeNames.get(@intCast(typeID)).?], {})
+                    catch return Error.AllocatorFailure;
                 continue;
             }
         }
@@ -380,6 +384,7 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
                     continue;
                 }
                 res.key_ptr.* = name;
+
                 try self.write(out, "typedef struct {s} {{\n", .{name});
                 for (str.fields) |field| {
                     const info = self.types.get(field.valueType);

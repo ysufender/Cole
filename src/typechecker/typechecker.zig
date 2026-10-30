@@ -3187,11 +3187,15 @@ pub fn registerType(self: *Typechecker, _newType: TypeInfo) Error!TypeID {
                 else => unreachable,
             };
 
-            if (candidateExpr != expr) continue;
-            if (!std.mem.startsWith(u8, self.builder.getInternedString(candidateName), "$$")) continue;
+            if (candidateExpr != expr) {
+                continue;
+            }
+            if (!std.mem.startsWith(u8, self.builder.getInternedString(candidateName), "$$")) {
+                continue;
+            }
             if (self.assertStructurallyIdenticalValue(info, newType)) |_| {
                 return candidate;
-            } else |_| {}
+            } else |_| { }
         }
     }
 

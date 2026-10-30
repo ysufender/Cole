@@ -2840,8 +2840,10 @@ fn handleScopeDecls(
         else false;
 
         const valueType =
-            if (self.getFlag(.InComptimeCall) and !parentBusy) try self.typechecker.typecheckDecl(newDecl, null)
-            else Builtin.Type("$$incomplete");
+            // if (self.getFlag(.InComptimeCall) and !parentBusy) try self.typechecker.typecheckDecl(newDecl, null)
+            // else Builtin.Type("$$incomplete");
+            Builtin.Type("$$incomplete");
+        _ = parentBusy;
             
         const newName = try self.typechecker.builder.internString(symbolName);
         defs.appendAssumeCapacity(.{

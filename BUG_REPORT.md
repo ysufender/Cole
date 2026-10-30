@@ -1,9 +1,5 @@
 # Known Bugs
 
-## Extern Structs Keep Getting Codegen'd (49)
-
-See `tests/stdlib/stdlib_filewatch.cole`.
-
 ## Major Performance Issues (46)
 
 The `bug_numeric_traits` test is passing in this commit, but has major performance
@@ -39,3 +35,4 @@ else is holding a reference to the said memory.
 ## Scoped Definition Access (45)
 ## Comptime Definition Lowering (47)
 ## Switch Capture Folding (48)
+## Extern Structs Keep Getting Codegen'd (49)

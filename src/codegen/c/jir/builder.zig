@@ -218,6 +218,9 @@ pub inline fn typeDef(self: *Builder, typeID: TypeID) Error!JIR.Ptr {
     if (!self.typeToJirMap.contains(typeID)) {
         self.typeToJirMap.putNoClobber(self.allocator, typeID, res)
             catch return Error.AllocatorFailure;
+        const mutableType = try self.typechecker.registerType(self.typechecker.makeMutable(self.typechecker.typeTable.get(typeID)));
+        self.typeToJirMap.putNoClobber(self.allocator, mutableType, res)
+            catch return Error.AllocatorFailure;
     }
 
     return res;
