@@ -870,10 +870,6 @@ fn forLoop(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.AST) 
     );
 }
 
-/// Unrolls a for loop whose range/iterable is marked with '@inline'. The body is lowered once
-/// per iteration, each copy in its own block with its own capture variable. Every iteration
-/// gets its own `_Check` (continue) and `_End` (break) labels, the `_End` labels are all placed
-/// after the last iteration so that `break` leaves the whole unrolled loop.
 fn inlineForLoop(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.AST, isRange: bool) Error!JIR.Ptr {
     const captureExpr = ast.extra[extraPtr + 3];
     const bodyPtr = ast.extra[extraPtr + 4];
@@ -883,13 +879,14 @@ fn inlineForLoop(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser
         .file = self.typechecker.currentFile,
         .expr = captureExpr,
     });
-    const captureName = self.typechecker.symbols.declarations.items(.name)[captureDeclPtr];
 
     var first: i64 = 0;
     var count: usize = 0;
     var captureType: TypeID = undefined;
-    var rangeDef: ?JIR.Ptr = null;
-    var dataPtr: JIR.Ptr = undefined;
+    var dataPtr: Comptime.Value.Ptr = undefined;
+
+    const previ = self.typechecker.folder.setFlag(.InComptimeCall, true);
+    defer _ = self.typechecker.folder.setFlag(.InComptimeCall, previ);
 
     if (isRange) {
         const startExpr = ast.extra[extraPtr];
@@ -914,26 +911,20 @@ fn inlineForLoop(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser
         const expr = ast.extra[extraPtr];
         const rangeType = try self.typechecker.typecheckExpression(expr, null);
 
-        const rangeName = try self.typechecker.folder.generateRandomName(.RangePtr);
-        rangeDef = try self.typechecker.builder.variableDef(
-            false,
-            rangeType,
-            rangeName,
-            false,
-            try self.expression(expr, rangeType),
-            null,
-        );
-        const rangeIdent = try self.typechecker.builder.identifier(rangeName);
-
-        dataPtr = try self.typechecker.builder.dot(
-            rangeIdent,
-            switch (self.typechecker.typeTable.get(rangeType)) {
-                .Pointer => try self.typechecker.builder.internString("ptr"),
-                .Array => try self.typechecker.builder.internString("data"),
-                else => return common.debug.ShouldBeImpossible(undefined, @src()),
+        dataPtr = dataPtr: switch (self.typechecker.folder.getValue(try self.typechecker.folder.eval(expr, rangeType))) {
+            .Slice => |s| s.To,
+            .String => |s| {
+                const start: Comptime.Value.Ptr = @intCast(self.typechecker.folder.memory.items.len);
+                for (s.str) |c| {
+                    _ = try self.typechecker.folder.appendValue(.{
+                        .Int = c,
+                    });
+                }
+                break :dataPtr start;
             },
-            rangeType,
-        );
+            .Pointer => |s| s.To,
+            else => return common.debug.ShouldBeImpossible(undefined, @src()),
+        };
 
         count = switch (self.typechecker.typeTable.get(rangeType)) {
             .Array => |arr| arr.len,
@@ -958,11 +949,9 @@ fn inlineForLoop(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser
     defer self.lastLoop = prevLoop;
 
     const arena = self.typechecker.arena.allocator();
-    const preCount: usize = if (rangeDef != null) 1 else 0;
+    const preCount: usize = 0;
     const endCount: usize = if (count == 0) 1 else count;
     const items = arena.alloc(JIR.Ptr, preCount + count + endCount) catch return Error.AllocatorFailure;
-
-    if (rangeDef) |def| items[0] = def;
 
     for (0..count) |k| {
         const base = try self.typechecker.folder.generateRandomNameString(.For);
@@ -973,31 +962,24 @@ fn inlineForLoop(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser
             std.fmt.allocPrint(arena, "{s}_End", .{ base }) catch return Error.AllocatorFailure,
         );
 
-        const captureInit = if (isRange) blk: {
-            const value = std.math.cast(u32, first + @as(i64, @intCast(k))) orelse {
-                self.report("Inline for loop range value is out of 'u32' bounds.", .{});
-                return Error.ComptimeNotPossible;
-            };
-            break :blk try self.typechecker.builder.literal(
-                try self.typechecker.builder.addConstant(.{ .Integer = .{ .u32 = value } }),
-            );
-        } else blk: {
-            const index = try self.typechecker.builder.literal(
-                try self.typechecker.builder.addConstant(.{ .Integer = .{ .u32 = @intCast(k) } }),
-            );
-            const elementPtr = try self.typechecker.builder.add(dataPtr, index);
-            break :blk if (byPointer) elementPtr
-                else try self.typechecker.builder.dereference(elementPtr, captureType);
+        const captureValue: Comptime.Value.Ptr = if (isRange) blk: {
+            const value = @as(usize, @intCast(first)) + k;
+            break :blk try self.typechecker.folder.appendValue(.{
+                .Int = @intCast(value),
+            });
+        }
+        else blk: {
+            break :blk
+                if (byPointer) {
+                    self.report("Pointer captures are not allowed in inlined for loops.", .{});
+                    return Error.IllegalSyntax;
+                }
+                else @intCast(dataPtr + k);
         };
 
-        const capture = try self.typechecker.builder.variableDef(
-            false,
-            captureType,
-            captureName,
-            false,
-            captureInit,
-            null,
-        );
+        self.typechecker.folder.declCache.put(self.typechecker.folder.arena.allocator(), captureDeclPtr, captureValue)
+            catch return Error.AllocatorFailure;
+        defer _ = self.typechecker.folder.declCache.remove(captureDeclPtr);
 
         self.lastLoop = base;
         const body = try self.statement(bodyPtr);
@@ -1005,7 +987,6 @@ fn inlineForLoop(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser
         items[preCount + k] = try self.typechecker.builder.scope(
             try self.typechecker.folder.generateRandomName(.Block),
             &.{
-                capture,
                 body,
                 try self.typechecker.builder.label(checkName),
             },
