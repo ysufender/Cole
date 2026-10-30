@@ -1,0 +1,11 @@
+import std::io::console as Console;
+
+let main = fn (args: [][]u8) -> i32 {
+    let strings = [2][]u8("Hello", "World");
+
+    for strings, |*str| {
+        Console::log(str.*);
+    }
+
+    return 0;
+};

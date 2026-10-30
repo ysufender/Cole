@@ -13,7 +13,7 @@ let Maybe = union(enum) { Some: i32, None: void };
 
 let find = fn (xs: []i32, target: i32) -> Maybe {
     for xs, |p| {
-        let v = p.*;
+        let v = p;
         if v == target { return (@Some, v); }
     }
     return (@None, ());

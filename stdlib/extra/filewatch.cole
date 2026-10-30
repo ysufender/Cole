@@ -32,9 +32,7 @@ pub let FileInfo = struct {
     modify: c_long,
 
     pub let print = fn (self: *FileInfo, stream: Stream::Output::Stream, allocator: Allocator::Allocator) -> void {
-        _ = Stream::Output::writebuffer(stream, "( size = ");
-        _ = Stream::Output::writebuffer(stream, String::intToStr(self.size, allocator));
-        _ = Stream::Output::writebuffer(stream, ", modify_time = ");
+        _ = Stream::Output::writebuffer(stream, "(modify_time = ");
         _ = Stream::Output::writebuffer(stream, String::intToStr(self.modify, allocator));
         _ = Stream::Output::writebuffer(stream, " )");
     };

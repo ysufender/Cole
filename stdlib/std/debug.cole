@@ -2,7 +2,15 @@ import builtin;
 import std::io::stream as Stream;
 import std::io::console as Console;
 import std::memory::allocator as Allocator;
-import std::string;
+import std::string as String;
+import std::fmt as Format;
+import std::io as Io;
+
+pub let print = fn (T: type) -> any {
+    return fn (arg: T, allocator: Allocator::Allocator) -> void {
+        Format::print(T)(arg, allocator, Io::StdOut());
+    };
+};
 
 pub let assert = fn (cnd: bool, msg: []u8) -> void {
     if !cnd {
@@ -59,9 +67,9 @@ pub let dumpTrace = fn (
             _ = Stream::Output::writebuffer(stream, "@");
             _ = Stream::Output::writebuffer(stream, current.frame.file);
             _ = Stream::Output::writebuffer(stream, ":");
-            _ = Stream::Output::writebuffer(stream, std::string::intToStr(current.frame.line, allocator));
+            _ = Stream::Output::writebuffer(stream, String::toStr(c_long)(current.frame.line, allocator));
             _ = Stream::Output::writebuffer(stream, ":");
-            _ = Stream::Output::writebuffer(stream, std::string::intToStr(current.frame.col, allocator));
+            _ = Stream::Output::writebuffer(stream, String::toStr(c_long)(current.frame.col, allocator));
             _ = Stream::Output::writebuffer(stream, "\n");
             current = current.next;
         }

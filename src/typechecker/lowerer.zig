@@ -737,6 +737,11 @@ fn rangeForLoop(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.
 fn forLoop(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.AST) Error!JIR.Ptr {
     const isRange = ast.extra[extraPtr + 1] == 1;
 
+    // @Note the typechecker already verified that an '@inline' range/iterable is comptime known.
+    if (self.typechecker.hasMetadata(ast.extra[extraPtr], "@inline")) {
+        return self.inlineForLoop(extraPtr, ast, isRange);
+    }
+
     if (isRange) {
         return self.rangeForLoop(extraPtr, ast);
     }
@@ -827,7 +832,8 @@ fn forLoop(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.AST) 
         captureType,
         name,
         false,
-        try self.typechecker.builder.add(rangePtr, idxIdent),
+        if (ast.extra[extraPtr + 5] == 1) try self.typechecker.builder.add(rangePtr, idxIdent)
+        else try self.typechecker.builder.dereference(try self.typechecker.builder.add(rangePtr, idxIdent), captureType),
         null,
     );
 
@@ -861,6 +867,142 @@ fn forLoop(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.AST) 
             sjump,
             forEndLabel,
         },
+    );
+}
+
+fn inlineForLoop(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.AST, isRange: bool) Error!JIR.Ptr {
+    const captureExpr = ast.extra[extraPtr + 3];
+    const bodyPtr = ast.extra[extraPtr + 4];
+    const byPointer = !isRange and ast.extra[extraPtr + 5] == 1;
+
+    const captureDeclPtr = self.typechecker.symbols.findDecl(.{
+        .file = self.typechecker.currentFile,
+        .expr = captureExpr,
+    });
+
+    var first: i64 = 0;
+    var count: usize = 0;
+    var captureType: TypeID = undefined;
+    var dataPtr: Comptime.Value.Ptr = undefined;
+
+    const previ = self.typechecker.folder.setFlag(.InComptimeCall, true);
+    defer _ = self.typechecker.folder.setFlag(.InComptimeCall, previ);
+
+    if (isRange) {
+        const startExpr = ast.extra[extraPtr];
+        const endExpr = ast.extra[extraPtr + 2];
+
+        const startT = try self.typechecker.typecheckExpression(startExpr, null);
+        const endT = try self.typechecker.typecheckExpression(endExpr, null);
+
+        const start = self.typechecker.folder.getValue(try self.typechecker.folder.eval(startExpr, startT));
+        const end = self.typechecker.folder.getValue(try self.typechecker.folder.eval(endExpr, endT));
+
+        if (start != .Int or end != .Int) {
+            self.report("Inline for loop range must be comptime known integers.", .{});
+            return Error.ComptimeNotPossible;
+        }
+
+        first = start.Int;
+        count = if (end.Int > start.Int) @intCast(end.Int - start.Int) else 0;
+        captureType = comptime Comptime.Folder.Builtin.Type("u32");
+    }
+    else {
+        const expr = ast.extra[extraPtr];
+        const rangeType = try self.typechecker.typecheckExpression(expr, null);
+
+        dataPtr = dataPtr: switch (self.typechecker.folder.getValue(try self.typechecker.folder.eval(expr, rangeType))) {
+            .Slice => |s| s.To,
+            .String => |s| {
+                const start: Comptime.Value.Ptr = @intCast(self.typechecker.folder.memory.items.len);
+                for (s.str) |c| {
+                    _ = try self.typechecker.folder.appendValue(.{
+                        .Int = c,
+                    });
+                }
+                break :dataPtr start;
+            },
+            .Pointer => |s| s.To,
+            else => return common.debug.ShouldBeImpossible(undefined, @src()),
+        };
+
+        count = switch (self.typechecker.typeTable.get(rangeType)) {
+            .Array => |arr| arr.len,
+            .Pointer => blk: {
+                const value = self.typechecker.folder.getValue(try self.typechecker.folder.eval(expr, rangeType));
+                break :blk switch (value) {
+                    .Slice => |slice| slice.Size,
+                    .String => |string| string.str.len,
+                    else => {
+                        self.report("Inline for loop over a slice requires a comptime known slice.", .{});
+                        return Error.ComptimeNotPossible;
+                    },
+                };
+            },
+            else => return common.debug.ShouldBeImpossible(undefined, @src()),
+        };
+
+        captureType = try self.typechecker.typecheckDecl(captureDeclPtr, null);
+    }
+
+    const prevLoop = self.lastLoop;
+    defer self.lastLoop = prevLoop;
+
+    const arena = self.typechecker.arena.allocator();
+    const preCount: usize = 0;
+    const endCount: usize = if (count == 0) 1 else count;
+    const items = arena.alloc(JIR.Ptr, preCount + count + endCount) catch return Error.AllocatorFailure;
+
+    for (0..count) |k| {
+        const base = try self.typechecker.folder.generateRandomNameString(.For);
+        const checkName = try self.typechecker.builder.internString(
+            std.fmt.allocPrint(arena, "{s}_Check", .{ base }) catch return Error.AllocatorFailure,
+        );
+        const endName = try self.typechecker.builder.internString(
+            std.fmt.allocPrint(arena, "{s}_End", .{ base }) catch return Error.AllocatorFailure,
+        );
+
+        const captureValue: Comptime.Value.Ptr = if (isRange) blk: {
+            const value = @as(usize, @intCast(first)) + k;
+            break :blk try self.typechecker.folder.appendValue(.{
+                .Int = @intCast(value),
+            });
+        }
+        else blk: {
+            break :blk
+                if (byPointer) {
+                    self.report("Pointer captures are not allowed in inlined for loops.", .{});
+                    return Error.IllegalSyntax;
+                }
+                else @intCast(dataPtr + k);
+        };
+
+        self.typechecker.folder.declCache.put(self.typechecker.folder.arena.allocator(), captureDeclPtr, captureValue)
+            catch return Error.AllocatorFailure;
+        defer _ = self.typechecker.folder.declCache.remove(captureDeclPtr);
+
+        self.lastLoop = base;
+        const body = try self.statement(bodyPtr);
+
+        items[preCount + k] = try self.typechecker.builder.scope(
+            try self.typechecker.folder.generateRandomName(.Block),
+            &.{
+                body,
+                try self.typechecker.builder.label(checkName),
+            },
+        );
+        items[preCount + count + k] = try self.typechecker.builder.label(endName);
+    }
+
+    if (count == 0) {
+        items[preCount] = try self.typechecker.builder.label(
+            try self.typechecker.folder.generateRandomName(.OptimizedLoop),
+        );
+    }
+
+    return self.typechecker.builder.scope(
+        try self.typechecker.folder.generateRandomName(.For),
+        items,
     );
 }
 

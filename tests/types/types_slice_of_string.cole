@@ -16,7 +16,7 @@ let main = fn (args: [][]u8) -> i32 {
     let part = word[0..5];
     pi(part.len);
     for part, |c| {
-        _ = Stream::Output::write(Io::StdOut(), c.*);
+        _ = Stream::Output::write(Io::StdOut(), c);
     }
     _ = Stream::Output::write(Io::StdOut(), 10);
     pi(part[1]);

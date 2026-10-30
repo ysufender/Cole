@@ -44,6 +44,7 @@ const DeclCache = collections.HashMap(defines.DeclPtr, TypecheckStatus);
 const ExprCache = collections.HashMap(Resolver.ResolutionKey, struct { TypeID, FlagMap });
 const AnonFuncList = collections.MultiArrayList(JIR.Function);
 const AnonQueue = collections.HashMap(defines.ScopePtr, void);
+const AnonTypeList = std.ArrayList(TypeID);
 
 pub const Flags = enum(u8) {
     ConcreteValue = 0,
@@ -80,6 +81,7 @@ symbols: *Resolver.Resolution,
 
 typeTable: TypeTable,
 typeMap: TypeMap,
+anonTypes: AnonTypeList,
 declCache: DeclCache,
 exprCache: ExprCache,
 
@@ -151,6 +153,8 @@ pub fn init(
         .typenameMap = typenameMap,
         .arena = arena,
         .anonFunctions = try AnonFuncList.init(allocator, counts.functions),
+        .anonTypes = AnonTypeList.initCapacity(allocator, typeCount * 2)
+            catch return Error.AllocatorFailure,
         .anonQueued = .empty,
     };
 }
@@ -573,6 +577,11 @@ fn typecheckFor(self: *Typechecker, extraPtr: defines.OpaquePtr, expected: TypeI
             return Error.NonIntegerRange;
         }
 
+        if (self.hasMetadata(range.start, "@inline")) {
+            _ = try self.folder.eval(range.start, rstartT);
+            _ = try self.folder.eval(range.end, rendT);
+        }
+
         const captureDecl = self.symbols.findDecl(.{
             .file = self.currentFile,
             .expr = captureExpr,
@@ -591,6 +600,11 @@ fn typecheckFor(self: *Typechecker, extraPtr: defines.OpaquePtr, expected: TypeI
         const body = ast.extra[extraPtr + 4];
 
         const exprT = try self.typecheckExpression(loopExpr, null);
+
+        if (self.hasMetadata(loopExpr, "@inline")) {
+            _ = try self.folder.eval(loopExpr, exprT);
+        }
+
         const exprInfo = self.typeTable.get(exprT);
         const innerCaptureType = switch (exprInfo) {
             .Array => |arr| arr.child,
@@ -611,13 +625,16 @@ fn typecheckFor(self: *Typechecker, extraPtr: defines.OpaquePtr, expected: TypeI
             },
         };
 
-        const captureType = try self.registerType(.{
-            .Pointer = .{
-                .size = .Single,
-                .child = innerCaptureType,
-                .mutable = false,
-            },
-        });
+        const captureType =
+            if (ast.extra[extraPtr + 5] == 1)
+                try self.registerType(.{
+                    .Pointer = .{
+                        .size = .Single,
+                        .child = innerCaptureType,
+                        .mutable = false,
+                    },
+                })
+            else innerCaptureType;
 
         const captureDecl = self.symbols.findDecl(.{
             .file = self.currentFile,
@@ -1543,11 +1560,22 @@ fn typecheckUnionInitialization(self: *Typechecker, ast: *const Parser.AST, uni:
 }
 
 pub fn typecheckScoping(self: *Typechecker, expr: defines.ExpressionPtr) Error!TypeID {
-    if (self.folder.currentInstantiation == null) {
-        if (self.symbols.resolutionMap.get(.{
-            .file = self.currentFile,
-            .expr = expr,
-        })) |decl| {
+    if (self.symbols.resolutionMap.get(.{
+        .file = self.currentFile,
+        .expr = expr,
+    })) |decl| {
+        if (self.folder.currentInstantiation == null) {
+            return self.typecheckDecl(decl, null);
+        }
+
+        if (self.symbols.scopes.items(.kind)[self.symbols.getDecl(decl).scope] == .Module) {
+            const prevInstantiation = self.folder.currentInstantiation;
+            self.folder.currentInstantiation = null;
+            defer self.folder.currentInstantiation = prevInstantiation;
+
+            const prevComptimeCall = self.folder.setFlag(.InComptimeCall, false);
+            defer _ = self.folder.setFlag(.InComptimeCall, prevComptimeCall);
+
             return self.typecheckDecl(decl, null);
         }
     }
@@ -3138,11 +3166,45 @@ pub fn registerType(self: *Typechecker, _newType: TypeInfo) Error!TypeID {
         else => null,
     };
 
+    // @Note Dedup anon types
+    const anonymous = if (name) |n| std.mem.startsWith(u8, self.builder.getInternedString(n), "$$") else false;
+    if (anonymous) {
+        const expr = switch (newType) {
+            .Struct => |str| str.expr,
+            .Union => |uni| uni.expr,
+            .Enum => |enm| enm.expr,
+            else => unreachable,
+        };
+
+        for (self.anonTypes.items) |candidate| {
+            const info = self.typeTable.get(candidate);
+            if (std.meta.activeTag(info) != std.meta.activeTag(newType)) continue;
+
+            const candidateName, const candidateExpr = switch (info) {
+                .Struct => |str| .{ str.name, str.expr },
+                .Union => |uni| .{ uni.name, uni.expr },
+                .Enum => |enm| .{ enm.name, enm.expr },
+                else => unreachable,
+            };
+
+            if (candidateExpr != expr) {
+                continue;
+            }
+            if (!std.mem.startsWith(u8, self.builder.getInternedString(candidateName), "$$")) {
+                continue;
+            }
+            if (self.assertStructurallyIdenticalValue(info, newType)) |_| {
+                return candidate;
+            } else |_| { }
+        }
+    }
+
     const isPresent = self.typeMap.getOrPut(self.arena.allocator(), newType)
         catch return Error.AllocatorFailure;
 
     if (!isPresent.found_existing) {
         const typeID = try self.typeTable.addOne(self.arena.allocator());
+        if (anonymous) self.anonTypes.append(self.arena.allocator(), @intCast(typeID)) catch return Error.AllocatorFailure;
         isPresent.value_ptr.* = @intCast(typeID);
 
         switch (newType) {

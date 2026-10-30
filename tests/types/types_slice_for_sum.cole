@@ -11,7 +11,7 @@ let pi = fn (n: c_long) -> void {
 let main = fn (args: [][]u8) -> i32 {
     let total: mut i32 = 0;
     for "abc", |c| {
-        total = total + cast(c.*);
+        total = total + cast(c);
     }
     pi(total);
     return 0;
