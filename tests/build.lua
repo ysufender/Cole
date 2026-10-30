@@ -7,7 +7,7 @@ local cole_build =
     -- "releasesafe"
     -- "releasefast"
 
-local cole_version = "v0.1.3"
+local cole_version = "v0.1.4"
 
 local exe_path = string.format("../zig-out/cole-%s-%s-linux-x86_64", cole_version, cole_build)
 
