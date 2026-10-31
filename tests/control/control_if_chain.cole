@@ -1,5 +1,3 @@
-// control/control_if_chain
-// if / else if / else chains select exactly one branch (runtime values).
 import std::io::console as Console;
 
 let grade = fn (score: i32) -> []u8 {

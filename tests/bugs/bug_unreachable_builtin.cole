@@ -1,6 +1,3 @@
-// bugs/bug_unreachable_builtin
-// The unreachable() builtin is emitted as a call to an undefined $$unreachable function (breaks std::debug::assert).
-// KNOWN BUG: C error: label $$unreachable__ used but not defined.
 import std::io::console as Console;
 
 import std::debug as Debug;

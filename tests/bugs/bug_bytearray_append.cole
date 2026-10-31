@@ -1,6 +1,3 @@
-// bugs/bug_bytearray_append
-// std::memory::bytearray::append does not typecheck (Element is the type of the whole items slice).
-// KNOWN BUG: Can't assign value of type 'mut []mut u8' to value of type '[]mut []mut u8'.
 import std::io::console as Console;
 import std::string as String;
 import std::c as C;

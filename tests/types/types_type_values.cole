@@ -1,5 +1,3 @@
-// types/types_type_values
-// Types are first-class comptime values and can be aliased and used in annotations.
 import std::io::console as Console;
 import std::string as String;
 import std::c as C;

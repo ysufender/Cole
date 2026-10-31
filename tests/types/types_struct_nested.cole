@@ -1,5 +1,3 @@
-// types/types_struct_nested
-// Structs nest, and can be built with constructors or initializer lists.
 import std::io::console as Console;
 import std::string as String;
 import std::c as C;

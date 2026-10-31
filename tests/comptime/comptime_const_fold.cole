@@ -1,5 +1,3 @@
-// comptime/comptime_const_fold
-// Global constants built from other constants are folded.
 import std::io::console as Console;
 import std::string as String;
 import std::c as C;

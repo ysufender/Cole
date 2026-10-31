@@ -1,0 +1,15 @@
+import std::io::console as Console;
+
+let Struct = struct {
+    field1: void,
+    field2: void,
+    field3: void,
+    field4: void,
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    for #(@inline) typeInfo(Struct).Struct.fields, |field| {
+        Console::log(field.name);
+    }
+    return 0;
+};

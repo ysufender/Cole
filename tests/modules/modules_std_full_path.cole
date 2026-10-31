@@ -1,6 +1,3 @@
-// modules/modules_std_full_path
-// Standard library modules can be used through their full path.
-
 import std::string;
 import std::io::console;
 

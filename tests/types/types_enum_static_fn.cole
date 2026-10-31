@@ -1,5 +1,3 @@
-// types/types_enum_static_fn
-// Enums are namespaces too and can hold functions.
 import std::io::console as Console;
 
 let Kind = enum {

@@ -1,0 +1,24 @@
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let Plain = struct {
+    a: i32,
+    b: i32,
+
+    pub let zero = this()(0, 0);
+    pub let make = fn (x: i32) -> this() { return this()(x, x + 1); };
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let z = Plain::zero;
+    pi(z.a + z.b);
+    let m = Plain::make(5);
+    pi(m.a);
+    pi(m.b);
+    return 0;
+};

@@ -1,52 +1,51 @@
-/*
-    this file is a part of the Cole standard library,
-    and is licensed under mit license.
+import std;
 
-    any user code that imports this module agrees that it
-    will satisfy the specifications stated further.
+pub let Error = enum {
+    OutOfMemory,
+};
 
-    disclaimer:
-        the traits and conventions mentioned in this document
-        are to be obeyed, otherwise neither Cole stdlib nor the
-        compiler can guarantee a well defined program.
-
-    name:
-        std::memory::allocator
-    public symbols:
-        Allocator
-        create
-        destroy
-        alloc
-        dealloc
-    description:
-        File operation utilities.
-*/
+pub let Result = fn (T: type) -> type {
+    return std::Result(T, Error);
+};
 
 pub let Allocator = struct {
     context: *mut void,
-    create: *fn (*mut void, u32) -> *mut void,
-    destroy: *fn (*mut void, *mut void) -> void,
-    alloc: *fn (*mut void, u32, u32) -> []mut void,
-    dealloc: *fn (*mut void, []mut void) -> void,
-    realloc: *fn (*mut void, []mut void, u32) -> []mut void,
+    create: *fn (*mut void, u32) -> Result(*mut void),
+    destroy: *fn (*mut void, *void) -> void,
+    alloc: *fn (*mut void, u32, u32) -> Result([]mut void),
+    dealloc: *fn (*mut void, []void) -> void,
+    realloc: *fn (*mut void, []mut void, u32) -> Result([]mut void),
 };
 
-pub let create = fn (self: Allocator, size: u32) -> *mut void {
-    return self.create(self.context, size);
+pub let create = fn (T: type) -> any {
+    return fn (self: Allocator) -> Result(*mut T) {
+        return switch self.create(self.context, sizeOf(T)) {
+            @Ok -> |res| (@Ok, cast(res)),
+            @Err -> |err| (@Err, err),
+        };
+    };
 };
 
-pub let destroy = fn (self: Allocator, ptr: *mut void) -> void {
-    return self.destroy(self.context, ptr);
+pub let destroy = fn (T: type) -> any {
+    return fn (self: Allocator, ptr: *T) -> void {
+        return self.destroy(self.context, ptr);
+    };
 };
 
-pub let alloc = fn (self: Allocator, count: u32, sizeBytesEach: u32) -> []mut void {
-    return self.alloc(self.context, count, sizeBytesEach);
+pub let alloc = fn (T: type) -> any {
+    return fn (self: Allocator, count: u32) -> Result([]mut T) {
+        return self.alloc(self.context, count, sizeOf(T));
+    };
 };
 
-pub let dealloc = fn (self: Allocator, arr: []mut void) -> void {
-    return self.dealloc(self.context, arr);
+pub let dealloc = fn (T: type) -> any {
+    return fn (self: Allocator, arr: []mut T) -> void {
+        return self.dealloc(self.context, arr);
+    };
 };
 
-pub let realloc = fn (self: Allocator, arr: []mut void, nlen: u32) -> []mut void {
-    return self.realloc(self.context, arr, nlen);
+pub let realloc = fn (T: type) -> any {
+    return fn (self: Allocator, arr: []mut T, nlen: u32) -> Result([]mut void) {
+        return self.realloc(self.context, arr, nlen);
+    };
 };

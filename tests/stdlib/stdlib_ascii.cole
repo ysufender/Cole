@@ -1,5 +1,3 @@
-// stdlib/stdlib_ascii
-// std::ascii character classification and constants.
 import std::io::console as Console;
 import std::string as String;
 import std::c as C;

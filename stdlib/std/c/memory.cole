@@ -21,6 +21,8 @@
 
 import std::memory::allocator;
 
+let Result = std::memory::allocator::Result;
+
 pub let Allocator = std::memory::allocator::Allocator(undefined, create, destroy, alloc, dealloc, _realloc);
 
 pub let copy = fn (to: [@c]mut void, from: [@c]mut void, n: u32) -> void {
@@ -33,22 +35,34 @@ let calloc = #(@extern) fn (nmemb: c_size, size: c_size) -> mut [@c]mut void { }
 let realloc = #(@extern) fn (ptr: [@c]mut void, nlen: c_size) -> mut [@c]mut void { };
 let memcpy = #(@extern) fn (dst: mut [@c]mut void, src: mut [@c]void, n: mut c_size) -> mut [@c]mut void { };
 
-let create = fn (ctx: *mut void, size: u32) -> *mut void {
-    return cast(malloc(size));
+let create = fn (ctx: *mut void, size: u32) -> Result(*mut void) {
+    let res: *mut void = cast(malloc(size));
+
+    return
+        if (res == undefined) (@Err, @OutOfMemory)
+        else (@Ok, res);
 };
 
-let destroy = fn (ctx: *mut void, ptr: *mut void) -> void {
-    free(cast(ptr));
+let destroy = fn (ctx: *mut void, ptr: *void) -> void {
+    free(unsafeCast(ptr));
 };
 
-let alloc = fn (ctx: *mut void, count: u32, sizeByteEach: u32) -> []mut void {
-    return calloc(count, sizeByteEach)[0..count];
+let alloc = fn (ctx: *mut void, count: u32, sizeByteEach: u32) -> Result([]mut void) {
+    let res: [@c]mut void = calloc(count, sizeByteEach);
+
+    return
+        if (res == undefined) (@Err, @OutOfMemory)
+        else (@Ok, res[0..count]);
 };
 
-let dealloc = fn (ctx: *mut void, ptr: []mut void) -> void {
-    free(ptr.ptr);
+let dealloc = fn (ctx: *mut void, ptr: []void) -> void {
+    free(unsafeCast(ptr.ptr));
 };
 
-let _realloc = fn (ctx: *mut void, ptr: []mut void, nlen: u32) -> []mut void {
-    return realloc(ptr.ptr, nlen)[0..nlen];
+let _realloc = fn (ctx: *mut void, ptr: []mut void, nlen: u32) -> Result([]mut void) {
+    let res = realloc(ptr.ptr, nlen);
+
+    return
+        if (res == undefined) (@Err, @OutOfMemory)
+        else (@Ok, res[0..nlen]);
 };

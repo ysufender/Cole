@@ -1,5 +1,3 @@
-// modules/modules_import_alias
-// import ... as gives a module a short alias; pub functions and constants are visible.
 import std::io::console as Console;
 import std::string as String;
 import std::c as C;

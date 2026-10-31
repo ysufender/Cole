@@ -1,5 +1,3 @@
-// interop/interop_code_block
-// A code block embeds raw C inside a function body.
 import std::io::console as Console;
 
 let main = fn (args: [][]u8) -> i32 {

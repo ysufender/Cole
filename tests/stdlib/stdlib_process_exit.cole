@@ -1,5 +1,3 @@
-// stdlib/stdlib_process_exit
-// std::c::process::exit terminates immediately; later statements never run.
 import std::io::console as Console;
 
 import std::c::process as Process;

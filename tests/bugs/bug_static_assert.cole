@@ -1,6 +1,3 @@
-// bugs/bug_static_assert
-// std::debug::staticAssert calls compileError with two arguments but the builtin takes one.
-// KNOWN BUG: 'compileError' expects a single expression argument, received 2.
 import std::io::console as Console;
 
 import std::debug as Debug;

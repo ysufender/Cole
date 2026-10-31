@@ -1,5 +1,3 @@
-// functions/fn_returns_slice
-// A function can return a string slice.
 import std::io::console as Console;
 
 let pick = fn (flag: bool) -> []u8 {

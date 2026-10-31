@@ -1,5 +1,3 @@
-// interop/interop_stdout_ordering
-// Console, puts and printf share one C stdout buffer, so ordering is preserved.
 import std::io::console as Console;
 
 let puts = #(@extern) fn (s: [@c]c_char) -> c_int { };

@@ -1,5 +1,3 @@
-// comptime/comptime_typename
-// typeName renders types as strings.
 import std::io::console as Console;
 
 let main = fn (args: [][]u8) -> i32 {

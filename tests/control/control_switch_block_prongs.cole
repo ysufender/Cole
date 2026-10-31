@@ -1,5 +1,3 @@
-// control/control_switch_block_prongs
-// Switch prongs may be blocks with several statements.
 import std::io::console as Console;
 
 let E = enum { A, B, C };

@@ -1,5 +1,3 @@
-// comptime/generic_type_sibling_forward_ref
-// A sibling referenced before its definition must still bind per instance.
 import std::io::console as Console;
 import std::string as String;
 import std::c as C;

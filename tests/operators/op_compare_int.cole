@@ -1,5 +1,3 @@
-// operators/op_compare_int
-// Integer comparison operators (runtime).
 import std::io::console as Console;
 import std::string as String;
 

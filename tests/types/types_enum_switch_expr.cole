@@ -1,5 +1,3 @@
-// types/types_enum_switch_expr
-// A switch expression maps every enum member to a value.
 import std::io::console as Console;
 
 let Color = enum { Red, Green, Blue };

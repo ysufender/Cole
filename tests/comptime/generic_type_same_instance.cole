@@ -1,4 +1,3 @@
-// Logically, they should be different
 import std::io::console as Console;
 
 let Box = fn (T: type) -> type {

@@ -1,0 +1,46 @@
+import std;
+import std::memory::allocator as Malloc;
+
+let Allocator = Malloc::Allocator;
+let Error = Malloc::Error;
+let Res = std::Result;
+
+pub let ArrayList = fn (T: type) -> type {
+    return struct {
+        items   : []mut T,
+        capacity: u32,
+
+        let Elem = T;
+        let Self = this();
+
+        pub let empty = Self(undefined, 0);
+
+        pub let reserve = fn (self: *mut Self, allocator: Allocator, size: u32) -> Res(void, Error) {
+            if self.capacity >= size {
+                return (@Ok, ());
+            }
+
+            switch Malloc::realloc(T)(allocator, self.items[0..self.capacity], size) {
+                @Ok -> {
+                    self.capacity = size;
+                }
+                @Err -> |err| return (@Err, err);
+            }
+
+            return (@Ok, ());
+        };
+
+        pub let append = fn (self: *mut Self, allocator: Allocator, elem: T) -> Res(void, Error) {
+            if self.items.len >= self.capacity {
+                switch reserve(self, allocator, self.capacity * 2) {
+                    @Ok -> { }
+                    @Err -> |err| return (@Err, err);
+                }
+            }
+
+            self.items = self.items[0..self.items.len + 1];
+            self.items[self.items.len - 1] = elem;
+            return (@Ok, ());
+        };
+    };
+}; 

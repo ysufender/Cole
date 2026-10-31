@@ -1658,9 +1658,9 @@ pub fn evalThis(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value
         });
         return Error.ArgumentCountMismatch;
     }
-    const ty = if (self.currentInstantiation) |s| self.scopeTypes.get(s) else null;
+    const ty = self.scopeTypes.get(self.typechecker.currentScope);
     if (ty == null) {
-        self.report("Use of 'this' outisde typed scope.", .{});
+        self.report("Use of 'this' outside typed scope.", .{});
         return Error.IllegalSyntax;
     }
 

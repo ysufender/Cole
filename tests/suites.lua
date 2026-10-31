@@ -165,6 +165,12 @@ return {
         "comptime_buildinfo",
         "comptime_src_info",
         "comptime_nocomptime_mark",
+        "inline_for_range",
+        "inline_for_array",
+        "inline_for_nested",
+        "inline_for_typeinfo_fields",
+        "this_generic_member",
+        "this_plain_struct",
     },
 
     ["interop"] = {
