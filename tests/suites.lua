@@ -171,6 +171,7 @@ return {
         "inline_for_typeinfo_fields",
         "this_generic_member",
         "this_plain_struct",
+        "this_self_member",
     },
 
     ["interop"] = {
@@ -240,7 +241,6 @@ return {
         "bug_precedence_documented",
         "bug_unreachable_builtin",
         "bug_static_assert",
-        "bug_bytearray_append",
         "bug_import_std_root",
         "bug_file_output",
         "bug_typeof_folded_variable",

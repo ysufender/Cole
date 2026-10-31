@@ -1807,7 +1807,7 @@ fn cast(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR.P
                     const srcElemSize = self.typechecker.sizeOf(rptr.child) / 8;
                     const dstElemSize = self.typechecker.sizeOf(tptr.child) / 8;
 
-                    const newSize = if (srcElemSize == dstElemSize or srcElemSize == 0)
+                    const newSize = if (srcElemSize == dstElemSize)
                         len
                     else blk: {
                         const itemSize = try self.typechecker.builder.literal(

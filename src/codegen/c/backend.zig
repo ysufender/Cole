@@ -4,9 +4,7 @@ const platform = @import("../../core/platform.zig");
 pub const JIR = @import("jir.zig");
 
 const Error = @import("../../core/common.zig").CompilerError;
-const Dir = std.Io.Dir;
-
-const tcc = @import("tcc");
+const Dir = std.Io.Dir; const tcc = @import("tcc");
 
 const files = [_]struct{ []const u8, []const u8 }{
     .{ "stdnoreturn.h", @embedFile("../../res/vendor/tcc/include/stdnoreturn.h") },
@@ -20,7 +18,10 @@ const files = [_]struct{ []const u8, []const u8 }{
     .{ "bt-log.o",  @embedFile("../../res/vendor/tcc/bt-log.o") },
 };
 
+var ctx: *common.CompilerContext = undefined;
+
 pub fn compile(outDir: Dir, allocator: std.mem.Allocator, context: *common.CompilerContext) Error!void {
+    ctx = context;
     try createStdIncludes(outDir, context.io);
 
     // Create TCC
@@ -161,7 +162,7 @@ fn report(comptime msg: []const u8) void {
 fn tccErrCallback(_: ?*anyopaque, msg: [*c]const u8) callconv(.c) void {
     const len = std.mem.len(msg);
     if (std.mem.find(u8, msg[0..len], "warning")) |_| {
-        std.log.warn("{s}", .{msg});
+        common.log.warn(ctx.log, "{s}", .{msg});
     }
     else {
         common.log.err("{s}", .{msg});

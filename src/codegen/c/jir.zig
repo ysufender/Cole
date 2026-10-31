@@ -385,7 +385,13 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
                 }
                 res.key_ptr.* = name;
 
-                try self.write(out, "typedef struct {s} {{\n", .{name});
+                try self.write(out, "typedef struct {s}{s} {{\n", .{
+                    if (self.typeToJirMap.get(@intCast(typeID))) |ptr|
+                        if (self.hasMetadata(ptr, "@packed")) "__attribute__((aligned (sizeof(uint8_t)))) "
+                        else ""
+                    else "",
+                    name,
+                });
                 for (str.fields) |field| {
                     const info = self.types.get(field.valueType);
 
@@ -417,7 +423,13 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
 
 
                 if (uni.isTagged) {
-                    try self.write(out, "typedef struct {s} {{\n", .{name});
+                    try self.write(out, "typedef struct {s}{s} {{\n", .{
+                        if (self.typeToJirMap.get(@intCast(typeID))) |ptr|
+                            if (self.hasMetadata(ptr, "@packed")) "__attribute__((aligned (sizeof(uint8_t)))) "
+                            else ""
+                        else "",
+                        name
+                    });
                     try self.write(out, "\t{s} {s};\n", .{
                         try self.getCName(uni.fields[0].valueType, null, false, false),
                         self.strings[uni.fields[0].name],

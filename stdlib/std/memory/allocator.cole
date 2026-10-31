@@ -2,6 +2,7 @@ import std;
 
 pub let Error = enum {
     OutOfMemory,
+    Undefined,
 };
 
 pub let Result = fn (T: type) -> type {
@@ -14,7 +15,7 @@ pub let Allocator = struct {
     destroy: *fn (*mut void, *void) -> void,
     alloc: *fn (*mut void, u32, u32) -> Result([]mut void),
     dealloc: *fn (*mut void, []void) -> void,
-    realloc: *fn (*mut void, []mut void, u32) -> Result([]mut void),
+    realloc: *fn (*mut void, []mut void, u32, u32) -> Result([]mut void),
 };
 
 pub let create = fn (T: type) -> any {
@@ -28,24 +29,30 @@ pub let create = fn (T: type) -> any {
 
 pub let destroy = fn (T: type) -> any {
     return fn (self: Allocator, ptr: *T) -> void {
-        return self.destroy(self.context, ptr);
+        return self.destroy(self.context, cast(ptr));
     };
 };
 
 pub let alloc = fn (T: type) -> any {
     return fn (self: Allocator, count: u32) -> Result([]mut T) {
-        return self.alloc(self.context, count, sizeOf(T));
+        return switch self.alloc(self.context, count, sizeOf(T)) {
+            @Ok -> |res| (@Ok, cast(res)),
+            @Err -> |err| (@Err, err),
+        };
     };
 };
 
 pub let dealloc = fn (T: type) -> any {
     return fn (self: Allocator, arr: []mut T) -> void {
-        return self.dealloc(self.context, arr);
+        return self.dealloc(self.context, cast(arr));
     };
 };
 
 pub let realloc = fn (T: type) -> any {
-    return fn (self: Allocator, arr: []mut T, nlen: u32) -> Result([]mut void) {
-        return self.realloc(self.context, arr, nlen);
+    return fn (self: Allocator, arr: []mut T, nlen: u32) -> Result([]mut T) {
+        return switch self.realloc(self.context, cast(arr), nlen, sizeOf(T)) {
+            @Ok -> |res| (@Ok, cast(res)),
+            @Err -> |err| (@Err, err),
+        };
     };
 };

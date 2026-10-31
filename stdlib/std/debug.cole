@@ -5,6 +5,8 @@ import std::memory::allocator as Allocator;
 import std::string as String;
 import std::fmt as Format;
 import std::io as Io;
+import std::c::process as Process;
+import std::c as C;
 
 pub let print = fn (T: type) -> any {
     return fn (arg: T, allocator: Allocator::Allocator) -> void {
@@ -19,10 +21,8 @@ pub let assert = fn (cnd: bool, msg: []u8) -> void {
     }
 };
 
-pub let staticAssert = #(@comptime) fn (msg: []u8, cnd: bool) -> void {
-    // @Note workaround the unary comptime bug
-    if cnd { }
-    else {
+pub let staticAssert = #(@comptime) fn (cnd: bool, msg: []u8) -> void {
+    if !cnd {
         compileError(msg);
     }
 };
@@ -74,4 +74,13 @@ pub let dumpTrace = fn (
             current = current.next;
         }
     }
+};
+
+pub let impossible = fn (T: type) -> any {
+    return fn () -> T {
+        Console::error("Reached unreachable code.");
+        dumpTrace(stackTrace(), C::Allocator, Io::StdErr());
+        Process::exit(1);
+        return undefined;
+    };
 };

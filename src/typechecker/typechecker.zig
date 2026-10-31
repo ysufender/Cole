@@ -1671,13 +1671,13 @@ pub fn discoverScopeDef(
 
     const prevs = self.currentScope;
     self.currentScope = scope;
-    self.folder.scopeTypes.put(self.folder.arena.allocator(), self.currentScope, from)
-        catch return Error.AllocatorFailure;
+    defer self.currentScope = prevs;
+
+    const prevDiscovering = self.folder.discoveringScope;
+    self.folder.discoveringScope = scope;
+    defer self.folder.discoveringScope = prevDiscovering;
 
     const discoveredType = try self.typecheckDecl(decl, null);
-
-    _ = self.folder.scopeTypes.remove(self.currentScope);
-    self.currentScope = prevs;
 
     const memberIndex = try self.definitionIndex(from, member.name);
 

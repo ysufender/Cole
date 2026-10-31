@@ -1,0 +1,27 @@
+import std::io::console as Console;
+
+let Wrapper = fn (T: type) -> type {
+    return struct {
+        value: T,
+
+        let Self = this();
+
+        pub let make = fn (v: T) -> Self {
+            return this()(v);
+        };
+
+        pub let get = fn (self: Self) -> T {
+            return self.value;
+        };
+    };
+};
+
+let W = Wrapper(u32);
+
+let main = fn (args: [][]u8) -> i32 {
+    let w = W::make(5);
+    if W::get(w) == 5 {
+        Console::log("ok");
+    }
+    return 0;
+};

@@ -9,14 +9,16 @@ let pi = fn (n: c_long) -> void {
 import std::memory::allocator as Alloc;
 
 let main = fn (args: [][]u8) -> i32 {
-    let mem = Alloc::alloc(C::Allocator, 4, 4);
-    pi(mem.len);
-    let ints: []mut i32 = unsafeCast(mem);
+    let ints = switch Alloc::alloc(i32)(C::Allocator, 4) {
+        @Ok -> |res| res,
+        @Err -> undefined,
+    };
+    pi(ints.len);
     ints[0] = 5;
     ints[1] = 6;
     ints[2] = 7;
     ints[3] = 8;
     pi(ints[0] + ints[1] + ints[2] + ints[3]);
-    Alloc::dealloc(C::Allocator, mem);
+    Alloc::dealloc(i32)(C::Allocator, ints);
     return 0;
 };

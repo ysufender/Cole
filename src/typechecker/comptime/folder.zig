@@ -57,6 +57,7 @@ const Folder = @This();
 currentInstantiation: ?defines.ScopePtr = null,
 scopeTypes: std.AutoHashMapUnmanaged(defines.ScopePtr, TypeID) = .empty,
 captures: std.AutoHashMapUnmanaged(defines.ScopePtr, Executer.Scope.Variables) = .empty,
+discoveringScope: ?defines.ScopePtr = null,
 
 cache: Cache,
 declCache: DeclCache,
@@ -863,7 +864,7 @@ fn capturedLocal(self: *Folder, name: defines.StringPtr, declScope: defines.Scop
 }
 
 pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID) Error!Comptime.Value.Ptr {
-    var decl  = self.typechecker.symbols.declarations.get(declPtr);
+    var decl = self.typechecker.symbols.declarations.get(declPtr);
 
     const prevToken = self.typechecker.lastToken;
     const prevFile = self.typechecker.currentFile;
@@ -952,12 +953,14 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
         },
         .Parameter =>
             if (self.getFlag(.InComptimeCall)) {
-                _ = try self.typechecker.typecheckDecl(declPtr, maybeExpected);
+                const paramType = try self.typechecker.typecheckDecl(declPtr, maybeExpected);
                 decl  = self.typechecker.symbols.declarations.get(declPtr);
 
                 if (self.typechecker.executer.getVar(decl.name)) |v| {
-                    self.declCache.put(self.arena.allocator(), declPtr, v)
-                        catch return Error.AllocatorFailure;
+                    if (self.typechecker.typeTable.get(paramType).isComptime(&self.typechecker.typeTable.slice())) {
+                        self.declCache.put(self.arena.allocator(), declPtr, v)
+                            catch return Error.AllocatorFailure;
+                    }
                     return v;
                 }
                 else {
@@ -1658,7 +1661,16 @@ pub fn evalThis(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value
         });
         return Error.ArgumentCountMismatch;
     }
-    const ty = self.scopeTypes.get(self.typechecker.currentScope);
+    const scopes = self.typechecker.symbols.scopes;
+    const current = self.typechecker.currentScope;
+    const ty = self.scopeTypes.get(current) orelse blk: {
+        const instance = self.discoveringScope orelse break :blk null;
+        const sameOrigin =
+            scopes.items(.parent)[instance] == scopes.items(.parent)[current]
+            and scopes.items(.kind)[instance] == scopes.items(.kind)[current]
+            and scopes.items(.module)[instance] == scopes.items(.module)[current];
+        break :blk if (sameOrigin) self.scopeTypes.get(instance) else null;
+    };
     if (ty == null) {
         self.report("Use of 'this' outside typed scope.", .{});
         return Error.IllegalSyntax;

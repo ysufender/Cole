@@ -31,7 +31,6 @@ pub let copy = fn (to: [@c]mut void, from: [@c]mut void, n: u32) -> void {
 
 let malloc = #(@extern) fn (size: mut c_size) -> mut [@c]mut void { };
 let free = #(@extern) fn (ptr: [@c]mut void) -> void { };
-let calloc = #(@extern) fn (nmemb: c_size, size: c_size) -> mut [@c]mut void { };
 let realloc = #(@extern) fn (ptr: [@c]mut void, nlen: c_size) -> mut [@c]mut void { };
 let memcpy = #(@extern) fn (dst: mut [@c]mut void, src: mut [@c]void, n: mut c_size) -> mut [@c]mut void { };
 
@@ -47,22 +46,22 @@ let destroy = fn (ctx: *mut void, ptr: *void) -> void {
     free(unsafeCast(ptr));
 };
 
-let alloc = fn (ctx: *mut void, count: u32, sizeByteEach: u32) -> Result([]mut void) {
-    let res: [@c]mut void = calloc(count, sizeByteEach);
+let alloc = fn (ctx: *mut void, count: u32, sizeBytesEach: u32) -> Result([]mut void) {
+    let res: [@c]mut void = malloc(count * sizeBytesEach);
 
     return
         if (res == undefined) (@Err, @OutOfMemory)
-        else (@Ok, res[0..count]);
+        else (@Ok, res[0..count * sizeBytesEach]);
 };
 
 let dealloc = fn (ctx: *mut void, ptr: []void) -> void {
     free(unsafeCast(ptr.ptr));
 };
 
-let _realloc = fn (ctx: *mut void, ptr: []mut void, nlen: u32) -> Result([]mut void) {
-    let res = realloc(ptr.ptr, nlen);
+let _realloc = fn (ctx: *mut void, ptr: []mut void, nlen: u32, sizeBytesEach: u32) -> Result([]mut void) {
+    let res = realloc(ptr.ptr, nlen * sizeBytesEach);
 
     return
         if (res == undefined) (@Err, @OutOfMemory)
-        else (@Ok, res[0..nlen]);
+        else (@Ok, res[0..nlen * sizeBytesEach]);
 };

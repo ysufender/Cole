@@ -43,7 +43,10 @@ let safeIntToStr = fn (num: c_long, allocator: Allocator::Allocator) -> std::Opt
     }
 
     digitCount = if (digitCount == 0) 1 else digitCount + (if (isSigned) 1 else 0);
-    let result: []mut u8 = cast(Allocator::alloc(allocator, digitCount + 1, 1));
+    let result = switch Allocator::alloc(u8)(allocator, digitCount + 1) {
+        @Ok -> |s| s,
+        @Err -> undefined,
+    };
 
     if result.ptr == undefined {
         return (@None, ());
@@ -107,12 +110,17 @@ let safeFloatToStr = fn (num: float, allocator: Allocator::Allocator) -> std::Op
     else if value >= 9223372036854775808.0 { special = if (negative) "-inf" else "inf"; }
 
     if special.len > 0 {
-        let text: []mut u8 = cast(Allocator::alloc(allocator, special.len + 1, 1));
-        for 0..special.len, |i| {
-            text[i] = special[i];
+        let text = Allocator::alloc(mut u8)(allocator, special.len + 1);
+        switch text {
+            @Ok -> { }
+            @Err -> return (@None, ());
         }
-        text[special.len] = 0;
-        return (@Some, text[0..special.len]);
+
+        for 0..special.len, |i| {
+            text.Ok[i] = special[i];
+        }
+        text.Ok[special.len] = 0;
+        return (@Some, text.Ok[0..special.len]);
     }
 
     let whole: mut c_ulong = cast(value);
@@ -142,7 +150,10 @@ let safeFloatToStr = fn (num: float, allocator: Allocator::Allocator) -> std::Op
     }
 
     let length: u32 = (if (negative) 1 else 0) + wholeDigits + 1 + precision;
-    let result: []mut u8 = cast(Allocator::alloc(allocator, length + 1, 1));
+    let result = switch Allocator::alloc(mut u8)(allocator, length + 1) {
+        @Ok -> |res| res,
+        @Err -> undefined,
+    };
 
     if result.ptr == undefined {
         return (@None, ());
