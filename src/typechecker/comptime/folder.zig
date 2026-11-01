@@ -449,7 +449,7 @@ pub fn evalDot(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.
             return uni.Value;
         },
         .String => |string|
-            if (std.mem.eql(u8, member, "len")) self.appendValue(.{ .Int = string.str.len })
+            if (std.mem.eql(u8, member, "len")) self.appendValue(.{ .Int = @intCast(string.str.len) })
             else if (std.mem.eql(u8, member, "ptr") and self.getFlag(.InComptimeCall)) ptr: {
                 const start: Comptime.Value.Ptr = @intCast(self.memory.items.len);
                 for (string.str) |c| {
@@ -2634,9 +2634,6 @@ pub fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Type
         return Error.ComptimeNotPossible;
     }
 
-    const prev = self.setFlag(.InComptimeCall, true);
-    defer _ = self.setFlag(.InComptimeCall, prev);
-
     self.typechecker.currentFile = prevs;
 
     const signature = self.typechecker.typeTable.get(function.signature).Function;
@@ -2655,6 +2652,9 @@ pub fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Type
     for (argsRange.start..argsRange.end, 0..) |ptr, idx| {
         args[idx] = try self.eval(ast.extra[@intCast(ptr)], signature.argTypes[idx]);
     }
+
+    const prev = self.setFlag(.InComptimeCall, true);
+    defer _ = self.setFlag(.InComptimeCall, prev);
 
     return self.typechecker.executer.executeCall(function, args);
 }
