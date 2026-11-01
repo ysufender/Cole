@@ -368,19 +368,57 @@ pub fn evalDot(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.
 
     const memberToken = tokens.get(ast.extra[extraPtr + 1]);
 
-    // @TODO Handle proper addressing
+    const objectPtr = try self.eval(ast.extra[extraPtr], null);
+
     switch (memberToken.type) {
-        .Ampersand, .Star => {
-            self.report("Attempt to use pointers in compile time scope.", .{});
-            return Error.ExistentialDilemma;
-        },
+        .Ampersand =>
+            if (self.getFlag(.InComptimeCall)) {
+                return self.appendValue(.{
+                    .Pointer = .{
+                        .Type = resType,
+                        .To = objectPtr,
+                    },
+                });
+            }
+            else {
+                self.report("Attempt to create pointers in compile-time scope.", .{});
+                return Error.ExistentialDilemma;
+            },
+
+        .Star =>
+            if (self.getFlag(.InComptimeCall)) {
+                return switch (self.getValue(objectPtr)) {
+                    .Pointer => |ptr| ptr.To,
+                    .Undefined => {
+                        self.report("Attempt to dereference an undefined pointer at comptime.", .{});
+                        return Error.UseOfUndefinedValue;
+                    },
+                    else => common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
+                };
+            }
+            else {
+                self.report("Attempt to dereference pointers in compile-time scope.", .{});
+                return Error.ExistentialDilemma;
+            },
         else => { },
     }
 
-    const objectPtr = try self.eval(ast.extra[extraPtr], null);
-
-    const object = self.getValue(objectPtr);
+    var object = self.getValue(objectPtr);
     const member = memberToken.lexeme(self.typechecker.context, self.typechecker.currentFile);
+
+    switch (object) {
+        .Pointer => |ptr|
+            if (self.getFlag(.InComptimeCall)) { object = self.getValue(ptr.To); }
+            else {
+                self.report("Attempt to use pointers in compile-time scope.", .{});
+                return Error.ExistentialDilemma;
+            },
+        .Undefined => {
+            self.report("Attempt to access member '{s}' through an undefined pointer at comptime.", .{member});
+            return Error.UseOfUndefinedValue;
+        },
+        else => { },
+    }
 
     return switch (object) {
         .Slice => |slice|
@@ -410,8 +448,26 @@ pub fn evalDot(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.
 
             return uni.Value;
         },
+        .String => |string|
+            if (std.mem.eql(u8, member, "len")) self.appendValue(.{ .Int = string.str.len })
+            else if (std.mem.eql(u8, member, "ptr") and self.getFlag(.InComptimeCall)) ptr: {
+                const start: Comptime.Value.Ptr = @intCast(self.memory.items.len);
+                for (string.str) |c| {
+                    _ = try self.appendValue(.{ .Int = c });
+                }
+                break :ptr self.appendValue(.{
+                    .Pointer = .{
+                        .Type = resType,
+                        .To = start,
+                    },
+                });
+            }
+            else {
+                self.report("Attempt to create pointers in compile-time scope.", .{});
+                return Error.ExistentialDilemma;
+            },
         else => {
-            self.report("Attempt to operate on pointer at comptime.", .{});
+            self.report("Attempt to access member '{s}' of a value that has no members at comptime.", .{member});
             return Error.ExistentialDilemma;
         },
     };
@@ -934,7 +990,7 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
             }
 
             switch (self.typechecker.typeTable.get(expected)) {
-                .Pointer => {
+                .Pointer => if (!self.getFlag(.InComptimeCall)) {
                     self.report("Comptime evaluation of variable of type '{s}' is not possible.", .{
                         try self.typechecker.typeName(self.arena.allocator(), expected),
                     });
@@ -2160,9 +2216,8 @@ pub fn evalTypeInfo(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.V
                                 });
                                 _ = try self.appendValue(fieldsSlice);
                                 _ = try self.appendValue(defsSlice);
-                                _ = try self.appendValue(.{ .Bool = false }); // external
 
-                                break :range .{ .start = start, .end = start + 5 };
+                                break :range .{ .start = start, .end = start + 4 };
                             },
                         },
                     },
@@ -2215,9 +2270,8 @@ pub fn evalTypeInfo(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.V
                                 });
                                 _ = try self.appendValue(fieldsSlice);
                                 _ = try self.appendValue(defsSlice);
-                                _ = try self.appendValue(.{ .Bool = false }); // external
                                 _ = try self.appendValue(.{ .Bool = str.isTuple });
-                                break :range .{ .start = start, .end = start + 6 };
+                                break :range .{ .start = start, .end = start + 7 };
                             },
                         },
                     },
@@ -2242,8 +2296,7 @@ pub fn evalTypeInfo(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.V
                                 });
                                 _ = try self.appendValue(fieldsSlice);
                                 _ = try self.appendValue(defsSlice);
-                                _ = try self.appendValue(.{ .Bool = false }); // external
-                                break :range .{ .start = start, .end = start + 7 };
+                                break :range .{ .start = start, .end = start + 8 };
                             },
                         },
                     },
@@ -2581,6 +2634,9 @@ pub fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Type
         return Error.ComptimeNotPossible;
     }
 
+    const prev = self.setFlag(.InComptimeCall, true);
+    defer _ = self.setFlag(.InComptimeCall, prev);
+
     self.typechecker.currentFile = prevs;
 
     const signature = self.typechecker.typeTable.get(function.signature).Function;
@@ -2599,9 +2655,6 @@ pub fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Type
     for (argsRange.start..argsRange.end, 0..) |ptr, idx| {
         args[idx] = try self.eval(ast.extra[@intCast(ptr)], signature.argTypes[idx]);
     }
-
-    const prev = self.setFlag(.InComptimeCall, true);
-    defer _ = self.setFlag(.InComptimeCall, prev);
 
     return self.typechecker.executer.executeCall(function, args);
 }
