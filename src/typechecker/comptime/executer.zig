@@ -67,9 +67,6 @@ pub fn init(typechecker: *Typechecker, allocator: Allocator) Error!Executer {
 pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.Value.Ptr) Error!Comptime.Value.Ptr {
     const sign = self.typechecker.typeTable.get(func.signature).Function;
 
-    const ast = self.typechecker.context.getAST(func.source);
-    const tokens = self.typechecker.context.getTokens(ast.tokens);
-
     const pscope = self.typechecker.currentScope;
     defer self.typechecker.currentScope = pscope;
     self.typechecker.currentScope = func.scope;
@@ -77,6 +74,9 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
     const psrc = self.typechecker.currentFile;
     defer self.typechecker.currentFile = psrc;
     self.typechecker.currentFile = func.source;
+
+    const ast = self.typechecker.context.getAST(func.source);
+    const tokens = self.typechecker.context.getTokens(ast.tokens);
 
     const bodyPtr = ast.statements.get(func.body).value;
 
@@ -104,20 +104,28 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
         self.stack.peek().variables.putAssumeCapacityNoClobber(func.args[i], arg);
     }
 
-    const pc = self.typechecker.setFlag(.CoveredAllPaths, false);
-    defer _ = self.typechecker.setFlag(.CoveredAllPaths, pc);
+    const prevsc = self.typechecker.folder.setFlag(.StaticPass, false);
+    defer _ = self.typechecker.folder.setFlag(.StaticPass, prevsc);
 
     const returnType = sign.returnType;
 
-    try self.typechecker.typecheckStatement(func.body, returnType);
-    if (!(
-        self.typechecker.typeTable.get(returnType).isZeroBit()
-        or self.typechecker.getFlag(.CoveredAllPaths)
-    )) {
-        self.report("Function with return type '{s}' does not return a value in all code paths.", .{
-            try self.typechecker.typeName(self.arena.allocator(), returnType),
-        });
-        return Error.UncoveredCodePath;
+    {
+        const pc = self.typechecker.setFlag(.CoveredAllPaths, false);
+        defer _ = self.typechecker.setFlag(.CoveredAllPaths, pc);
+
+        const psc = self.typechecker.folder.setFlag(.StaticPass, true);
+        defer _ = self.typechecker.folder.setFlag(.StaticPass, psc);
+
+        try self.typechecker.typecheckStatement(func.body, returnType);
+        if (!(
+            self.typechecker.typeTable.get(returnType).isZeroBit()
+            or self.typechecker.getFlag(.CoveredAllPaths)
+        )) {
+            self.report("Function with return type '{s}' does not return a value in all code paths.", .{
+                try self.typechecker.typeName(self.arena.allocator(), returnType),
+            });
+            return Error.UncoveredCodePath;
+        }
     }
 
     while (self.stack.index > base) {
@@ -226,6 +234,11 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
                 continue;
             },
             .For => {
+                if (self.typechecker.hasMetadata(ast.extra[statement.value], "@inline")) {
+                    self.report("Comptime execution of inlined for loops is not possible.", .{});
+                    return Error.ComptimeNotPossible;
+                }
+
                 const isRange = ast.extra[statement.value + 1] == 1;
                 const isPtr = ast.extra[statement.value + 5] == 1;
                 const capturePtr = ast.extra[statement.value + 3];
@@ -370,6 +383,7 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
                     });
                 }
                 else if (ast.extra[statement.value + 2] == 1) {
+                    // @TODO fix this place to account for 'else if' usage.
                     const bPtr = ast.extra[statement.value + 3];
                     const bod = ast.statements.get(bPtr);
                     try self.stack.push(.{
@@ -399,10 +413,35 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
     return @intFromEnum(Comptime.Value.Implicit.Void);
 }
 
-pub fn executeAssignment(self: *Executer, exprPtr: defines.ExpressionPtr) Error!Comptime.Value.Ptr {
-    _ = exprPtr;
-    self.report("Comptime mutable variables are not (yet) supportede.", .{});
-    return Error.ComptimeNotPossible;
+pub fn executeAssignment(self: *Executer, extraPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {
+    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+    const tokens = self.typechecker.context.getTokens(ast.tokens);
+
+    const assignee = ast.expressions.get(ast.extra[extraPtr]);
+    const assigneeType = try self.typechecker.typecheckExpression(ast.extra[extraPtr], null);
+    const value = try self.typechecker.folder.eval(ast.extra[extraPtr + 1], assigneeType);
+
+    switch (assignee.type) {
+        .Identifier => {
+            const token = try self.typechecker.builder.internString(tokens.get(assignee.value).lexeme(self.typechecker.context, self.typechecker.currentFile));
+            self.setVar(token, value);
+        },
+        .Indexing => {
+            const slice = switch (self.typechecker.folder.getValue(try self.typechecker.folder.eval(ast.extra[assignee.value], assigneeType))) {
+                .Slice => |s| s.To,
+                .Pointer => |p| p.To,
+                else => return common.debug.ShouldBeImpossible(undefined, @src()),
+            };
+            const index = self.typechecker.folder.getValue(try self.typechecker.folder.eval(ast.extra[assignee.value + 1], assigneeType)).Int;
+
+            self.typechecker.folder.memory.items[@intCast(slice + index)] = self.typechecker.folder.getValue(value);
+        },
+        .Scoping => { },
+        .Dot => { },
+        else => return common.debug.ShouldBeImpossible(undefined, @src()),
+    }
+
+    return value;
 }
 
 pub fn snapshot(self: *const Executer, allocator: Allocator) Error!Scope.Variables {
@@ -425,6 +464,16 @@ pub fn getVar(self: *const Executer, name: defines.StringPtr) ?Comptime.Value.Pt
     }
 
     return null;
+}
+
+pub fn setVar(self: *const Executer, name: defines.StringPtr, val: Comptime.Value.Ptr) void {
+    var tmp = self.stack;
+
+    while (tmp.pop()) |scope| {
+        if (scope.variables.getEntry(name)) |v| {
+            v.value_ptr.* = val;
+        }
+    }
 }
 
 fn report(self: *Executer, comptime fmt: []const u8, args: anytype) void {

@@ -1044,10 +1044,11 @@ fn typecheckAssignment(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!vo
 
     if (ast.expressions.get(expr).type == .Indexing) {
         const indexable = ast.extra[ast.expressions.get(expr).value];
-        const indexableType = try self.typecheckExpression(indexable, vtype);
+        const indexableType = try self.typecheckExpression(indexable, null);
 
         if (
-            self.typeTable.get(indexableType) == .Array
+            false
+            and self.typeTable.get(indexableType) == .Array
             and !self.mutable(indexableType)
         ) {
             self.report("Attempt to modify non-mutable value of type '{s}'.", .{
@@ -1080,7 +1081,9 @@ fn typecheckExpressionStatement(self: *Typechecker, exprPtr: defines.OpaquePtr) 
 
     const expression = ast.expressions.get(exprPtr);
 
-    if (expression.type == .Assignment) return self.typecheckAssignment(expression.value);
+    if (expression.type == .Assignment) {
+        return self.typecheckAssignment(expression.value);
+    }
 
     const resultType = try self.typecheckExpression(exprPtr, null);
 
@@ -1907,11 +1910,39 @@ pub fn typecheckBuiltinCall(self: *Typechecker, extraPtr: defines.ExpressionPtr,
         BI("unreachable") => comptime Comptime.Folder.Builtin.Type("noreturn"),
         BI("this") => comptime Comptime.Folder.Builtin.Type("type"),
         BI("isComptime") => comptime Comptime.Folder.Builtin.Type("bool"),
+        BI("field") => self.typecheckFieldBuiltin(extraPtr),
         else => {
             self.report("Builtin '{s}' is not usable in this context.", .{Resolver.builtins[declPtr]});
             return Error.ComptimeNotPossible;
         },
     };
+}
+
+pub fn typecheckFieldBuiltin(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!TypeID {
+    const ast = self.context.getAST(self.currentFile);
+    const expressionList = ast.expressions.items(.value)[ast.extra[extraPtr + 1]];
+    const args = defines.Range{
+        .start = ast.extra[expressionList],
+        .end = ast.extra[expressionList + 1],
+    };
+
+    if (args.len() != 2) {
+        self.report("'getMetadata' expects a single expression argument, received {d}.", .{
+            args.len(),
+        });
+        return Error.ArgumentCountMismatch;
+    }
+
+    const from = try self.typecheckExpression(ast.extra[args.at(0)], null);
+    const field = switch (self.folder.getValue(try self.folder.eval(ast.extra[args.at(1)], comptime Comptime.Folder.Builtin.Type("[]u8")))) {
+        .String => |str| str.str,
+        else => {
+            self.report("Expected a compile-time string.", .{});
+            return Error.TypeMismatch;
+        },
+    };
+
+    return self.typecheckFieldAccess(from, field);
 }
 
 pub fn typecheckGetMetadata(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!TypeID {

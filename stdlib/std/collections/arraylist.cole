@@ -7,10 +7,11 @@ let Res = std::Result;
 let Opt = std::Option;
 
 pub let ArrayList = fn (T: type) -> type {
-    let Self = struct {
+    return struct {
         items   : mut []mut T,
         capacity: mut u32,
 
+        let Self = this();
         let Elem = T;
         let Overhead = 32;
 
@@ -65,5 +66,4 @@ pub let ArrayList = fn (T: type) -> type {
             return (@Ok, index);
         };
     };
-    return Self;
 }; 

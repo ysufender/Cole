@@ -46,6 +46,7 @@ pub const Flags = enum(u3) {
     LValue = 1,
     InComptimeCall = 2,
     Volatile = 3,
+    StaticPass = 4,
 
     pub fn flag(flagToGet: Flags) u3 {
         return @intFromEnum(flagToGet);
@@ -193,7 +194,7 @@ pub fn eval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeI
         .FunctionDefinition => try self.evalFunction(exprPtr, expr.value),
 
         // @Note should be handled with the statements.
-        .Assignment => try self.typechecker.executer.executeAssignment(exprPtr),
+        .Assignment => try self.typechecker.executer.executeAssignment(expr.value),
     };
 
     if (
@@ -360,51 +361,40 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
     });
 }
 
-pub fn evalDot(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {
-    const resType = try self.typechecker.typecheckDot(extraPtr);
-
-    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
-    const tokens = self.typechecker.context.getTokens(ast.tokens);
-
-    const memberToken = tokens.get(ast.extra[extraPtr + 1]);
-
-    const objectPtr = try self.eval(ast.extra[extraPtr], null);
-
-    switch (memberToken.type) {
-        .Ampersand =>
-            if (self.getFlag(.InComptimeCall)) {
-                return self.appendValue(.{
-                    .Pointer = .{
-                        .Type = resType,
-                        .To = objectPtr,
-                    },
-                });
-            }
-            else {
-                self.report("Attempt to create pointers in compile-time scope.", .{});
-                return Error.ExistentialDilemma;
-            },
-
-        .Star =>
-            if (self.getFlag(.InComptimeCall)) {
-                return switch (self.getValue(objectPtr)) {
-                    .Pointer => |ptr| ptr.To,
-                    .Undefined => {
-                        self.report("Attempt to dereference an undefined pointer at comptime.", .{});
-                        return Error.UseOfUndefinedValue;
-                    },
-                    else => common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
-                };
-            }
-            else {
-                self.report("Attempt to dereference pointers in compile-time scope.", .{});
-                return Error.ExistentialDilemma;
-            },
-        else => { },
+fn evalFieldAccess(self: *Folder, resType: TypeID, on: Comptime.Value.Ptr, name: []const u8) Error!Comptime.Value.Ptr {
+    if (std.mem.eql(u8, name, "&")) {
+        if (self.getFlag(.InComptimeCall)) {
+            return self.appendValue(.{
+                .Pointer = .{
+                    .Type = resType,
+                    .To = on,
+                },
+            });
+        }
+        else {
+            self.report("Attempt to create pointers in compile-time scope.", .{});
+            return Error.ExistentialDilemma;
+        }
+    }
+    else if (std.mem.eql(u8, name, "*")) {
+        if (self.getFlag(.InComptimeCall)) {
+            return switch (self.getValue(on)) {
+                .Pointer => |ptr| ptr.To,
+                .Undefined => {
+                    self.report("Attempt to dereference an undefined pointer at comptime.", .{});
+                    return Error.UseOfUndefinedValue;
+                },
+                else => common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
+            };
+        }
+        else {
+            self.report("Attempt to dereference pointers in compile-time scope.", .{});
+            return Error.ExistentialDilemma;
+        }
     }
 
-    var object = self.getValue(objectPtr);
-    const member = memberToken.lexeme(self.typechecker.context, self.typechecker.currentFile);
+    var object = self.getValue(on);
+    const member = name;
 
     switch (object) {
         .Pointer => |ptr|
@@ -471,6 +461,20 @@ pub fn evalDot(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.
             return Error.ExistentialDilemma;
         },
     };
+
+}
+
+pub fn evalDot(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {
+    const resType = try self.typechecker.typecheckDot(extraPtr);
+
+    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+    const tokens = self.typechecker.context.getTokens(ast.tokens);
+
+    const memberToken = tokens.get(ast.extra[extraPtr + 1]);
+
+    const objectPtr = try self.eval(ast.extra[extraPtr], null);
+
+    return self.evalFieldAccess(resType, objectPtr, memberToken.lexeme(self.typechecker.context, self.typechecker.currentFile));
 }
 
 pub fn evalMark(
@@ -513,6 +517,14 @@ pub fn evalSlicing(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Va
     const startIndex = self.getValue(try self.expectDefined(ast.extra[extraPtr + 1], null)).Int;
     const endIndex = self.getValue(try self.expectDefined(ast.extra[extraPtr + 2], null)).Int;
 
+    if (startIndex >= self.memory.items.len or endIndex > self.memory.items.len) {
+        self.report("Range [{d}..{d}] is outside out the bound of comptime memory.", .{
+            startIndex,
+            endIndex,
+        });
+        return Error.OutOfMemory;
+    }
+
     const slice = switch (self.getValue(try self.expectDefined(ast.extra[extraPtr], null))) {
         .Slice => |slice| slice,
         .Pointer => |ptr| (Comptime.Value{
@@ -522,18 +534,37 @@ pub fn evalSlicing(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Va
                 .To = ptr.To,
             },
         }).Slice,
-        else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
+        .String => |str| {
+            if (startIndex >= str.str.len or startIndex < 0) {
+                self.report("Invalid slice starting position {d}. Slice length is {d}.", .{
+                    startIndex,
+                    str.str.len,
+                });
+                return Error.IndexOutOfBounds;
+            }
+
+            if (endIndex > str.str.len or endIndex < 0) {
+                self.report("Invalid slice ending position {d}. Slice length is {d}.", .{
+                    endIndex,
+                    str.str.len,
+                });
+                return Error.IndexOutOfBounds;
+            }
+
+            return self.appendValue(.{
+                .String = .{
+                    .type = str.type,
+                    .str = str.str[@intCast(startIndex)..@intCast(endIndex)],
+                },
+            });
+        },
+        else => |t| {
+            self.report("Attempt to index {s}.", .{@tagName(t)});
+            return Error.IllegalSyntax;
+        },
     };
 
-    if (startIndex >= self.memory.items.len or endIndex > self.memory.items.len) {
-        self.report("Range [{d}..{d}] is outside out the bound of comptime memory.", .{
-            startIndex,
-            endIndex,
-        });
-        return Error.OutOfMemory;
-    }
-
-    if (startIndex >= slice.Size) {
+    if (startIndex >= slice.Size or startIndex < 0) {
         self.report("Invalid slice starting position {d}. Slice length is {d}.", .{
             startIndex,
             slice.Size,
@@ -541,14 +572,13 @@ pub fn evalSlicing(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Va
         return Error.IndexOutOfBounds;
     }
 
-    if (endIndex > slice.Size) {
+    if (endIndex > slice.Size or endIndex < 0) {
         self.report("Invalid slice ending position {d}. Slice length is {d}.", .{
             endIndex,
             slice.Size,
         });
         return Error.IndexOutOfBounds;
     }
-
 
     return self.appendValue(.{
         .Slice = .{
@@ -984,7 +1014,7 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
                 return Error.ComptimeNotPossible;
             }
 
-            if (self.typechecker.mutable(expected)) {
+            if (self.typechecker.mutable(expected) and (!self.getFlag(.InComptimeCall) or self.getFlag(.StaticPass))) {
                 self.report("Comptime evaluation of mutable variable is not possible.", .{});
                 return Error.ComptimeNotPossible;
             }
@@ -999,12 +1029,19 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
                 else => { },
             }
 
+            if (self.getFlag(.InComptimeCall) and !decl.topLevel) {
+                if (self.typechecker.executer.getVar(decl.name)) |live| {
+                    _ = self.setFlag(.Volatile, true);
+                    break :blk live;
+                }
+            }
+
             const valuePtr = try self.expectDefined(decl.node, maybeExpected);
 
             break :blk self.castValue(valuePtr, expected, false);
         },
         .Capture =>
-            if (self.getFlag(.InComptimeCall)) {
+            if (self.getFlag(.InComptimeCall) or self.getFlag(.StaticPass)) {
                 if (self.typechecker.executer.getVar(decl.name)) |v| {
                     return v;
                 }
@@ -1087,6 +1124,7 @@ fn evalBuiltinCall(self: *Folder, extraPtr: defines.OpaquePtr, declPtr: defines.
         BI("compileLog") => self.evalCompileLog(extraPtr),
         BI("this") => self.evalThis(extraPtr),
         BI("isComptime") => self.evalIsComptime(extraPtr),
+        BI("field") => self.evalField(extraPtr),
         else => {
             self.report("Builtin '{s}' is not usable in this context.", .{Resolver.builtins[declPtr]});
             return Error.ComptimeNotPossible;
@@ -1690,6 +1728,30 @@ fn evalCast(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID, 
     return self.castValue(thingToCast, targetType, false);
 }
 
+pub fn evalField(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {
+    const resType = try self.typechecker.typecheckFieldBuiltin(extraPtr);
+
+    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+
+    const expressionList = ast.expressions.items(.value)[ast.extra[extraPtr + 1]];
+    const args = defines.Range{
+        .start = ast.extra[expressionList],
+        .end = ast.extra[expressionList + 1],
+    };
+
+    if (args.len() != 2) {
+        self.report("'field' expects a single expression argument, received {d}.", .{
+            args.len(),
+        });
+        return Error.ArgumentCountMismatch;
+    }
+
+    const valueToAccessOn = try self.eval(ast.extra[args.at(0)], null);
+    const field = self.getValue(try self.eval(ast.extra[args.at(1)], null)).String.str;
+
+    return self.evalFieldAccess(resType, valueToAccessOn, field);
+}
+
 pub fn evalIsComptime(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
 
@@ -1767,8 +1829,10 @@ pub fn evalCompileLog(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime
 
     const message = switch (self.getValue(try self.eval(ast.extra[args.at(0)], null))) {
         .String => |str| str,
-        else => {
-            self.report("Expected a string message in compile log.", .{});
+        else => |t| {
+            self.report("Expected a string message in compile log, received {s}.", .{
+                @tagName(t),
+            });
             return Error.TypeMismatch;
         },
     };
@@ -1802,7 +1866,7 @@ pub fn evalGetMetadata(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptim
     });
 
     const metadata = self.typechecker.getMetadata(decl.node) orelse {
-        self.report("This shouls've been handled in the typechecker.", .{});
+        self.report("This should've been handled in the typechecker.", .{});
         return common.debug.ShouldBeImpossible(undefined, @src());
     };
 
@@ -2668,6 +2732,9 @@ pub fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Type
     const prev = self.setFlag(.InComptimeCall, true);
     defer _ = self.setFlag(.InComptimeCall, prev);
 
+    const prevVolatile = self.setFlag(.Volatile, false);
+    defer _ = self.setFlag(.Volatile, prevVolatile);
+
     return self.typechecker.executer.executeCall(function, args);
 }
 
@@ -2847,14 +2914,46 @@ fn expectDefined(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?
 }
 
 pub fn constructUndefined(self: *Folder, valueType: TypeID) Error!Comptime.Value.Ptr {
-    return switch (self.typechecker.typeTable.get(valueType)) {
-        .Void, .Function, .Type, .Any, .Noreturn, .EnumLiteral => {
+    return res: switch (self.typechecker.typeTable.get(valueType)) {
+        .Union, .Struct, .Enum, .Void, .Function, .Type, .Any, .Noreturn, .EnumLiteral => {
             self.report("Given type '{s}' can't be undefined.", .{
                 try self.typechecker.typeName(self.arena.allocator(), valueType)
             });
             return Error.IllegalSyntax;
         },
-        else => self.appendValue(.{ .Undefined = valueType }),
+        .Bool => self.appendValue(.{ .Bool = false }),
+        .CUInt, .CUChar, .CChar, .CLong, .CInt, .CShort, .CSize,
+        .CULong, .CUShort, .Integer, .ComptimeInt  => self.appendValue(.{ .Int = 0 }),
+        .CDouble, .Float, .ComptimeFloat => self.appendValue(.{ .Float = 0 }),
+        .Pointer => |ptr| switch (ptr.size) {
+            .Slice => switch (self.typechecker.typeTable.get(ptr.child)) {
+                .Integer => |i|
+                    if (i.size == 8) self.appendValue(.{ .String = .{
+                        .type = .Cole,
+                        .str = "",
+                    }})
+                    else self.appendValue(.{ .Undefined = valueType }),
+                else => self.appendValue(.{ .Undefined = valueType }),
+            },
+            else => self.appendValue(.{ .Undefined = valueType }),
+        },
+        .Array => |arr| {
+            const start: u32 = @intCast(self.memory.items.len);
+            _ = self.memory.addManyAsSlice(self.arena.allocator(), arr.len)
+                catch return Error.AllocatorFailure;
+
+            for (start..start + arr.len) |ptr| {
+                self.memory.items[ptr] = self.getValue(try self.constructUndefined(arr.child));
+            }
+
+            break :res self.appendValue(.{
+                .Slice = .{
+                    .Type = valueType,
+                    .Size = @intCast(arr.len),
+                    .To = start,
+                },
+            });
+        },
     };
 }
 

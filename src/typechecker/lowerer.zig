@@ -1675,6 +1675,13 @@ fn builtinCall(
         BI("compileLog"), BI("compileError") => self.typechecker.builder.label(
             try self.typechecker.folder.generateRandomName(.BuiltinCall),
         ),
+        BI("field") => self.typechecker.builder.dot(
+            try self.expression(ast.extra[args.at(0)], try self.typechecker.typecheckExpression(ast.extra[args.at(0)], null)),
+            try self.typechecker.builder.internString(self.typechecker.folder.getValue(
+                try self.typechecker.folder.eval(ast.extra[args.at(1)], null),
+            ).String.str),
+            try self.typechecker.typecheckExpression(ast.extra[args.at(0)], null),
+        ),
         else => common.debug.NotImplemented(self.typechecker.context.log, @src()),
     };
 }
