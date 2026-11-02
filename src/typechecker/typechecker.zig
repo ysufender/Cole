@@ -488,12 +488,19 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
                 else if (decl.topLevel) self.modules.modules.get(self.symbols.scopes.items(.module)[decl.scope]).name
                 else try self.folder.generateRandomNameString(.Function);
 
-            const newName =
-                if (
+            const keepName = keep: {
+                const prevFile = self.currentFile;
+                self.currentFile = func.source;
+                defer self.currentFile = prevFile;
+
+                break :keep
                     self.hasMetadata(func.expr, "@export")
                     or self.hasMetadata(func.expr, "@extern")
-                    and decl.topLevel
-                ) symName
+                    and decl.topLevel;
+            };
+
+            const newName =
+                if (keepName) symName
                 else if (!decl.topLevel) namespace
                 else std.fmt.allocPrint(self.arena.allocator(), "{s}::{s}", .{
                     namespace,
@@ -591,7 +598,9 @@ fn typecheckFor(self: *Typechecker, extraPtr: defines.OpaquePtr, expected: TypeI
         const prev = self.setFlag(.InLoop, true);
         defer _ = self.setFlag(.InLoop, prev);
 
-        try self.typecheckStatement(body, expected);
+        if (!self.hasMetadata(range.start, "@inline")) {
+            try self.typecheckStatement(body, expected);
+        }
     }
     else {
         const loopExpr = ast.extra[extraPtr];
@@ -645,7 +654,9 @@ fn typecheckFor(self: *Typechecker, extraPtr: defines.OpaquePtr, expected: TypeI
         const prev = self.setFlag(.InLoop, true);
         defer _ = self.setFlag(.InLoop, prev);
 
-        try self.typecheckStatement(body, expected);
+        if (!self.hasMetadata(loopExpr, "@inline")) {
+            try self.typecheckStatement(body, expected);
+        }
     }
 }
 

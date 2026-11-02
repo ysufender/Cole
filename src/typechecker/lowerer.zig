@@ -981,6 +981,13 @@ fn inlineForLoop(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser
             catch return Error.AllocatorFailure;
         defer _ = self.typechecker.folder.declCache.remove(captureDeclPtr);
 
+        {
+            const prevl = self.typechecker.setFlag(.InLoop, true);
+            defer _ = self.typechecker.setFlag(.InLoop, prevl);
+
+            try self.typechecker.typecheckStatement(bodyPtr, comptime Comptime.Folder.Builtin.Type("any"));
+        }
+
         self.lastLoop = base;
         const body = try self.statement(bodyPtr);
 
