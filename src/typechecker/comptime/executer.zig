@@ -144,11 +144,10 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
                     else {
                         top.pc = 0;
 
-                        self.stack.peek().variables.put(
-                            self.arena.allocator(),
-                            top.data.range.capture,
-                            try self.typechecker.folder.appendValue(.{ .Int = top.data.range.start }),
-                        ) catch return Error.AllocatorFailure;
+                        const val = self.stack.peek().variables.get(top.data.range.capture)
+                            orelse return common.debug.ShouldBeImpossible(undefined, @src());
+
+                        self.typechecker.folder.memory.items[val].Int = top.data.range.start;
                     }
                 },
                 .For => {
@@ -160,11 +159,18 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
                     else {
                         top.pc = 0;
 
-                        self.stack.peek().variables.put(
-                            self.arena.allocator(),
-                            top.data.over.capture,
-                            top.data.over.slice.at(top.data.over.index),
-                        ) catch return Error.AllocatorFailure;
+                        if (top.data.over.isPtr) {
+                            const val = self.stack.peek().variables.get(top.data.over.capture)
+                                orelse return common.debug.ShouldBeImpossible(undefined, @src());
+                            self.typechecker.folder.memory.items[val].Pointer.To += 1;
+                        }
+                        else {
+                            self.stack.peek().variables.put(
+                                self.arena.allocator(),
+                                top.data.over.capture,
+                                top.data.over.slice.at(top.data.over.index),
+                            ) catch return Error.AllocatorFailure;
+                        }
                     }
                 },
             }
@@ -294,9 +300,24 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
                         self.stack.peek().variables.put(
                             self.arena.allocator(),
                             captureNamePtr,
-                            if (isPtr) {
-                                self.report("Pointer captured for loops are not supported in compile-time contexts.", .{});
-                                return Error.IllegalSyntax;
+                            if (isPtr) ptr: {
+                                const child = switch (self.typechecker.typeTable.get(loopvar.Type)) {
+                                    .Pointer => |p| p.child,
+                                    .Array => |a| a.child,
+                                    else => return common.debug.ShouldBeImpossible(undefined, @src()),
+                                };
+
+                                break :ptr try self.typechecker.folder.appendValue(.{
+                                    .Pointer = .{
+                                        .Type = try self.typechecker.registerType(.{
+                                            .Pointer = .{
+                                            .mutable = false,
+                                            .size = .Single,
+                                            .child = child,
+                                        }}),
+                                        .To = loopvar.To,
+                                    },
+                                });
                             }
                             else loopvar.To,
                         ) catch return Error.AllocatorFailure;
