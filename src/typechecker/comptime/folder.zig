@@ -1003,10 +1003,22 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
 
             break :blk self.castValue(valuePtr, expected, false);
         },
-        .Capture => {
-            self.report("Attempt to evaluate captured variable in non-comptime scope.", .{});
-            return Error.ComptimeNotPossible;
-        },
+        .Capture =>
+            if (self.getFlag(.InComptimeCall)) {
+                if (self.typechecker.executer.getVar(decl.name)) |v| {
+                    return v;
+                }
+                else {
+                    self.report("Failed to evaluate comptime capture '{s}'.", .{
+                        self.typechecker.builder.getInternedString(decl.name),
+                    });
+                    return Error.EarlyEval;
+                }
+            }
+            else {
+                self.report("Attempt to evaluate captured variable in non-comptime scope.", .{});
+                return Error.ComptimeNotPossible;
+            },
         .Parameter =>
             if (self.getFlag(.InComptimeCall)) {
                 const paramType = try self.typechecker.typecheckDecl(declPtr, maybeExpected);

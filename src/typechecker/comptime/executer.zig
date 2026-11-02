@@ -25,9 +25,29 @@ pub const Scope = struct {
     pub const Variables = collections.HashMap(defines.StringPtr, Comptime.Value.Ptr);
 
     pc: defines.Offset,
-    bp: defines.Offset,
     variables: Variables,
     body: []const defines.StatementPtr,
+    kind: enum {
+        Block,
+        Range,
+        For,
+        While,
+    },
+    data: union {
+        block: void,
+        range: struct {
+            start: u32,
+            end: u32,
+            capture: defines.StringPtr,
+        },
+        over: struct {
+            slice: defines.Range,
+            index: defines.Offset,
+            isPtr: bool,
+            capture: defines.StringPtr,
+        },
+        condition: defines.ExpressionPtr,
+    }
 };
 
 const Executer = @This();
@@ -69,10 +89,11 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
 
     const base = self.stack.index;
     try self.stack.push(.{
-        .bp = @intCast(self.typechecker.folder.memory.items.len),
         .pc = 0,
         .variables = .empty,
         .body = body,
+        .kind = .Block,
+        .data = .{ .block = {} },
     });
     defer self.stack.revert(base);
 
@@ -103,9 +124,50 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
         const top = self.stack.peekm() orelse break;
 
         if (top.pc >= top.body.len) {
-            // @Beware @TODO Causes out of bounds bugs
-            // self.typechecker.folder.memory.shrinkRetainingCapacity(top.bp);
-            _ = self.stack.pop();
+            switch (top.kind) {
+                .Block => _ = self.stack.pop(),
+                .While => {
+                    const conditionExpr = top.data.condition;
+                    const conditionRes = self.typechecker.folder.getValue(
+                        try self.typechecker.folder.eval(conditionExpr, comptime Comptime.Folder.Builtin.Type("bool")),
+                    ).Bool;
+
+                    if (conditionRes) {
+                        top.pc = 0;
+                    }
+                },
+                .Range => {
+                    top.data.range.start += 1;
+                    if (top.data.range.start >= top.data.range.end) {
+                        _ = self.stack.pop();
+                    }
+                    else {
+                        top.pc = 0;
+
+                        self.stack.peek().variables.put(
+                            self.arena.allocator(),
+                            top.data.range.capture,
+                            try self.typechecker.folder.appendValue(.{ .Int = top.data.range.start }),
+                        ) catch return Error.AllocatorFailure;
+                    }
+                },
+                .For => {
+                    top.data.over.index += 1;
+
+                    if (top.data.over.index >= top.data.over.slice.len()) {
+                        _ = self.stack.pop();
+                    }
+                    else {
+                        top.pc = 0;
+
+                        self.stack.peek().variables.put(
+                            self.arena.allocator(),
+                            top.data.over.capture,
+                            top.data.over.slice.at(top.data.over.index),
+                        ) catch return Error.AllocatorFailure;
+                    }
+                },
+            }
             continue;
         }
 
@@ -133,16 +195,138 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
             .Block => {
                 try self.stack.push(.{
                     .pc = 0,
-                    .bp = @intCast(self.typechecker.folder.memory.items.len),
                     .variables = .empty,
                     .body = ast.extra[
                         ast.extra[statement.value]
                         ..
                         ast.extra[statement.value + 1]
                     ],
+                    .kind = .Block,
+                    .data = .{ .block = {} },
                 });
             },
+            .Break => {
+                while (self.stack.peek().kind == .Block) {
+                    _ = self.stack.pop();
+                }
+                _ = self.stack.pop();
+                continue;
+            },
+            .Continue => {
+                while (self.stack.peek().kind == .Block) {
+                    _ = self.stack.pop();
+                }
+                self.stack.peek().pc = @intCast(self.stack.peek().body.len);
+                continue;
+            },
+            .For => {
+                const isRange = ast.extra[statement.value + 1] == 1;
+                const isPtr = ast.extra[statement.value + 5] == 1;
+                const capturePtr = ast.extra[statement.value + 3];
+                const bptr = ast.extra[statement.value + 4];
+
+                const capture = ast.expressions.get(capturePtr);
+                const captureName = tokens.get(capture.value).lexeme(self.typechecker.context, ast.tokens);
+                const captureNamePtr = try self.typechecker.builder.internString(captureName);
+
+                const bod = ast.statements.get(bptr);
+                const bodyr = ast.extra[
+                    ast.extra[bod.value]
+                    ..
+                    ast.extra[bod.value + 1]
+                ];
+
+                if (isRange) {
+                    const rangeStart = self.typechecker.folder.getValue(
+                        try self.typechecker.folder.eval(ast.extra[statement.value], comptime Comptime.Folder.Builtin.Type("comptime_int")),
+                    ).Int;
+
+                    const rangeEnd = self.typechecker.folder.getValue(
+                        try self.typechecker.folder.eval(ast.extra[statement.value + 2], comptime Comptime.Folder.Builtin.Type("comptime_int")),
+                    ).Int;
+
+                    if (rangeStart < rangeEnd) {
+                        try self.stack.push(.{
+                            .pc = 0,
+                            .variables = .empty,
+                            .body = bodyr,
+                            .kind = .Range,
+                            .data = .{
+                                .range = .{
+                                    .start = @intCast(rangeStart),
+                                    .end = @intCast(rangeEnd),
+                                    .capture = captureNamePtr,
+                                }
+                            }
+                        });
+
+                        self.stack.peek().variables.put(
+                            self.arena.allocator(),
+                            captureNamePtr,
+                            try self.typechecker.folder.appendValue(.{ .Int = rangeStart }),
+                        ) catch return Error.AllocatorFailure;
+                    }
+                }
+                else {
+                    const loopvar = self.typechecker.folder.getValue(
+                        try self.typechecker.folder.eval(ast.extra[statement.value], comptime Comptime.Folder.Builtin.Type("comptime_int")),
+                    ).Slice;
+
+                    if (loopvar.Size > 0) {
+                        try self.stack.push(.{
+                            .pc = 0,
+                            .variables = .empty,
+                            .body = bodyr,
+                            .kind = .For,
+                            .data = .{
+                                .over = .{
+                                    .slice = .{
+                                        .start = loopvar.To,
+                                        .end = loopvar.To + loopvar.Size,
+                                    },
+                                    .index = 0,
+                                    .isPtr = isPtr,
+                                    .capture = captureNamePtr,
+                                }
+                            }
+                        });
+
+                        self.stack.peek().variables.put(
+                            self.arena.allocator(),
+                            captureNamePtr,
+                            if (isPtr) {
+                                self.report("Pointer captured for loops are not supported in compile-time contexts.", .{});
+                                return Error.IllegalSyntax;
+                            }
+                            else loopvar.To,
+                        ) catch return Error.AllocatorFailure;
+                    }
+                }
+            },
             .Expression => _ = try self.typechecker.folder.eval(statement.value, null),
+            .While => {
+                const conditionExpr = ast.extra[statement.value];
+                const bptr = ast.extra[statement.value + 1];
+
+                const conditionRes = self.typechecker.folder.getValue(
+                    try self.typechecker.folder.eval(conditionExpr, comptime Comptime.Folder.Builtin.Type("bool")),
+                ).Bool;
+
+                if (conditionRes) {
+                    const bod = ast.statements.get(bptr);
+                    try self.stack.push(.{
+                        .pc = 0,
+                        .variables = .empty,
+                        .body = ast.extra[
+                            ast.extra[bod.value]
+                            ..
+                            ast.extra[bod.value + 1]
+                        ],
+                        .kind = .While,
+                        .data = .{ .condition = conditionExpr },
+                    });
+                }
+            },
             .Conditional => {
                 const conditionExpr = ast.extra[statement.value];
                 const conditionRes = self.typechecker.folder.getValue(
@@ -154,13 +338,14 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
                     const bod = ast.statements.get(bptr);
                     try self.stack.push(.{
                         .pc = 0,
-                        .bp = @intCast(self.typechecker.folder.memory.items.len),
                         .variables = .empty,
                         .body = ast.extra[
                             ast.extra[bod.value]
                             ..
                             ast.extra[bod.value + 1]
                         ],
+                        .kind = .Block,
+                        .data = .{ .block = {} },
                     });
                 }
                 else if (ast.extra[statement.value + 2] == 1) {
@@ -168,13 +353,14 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
                     const bod = ast.statements.get(bPtr);
                     try self.stack.push(.{
                         .pc = 0,
-                        .bp = @intCast(self.typechecker.folder.memory.items.len),
                         .variables = .empty,
                         .body = ast.extra[
                             ast.extra[bod.value]
                             ..
                             ast.extra[bod.value + 1]
                         ],
+                        .kind = .Block,
+                        .data = .{ .block = {} },
                     });
                 }
             },
@@ -183,7 +369,7 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
                 return Error.ComptimeNotPossible;
             },
             else => {
-                self.report("Unreachable '{s}'.", .{@tagName(statement.type)});
+                self.report("Execution of '{s}' in compile-time scopes is not implemented.", .{@tagName(statement.type)});
                 return Error.ShouldBeImpossible;
             },
         }
