@@ -44,6 +44,9 @@ pub fn main(init: std.process.Init) void {
         if (@errorReturnTrace()) |trace| {
             std.debug.dumpErrorReturnTrace(@ptrCast(trace));
         }
+        else {
+            common.log.err("Stack trace is not available.", .{});
+        }
 
         return common.log.err(
             "Compiler exited with code {d} <{s}>", .{

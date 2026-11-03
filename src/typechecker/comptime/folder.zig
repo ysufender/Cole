@@ -130,7 +130,6 @@ pub fn eval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeI
         expr.type != .Literal
         and (
             self.getFlag(.ComptimeBanned)
-            or self.typechecker.hasMetadata(exprPtr, "@noComptime")
         )
     );
     defer _ = self.setFlag(.ComptimeBanned, prevcb);
@@ -704,7 +703,7 @@ pub fn evalBinary(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Ty
         },
         .Plus, .Minus, .Slash, .Star, .Modulo => |arithmetic| {
             var lhs = self.getValue(try self.expectDefined(ast.extra[extraPtr], lhsType));
-            var rhs = self.getValue(try self.expectDefined(ast.extra[extraPtr + 2], null));
+            var rhs = self.getValue(try self.expectDefined(ast.extra[extraPtr + 2], lhsType));
 
             if (lhs == .Int and rhs == .Float) {
                 const lhsInt = lhs.Int;
@@ -1097,6 +1096,8 @@ fn evalBuiltinCall(self: *Folder, extraPtr: defines.OpaquePtr, declPtr: defines.
 
     return switch (declPtr) {
         BI("inComptime") => inComptime: {
+            if (self.typechecker.getFlag(.AttemptingEval)) return Error.ComptimeNotPossible;
+
             _ = self.setFlag(.Volatile, true);
             break :inComptime self.appendValue(.{ .Bool = true });
         },
@@ -2915,7 +2916,7 @@ fn expectDefined(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?
 
 pub fn constructUndefined(self: *Folder, valueType: TypeID) Error!Comptime.Value.Ptr {
     return res: switch (self.typechecker.typeTable.get(valueType)) {
-        .Union, .Struct, .Enum, .Void, .Function, .Type, .Any, .Noreturn, .EnumLiteral => {
+        .Enum, .Void, .Function, .Type, .Any, .Noreturn, .EnumLiteral => {
             self.report("Given type '{s}' can't be undefined.", .{
                 try self.typechecker.typeName(self.arena.allocator(), valueType)
             });
@@ -2954,6 +2955,7 @@ pub fn constructUndefined(self: *Folder, valueType: TypeID) Error!Comptime.Value
                 },
             });
         },
+        else => self.appendValue(.{ .Undefined = valueType }),
     };
 }
 
@@ -3174,8 +3176,9 @@ fn castValue(self: *Folder, valuePtr: Comptime.Value.Ptr, to: TypeID, _: bool) E
         }
     };
 
-    self.memory.items[valuePtr] = newValue;
-    return valuePtr;
+    // @Beware destructive casting
+    // self.memory.items[valuePtr] = newValue;
+    return self.appendValue(newValue);
 }
 
 pub fn comptimeEq(self: *const Folder, lhs: Comptime.Value, rhs: Comptime.Value) bool {
@@ -3322,7 +3325,7 @@ fn buildEnumFieldSlice(self: *Folder, fields: []const types.EnumField) Error!Com
 }
 
 fn cacheValue(self: *Folder, ptr: FolderCacheKey, val: Comptime.Value.Ptr) Error!void {
-    if (self.getFlag(.InComptimeCall) or self.getFlag(.Volatile)) {
+    if (self.getFlag(.InComptimeCall) or self.getFlag(.Volatile) or self.getFlag(.StaticPass)) {
         return;
     }
 

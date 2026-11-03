@@ -140,9 +140,8 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
                         try self.typechecker.folder.eval(conditionExpr, comptime Comptime.Folder.Builtin.Type("bool")),
                     ).Bool;
 
-                    if (conditionRes) {
-                        top.pc = 0;
-                    }
+                    if (conditionRes) top.pc = 0
+                    else _ = self.stack.pop();
                 },
                 .Range => {
                     top.data.range.start += 1;
@@ -249,11 +248,9 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
                 const captureNamePtr = try self.typechecker.builder.internString(captureName);
 
                 const bod = ast.statements.get(bptr);
-                const bodyr = ast.extra[
-                    ast.extra[bod.value]
-                    ..
-                    ast.extra[bod.value + 1]
-                ];
+                const bodyr =
+                    if (bod.type == .Block) ast.extra[ast.extra[bod.value]..ast.extra[bod.value + 1]]
+                    else ast.extra[statement.value + 4..statement.value + 5];
 
                 if (isRange) {
                     const rangeStart = self.typechecker.folder.getValue(
@@ -287,9 +284,24 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
                     }
                 }
                 else {
-                    const loopvar = self.typechecker.folder.getValue(
+                    const loopvar = switch (self.typechecker.folder.getValue(
                         try self.typechecker.folder.eval(ast.extra[statement.value], comptime Comptime.Folder.Builtin.Type("comptime_int")),
-                    ).Slice;
+                    )) {
+                        .Slice => |slice| slice,
+                        .String => |str| blk: {
+                            const to: u32 = @intCast(self.typechecker.folder.memory.items.len);
+                            for (str.str) |byte| _ = try self.typechecker.folder.appendValue(.{ .Int = byte });
+
+                            break :blk (Comptime.Value{
+                                .Slice = .{
+                                    .Type = comptime Comptime.Folder.Builtin.Type("[]u8"),
+                                    .Size = @intCast(str.str.len),
+                                    .To = to,
+                                },
+                            }).Slice;
+                        },
+                        else => return common.debug.ShouldBeImpossible(undefined, @src()),
+                    };
 
                     if (loopvar.Size > 0) {
                         try self.stack.push(.{
@@ -351,11 +363,9 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
                     try self.stack.push(.{
                         .pc = 0,
                         .variables = .empty,
-                        .body = ast.extra[
-                            ast.extra[bod.value]
-                            ..
-                            ast.extra[bod.value + 1]
-                        ],
+                        .body =
+                            if (bod.type == .Block) ast.extra[ast.extra[bod.value]..ast.extra[bod.value + 1]]
+                            else ast.extra[statement.value + 1..statement.value + 2],
                         .kind = .While,
                         .data = .{ .condition = conditionExpr },
                     });
@@ -373,11 +383,9 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
                     try self.stack.push(.{
                         .pc = 0,
                         .variables = .empty,
-                        .body = ast.extra[
-                            ast.extra[bod.value]
-                            ..
-                            ast.extra[bod.value + 1]
-                        ],
+                        .body =
+                            if (bod.type == .Block) ast.extra[ast.extra[bod.value]..ast.extra[bod.value + 1]]
+                            else ast.extra[statement.value + 1..statement.value + 2],
                         .kind = .Block,
                         .data = .{ .block = {} },
                     });
@@ -389,11 +397,9 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
                     try self.stack.push(.{
                         .pc = 0,
                         .variables = .empty,
-                        .body = ast.extra[
-                            ast.extra[bod.value]
-                            ..
-                            ast.extra[bod.value + 1]
-                        ],
+                        .body =
+                            if (bod.type == .Block) ast.extra[ast.extra[bod.value]..ast.extra[bod.value + 1]]
+                            else ast.extra[statement.value + 3..statement.value + 4],
                         .kind = .Block,
                         .data = .{ .block = {} },
                     });
@@ -436,8 +442,11 @@ pub fn executeAssignment(self: *Executer, extraPtr: defines.OpaquePtr) Error!Com
 
             self.typechecker.folder.memory.items[@intCast(slice + index)] = self.typechecker.folder.getValue(value);
         },
-        .Scoping => { },
-        .Dot => { },
+        .Scoping => {
+            self.report("Global mutation in compile-time is not supported.", .{});
+            return Error.ComptimeNotPossible;
+        },
+        .Dot => return Error.NotImplemented,
         else => return common.debug.ShouldBeImpossible(undefined, @src()),
     }
 
@@ -455,22 +464,20 @@ pub fn snapshot(self: *const Executer, allocator: Allocator) Error!Scope.Variabl
 }
 
 pub fn getVar(self: *const Executer, name: defines.StringPtr) ?Comptime.Value.Ptr {
-    var tmp = self.stack;
-
-    while (tmp.pop()) |scope| {
-        if (scope.variables.get(name)) |v| {
-            return v;
-        }
+    var i = self.stack.items.len;
+    while (i > 0) {
+        i -= 1;
+        if (self.stack.items[i].variables.get(name)) |v| return v;
     }
 
     return null;
 }
 
 pub fn setVar(self: *const Executer, name: defines.StringPtr, val: Comptime.Value.Ptr) void {
-    var tmp = self.stack;
-
-    while (tmp.pop()) |scope| {
-        if (scope.variables.getEntry(name)) |v| {
+    var i = self.stack.items.len;
+    while (i > 0) {
+        i -= 1;
+        if (self.stack.items[i].variables.getEntry(name)) |v| {
             v.value_ptr.* = val;
         }
     }

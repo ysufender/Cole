@@ -4,8 +4,8 @@ local suites = require "suites"
 
 local cole_build =
     "debug"
-    -- "releasesafe"
-    -- "releasefast"
+    -- "safe"
+    -- "fast"
 
 local cole_version = "v0.1.4"
 

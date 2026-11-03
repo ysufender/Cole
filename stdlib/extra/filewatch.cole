@@ -133,7 +133,7 @@ let getInfo = fn (path: []u8) -> FileInfo {
             return (0);
         }
 
-        let status: mut stat = undefined;
+        let status: mut stat = #(@noComptime) undefined;
         let fd = fileno(file);
         _ = fstat(fd, status.&);
         _ = fclose(file);

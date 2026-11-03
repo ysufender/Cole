@@ -163,7 +163,7 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
         },
         .Union => |uni| uni: {
             const tagConst = try self.typechecker.builder.addConstant(.{ .Integer = .{ .u32 = uni.Tag } });
-            const valueConst = try self.addConstant(uni.Value, ofType.Union.fields[uni.Tag + 1].valueType);
+            const valueConst = try self.addConstant(uni.Value, ofType.Union.fields[uni.Tag + @intFromBool(ofType.Union.isTagged)].valueType);
 
             const start = self.typechecker.builder.constants.len;
             _ = try self.typechecker.builder.addConstant(self.typechecker.builder.constants.get(tagConst));

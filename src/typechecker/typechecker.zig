@@ -241,7 +241,7 @@ pub fn typecheck(self: *Typechecker, allocator: Allocator) Error!JIR {
         }
     }
 
-    // TODO:                                             This part is not really nice, fix it.
+    // @TODO:                                             This part is not really nice, fix it.
     const mainPtr = self.symbols.lookup.get(.{ .scope = self.modules.modules.len - 1, .name = "main" }).?;
     const mainDecl = self.symbols.getDecl(mainPtr);
 
@@ -819,7 +819,6 @@ fn typecheckSwitchStatementOnUnion(
 
             _ = try self.typecheckDecl(captureDecl, captureType);
 
-            // Bind the capture to its comptime payload so the body can fold on it.
             if (comptimeItem) |p| switch (self.folder.getValue(p)) {
                 .Union => |u| self.folder.declCache.put(self.folder.arena.allocator(), captureDecl, u.Value)
                     catch return Error.AllocatorFailure,

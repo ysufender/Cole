@@ -1,5 +1,6 @@
 import std::memory::allocator as Allocator;
 import std::io::console as Console;
+import std::c::memory as Memory;
 import std;
 
 /*
@@ -21,14 +22,15 @@ pub let equals = fn (str1: []u8, str2: []u8) -> bool {
 };
 
 pub let toStr = fn (T: type) -> any {
-    return fn (arg: T, allocator: Allocator::Allocator) -> std::Option([]u8) {
+    return fn (arg: T, gpa: Allocator::Allocator) -> std::Option([]u8) {
         return switch typeInfo(T) {
-            @Integer -> safeIntToStr(arg, allocator),
+            @Integer -> safeIntToStr(arg, gpa),
+            @Float -> safeFloatToStr(arg, gpa),
             @Pointer -> |p| switch p.size {
                 @Slice ->
                     if (p.child == u8 or p.child == mut u8) (@Some, arg)
-                    else (@Some, "<pointer>"),
-                else -> (@Some, "<pointer>"),
+                    else ptrToStr(unsafeCast(arg), gpa),
+                else -> ptrToStr(unsafeCast(arg), gpa),
             },
             else -> (@None, ()),
         };
@@ -39,7 +41,29 @@ pub let toStr = fn (T: type) -> any {
  * PRIVATE
  */
 
-let safeIntToStr = fn (num: c_long, allocator: Allocator::Allocator) -> std::Option([]u8) {
+let ptrToStr = fn (ptr: usize, gpa: Allocator::Allocator) -> std::Option([]u8) {
+    let header =  "<pointer@";
+    let footer = ">";
+
+    let ptrVal = switch safeIntToStr() {
+        @Some -> |s| s,
+        else -> "undefined",
+    };
+
+    let res = Allocator::alloc(u8)(gpa, header.len + footer.name + ptrVal.len);
+    switch res {
+        @Ok -> {
+            Memory::copy(cast(res.ptr), cast(header.ptr), header.len);
+            Memory::copy(cast(res.ptr), cast(header.ptr), header.len);
+            Memory::copy(cast(res.ptr), cast(header.ptr), header.len);
+        }
+        else -> {
+            return (@None, ());
+        }
+    }
+};
+
+let safeIntToStr = fn (num: c_long, gpa: Allocator::Allocator) -> std::Option([]u8) {
     let isSigned = num < 0;
     let tmp: mut any = num * (if (isSigned) -1 else 1);
     let digitCount: mut u32 = 0;
@@ -49,7 +73,7 @@ let safeIntToStr = fn (num: c_long, allocator: Allocator::Allocator) -> std::Opt
     }
 
     digitCount = if (digitCount == 0) 1 else digitCount + (if (isSigned) 1 else 0);
-    let result = switch Allocator::alloc(u8)(allocator, digitCount + 1) {
+    let result = switch Allocator::alloc(u8)(gpa, digitCount + 1) {
         @Ok -> |s| s,
         @Err -> undefined,
     };
@@ -102,10 +126,10 @@ pub let strToFloat = fn (str: mut []u8) -> float {
         divisor = divisor * 10;
     }
 
-    return (as(float, cast(base)) + decimal) * (if (negative) -1 else 1);
+    return (as(float, cast(base)) + decimal) * (if (negative) -1.0 else 1.0);
 };
 
-let safeFloatToStr = fn (num: float, allocator: Allocator::Allocator) -> std::Option([]u8) {
+let safeFloatToStr = fn (num: float, gpa: Allocator::Allocator) -> std::Option([]u8) {
     let precision: u32 = 9;
     let negative: bool = num < 0;
     let value: mut c_double = cast(num);
@@ -116,7 +140,7 @@ let safeFloatToStr = fn (num: float, allocator: Allocator::Allocator) -> std::Op
     else if value >= 9223372036854775808.0 { special = if (negative) "-inf" else "inf"; }
 
     if special.len > 0 {
-        let text = Allocator::alloc(mut u8)(allocator, special.len + 1);
+        let text = Allocator::alloc(mut u8)(gpa, special.len + 1);
         switch text {
             @Ok -> { }
             @Err -> return (@None, ());
@@ -156,7 +180,7 @@ let safeFloatToStr = fn (num: float, allocator: Allocator::Allocator) -> std::Op
     }
 
     let length: u32 = (if (negative) 1 else 0) + wholeDigits + 1 + precision;
-    let result = switch Allocator::alloc(mut u8)(allocator, length + 1) {
+    let result = switch Allocator::alloc(mut u8)(gpa, length + 1) {
         @Ok -> |res| res,
         @Err -> undefined,
     };
@@ -191,12 +215,12 @@ let safeFloatToStr = fn (num: float, allocator: Allocator::Allocator) -> std::Op
     return (@Some, result[0..length]);
 };
 
-pub let floatToStr = fn (num: float, allocator: Allocator::Allocator) -> []u8 {
-    return safeFloatToStr(num, allocator).Some;
+pub let floatToStr = fn (num: float, gpa: Allocator::Allocator) -> []u8 {
+    return safeFloatToStr(num, gpa).Some;
 };
 
-pub let intToStr = fn (num: c_long, allocator: Allocator::Allocator) -> []u8 {
-    return safeIntToStr(num, allocator).Some;
+pub let intToStr = fn (num: c_long, gpa: Allocator::Allocator) -> []u8 {
+    return safeIntToStr(num, gpa).Some;
 };
 
 pub let boolToStr = fn (b: bool) -> []u8 {
