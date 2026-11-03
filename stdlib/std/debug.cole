@@ -8,9 +8,9 @@ import std::io as Io;
 import std::c::process as Process;
 import std::c as C;
 
-pub let print = fn (T: type) -> any {
-    return fn (arg: T, allocator: Allocator::Allocator) -> void {
-        Format::print(T)(arg, allocator, Io::StdOut());
+pub let print = fn (fmt: []u8, T: type) -> any {
+    return fn (arg: T) -> void {
+        Format::print(fmt, T)(arg, C::Allocator, Io::StdOut());
     };
 };
 

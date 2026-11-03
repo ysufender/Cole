@@ -2928,7 +2928,7 @@ pub fn constructUndefined(self: *Folder, valueType: TypeID) Error!Comptime.Value
         .Pointer => |ptr| switch (ptr.size) {
             .Slice => switch (self.typechecker.typeTable.get(ptr.child)) {
                 .Integer => |i|
-                    if (i.size == 8) self.appendValue(.{ .String = .{
+                    if (i.size == 8 and !i.mutable) self.appendValue(.{ .String = .{
                         .type = .Cole,
                         .str = "",
                     }})

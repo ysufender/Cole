@@ -24,6 +24,12 @@ pub let toStr = fn (T: type) -> any {
     return fn (arg: T, allocator: Allocator::Allocator) -> std::Option([]u8) {
         return switch typeInfo(T) {
             @Integer -> safeIntToStr(arg, allocator),
+            @Pointer -> |p| switch p.size {
+                @Slice ->
+                    if (p.child == u8 or p.child == mut u8) (@Some, arg)
+                    else (@Some, "<pointer>"),
+                else -> (@Some, "<pointer>"),
+            },
             else -> (@None, ()),
         };
     };

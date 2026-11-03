@@ -488,25 +488,22 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
                 else if (decl.topLevel) self.modules.modules.get(self.symbols.scopes.items(.module)[decl.scope]).name
                 else try self.folder.generateRandomNameString(.Function);
 
-            const keepName = keep: {
-                const prevFile = self.currentFile;
-                self.currentFile = func.source;
-                defer self.currentFile = prevFile;
+                const keepName = keep: {
+                    const prevFile = self.currentFile;
+                    self.currentFile = func.source;
+                    defer self.currentFile = prevFile;
+                    break :keep
+                        self.hasMetadata(func.expr, "@export")
+                        or self.hasMetadata(func.expr, "@extern")
+                        and decl.topLevel;
+                };
 
-                break :keep
-                    self.hasMetadata(func.expr, "@export")
-                    or self.hasMetadata(func.expr, "@extern")
-                    and decl.topLevel;
-            };
-
-            const newName =
-                if (keepName) symName
-                else if (!decl.topLevel) namespace
-                else std.fmt.allocPrint(self.arena.allocator(), "{s}::{s}", .{
-                    namespace,
-                    symName,
-                }) catch return Error.AllocatorFailure;
-            // const new = try self.builder.internString(newName);
+                const newName = if (keepName) symName
+                    else if (!decl.topLevel) namespace
+                    else std.fmt.allocPrint(self.arena.allocator(), "{s}::{s}", .{
+                        namespace,
+                        symName,
+                    }) catch return Error.AllocatorFailure;
 
             if (std.mem.eql(u8, namespace, "root") and std.mem.eql(u8, newName, "main")) {
                 self.report("Main function can't be exported.", .{});
@@ -514,7 +511,6 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
             }
 
             try self.builder.modifyInternedString(func.name, newName);
-            // func.name = try self.builder.internString(newName);
         },
         else => { },
     }
@@ -2961,9 +2957,11 @@ pub fn typecheckSwitchExpression(self: *Typechecker, extraPtr: defines.OpaquePtr
         .end = ast.extra[extraPtr + 2],
     };
 
+    const comptimeItem = self.folder.attemptEval(item, itemTypeID);
+
     return switch (itemType) {
-        .Enum => |enm| self.typecheckSwitchOnEnum(ast, itemTypeID, &enm, range, maybeExpected),
-        .Union => |uni| self.typecheckSwitchOnUnion(ast, itemTypeID, &uni, range, maybeExpected),
+        .Enum => |enm| self.typecheckSwitchOnEnum(ast, itemTypeID, &enm, range, maybeExpected, comptimeItem),
+        .Union => |uni| self.typecheckSwitchOnUnion(ast, itemTypeID, &uni, range, maybeExpected, comptimeItem),
         else => return common.debug.ShouldBeImpossible(self.context.log, @src()),
     };
 }
@@ -2975,6 +2973,7 @@ fn typecheckSwitchOnUnion(
     uni: *const Types.Union,
     range: defines.Range,
     maybeExpected: ?TypeID,
+    comptimeItem: ?Comptime.Value.Ptr,
 ) Error!TypeID {
     // @Beware Hardcoded field size, must be kept in sync with parser.(union|struct|enum)Definition
     var fieldBuffer: [512]u32 = undefined;
@@ -2985,6 +2984,12 @@ fn typecheckSwitchOnUnion(
     var fieldMap = std.DynamicBitSet.initEmpty(bufferAllocator.allocator(), tag.fields.len)
         catch return common.debug.ShouldBeImpossible(self.context.log, @src());
 
+    const liveTag: ?u32 = if (comptimeItem) |p| switch (self.folder.getValue(p)) {
+        .Union => |u| @intCast(u.Tag),
+        else => null,
+    } else null;
+    var liveMatched = false;
+
     var expected: ?TypeID = determineExpected(maybeExpected);
     var case = range.start;
     while (case < range.end) : (case += 4) {
@@ -2993,6 +2998,7 @@ fn typecheckSwitchOnUnion(
             return Error.UnreachableCodePath;
         }
 
+        var labelIdx: ?usize = null;
         const caseLabel = ast.extra[case];
         const fieldName = 
             if (caseLabel == 0) blk: {
@@ -3025,8 +3031,15 @@ fn typecheckSwitchOnUnion(
                 }
 
                 fieldMap.set(enumeration);
+                labelIdx = enumeration;
                 break :blk tag.fields[enumeration].name;
             };
+
+        if (liveTag) |lt| {
+            const live = if (labelIdx) |l| l == lt else !liveMatched;
+            if (!live) continue;
+            liveMatched = true;
+        }
 
         const prev = self.currentScope;
         defer self.currentScope = prev;
@@ -3047,7 +3060,20 @@ fn typecheckSwitchOnUnion(
             ].valueType;
 
             _ = try self.typecheckDecl(captureDecl, captureType);
+
+            // Bind the capture to its comptime payload so the body can fold on it.
+            if (comptimeItem) |p| switch (self.folder.getValue(p)) {
+                .Union => |u| self.folder.declCache.put(self.folder.arena.allocator(), captureDecl, u.Value)
+                    catch return Error.AllocatorFailure,
+                else => {},
+            };
         }
+        defer if (hasCapture and comptimeItem != null) {
+            _ = self.folder.declCache.remove(self.symbols.findDecl(.{
+                .file = self.currentFile,
+                .expr = ast.extra[case + 2],
+            }));
+        };
 
         const prevc = self.setFlag(.CoveredAllPaths, false);
         const branchType = try self.typecheckExpression(ast.extra[case + 3], expected);
@@ -3094,6 +3120,7 @@ fn typecheckSwitchOnEnum(
     enm: *const Types.Enum,
     range: defines.Range,
     maybeExpected: ?TypeID,
+    comptimeItem: ?Comptime.Value.Ptr,
 ) Error!TypeID {
     // @Beware Hardcoded field size, must be kept in sync with parser.(union|struct|enum)Definition
     var fieldBuffer: [512]u32 = undefined;
@@ -3101,6 +3128,12 @@ fn typecheckSwitchOnEnum(
 
     var fieldMap = std.DynamicBitSet.initEmpty(bufferAllocator.allocator(), enm.fields.len)
         catch return common.debug.ShouldBeImpossible(self.context.log, @src());
+
+    const liveTag: ?u32 = if (comptimeItem) |p| switch (self.folder.getValue(p)) {
+        .Enum => |e| @intCast(e.Value),
+        else => null,
+    } else null;
+    var liveMatched = false;
 
     var expected: ?TypeID = determineExpected(maybeExpected);
     var case = range.start;
@@ -3110,6 +3143,7 @@ fn typecheckSwitchOnEnum(
             return Error.UnreachableCodePath;
         }
 
+        var labelIdx: ?usize = null;
         const caseLabel = ast.extra[case];
         const field = 
             if (caseLabel == 0) blk: {
@@ -3142,8 +3176,15 @@ fn typecheckSwitchOnEnum(
                 }
 
                 fieldMap.set(enumeration);
+                labelIdx = enumeration;
                 break :blk enm.fields[enumeration].name;
             };
+
+        if (liveTag) |lt| {
+            const live = if (labelIdx) |l| l == lt else !liveMatched;
+            if (!live) continue;
+            liveMatched = true;
+        }
 
         const hasCapture = ast.extra[case + 1] == 1;
         if (hasCapture) {
@@ -3501,8 +3542,11 @@ pub fn nominallyIdentical(self: *const Typechecker, this: TypeID, that: TypeID) 
             arr.len == tb.Array.len
             and self.nominallyIdentical(arr.child, tb.Array.child),
         .Pointer => |ptr|
-            ptr.size == tb.Pointer.size
-            and self.nominallyIdentical(ptr.child, tb.Pointer.child),
+            (
+                ptr.size == tb.Pointer.size
+                or ptr.size == .C
+                or tb.Pointer.size == .C
+            ) and self.nominallyIdentical(ptr.child, tb.Pointer.child),
         .Function => |f| blk: {
             const g = tb.Function;
             if (
@@ -3722,9 +3766,9 @@ pub fn maybeSwitchable(self: *const Typechecker, this: TypeID) ?TypeInfo {
 /// Checks which of 'this' or 'that' is more suitable in general.
 pub fn coerce(self: *Typechecker, this: TypeID, that: TypeID) Error!TypeID {
     self.assertCanCoerce(this, that) catch |err| {
-        self.report("Failed to infer type ('{s}' vs {s}')", .{
-            try self.typeName(self.arena.allocator(), this),
+        self.report("Failed to infer type, '{s}' can't coerce to '{s}'.", .{
             try self.typeName(self.arena.allocator(), that),
+            try self.typeName(self.arena.allocator(), this),
         });
         return err;
     };

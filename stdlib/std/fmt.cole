@@ -1,13 +1,58 @@
-import std;
 import std::memory::allocator as Allocator;
 import std::io::stream as Stream;
 import std::string as String;
+import std;
 
-pub let print = fn (T: type) -> any {
-    return fn (arg: T, allocator: Allocator::Allocator, out: Stream::Output::Stream) -> void {
-        _  = Stream::Output::writebuffer(out, switch String::toStr(T)(arg, allocator) {
-            @Some -> |s| s,
-            @None -> "<out_of_memory>",
-        });
+pub let print = fn (fmt: []u8, T: type) -> any {
+    let info = typeInfo(T).Struct;
+
+    let strings: [info.fields.len + 1]mut []u8 = undefined;
+
+    let index: mut u32 = 0;
+    let start: mut u32 = 0;
+    let escaping: mut bool = false;
+    for 0..fmt.len, |i| {
+        if escaping {
+            escaping = false;
+        }
+        else {
+            if fmt[i] == '%' {
+                if i + 1 < fmt.len and fmt[i + 1] == '%' {
+                    escaping = true;
+                }
+                else {
+                    if index >= strings.len {
+                        compileError("Excess format specifiers.");
+                    }
+
+                    strings[index] = fmt[start..i];
+                    start = i + 1;
+                    index = index + 1;
+                }
+            }
+        }
+    }
+    strings[index] = fmt[start..fmt.len];
+
+    if index != strings.len - 1 {
+        compileError("Unhandled format values.");
+    }
+
+    return fn (args: T, gpa: Allocator::Allocator, out: Stream::Output::Stream) -> void {
+        for #(@inline) 0..strings.len, |i| {
+            _ = Stream::Output::writebuffer(out, strings[i]);
+
+            if i < strings.len - 1 {
+                let toStr = String::toStr(info.fields[i].valueType);
+                let str = switch toStr(field(args, info.fields[i].name), gpa) {
+                    @Some -> |s| s,
+                    @None -> "<unknown>",
+                };
+
+                _ = Stream::Output::writebuffer(out, str);
+            }
+        }
+
+        _ = Stream::Output::writebuffer(out, "\n");
     };
 };

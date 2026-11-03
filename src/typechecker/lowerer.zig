@@ -327,11 +327,8 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
 
     const enumOrUnionType = try typechecker.typecheckExpression(ast.extra[extraPtr], null);
     const enumOrUnionExpr = try self.expression(ast.extra[extraPtr], enumOrUnionType);
-    const maybeComptimeEnumOrUnionPtr = typechecker.folder.cache.get(.{
-        .file = typechecker.currentFile,
-        .expr = ast.extra[extraPtr],
-        .instantiation = self.typechecker.folder.instKey(),
-    });
+    const maybeComptimeEnumOrUnionPtr = self.typechecker.folder.attemptEval(ast.extra[extraPtr], enumOrUnionType);
+
     const maybeComptimeEnumOrUnion =
         if (maybeComptimeEnumOrUnionPtr) |ptr| typechecker.folder.getValue(ptr)
         else null;
@@ -545,8 +542,10 @@ fn variableDef(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
         return vdef;
     }
 
+    const maybeConstant = self.typechecker.folder.attemptEval(decl.node, typeID);
+
     const node =
-        if (self.typechecker.folder.cache.get(.{ .instantiation = self.typechecker.folder.instKey(), .file = self.typechecker.currentFile, .expr = decl.node })) |someVal|
+        if (maybeConstant) |someVal|
             try self.typechecker.builder.literal(try self.addConstant(someVal, typeID))
         else
             try self.expression(decl.node, typeID);
@@ -555,8 +554,7 @@ fn variableDef(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
         decl.topLevel,
         typeID,
         decl.name,
-        if (self.typechecker.folder.cache.get(.{ .instantiation = self.typechecker.folder.instKey(), .file = self.typechecker.currentFile, .expr = decl.node })) |i|
-            self.typechecker.folder.getValue(i) == .Undefined
+        if (maybeConstant) |i| self.typechecker.folder.getValue(i) == .Undefined
         else false,
         node,
         decl.node,
@@ -1056,7 +1054,9 @@ fn loop(
 
     const conditionPtr = ast.extra[extraPtr];
 
-    if (self.typechecker.folder.cache.get(.{ .instantiation = self.typechecker.folder.instKey(), .file = self.typechecker.currentFile, .expr = conditionPtr })) |res| {
+    const maybeRes = self.typechecker.folder.attemptEval(conditionPtr, comptime Comptime.Folder.Builtin.Type("bool"));
+
+    if (maybeRes) |res| {
         if (self.typechecker.folder.getValue(res).Bool) {
             var loopData: [5]JIR.Ptr = undefined;
 
@@ -1101,7 +1101,9 @@ fn loop(
 fn conditional(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.AST) Error!JIR.Ptr {
     const conditionExpr = ast.extra[extraPtr];
 
-    if (self.typechecker.folder.cache.get(.{ .instantiation = self.typechecker.folder.instKey(), .file = self.typechecker.currentFile, .expr = conditionExpr })) |comptimeConditionPtr| {
+    const maybeComptimeCondition = self.typechecker.folder.attemptEval(conditionExpr, Comptime.Folder.Builtin.Type("bool"));
+
+    if (maybeComptimeCondition) |comptimeConditionPtr| {
         const comptimeCondition = self.typechecker.folder.getValue(comptimeConditionPtr).Bool;
 
         if (comptimeCondition) {
@@ -1207,8 +1209,8 @@ fn block(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
 }
 
 pub fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID) Error!JIR.Ptr {
-    if (self.typechecker.folder.attemptEval(exprPtr, ofType)) |_| {
-        return self.literal(exprPtr, ofType);
+    if (self.typechecker.folder.attemptEval(exprPtr, ofType)) |value| {
+        return self.typechecker.builder.literal(try self.addConstant(value, ofType));
     }
 
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
@@ -1398,8 +1400,7 @@ fn switchExpr(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error
     const enumOrUnionType = try typechecker.typecheckExpression(ast.extra[extraPtr], null);
     const enumOrUnionExpr = try self.expression(ast.extra[extraPtr], enumOrUnionType);
     const maybeComptimeEnumOrUnion =
-        if (self.typechecker.folder.cache.get(.{ .instantiation = self.typechecker.folder.instKey(), .file = self.typechecker.currentFile, .expr = ast.extra[extraPtr] })) |ptr|
-            typechecker.folder.getValue(ptr)
+        if (self.typechecker.folder.attemptEval(ast.extra[extraPtr], enumOrUnionType)) |ptr| self.typechecker.folder.getValue(ptr)
         else null;
 
     var cachedDef: ?JIR.Ptr = null;
