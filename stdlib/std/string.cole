@@ -29,8 +29,8 @@ pub let toStr = fn (T: type) -> any {
             @Pointer -> |p| switch p.size {
                 @Slice ->
                     if (p.child == u8 or p.child == mut u8) (@Some, arg)
-                    else ptrToStr(unsafeCast(arg), gpa),
-                else -> ptrToStr(unsafeCast(arg), gpa),
+                    else (@Some, "<pointer>"),
+                else -> (@Some, "<pointer>"),
             },
             else -> (@None, ()),
         };
@@ -40,28 +40,6 @@ pub let toStr = fn (T: type) -> any {
 /*
  * PRIVATE
  */
-
-let ptrToStr = fn (ptr: usize, gpa: Allocator::Allocator) -> std::Option([]u8) {
-    let header =  "<pointer@";
-    let footer = ">";
-
-    let ptrVal = switch safeIntToStr() {
-        @Some -> |s| s,
-        else -> "undefined",
-    };
-
-    let res = Allocator::alloc(u8)(gpa, header.len + footer.name + ptrVal.len);
-    switch res {
-        @Ok -> {
-            Memory::copy(cast(res.ptr), cast(header.ptr), header.len);
-            Memory::copy(cast(res.ptr), cast(header.ptr), header.len);
-            Memory::copy(cast(res.ptr), cast(header.ptr), header.len);
-        }
-        else -> {
-            return (@None, ());
-        }
-    }
-};
 
 let safeIntToStr = fn (num: c_long, gpa: Allocator::Allocator) -> std::Option([]u8) {
     let isSigned = num < 0;

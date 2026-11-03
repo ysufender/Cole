@@ -1798,15 +1798,16 @@ pub fn typecheckCall(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpec
         },
         .Function => |func| func,
         else =>
-            if (self.folder.attemptEval(ast.extra[extraPtr], lhsType)) |val| switch (self.folder.getValue(val)) {
-                .Function => |func| self.typeTable.get(func.signature).Function,
-                else => {
-                    self.report("Attempt to call non-function type '{s}'.", .{
-                        try self.typeName(self.arena.allocator(), lhsType),
-                    });
-                    return Error.TypeIsNotCallable;
+            if (self.hasMetadata(ast.extra[extraPtr], "@lazy"))
+                switch (self.folder.getValue(try self.folder.eval(ast.extra[extraPtr], lhsType))) {
+                    .Function => |func| self.typeTable.get(func.signature).Function,
+                    else => {
+                        self.report("Attempt to call non-function type '{s}'.", .{
+                            try self.typeName(self.arena.allocator(), lhsType),
+                        });
+                        return Error.TypeIsNotCallable;
+                    }
                 }
-            }
             else {
                 self.report("Attempt to call non-function type '{s}'.", .{
                     try self.typeName(self.arena.allocator(), lhsType),

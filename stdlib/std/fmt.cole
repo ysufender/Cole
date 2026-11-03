@@ -3,7 +3,7 @@ import std::io::stream as Stream;
 import std::string as String;
 import std;
 
-pub let print = fn (fmt: []u8, T: type) -> any {
+pub let print = fn (fmt: []u8, T: type) -> #(@lazy) any {
     let info = typeInfo(T).Struct;
 
     let strings: [info.fields.len + 1]mut []u8 = undefined;
@@ -15,44 +15,50 @@ pub let print = fn (fmt: []u8, T: type) -> any {
         if escaping {
             escaping = false;
         }
-        else {
-            if fmt[i] == '%' {
-                if i + 1 < fmt.len and fmt[i + 1] == '%' {
-                    escaping = true;
-                }
-                else {
-                    if index >= strings.len {
-                        compileError("Excess format specifiers.");
-                    }
-
-                    strings[index] = fmt[start..i];
-                    start = i + 1;
-                    index = index + 1;
-                }
+        else if fmt[i] == '%' {
+            if i + 1 < fmt.len and fmt[i + 1] == '%' {
+                escaping = true;
+            }
+            else if index >= strings.len {
+                compileError("Excess format specifiers.");
+            }
+            else {
+                strings[index] = fmt[start..i];
+                start = i + 1;
+                index = index + 1;
             }
         }
     }
-    strings[index] = fmt[start..fmt.len];
+
+    if start != fmt.len {
+        strings[index] = fmt[start..fmt.len];
+    }
 
     if index != strings.len - 1 {
         compileError("Unhandled format values.");
     }
 
-    return fn (args: T, gpa: Allocator::Allocator, out: Stream::Output::Stream) -> void {
-        for #(@inline) 0..strings.len, |i| {
-            _ = Stream::Output::writebuffer(out, strings[i]);
+    return
+        if (sizeOf(T) != 0)
+            fn (args: T, gpa: Allocator::Allocator, out: Stream::Output::Stream) -> void {
+                for #(@inline) 0..strings.len, |i| {
+                    _ = Stream::Output::writebuffer(out, strings[i]);
 
-            if i < strings.len - 1 {
-                let toStr = String::toStr(info.fields[i].valueType);
-                let str = switch toStr(field(args, info.fields[i].name), gpa) {
-                    @Some -> |s| s,
-                    @None -> "<unknown>",
-                };
+                    if i < strings.len - 1 {
+                        let toStr = String::toStr(info.fields[i].valueType);
+                        let str = switch toStr(field(args, info.fields[i].name), gpa) {
+                            @Some -> |s| s,
+                            @None -> "<unknown>",
+                        };
 
-                _ = Stream::Output::writebuffer(out, str);
+                        _ = Stream::Output::writebuffer(out, str);
+                    }
+                }
+
+                _ = Stream::Output::writebuffer(out, "\n");
             }
-        }
-
-        _ = Stream::Output::writebuffer(out, "\n");
-    };
+        else
+            fn (out: Stream::Output::Stream) -> void {
+                _ = Stream::Output::write(fmt);
+            };
 };

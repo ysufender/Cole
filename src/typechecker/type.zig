@@ -68,7 +68,7 @@ pub const TypeInfo = union(enum) {
             .Noreturn => true,
             .Void => true,
             .Type => true,
-            .Struct => |str| str.fields.len == 0,
+            .Struct => |str| str.fields.len == 0 and !str.isTuple,
             .Union => |uni| uni.fields.len == 0,
             .Enum => |enm| enm.fields.len == 0,
             else => false,
