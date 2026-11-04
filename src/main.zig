@@ -37,6 +37,11 @@ pub fn main(init: std.process.Init) void {
                 "The compiler has ran out of memory, this is probably because of an internal error."
                 ++ " Please report this to the author(s), along with a stack trace.", .{ }
             ),
+            Error.OutOfMemory => common.log.err(
+                "The compiler has ran out of memory DURING compile-time execution. This suggests"
+                ++ " to a stack overflow in the compile-time callstack. Please report this to the"
+                ++ " author(s), along with a stack trace.", .{ }
+            ),
             Error.Terminate => break :blk,
             else => { }, 
         }

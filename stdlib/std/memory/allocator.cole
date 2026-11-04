@@ -18,7 +18,7 @@ pub let Allocator = struct {
     realloc: *fn (*mut void, []mut void, u32, u32) -> Result([]mut void),
 };
 
-pub let create = fn (T: type) -> any {
+pub let create = fn (T: type) -> *fn (Allocator) -> Result(*mut T) {
     return fn (self: Allocator) -> Result(*mut T) {
         return switch self.create(self.context, sizeOf(T)) {
             @Ok -> |res| (@Ok, cast(res)),
@@ -27,13 +27,13 @@ pub let create = fn (T: type) -> any {
     };
 };
 
-pub let destroy = fn (T: type) -> any {
+pub let destroy = fn (T: type) -> *fn (Allocator, *T) -> void  {
     return fn (self: Allocator, ptr: *T) -> void {
         return self.destroy(self.context, cast(ptr));
     };
 };
 
-pub let alloc = fn (T: type) -> any {
+pub let alloc = fn (T: type) -> *fn (Allocator, u32) -> Result([]mut T) {
     return fn (self: Allocator, count: u32) -> Result([]mut T) {
         return switch self.alloc(self.context, count, sizeOf(T)) {
             @Ok -> |res| (@Ok, cast(res)),
@@ -42,13 +42,13 @@ pub let alloc = fn (T: type) -> any {
     };
 };
 
-pub let dealloc = fn (T: type) -> any {
+pub let dealloc = fn (T: type) -> *fn (Allocator, []mut T) -> void {
     return fn (self: Allocator, arr: []mut T) -> void {
         return self.dealloc(self.context, cast(arr));
     };
 };
 
-pub let realloc = fn (T: type) -> any {
+pub let realloc = fn (T: type) -> *fn (Allocator, []mut T, u32) -> Result([]mut T) {
     return fn (self: Allocator, arr: []mut T, nlen: u32) -> Result([]mut T) {
         return switch self.realloc(self.context, cast(arr), nlen, sizeOf(T)) {
             @Ok -> |res| (@Ok, cast(res)),

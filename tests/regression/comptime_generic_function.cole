@@ -1,6 +1,6 @@
 import std::io::console as Console;
 
-let format = fn (fmt: []u8, T: type) -> any {
+let format = fn (fmt: []u8, T: type) -> *fn (T) -> T {
     return fn (arg: T) -> void {
         Console::write(fmt);
         Console::log(arg);

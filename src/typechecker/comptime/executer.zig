@@ -107,7 +107,7 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
     const prevsc = self.typechecker.folder.setFlag(.StaticPass, false);
     defer _ = self.typechecker.folder.setFlag(.StaticPass, prevsc);
 
-    const returnType = sign.returnType;
+    const returnType = try self.typechecker.folder.determineComptimeReturnTypeDirect(sign.returnType, func, args);
 
     {
         const pc = self.typechecker.setFlag(.CoveredAllPaths, false);

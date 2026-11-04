@@ -8,7 +8,7 @@ import std::io as Io;
 import std::c::process as Process;
 import std::c as C;
 
-pub let print = fn (fmt: []u8, T: type) -> any {
+pub let print = fn (fmt: []u8, T: type) -> *fn (T) -> void {
     return fn (arg: T) -> void {
         Format::print(fmt, T)(arg, C::Allocator, Io::StdOut());
     };
@@ -76,7 +76,7 @@ pub let dumpTrace = fn (
     }
 };
 
-pub let impossible = fn (T: type) -> any {
+pub let impossible = fn (T: type) -> *fn () -> T {
     return fn () -> T {
         Console::error("Reached unreachable code.");
         dumpTrace(stackTrace(), C::Allocator, Io::StdErr());

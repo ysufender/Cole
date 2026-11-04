@@ -21,7 +21,7 @@ pub let equals = fn (str1: []u8, str2: []u8) -> bool {
     return true;
 };
 
-pub let toStr = fn (T: type) -> any {
+pub let toStr = fn (T: type) -> *fn (T, Allocator::Allocator) -> std::Option([]u8) {
     return fn (arg: T, gpa: Allocator::Allocator) -> std::Option([]u8) {
         return switch typeInfo(T) {
             @Integer -> safeIntToStr(arg, gpa),

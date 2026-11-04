@@ -1797,23 +1797,12 @@ pub fn typecheckCall(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpec
             );
         },
         .Function => |func| func,
-        else =>
-            if (self.hasMetadata(ast.extra[extraPtr], "@lazy"))
-                switch (self.folder.getValue(try self.folder.eval(ast.extra[extraPtr], lhsType))) {
-                    .Function => |func| self.typeTable.get(func.signature).Function,
-                    else => {
-                        self.report("Attempt to call non-function type '{s}'.", .{
-                            try self.typeName(self.arena.allocator(), lhsType),
-                        });
-                        return Error.TypeIsNotCallable;
-                    }
-                }
-            else {
-                self.report("Attempt to call non-function type '{s}'.", .{
-                    try self.typeName(self.arena.allocator(), lhsType),
-                });
-                return Error.TypeIsNotCallable;
-            },
+        else => {
+            self.report("Attempt to call non-function type '{s}'.", .{
+                try self.typeName(self.arena.allocator(), lhsType),
+            });
+            return Error.TypeIsNotCallable;
+        },
     };
 
     const exprList = ast.expressions.items(.value)[ast.extra[extraPtr + 1]];
@@ -1846,11 +1835,15 @@ pub fn typecheckCall(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpec
         return Error.ArgumentCountMismatch;
     }
 
-    if (func.returnType == comptime Comptime.Folder.Builtin.Type("noreturn")) {
+    const returnType = 
+        if (func.isComptime) try self.folder.determineComptimeReturnType(func.returnType, ast.extra[extraPtr], args, func.argTypes)
+        else func.returnType;
+
+    if (returnType == comptime Comptime.Folder.Builtin.Type("noreturn")) {
         _ = self.setFlag(.CoveredAllPaths, true);
     }
 
-    return func.returnType;
+    return returnType;
 }
 
 pub fn typecheckBuiltinCall(self: *Typechecker, extraPtr: defines.ExpressionPtr, declPtr: defines.DeclPtr, maybeExpected: ?TypeID) Error!TypeID {
@@ -4221,7 +4214,11 @@ pub fn typeName(self: *Typechecker, allocator: Allocator, typeID: TypeID) Error!
                 }
 
 
-                res = std.fmt.allocPrint(allocator, "{s}) -> {s}", .{res, try self.typeName(allocator, func.returnType)}) catch return Error.AllocatorFailure;
+                res = std.fmt.allocPrint(allocator, "{s}) -> {s}", .{
+                    res,
+                    if (func.isComptime) "dependent"
+                    else try self.typeName(allocator, func.returnType)
+                }) catch return Error.AllocatorFailure;
                 self.typenameMap.putNoClobber(allocator, typeID, try self.builder.internString(res)) catch unreachable;
                 break :ret res;
             },

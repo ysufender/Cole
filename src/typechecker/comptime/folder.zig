@@ -1,4 +1,4 @@
-// @TODO: Garbage collecting or something si
+// @TODO: Garbage collecting or something similar
 
 const std = @import("std");
 const common = @import("../../core/common.zig");
@@ -228,17 +228,6 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
 
     var isComptime = self.typechecker.hasMetadata(exprPtr, "@comptime");
 
-    const returnType = Typechecker.determineExpected(
-        self.getValue(try self.expectType(returnTypeExpr)).Type
-    ) orelse res: {
-        isComptime = true;
-        break :res Builtin.Type("any");
-    };
-
-    if (self.typechecker.typeTable.get(returnType).isComptime(&self.typechecker.typeTable.slice())) {
-        isComptime = true;
-    }
-
     const oldScope = self.typechecker.symbols.resolutionMap.get(.{
         .file = self.typechecker.currentFile,
         .expr = exprPtr,
@@ -306,9 +295,18 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
         }
     }
 
-    const lret = self.typechecker.lowerer.lastReturnType;
-    defer self.typechecker.lowerer.lastReturnType = lret;
-    self.typechecker.lowerer.lastReturnType = returnType;
+    const returnType =
+        if (isComptime) returnTypeExpr
+        else Typechecker.determineExpected(
+            self.getValue(try self.expectType(returnTypeExpr)).Type
+        ) orelse res: {
+            isComptime = true;
+            break :res Builtin.Type("any");
+        };
+
+    if (!isComptime and self.typechecker.typeTable.get(returnType).isComptime(&self.typechecker.typeTable.slice())) {
+        isComptime = true;
+    }
 
     if (
         self.typechecker.hasMetadata(exprPtr, "@variadic")
@@ -322,7 +320,7 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
         self.typechecker.hasMetadata(exprPtr, "@variadic")
         and argTypes.len == 0
     ) {
-        self.report("ISO C does not allow variadic arguments without a named parameter..", .{});
+        self.report("ISO C does not allow variadic arguments without a named parameter.", .{});
         return Error.UnnamedVariadic;
     }
 
@@ -358,6 +356,77 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
     return self.appendValue(.{
         .Function = functionDef,
     });
+}
+
+pub fn determineComptimeReturnTypeDirect(
+    self: *Folder,
+    returnExpr: defines.ExpressionPtr,
+    func: JIR.Function,
+    args: []const Comptime.Value.Ptr,
+) Error!TypeID {
+    const prevc = self.setFlag(.InComptimeCall, true);
+    defer _ = self.setFlag(.InComptimeCall, prevc);
+
+    try self.typechecker.executer.stack.push(.{
+        .body = &.{},
+        .data = .{ .block = {} },
+        .kind = .Block,
+        .pc = 0,
+        .variables = .empty,
+    });
+    defer _ = self.typechecker.executer.stack.pop();
+    var top = self.typechecker.executer.stack.peek();
+
+    for (func.args, 0..) |arg, i| {
+        top.variables.putNoClobber(
+            self.typechecker.executer.arena.allocator(),
+            arg,
+            args[i],
+        ) catch return Error.AllocatorFailure;
+    }
+
+    const prevs = self.typechecker.currentFile;
+    self.typechecker.currentFile = func.source;
+    defer self.typechecker.currentFile = prevs;
+
+    return self.getValue(try self.expectType(returnExpr)).Type;
+}
+
+pub fn determineComptimeReturnType(
+    self: *Folder,
+    returnExpr: defines.ExpressionPtr,
+    functionExpr: defines.ExpressionPtr,
+    args: []const defines.ExpressionPtr,
+    argTypes: []const TypeID,
+) Error!TypeID {
+    const func = self.getValue(try self.eval(functionExpr, null)).Function;
+
+    const prevc = self.setFlag(.InComptimeCall, true);
+    defer _ = self.setFlag(.InComptimeCall, prevc);
+
+    try self.typechecker.executer.stack.push(.{
+        .body = &.{},
+        .data = .{ .block = {} },
+        .kind = .Block,
+        .pc = 0,
+        .variables = .empty,
+    });
+    defer _ = self.typechecker.executer.stack.pop();
+    var top = self.typechecker.executer.stack.peek();
+
+    for (func.args, 0..) |arg, i| {
+        top.variables.putNoClobber(
+            self.typechecker.executer.arena.allocator(),
+            arg,
+            try self.eval(args[i], argTypes[i]),
+        ) catch return Error.AllocatorFailure;
+    }
+
+    const prevs = self.typechecker.currentFile;
+    self.typechecker.currentFile = func.source;
+    defer self.typechecker.currentFile = prevs;
+
+    return self.getValue(try self.expectType(returnExpr)).Type;
 }
 
 fn evalFieldAccess(self: *Folder, resType: TypeID, on: Comptime.Value.Ptr, name: []const u8) Error!Comptime.Value.Ptr {
@@ -3508,5 +3577,4 @@ pub const builtinMetadata = [_][]const u8 {
     "@opaque",
     "@packed",
     "@inline",
-    "@lazy"
 };

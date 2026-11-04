@@ -3,7 +3,7 @@ import std::io::stream as Stream;
 import std::string as String;
 import std;
 
-pub let print = fn (fmt: []u8, T: type) -> #(@lazy) any {
+pub let print = fn (fmt: []u8, T: type) -> *fn (T, Allocator::Allocator, Stream::Output::Stream) -> void {
     let info = typeInfo(T).Struct;
 
     let strings: [info.fields.len + 1]mut []u8 = undefined;
@@ -38,27 +38,21 @@ pub let print = fn (fmt: []u8, T: type) -> #(@lazy) any {
         compileError("Unhandled format values.");
     }
 
-    return
-        if (sizeOf(T) != 0)
-            fn (args: T, gpa: Allocator::Allocator, out: Stream::Output::Stream) -> void {
-                for #(@inline) 0..strings.len, |i| {
-                    _ = Stream::Output::writebuffer(out, strings[i]);
+    return fn (args: T, gpa: Allocator::Allocator, out: Stream::Output::Stream) -> void {
+        for #(@inline) 0..strings.len, |i| {
+            _ = Stream::Output::writebuffer(out, strings[i]);
 
-                    if i < strings.len - 1 {
-                        let toStr = String::toStr(info.fields[i].valueType);
-                        let str = switch toStr(field(args, info.fields[i].name), gpa) {
-                            @Some -> |s| s,
-                            @None -> "<unknown>",
-                        };
+            if i < strings.len - 1 {
+                let toStr = String::toStr(info.fields[i].valueType);
+                let str = switch toStr(field(args, info.fields[i].name), gpa) {
+                    @Some -> |s| s,
+                    @None -> "<unknown>",
+                };
 
-                        _ = Stream::Output::writebuffer(out, str);
-                    }
-                }
-
-                _ = Stream::Output::writebuffer(out, "\n");
+                _ = Stream::Output::writebuffer(out, str);
             }
-        else
-            fn (out: Stream::Output::Stream) -> void {
-                _ = Stream::Output::write(fmt);
-            };
+        }
+
+        _ = Stream::Output::writebuffer(out, "\n");
+    };
 };
