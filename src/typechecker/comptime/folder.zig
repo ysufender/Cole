@@ -297,15 +297,27 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
 
     const returnType =
         if (isComptime) returnTypeExpr
-        else Typechecker.determineExpected(
-            self.getValue(try self.expectType(returnTypeExpr)).Type
-        ) orelse res: {
-            isComptime = true;
-            break :res Builtin.Type("any");
+        else blk: {
+            const inner = self.typechecker.currentScope;
+            self.typechecker.currentScope = prev;
+            defer self.typechecker.currentScope = inner;
+
+            break :blk Typechecker.determineExpected(
+                self.getValue(try self.expectType(returnTypeExpr)).Type
+            ) orelse {
+                isComptime = true;
+                break :blk returnTypeExpr;
+            };
         };
 
     if (!isComptime and self.typechecker.typeTable.get(returnType).isComptime(&self.typechecker.typeTable.slice())) {
         isComptime = true;
+    }
+
+    const lret = self.typechecker.lowerer.lastReturnType;
+    defer self.typechecker.lowerer.lastReturnType = lret;
+    if (!isComptime) {
+        self.typechecker.lowerer.lastReturnType = returnType;
     }
 
     if (
@@ -364,9 +376,6 @@ pub fn determineComptimeReturnTypeDirect(
     func: JIR.Function,
     args: []const Comptime.Value.Ptr,
 ) Error!TypeID {
-    const prevc = self.setFlag(.InComptimeCall, true);
-    defer _ = self.setFlag(.InComptimeCall, prevc);
-
     try self.typechecker.executer.stack.push(.{
         .body = &.{},
         .data = .{ .block = {} },
@@ -375,19 +384,25 @@ pub fn determineComptimeReturnTypeDirect(
         .variables = .empty,
     });
     defer _ = self.typechecker.executer.stack.pop();
-    var top = self.typechecker.executer.stack.peek();
 
     for (func.args, 0..) |arg, i| {
-        top.variables.putNoClobber(
+        self.typechecker.executer.stack.peek().variables.putNoClobber(
             self.typechecker.executer.arena.allocator(),
             arg,
             args[i],
         ) catch return Error.AllocatorFailure;
     }
 
+    const prevc = self.setFlag(.InComptimeCall, true);
+    defer _ = self.setFlag(.InComptimeCall, prevc);
+
     const prevs = self.typechecker.currentFile;
     self.typechecker.currentFile = func.source;
     defer self.typechecker.currentFile = prevs;
+
+    const prevsc = self.typechecker.currentScope;
+    self.typechecker.currentScope = func.scope;
+    defer self.typechecker.currentScope = prevsc;
 
     return self.getValue(try self.expectType(returnExpr)).Type;
 }
@@ -400,9 +415,6 @@ pub fn determineComptimeReturnType(
     argTypes: []const TypeID,
 ) Error!TypeID {
     const func = self.getValue(try self.eval(functionExpr, null)).Function;
-
-    const prevc = self.setFlag(.InComptimeCall, true);
-    defer _ = self.setFlag(.InComptimeCall, prevc);
 
     try self.typechecker.executer.stack.push(.{
         .body = &.{},
@@ -421,6 +433,9 @@ pub fn determineComptimeReturnType(
             try self.eval(args[i], argTypes[i]),
         ) catch return Error.AllocatorFailure;
     }
+
+    const prevc = self.setFlag(.InComptimeCall, true);
+    defer _ = self.setFlag(.InComptimeCall, prevc);
 
     const prevs = self.typechecker.currentFile;
     self.typechecker.currentFile = func.source;

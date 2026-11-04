@@ -1,6 +1,6 @@
 import std::io::console as Console;
 
-let Noop = fn (T: type) -> *fn (T) -> T {
+let Noop = fn (T: type) -> *fn (T) -> void {
     return fn (a: T) -> void {
     };
 };

@@ -1,0 +1,492 @@
+diff --git a/debug.cfg b/debug.cfg
+index 2ca4df8..07f4ec6 100644
+--- a/debug.cfg
++++ b/debug.cfg
+@@ -9,4 +9,5 @@ file zig-out/bin/cole-debug
+ set args --working test main.cole --supress-warnings -o test -I ../stdlib
+ 
+ r
++i stack
+ q
+diff --git a/src/main.zig b/src/main.zig
+index fbdd09e..6be0261 100644
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -37,6 +37,11 @@ pub fn main(init: std.process.Init) void {
+                 "The compiler has ran out of memory, this is probably because of an internal error."
+                 ++ " Please report this to the author(s), along with a stack trace.", .{ }
+             ),
++            Error.OutOfMemory => common.log.err(
++                "The compiler has ran out of memory DURING compile-time execution. This suggests"
++                ++ " to a stack overflow in the compile-time callstack. Please report this to the"
++                ++ " author(s), along with a stack trace.", .{ }
++            ),
+             Error.Terminate => break :blk,
+             else => { }, 
+         }
+diff --git a/src/typechecker/comptime/executer.zig b/src/typechecker/comptime/executer.zig
+index 5b539b7..78c3e08 100644
+--- a/src/typechecker/comptime/executer.zig
++++ b/src/typechecker/comptime/executer.zig
+@@ -107,7 +107,7 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
+     const prevsc = self.typechecker.folder.setFlag(.StaticPass, false);
+     defer _ = self.typechecker.folder.setFlag(.StaticPass, prevsc);
+ 
+-    const returnType = sign.returnType;
++    const returnType = try self.typechecker.folder.determineComptimeReturnTypeDirect(sign.returnType, func, args);
+ 
+     {
+         const pc = self.typechecker.setFlag(.CoveredAllPaths, false);
+diff --git a/src/typechecker/comptime/folder.zig b/src/typechecker/comptime/folder.zig
+index 8759676..c677a7f 100644
+--- a/src/typechecker/comptime/folder.zig
++++ b/src/typechecker/comptime/folder.zig
+@@ -1,4 +1,4 @@
+-// @TODO: Garbage collecting or something si
++// @TODO: Garbage collecting or something similar
+ 
+ const std = @import("std");
+ const common = @import("../../core/common.zig");
+@@ -228,17 +228,6 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
+ 
+     var isComptime = self.typechecker.hasMetadata(exprPtr, "@comptime");
+ 
+-    const returnType = Typechecker.determineExpected(
+-        self.getValue(try self.expectType(returnTypeExpr)).Type
+-    ) orelse res: {
+-        isComptime = true;
+-        break :res Builtin.Type("any");
+-    };
+-
+-    if (self.typechecker.typeTable.get(returnType).isComptime(&self.typechecker.typeTable.slice())) {
+-        isComptime = true;
+-    }
+-
+     const oldScope = self.typechecker.symbols.resolutionMap.get(.{
+         .file = self.typechecker.currentFile,
+         .expr = exprPtr,
+@@ -306,9 +295,24 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
+         }
+     }
+ 
++    const returnType =
++        if (isComptime) returnTypeExpr
++        else Typechecker.determineExpected(
++            self.getValue(try self.expectType(returnTypeExpr)).Type
++        ) orelse res: {
++            isComptime = true;
++            break :res Builtin.Type("any");
++        };
++
++    if (!isComptime and self.typechecker.typeTable.get(returnType).isComptime(&self.typechecker.typeTable.slice())) {
++        isComptime = true;
++    }
++
+     const lret = self.typechecker.lowerer.lastReturnType;
+     defer self.typechecker.lowerer.lastReturnType = lret;
+-    self.typechecker.lowerer.lastReturnType = returnType;
++    if (!isComptime) {
++        self.typechecker.lowerer.lastReturnType = returnType;
++    }
+ 
+     if (
+         self.typechecker.hasMetadata(exprPtr, "@variadic")
+@@ -322,7 +326,7 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
+         self.typechecker.hasMetadata(exprPtr, "@variadic")
+         and argTypes.len == 0
+     ) {
+-        self.report("ISO C does not allow variadic arguments without a named parameter..", .{});
++        self.report("ISO C does not allow variadic arguments without a named parameter.", .{});
+         return Error.UnnamedVariadic;
+     }
+ 
+@@ -360,6 +364,80 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
+     });
+ }
+ 
++pub fn determineComptimeReturnTypeDirect(
++    self: *Folder,
++    returnExpr: defines.ExpressionPtr,
++    func: JIR.Function,
++    args: []const Comptime.Value.Ptr,
++) Error!TypeID {
++    try self.typechecker.executer.stack.push(.{
++        .body = &.{},
++        .data = .{ .block = {} },
++        .kind = .Block,
++        .pc = 0,
++        .variables = .empty,
++    });
++    defer _ = self.typechecker.executer.stack.pop();
++
++    for (func.args, 0..) |arg, i| {
++        self.typechecker.executer.stack.peek().variables.putNoClobber(
++            self.typechecker.executer.arena.allocator(),
++            arg,
++            args[i],
++        ) catch return Error.AllocatorFailure;
++    }
++
++    const prevc = self.setFlag(.InComptimeCall, true);
++    defer _ = self.setFlag(.InComptimeCall, prevc);
++
++    const prevs = self.typechecker.currentFile;
++    self.typechecker.currentFile = func.source;
++    defer self.typechecker.currentFile = prevs;
++
++    const prevsc = self.typechecker.currentScope;
++    self.typechecker.currentScope = func.scope;
++    defer self.typechecker.currentScope = prevsc;
++
++    return self.getValue(try self.expectType(returnExpr)).Type;
++}
++
++pub fn determineComptimeReturnType(
++    self: *Folder,
++    returnExpr: defines.ExpressionPtr,
++    functionExpr: defines.ExpressionPtr,
++    args: []const defines.ExpressionPtr,
++    argTypes: []const TypeID,
++) Error!TypeID {
++    const func = self.getValue(try self.eval(functionExpr, null)).Function;
++
++    try self.typechecker.executer.stack.push(.{
++        .body = &.{},
++        .data = .{ .block = {} },
++        .kind = .Block,
++        .pc = 0,
++        .variables = .empty,
++    });
++    defer _ = self.typechecker.executer.stack.pop();
++    var top = self.typechecker.executer.stack.peek();
++
++    for (func.args, 0..) |arg, i| {
++        top.variables.putNoClobber(
++            self.typechecker.executer.arena.allocator(),
++            arg,
++            try self.eval(args[i], argTypes[i]),
++        ) catch return Error.AllocatorFailure;
++    }
++
++    const prevc = self.setFlag(.InComptimeCall, true);
++    defer _ = self.setFlag(.InComptimeCall, prevc);
++
++    const prevs = self.typechecker.currentFile;
++    self.typechecker.currentFile = func.source;
++    defer self.typechecker.currentFile = prevs;
++
++    return self.getValue(try self.expectType(returnExpr)).Type;
++}
++
+ fn evalFieldAccess(self: *Folder, resType: TypeID, on: Comptime.Value.Ptr, name: []const u8) Error!Comptime.Value.Ptr {
+     if (std.mem.eql(u8, name, "&")) {
+         if (self.getFlag(.InComptimeCall)) {
+@@ -3508,5 +3586,4 @@ pub const builtinMetadata = [_][]const u8 {
+     "@opaque",
+     "@packed",
+     "@inline",
+-    "@lazy"
+ };
+diff --git a/src/typechecker/typechecker.zig b/src/typechecker/typechecker.zig
+index 10d9ce1..b2c3af5 100644
+--- a/src/typechecker/typechecker.zig
++++ b/src/typechecker/typechecker.zig
+@@ -1797,23 +1797,12 @@ pub fn typecheckCall(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpec
+             );
+         },
+         .Function => |func| func,
+-        else =>
+-            if (self.hasMetadata(ast.extra[extraPtr], "@lazy"))
+-                switch (self.folder.getValue(try self.folder.eval(ast.extra[extraPtr], lhsType))) {
+-                    .Function => |func| self.typeTable.get(func.signature).Function,
+-                    else => {
+-                        self.report("Attempt to call non-function type '{s}'.", .{
+-                            try self.typeName(self.arena.allocator(), lhsType),
+-                        });
+-                        return Error.TypeIsNotCallable;
+-                    }
+-                }
+-            else {
+-                self.report("Attempt to call non-function type '{s}'.", .{
+-                    try self.typeName(self.arena.allocator(), lhsType),
+-                });
+-                return Error.TypeIsNotCallable;
+-            },
++        else => {
++            self.report("Attempt to call non-function type '{s}'.", .{
++                try self.typeName(self.arena.allocator(), lhsType),
++            });
++            return Error.TypeIsNotCallable;
++        },
+     };
+ 
+     const exprList = ast.expressions.items(.value)[ast.extra[extraPtr + 1]];
+@@ -1846,11 +1835,15 @@ pub fn typecheckCall(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpec
+         return Error.ArgumentCountMismatch;
+     }
+ 
+-    if (func.returnType == comptime Comptime.Folder.Builtin.Type("noreturn")) {
++    const returnType = 
++        if (func.isComptime) try self.folder.determineComptimeReturnType(func.returnType, ast.extra[extraPtr], args, func.argTypes)
++        else func.returnType;
++
++    if (returnType == comptime Comptime.Folder.Builtin.Type("noreturn")) {
+         _ = self.setFlag(.CoveredAllPaths, true);
+     }
+ 
+-    return func.returnType;
++    return returnType;
+ }
+ 
+ pub fn typecheckBuiltinCall(self: *Typechecker, extraPtr: defines.ExpressionPtr, declPtr: defines.DeclPtr, maybeExpected: ?TypeID) Error!TypeID {
+@@ -4221,7 +4214,11 @@ pub fn typeName(self: *Typechecker, allocator: Allocator, typeID: TypeID) Error!
+                 }
+ 
+ 
+-                res = std.fmt.allocPrint(allocator, "{s}) -> {s}", .{res, try self.typeName(allocator, func.returnType)}) catch return Error.AllocatorFailure;
++                res = std.fmt.allocPrint(allocator, "{s}) -> {s}", .{
++                    res,
++                    if (func.isComptime) "dependent"
++                    else try self.typeName(allocator, func.returnType)
++                }) catch return Error.AllocatorFailure;
+                 self.typenameMap.putNoClobber(allocator, typeID, try self.builder.internString(res)) catch unreachable;
+                 break :ret res;
+             },
+diff --git a/stdlib/std/debug.cole b/stdlib/std/debug.cole
+index b998c77..989070a 100644
+--- a/stdlib/std/debug.cole
++++ b/stdlib/std/debug.cole
+@@ -8,7 +8,7 @@ import std::io as Io;
+ import std::c::process as Process;
+ import std::c as C;
+ 
+-pub let print = fn (fmt: []u8, T: type) -> any {
++pub let print = fn (fmt: []u8, T: type) -> *fn (T) -> void {
+     return fn (arg: T) -> void {
+         Format::print(fmt, T)(arg, C::Allocator, Io::StdOut());
+     };
+@@ -76,7 +76,7 @@ pub let dumpTrace = fn (
+     }
+ };
+ 
+-pub let impossible = fn (T: type) -> any {
++pub let impossible = fn (T: type) -> *fn () -> T {
+     return fn () -> T {
+         Console::error("Reached unreachable code.");
+         dumpTrace(stackTrace(), C::Allocator, Io::StdErr());
+diff --git a/stdlib/std/fmt.cole b/stdlib/std/fmt.cole
+index f6375b8..ab5a5a5 100644
+--- a/stdlib/std/fmt.cole
++++ b/stdlib/std/fmt.cole
+@@ -3,7 +3,7 @@ import std::io::stream as Stream;
+ import std::string as String;
+ import std;
+ 
+-pub let print = fn (fmt: []u8, T: type) -> #(@lazy) any {
++pub let print = fn (fmt: []u8, T: type) -> *fn (T, Allocator::Allocator, Stream::Output::Stream) -> void {
+     let info = typeInfo(T).Struct;
+ 
+     let strings: [info.fields.len + 1]mut []u8 = undefined;
+@@ -38,27 +38,21 @@ pub let print = fn (fmt: []u8, T: type) -> #(@lazy) any {
+         compileError("Unhandled format values.");
+     }
+ 
+-    return
+-        if (sizeOf(T) != 0)
+-            fn (args: T, gpa: Allocator::Allocator, out: Stream::Output::Stream) -> void {
+-                for #(@inline) 0..strings.len, |i| {
+-                    _ = Stream::Output::writebuffer(out, strings[i]);
++    return fn (args: T, gpa: Allocator::Allocator, out: Stream::Output::Stream) -> void {
++        for #(@inline) 0..strings.len, |i| {
++            _ = Stream::Output::writebuffer(out, strings[i]);
+ 
+-                    if i < strings.len - 1 {
+-                        let toStr = String::toStr(info.fields[i].valueType);
+-                        let str = switch toStr(field(args, info.fields[i].name), gpa) {
+-                            @Some -> |s| s,
+-                            @None -> "<unknown>",
+-                        };
++            if i < strings.len - 1 {
++                let toStr = String::toStr(info.fields[i].valueType);
++                let str = switch toStr(field(args, info.fields[i].name), gpa) {
++                    @Some -> |s| s,
++                    @None -> "<unknown>",
++                };
+ 
+-                        _ = Stream::Output::writebuffer(out, str);
+-                    }
+-                }
+-
+-                _ = Stream::Output::writebuffer(out, "\n");
++                _ = Stream::Output::writebuffer(out, str);
+             }
+-        else
+-            fn (out: Stream::Output::Stream) -> void {
+-                _ = Stream::Output::write(fmt);
+-            };
++        }
++
++        _ = Stream::Output::writebuffer(out, "\n");
++    };
+ };
+diff --git a/stdlib/std/memory/allocator.cole b/stdlib/std/memory/allocator.cole
+index c91c4a4..350b5f5 100644
+--- a/stdlib/std/memory/allocator.cole
++++ b/stdlib/std/memory/allocator.cole
+@@ -18,7 +18,7 @@ pub let Allocator = struct {
+     realloc: *fn (*mut void, []mut void, u32, u32) -> Result([]mut void),
+ };
+ 
+-pub let create = fn (T: type) -> any {
++pub let create = fn (T: type) -> *fn (Allocator) -> Result(*mut T) {
+     return fn (self: Allocator) -> Result(*mut T) {
+         return switch self.create(self.context, sizeOf(T)) {
+             @Ok -> |res| (@Ok, cast(res)),
+@@ -27,13 +27,13 @@ pub let create = fn (T: type) -> any {
+     };
+ };
+ 
+-pub let destroy = fn (T: type) -> any {
++pub let destroy = fn (T: type) -> *fn (Allocator, *T) -> void  {
+     return fn (self: Allocator, ptr: *T) -> void {
+         return self.destroy(self.context, cast(ptr));
+     };
+ };
+ 
+-pub let alloc = fn (T: type) -> any {
++pub let alloc = fn (T: type) -> *fn (Allocator, u32) -> Result([]mut T) {
+     return fn (self: Allocator, count: u32) -> Result([]mut T) {
+         return switch self.alloc(self.context, count, sizeOf(T)) {
+             @Ok -> |res| (@Ok, cast(res)),
+@@ -42,13 +42,13 @@ pub let alloc = fn (T: type) -> any {
+     };
+ };
+ 
+-pub let dealloc = fn (T: type) -> any {
++pub let dealloc = fn (T: type) -> *fn (Allocator, []mut T) -> void {
+     return fn (self: Allocator, arr: []mut T) -> void {
+         return self.dealloc(self.context, cast(arr));
+     };
+ };
+ 
+-pub let realloc = fn (T: type) -> any {
++pub let realloc = fn (T: type) -> *fn (Allocator, []mut T, u32) -> Result([]mut T) {
+     return fn (self: Allocator, arr: []mut T, nlen: u32) -> Result([]mut T) {
+         return switch self.realloc(self.context, cast(arr), nlen, sizeOf(T)) {
+             @Ok -> |res| (@Ok, cast(res)),
+diff --git a/stdlib/std/string.cole b/stdlib/std/string.cole
+index 61e531c..ab58727 100644
+--- a/stdlib/std/string.cole
++++ b/stdlib/std/string.cole
+@@ -21,7 +21,7 @@ pub let equals = fn (str1: []u8, str2: []u8) -> bool {
+     return true;
+ };
+ 
+-pub let toStr = fn (T: type) -> any {
++pub let toStr = fn (T: type) -> *fn (T, Allocator::Allocator) -> std::Option([]u8) {
+     return fn (arg: T, gpa: Allocator::Allocator) -> std::Option([]u8) {
+         return switch typeInfo(T) {
+             @Integer -> safeIntToStr(arg, gpa),
+diff --git a/tests/comptime/generic_fn_basic.cole b/tests/comptime/generic_fn_basic.cole
+index d8a24a3..33b7325 100644
+--- a/tests/comptime/generic_fn_basic.cole
++++ b/tests/comptime/generic_fn_basic.cole
+@@ -1,6 +1,6 @@
+ import std::io::console as Console;
+ 
+-let Identity = fn (T: type) -> any {
++let Identity = fn (T: type) -> *fn (T) -> T {
+     return fn (a: T) -> T {
+         return a;
+     };
+diff --git a/tests/comptime/generic_fn_body_uses_T.cole b/tests/comptime/generic_fn_body_uses_T.cole
+index cfdba0d..04a498a 100644
+--- a/tests/comptime/generic_fn_body_uses_T.cole
++++ b/tests/comptime/generic_fn_body_uses_T.cole
+@@ -1,6 +1,6 @@
+ import std::io::console as Console;
+ 
+-let Copy = fn (T: type) -> any {
++let Copy = fn (T: type) -> *fn(T)->T {
+     return fn (a: T) -> T {
+         let tmp: T = a;
+         return tmp;
+diff --git a/tests/comptime/generic_fn_bound.cole b/tests/comptime/generic_fn_bound.cole
+index 1aaf3c8..541ed36 100644
+--- a/tests/comptime/generic_fn_bound.cole
++++ b/tests/comptime/generic_fn_bound.cole
+@@ -1,6 +1,6 @@
+ import std::io::console as Console;
+ 
+-let Identity = fn (T: type) -> any {
++let Identity = fn (T: type) -> *fn(T)->T {
+     return fn (a: T) -> T {
+         return a;
+     };
+diff --git a/tests/comptime/generic_fn_multi.cole b/tests/comptime/generic_fn_multi.cole
+index f8f622c..ac656f8 100644
+--- a/tests/comptime/generic_fn_multi.cole
++++ b/tests/comptime/generic_fn_multi.cole
+@@ -1,6 +1,6 @@
+ import std::io::console as Console;
+ 
+-let Identity = fn (T: type) -> any {
++let Identity = fn (T: type) -> *fn (T) -> T {
+     return fn (a: T) -> T {
+         return a;
+     };
+diff --git a/tests/comptime/generic_fn_nested_call.cole b/tests/comptime/generic_fn_nested_call.cole
+index cf0cbe5..f89fb25 100644
+--- a/tests/comptime/generic_fn_nested_call.cole
++++ b/tests/comptime/generic_fn_nested_call.cole
+@@ -1,12 +1,12 @@
+ import std::io::console as Console;
+ 
+-let Identity = fn (T: type) -> any {
++let Identity = fn (T: type) -> *fn (T)->T {
+     return fn (a: T) -> T {
+         return a;
+     };
+ };
+ 
+-let Twice = fn (T: type) -> any {
++let Twice = fn (T: type) -> *fn (T)->T {
+     return fn (a: T) -> T {
+         return Identity(T)(Identity(T)(a));
+     };
+diff --git a/tests/comptime/generic_fn_two_params.cole b/tests/comptime/generic_fn_two_params.cole
+index 2eaf55e..d69694f 100644
+--- a/tests/comptime/generic_fn_two_params.cole
++++ b/tests/comptime/generic_fn_two_params.cole
+@@ -1,6 +1,6 @@
+ import std::io::console as Console;
+ 
+-let Second = fn (A: type, B: type) -> any {
++let Second = fn (A: type, B: type) -> *fn (A, B) -> B {
+     return fn (a: A, b: B) -> B {
+         return b;
+     };
+diff --git a/tests/comptime/generic_fn_void.cole b/tests/comptime/generic_fn_void.cole
+index a1e39f2..41e1afc 100644
+--- a/tests/comptime/generic_fn_void.cole
++++ b/tests/comptime/generic_fn_void.cole
+@@ -1,6 +1,6 @@
+ import std::io::console as Console;
+ 
+-let Noop = fn (T: type) -> any {
++let Noop = fn (T: type) -> *fn (T) -> T {
+     return fn (a: T) -> void {
+     };
+ };
+diff --git a/tests/regression/comptime_generic_function.cole b/tests/regression/comptime_generic_function.cole
+index ba8922a..aab2909 100644
+--- a/tests/regression/comptime_generic_function.cole
++++ b/tests/regression/comptime_generic_function.cole
+@@ -1,6 +1,6 @@
+ import std::io::console as Console;
+ 
+-let format = fn (fmt: []u8, T: type) -> any {
++let format = fn (fmt: []u8, T: type) -> *fn (T) -> T {
+     return fn (arg: T) -> void {
+         Console::write(fmt);
+         Console::log(arg);
