@@ -3,11 +3,11 @@ local Efile = require "efile"
 local suites = require "suites"
 
 local cole_build =
-    -- "debug"
+    "debug"
     -- "safe"
-    "fast"
+    -- "fast"
 
-local cole_version = "v0.1.4"
+local cole_version = "v0.1.5"
 
 local exe_path = string.format("../zig-out/cole-%s-%s-linux-x86_64", cole_version, cole_build)
 
