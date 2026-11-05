@@ -55,6 +55,7 @@ const Executer = @This();
 typechecker: *Typechecker,
 arena: Arena,
 stack: Stack,
+depth: u32 = 0,
 
 pub fn init(typechecker: *Typechecker, allocator: Allocator) Error!Executer {
     return .{
@@ -65,6 +66,13 @@ pub fn init(typechecker: *Typechecker, allocator: Allocator) Error!Executer {
 }
 
 pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.Value.Ptr) Error!Comptime.Value.Ptr {
+    if (self.depth >= defines.comptimeCallLimit) {
+        self.report("Compile-time call depth limit ({d}) exceeded.", .{defines.comptimeCallLimit});
+        return Error.StackOverflow;
+    }
+    self.depth += 1;
+    defer self.depth -= 1;
+
     const sign = self.typechecker.typeTable.get(func.signature).Function;
 
     const pscope = self.typechecker.currentScope;

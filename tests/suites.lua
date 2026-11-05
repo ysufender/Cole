@@ -185,6 +185,7 @@ return {
     },
 
     ["stdlib"] = {
+        "fmt",
         "string",
         "math",
         "io",

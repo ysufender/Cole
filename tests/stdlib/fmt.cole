@@ -1,0 +1,13 @@
+import std::fmt as fmt;
+import std::io as io;
+import std::c as c;
+import builtin;
+
+let main = fn (args: [][]u8) -> i32 {
+    let bi = builtin::ColeInfo;
+
+    fmt::print("Hi from %, this is a test from Cole v%.%.%!", ([]u8, u32, u32, u32))
+        ((bi.name, bi.versionMajor, bi.versionMinor, bi.versionPatch), c::Allocator, io::StdOut());
+
+    return 0;
+};

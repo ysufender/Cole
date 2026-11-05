@@ -1,12 +1,13 @@
 import std::io::console as Console;
 
 let main = fn (args: [][]u8) -> i32 {
-    switch (enum { Some, None })(@Some) {
+    let enm = enum { Some, None };
+    switch enm(@Some) {
         @Some -> Console::log("Some");
         else -> Console::log("Unexpected Error");
     }
 
-    switch (enum { Some, None })(@None) {
+    switch enm(@None) {
         @Some -> Console::log("Unexpected Error");
         else -> Console::log("None");
     }

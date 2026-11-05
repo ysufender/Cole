@@ -43,12 +43,14 @@ pub let print = fn (fmt: []u8, T: type) -> *fn (T, Allocator::Allocator, Stream:
         compileError("Unhandled format values.");
     }
 
-    if start != fmt.len {
-        strings[index] = fmt[start..fmt.len];
-    }
+    strings[index] = fmt[start..fmt.len];
 
     return fn (args: T, gpa: Allocator::Allocator, out: Stream::Output::Stream) -> void {
         for #(@inline) 0..strings.len, |i| {
+            if strings[i].len == 0 {
+                continue;
+            }
+
             _ = Stream::Output::writebuffer(out, strings[i]);
 
             if i < strings.len - 1 {

@@ -51,7 +51,7 @@ let safeIntToStr = fn (num: c_long, gpa: Allocator::Allocator) -> std::Option([]
     }
 
     digitCount = if (digitCount == 0) 1 else digitCount + (if (isSigned) 1 else 0);
-    let result = switch Allocator::alloc(u8)(gpa, digitCount + 1) {
+    let result = switch Allocator::alloc(u8)(gpa, digitCount) {
         @Ok -> |s| s,
         @Err -> undefined,
     };
@@ -68,7 +68,6 @@ let safeIntToStr = fn (num: c_long, gpa: Allocator::Allocator) -> std::Option([]
         index = index - 1;
     }
     result[0] = if (num < 0) '-' else result[0];
-    result[result.len - 1] = 0;
 
     return (@Some, result);
 };
@@ -118,7 +117,7 @@ let safeFloatToStr = fn (num: float, gpa: Allocator::Allocator) -> std::Option([
     else if value >= 9223372036854775808.0 { special = if (negative) "-inf" else "inf"; }
 
     if special.len > 0 {
-        let text = Allocator::alloc(mut u8)(gpa, special.len + 1);
+        let text = Allocator::alloc(mut u8)(gpa, special.len);
         switch text {
             @Ok -> { }
             @Err -> return (@None, ());
@@ -127,7 +126,6 @@ let safeFloatToStr = fn (num: float, gpa: Allocator::Allocator) -> std::Option([
         for 0..special.len, |i| {
             text.Ok[i] = special[i];
         }
-        text.Ok[special.len] = 0;
         return (@Some, text.Ok[0..special.len]);
     }
 
@@ -158,7 +156,7 @@ let safeFloatToStr = fn (num: float, gpa: Allocator::Allocator) -> std::Option([
     }
 
     let length: u32 = (if (negative) 1 else 0) + wholeDigits + 1 + precision;
-    let result = switch Allocator::alloc(mut u8)(gpa, length + 1) {
+    let result = switch Allocator::alloc(mut u8)(gpa, length) {
         @Ok -> |res| res,
         @Err -> undefined,
     };
@@ -168,7 +166,6 @@ let safeFloatToStr = fn (num: float, gpa: Allocator::Allocator) -> std::Option([
     }
 
     let pos: mut u32 = length;
-    result[pos] = 0;
 
     for 0..precision, |i| {
         pos = pos - 1;
