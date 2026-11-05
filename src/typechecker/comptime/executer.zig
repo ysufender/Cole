@@ -119,7 +119,7 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
         if (sign.isComptime) try self.typechecker.folder.determineComptimeReturnTypeDirect(sign.returnType, func, args)
         else sign.returnType;
 
-    {
+    if (!self.typechecker.typecheckedBodies.contains((@as(u128, func.source) << 64) | (@as(u128, func.body) << 32) | self.typechecker.folder.instKey())) {
         const pc = self.typechecker.setFlag(.CoveredAllPaths, false);
         defer _ = self.typechecker.setFlag(.CoveredAllPaths, pc);
 
@@ -139,6 +139,11 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
                 try self.typechecker.typeName(self.arena.allocator(), returnType),
             });
             return Error.UncoveredCodePath;
+        }
+
+        if (!sign.isComptime) {
+            self.typechecker.typecheckedBodies.put(self.arena.allocator(), (@as(u128, func.source) << 64) | (@as(u128, func.body) << 32) | self.typechecker.folder.instKey(), {})
+                catch return Error.AllocatorFailure;
         }
     }
 

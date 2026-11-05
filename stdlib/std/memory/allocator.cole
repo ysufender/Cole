@@ -42,8 +42,8 @@ pub let alloc = fn (T: type) -> *fn (Allocator, u32) -> Result([]mut T) {
     };
 };
 
-pub let dealloc = fn (T: type) -> *fn (Allocator, []mut T) -> void {
-    return fn (self: Allocator, arr: []mut T) -> void {
+pub let dealloc = fn (T: type) -> *fn (Allocator, []T) -> void {
+    return fn (self: Allocator, arr: []T) -> void {
         return self.dealloc(self.context, cast(arr));
     };
 };

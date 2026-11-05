@@ -16,6 +16,7 @@ const Error = common.CompilerError;
 const Resolver = @import("../typechecker/resolver.zig");
 
 const assert = std.debug.assert;
+const toKey = Resolver.toKey;
 
 const Scope = u32;
 
@@ -1313,10 +1314,10 @@ fn scoping(self: *Lowerer, _extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
         rightMost = rtoken.end;
         leftMost = rtoken.start;
 
-        if (self.typechecker.symbols.resolutionMap.get(.{
+        if (self.typechecker.symbols.resolutionMap.get(toKey(.{
             .expr = lhs,
             .file = ast.tokens,
-        })) |decl| {
+        }))) |decl| {
             const declType = try self.typechecker.typecheckDecl(decl, null);
             if (declType == comptime Comptime.Folder.Builtin.Type("type")) {
                 const prevc = self.typechecker.folder.setFlag(.ComptimeBanned, false);
@@ -1581,10 +1582,10 @@ fn call(
     };
 
     if (ast.expressions.items(.type)[func] == .Identifier) blk: {
-        if (self.typechecker.symbols.resolutionMap.get(.{
+        if (self.typechecker.symbols.resolutionMap.get(toKey(.{
             .file = self.typechecker.currentFile,
             .expr = func,
-        })) |builtinPtr| {
+        }))) |builtinPtr| {
             const decl = self.typechecker.symbols.declarations.get(builtinPtr);
 
             if (decl.kind != .Builtin) {

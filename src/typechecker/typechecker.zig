@@ -34,17 +34,20 @@ const BuiltinIndex = Resolver.BuiltinIndex;
 const deepCopy = collections.deepCopy;
 const assert = std.debug.assert;
 const eql = std.meta.eql;
+const toKey = Resolver.toKey;
 
 pub const TypeTable = MultiArrayList(TypeInfo);
 pub const TypeMap = collections.HashMap(TypeInfo, TypeID);
 pub const TypeNameMap = std.AutoHashMapUnmanaged(TypeID, defines.StringPtr);
-pub const MetadataMap = collections.HashMap(Resolver.ResolutionKey, []const Comptime.Value.Ptr);
+pub const MetadataMap = collections.HashMap(u64, []const Comptime.Value.Ptr);
 
 const DeclCache = collections.HashMap(defines.DeclPtr, TypecheckStatus);
-const ExprCache = collections.HashMap(Resolver.ResolutionKey, struct { TypeID, FlagMap });
+const ExprCache = collections.HashMap(u64, struct { TypeID, FlagMap });
 const AnonFuncList = collections.MultiArrayList(JIR.Function);
 const AnonQueue = collections.HashMap(defines.ScopePtr, void);
 const AnonTypeList = std.ArrayList(TypeID);
+const BodyKey = u128;
+const BodyMap = collections.HashMap(BodyKey, void);
 
 pub const Flags = enum(u8) {
     ConcreteValue = 0,
@@ -61,7 +64,7 @@ pub const Flags = enum(u8) {
 };
 
 const TypecheckStatus = struct {
-    status: enum {
+    status: enum(u32) {
         Checked,
         InProgress,
         NotChecked,
@@ -87,6 +90,8 @@ exprCache: ExprCache,
 
 anonFunctions: AnonFuncList,
 anonQueued: AnonQueue,
+
+typecheckedBodies: BodyMap,
 
 metadata: MetadataMap,
 
@@ -124,6 +129,7 @@ pub fn init(
     var typenameMap = TypeNameMap.empty;
     var exprCache = ExprCache.empty;
     var anonQueued = AnonQueue.empty;
+    var bodyMap = BodyMap.empty;
 
     typenameMap.ensureTotalCapacity(allocator, 50 + typeCount + @as(u32, @intCast(Comptime.Folder.builtinTypes.len))) catch return Error.AllocatorFailure;
     typeMap.ensureTotalCapacity(allocator, 50 + typeCount + @as(u32, @intCast(Comptime.Folder.builtinTypes.len))) catch return Error.AllocatorFailure;
@@ -131,6 +137,7 @@ pub fn init(
     metadata.ensureTotalCapacity(allocator, counts.meta * 3) catch return Error.AllocatorFailure;
     exprCache.ensureTotalCapacity(allocator, symbolTable.resolutionMap.count()) catch return Error.AllocatorFailure;
     anonQueued.ensureTotalCapacity(allocator, counts.functions) catch return Error.AllocatorFailure;
+    bodyMap.ensureTotalCapacity(allocator, counts.functions) catch return Error.AllocatorFailure;
 
     return .{
         .context = context,
@@ -145,6 +152,7 @@ pub fn init(
         .executer = undefined,
         .builder = undefined,
         .lowerer = undefined,
+        .typecheckedBodies = bodyMap,
         .symbols = symbolTable,
         .currentFile = 0,
         .currentScope = 0,
@@ -1136,7 +1144,7 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
     };
 
     if (self.folder.currentInstantiation == null) {
-        if (self.exprCache.get(key)) |tuple| {
+        if (self.exprCache.get(toKey(key))) |tuple| {
             const attempting = self.getFlag(.AttemptingEval);
             const inLoop = self.getFlag(.InLoop);
             const inDefer = self.getFlag(.InDefer);
@@ -1209,7 +1217,7 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
     });
 
     if (self.folder.currentInstantiation == null and !self.folder.getFlag(.InComptimeCall)) {
-        self.exprCache.put(self.arena.allocator(), key, .{typeID, self.flags})
+        self.exprCache.put(self.arena.allocator(), toKey(key), .{typeID, self.flags})
             catch return Error.AllocatorFailure;
     }
 
@@ -1569,10 +1577,10 @@ fn typecheckUnionInitialization(self: *Typechecker, ast: *const Parser.AST, uni:
 }
 
 pub fn typecheckScoping(self: *Typechecker, expr: defines.ExpressionPtr) Error!TypeID {
-    if (self.symbols.resolutionMap.get(.{
+    if (self.symbols.resolutionMap.get(toKey(.{
         .file = self.currentFile,
         .expr = expr,
-    })) |decl| {
+    }))) |decl| {
         if (self.folder.currentInstantiation == null) {
             return self.typecheckDecl(decl, null);
         }
@@ -1673,10 +1681,10 @@ pub fn discoverScopeDef(
         .name = self.builder.getInternedString(member.name),
     }) orelse return common.debug.ShouldBeImpossible(self.context.log, @src());
 
-    self.symbols.resolutionMap.put(self.arena.allocator(), .{
+    self.symbols.resolutionMap.put(self.arena.allocator(), toKey(.{
         .file = self.currentFile,
         .expr = expr,
-    }, decl) catch return Error.AllocatorFailure;
+    }), decl) catch return Error.AllocatorFailure;
 
     const prevs = self.currentScope;
     self.currentScope = scope;
@@ -1750,10 +1758,10 @@ pub fn discoverScopeDef(
 pub fn typecheckCall(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID) Error!TypeID {
     const ast = self.context.getAST(self.currentFile);
 
-    if (self.symbols.resolutionMap.get(.{
+    if (self.symbols.resolutionMap.get(toKey(.{
         .file = self.currentFile,
         .expr = ast.extra[extraPtr], 
-    })) |builtinPtr| blk: {
+    }))) |builtinPtr| blk: {
         const decl = self.symbols.declarations.get(builtinPtr);
 
         if (decl.kind != .Builtin) {
@@ -2241,7 +2249,7 @@ pub fn lowerFunction(self: *Typechecker, function: JIR.Function, token: ?defines
         self.folder.currentInstantiation = func.scope;
     defer self.folder.currentInstantiation = prevInst;
 
-    if (!self.hasMetadata(func.expr, "@extern")) {
+    if (!self.hasMetadata(func.expr, "@extern") and !self.typecheckedBodies.contains((@as(u128, func.source) << 64) | (@as(u128, func.body) << 32) | self.folder.instKey())) {
         const pc = self.setFlag(.CoveredAllPaths, false);
         defer _ = self.setFlag(.CoveredAllPaths, pc);
 
@@ -2255,6 +2263,9 @@ pub fn lowerFunction(self: *Typechecker, function: JIR.Function, token: ?defines
             });
             return Error.UncoveredCodePath;
         }
+
+        self.typecheckedBodies.put(self.arena.allocator(), (@as(u128, func.source) << 64) | (@as(u128, func.body) << 32) | self.folder.instKey(), {})
+            catch return Error.AllocatorFailure;
     }
 
     const prt = self.lowerer.lastReturnType;
@@ -4281,20 +4292,20 @@ pub fn setMetadata(
     element: defines.ExpressionPtr,
     metadata: []const Comptime.Value.Ptr,
 ) Error!void {
-    return self.metadata.put(self.arena.allocator(), .{
+    return self.metadata.put(self.arena.allocator(), toKey(.{
         .file = self.currentFile,
         .expr = element,
-    }, metadata) catch Error.AllocatorFailure;
+    }), metadata) catch Error.AllocatorFailure;
 }
 
 pub fn getMetadata(
     self: *const Typechecker,
     value: defines.ExpressionPtr,
 ) ?[]const Comptime.Value.Ptr{
-    return self.metadata.get(.{
+    return self.metadata.get(toKey(.{
         .file = self.currentFile,
         .expr = value,
-    });
+    }));
 }
 
 pub fn hasMetadata(

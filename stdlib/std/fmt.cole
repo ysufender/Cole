@@ -113,52 +113,42 @@ let formatInt = fn (T: type, hex: bool) -> Formatter(T) {
         if Numeric::Signed::Check(T) {
             let isSigned = if (Numeric::Unsigned::Check(T)) false else num < 0;
             let tmp: mut any = num * (if (isSigned) -1 else 1);
-            let digitCount: mut u32 = 0;
-            while tmp != 0 {
-                tmp = tmp / divider;
-                digitCount = digitCount + 1;
-            }
 
             if isSigned {
                 _ = Stream::Output::write(out, '-');
             }
 
-            digitCount = if (digitCount == 0) 1 else digitCount + (if (isSigned) 1 else 0);
+            let place: mut any = tmp - tmp + 1;
+            while tmp / place >= divider {
+                place = place * divider;
+            }
 
-            tmp = num * (if (isSigned) -1 else 1);
-            let index: mut u32 = digitCount;
-            while index > (if (isSigned) 1 else 0) {
-                let rem = tmp % divider;
+            while place > 0 {
+                let digit = (tmp / place) % divider;
                 let ch =
-                    if (hex and rem >= 10) 'A' + rem - 10
-                    else '0' + tmp % divider;
+                    if (hex and digit >= 10) 'A' + digit - 10
+                    else '0' + digit;
 
                 _ = Stream::Output::write(out, ch);
-                tmp = tmp / divider;
-                index = index - 1;
+                place = place / divider;
             }
         }
         else {
             let tmp: mut any = num;
-            let digitCount: mut u32 = 0;
-            while tmp != 0 {
-                tmp = tmp / divider;
-                digitCount = digitCount + 1;
+
+            let place: mut any = tmp - tmp + 1;
+            while tmp / place >= divider {
+                place = place * divider;
             }
 
-            digitCount = if (digitCount == 0) 1 else digitCount;
-
-            tmp = num;
-            let index: mut u32 = digitCount;
-            while index > 0 {
-                let rem = tmp % divider;
+            while place > 0 {
+                let digit = (tmp / place) % divider;
                 let ch =
-                    if (hex and rem >= 10) 'A' + rem - 10
-                    else '0' + tmp % divider;
+                    if (hex and digit >= 10) 'A' + digit - 10
+                    else '0' + digit;
 
                 _ = Stream::Output::write(out, ch);
-                tmp = tmp / divider;
-                index = index - 1;
+                place = place / divider;
             }
         }
     };

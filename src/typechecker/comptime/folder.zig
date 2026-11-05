@@ -8,6 +8,7 @@ const types = @import("../type.zig");
 const backend = @import("../../codegen/backend.zig");
 
 const assert = std.debug.assert;
+const toKey = Resolver.toKey;
 
 const Lexer = @import("../../lexer/lexer.zig");
 const Parser = @import("../../parser/parser.zig");
@@ -24,13 +25,14 @@ const Comptime = @import("../comptime.zig");
 
 const FlagMap = std.bit_set.IntegerBitSet(8);
 
-pub const FolderCacheKey = struct {
-    file: defines.FilePtr,
-    expr: defines.ExpressionPtr,
-    instantiation: u32,
+pub const FolderCacheKey = u128;
+
+pub const FolderCacheValue = union(enum) {
+    Ok: Comptime.Value.Ptr,
+    Err: Error,
 };
 
-const Cache = collections.HashMap(FolderCacheKey, Comptime.Value.Ptr);
+const Cache = collections.HashMap(FolderCacheKey, FolderCacheValue);
 
 const DeclCache = collections.HashMap(defines.DeclPtr, Comptime.Value.Ptr);
 const Memory = std.ArrayList(Comptime.Value);
@@ -106,18 +108,29 @@ pub fn attemptEval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected:
 
     const prev = self.typechecker.setFlag(.AttemptingEval, true);
     defer _ = self.typechecker.setFlag(.AttemptingEval, prev);
-    return self.eval(exprPtr, maybeExpected) catch null;
+    const cacheable = !(self.getFlag(.InComptimeCall) or self.getFlag(.Volatile) or self.getFlag(.StaticPass));
+
+    const key: FolderCacheKey = (@as(u128, self.typechecker.currentFile) << 64) | (@as(u128, exprPtr) << 32) | self.instKey();
+
+    if (cacheable) if (self.cache.get(key)) |cached| switch (cached) {
+        .Err => return null,
+        .Ok => {},
+    };
+
+    return self.eval(exprPtr, maybeExpected) catch |err| {
+        if (cacheable and !self.getFlag(.Volatile) and err != Error.EarlyEval and !self.cache.contains(key)) {
+            self.cache.put(self.arena.allocator(), key, .{ .Err = err }) catch {};
+        }
+
+        return null;
+    };
 }
 
 pub fn eval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeID) Error!Comptime.Value.Ptr {
     const typechecker = self.typechecker;
     const file = typechecker.currentFile;
 
-    const key = FolderCacheKey{
-        .file = file,
-        .expr = exprPtr,
-        .instantiation = self.instKey(),
-    };
+    const key: FolderCacheKey = (@as(u128, file) << 64) | (@as(u128, exprPtr) << 32) | self.instKey();
 
     const ast = typechecker.context.getAST(file);
     const expr = ast.expressions.get(exprPtr);
@@ -140,7 +153,10 @@ pub fn eval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeI
     }
 
     if (self.cache.get(key)) |cached| {
-        return cached;
+        switch (cached) {
+            .Ok => |val| return val,
+            .Err => {},
+        }
     }
 
     const addr = switch (expr.type) {
@@ -228,10 +244,10 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
 
     var isComptime = self.typechecker.hasMetadata(exprPtr, "@comptime");
 
-    const oldScope = self.typechecker.symbols.resolutionMap.get(.{
+    const oldScope = self.typechecker.symbols.resolutionMap.get(toKey(.{
         .file = self.typechecker.currentFile,
         .expr = exprPtr,
-    }).?;
+    })).?;
 
     const scope = self.typechecker.symbols.scopes.addOne(self.typechecker.arena.allocator())
         catch return Error.AllocatorFailure;
@@ -1422,13 +1438,13 @@ fn evalFuncType(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
 
 fn sharedTypeKey(self: *Folder, expr: defines.ExpressionPtr) ?FolderCacheKey {
     const file = self.typechecker.currentFile;
-    const scope = self.typechecker.symbols.resolutionMap.get(.{ .file = file, .expr = expr }).?;
+    const scope = self.typechecker.symbols.resolutionMap.get(toKey(.{ .file = file, .expr = expr })).?;
 
     if (self.needsOwnScope(scope)) {
         return null;
     }
 
-    return .{ .file = file, .expr = expr, .instantiation = 0 };
+    return (@as(u128, file) << 64) | (@as(u128, expr) << 32);
 }
 
 fn evalEnumType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Value.Ptr {
@@ -1439,7 +1455,7 @@ fn evalEnumType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Value
     const sharedKey = self.sharedTypeKey(expr);
     if (sharedKey) |key| {
         if (self.cache.get(key)) |cached| {
-            return cached;
+            if (cached == .Ok) return cached.Ok;
         }
     }
 
@@ -1496,10 +1512,10 @@ fn evalEnumType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Value
         };
     }
 
-    const oldScope = self.typechecker.symbols.resolutionMap.get(.{
+    const oldScope = self.typechecker.symbols.resolutionMap.get(toKey(.{
         .file = self.typechecker.currentFile,
         .expr = expr,
-    }).?;
+    })).?;
 
     const ownScope = self.getFlag(.InComptimeCall) and self.needsOwnScope(oldScope);
     if (ownScope) {
@@ -1529,16 +1545,16 @@ fn evalEnumType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Value
     });
 
     if (sharedKey) |key| {
-        self.cache.put(self.arena.allocator(), key, res) catch return Error.AllocatorFailure;
+        self.cache.put(self.arena.allocator(), key, .{ .Ok = res }) catch return Error.AllocatorFailure;
     }
 
     try self.registerInstance(scope, self.getValue(res).Type, ownScope);
     
-    self.cache.put(self.arena.allocator(), .{
-        .file = self.typechecker.currentFile,
-        .expr = expr,
-        .instantiation = res,
-    }, res) catch return Error.AllocatorFailure;
+    self.cache.put(
+        self.arena.allocator(),
+        (@as(u128, self.typechecker.currentFile) << 64) | (@as(u128, expr) << 32) | res,
+        .{ .Ok = res },
+    ) catch return Error.AllocatorFailure;
     
     return res;
 }
@@ -1551,7 +1567,7 @@ fn evalStructType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Val
     const sharedKey = self.sharedTypeKey(expr);
     if (sharedKey) |key| {
         if (self.cache.get(key)) |cached| {
-            return cached;
+            if (cached == .Ok) return cached.Ok;
         }
     }
 
@@ -1587,10 +1603,10 @@ fn evalStructType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Val
         };
     }
 
-    const oldScope = self.typechecker.symbols.resolutionMap.get(.{
+    const oldScope = self.typechecker.symbols.resolutionMap.get(toKey(.{
         .file = self.typechecker.currentFile,
         .expr = expr,
-    }).?;
+    })).?;
 
     const ownScope = self.getFlag(.InComptimeCall) and self.needsOwnScope(oldScope);
     if (ownScope) {
@@ -1621,16 +1637,16 @@ fn evalStructType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Val
     });
 
     if (sharedKey) |key| {
-        self.cache.put(self.arena.allocator(), key, res) catch return Error.AllocatorFailure;
+        self.cache.put(self.arena.allocator(), key, .{ .Ok = res }) catch return Error.AllocatorFailure;
     }
 
     try self.registerInstance(scope, self.getValue(res).Type, ownScope);
     
-    self.cache.put(self.arena.allocator(), .{
-        .file = self.typechecker.currentFile,
-        .expr = expr,
-        .instantiation = res,
-    }, res) catch return Error.AllocatorFailure;
+    self.cache.put(
+        self.arena.allocator(),
+        (@as(u128, self.typechecker.currentFile) << 64) | (@as(u128, expr) << 32) | res,
+        .{ .Ok = res },
+    ) catch return Error.AllocatorFailure;
     
     return res;
 }
@@ -1645,7 +1661,7 @@ fn evalUnionType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Valu
     const sharedKey = self.sharedTypeKey(expr);
     if (sharedKey) |key| {
         if (self.cache.get(key)) |cached| {
-            return cached;
+            if (cached == .Ok) return cached.Ok;
         }
     }
 
@@ -1739,10 +1755,10 @@ fn evalUnionType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Valu
         };
     }
 
-    const oldScope = self.typechecker.symbols.resolutionMap.get(.{
+    const oldScope = self.typechecker.symbols.resolutionMap.get(toKey(.{
         .file = self.typechecker.currentFile,
         .expr = expr,
-    }).?;
+    })).?;
 
     const ownScope = self.getFlag(.InComptimeCall) and self.needsOwnScope(oldScope);
     if (ownScope) {
@@ -1774,16 +1790,16 @@ fn evalUnionType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Valu
     });
 
     if (sharedKey) |key| {
-        self.cache.put(self.arena.allocator(), key, res) catch return Error.AllocatorFailure;
+        self.cache.put(self.arena.allocator(), key, .{ .Ok = res }) catch return Error.AllocatorFailure;
     }
 
     try self.registerInstance(scope, self.getValue(res).Type, ownScope);
     
-    self.cache.put(self.arena.allocator(), .{
-        .file = self.typechecker.currentFile,
-        .expr = expr,
-        .instantiation = res,
-    }, res) catch return Error.AllocatorFailure;
+    self.cache.put(
+        self.arena.allocator(),
+        (@as(u128, self.typechecker.currentFile) << 64) | (@as(u128, expr) << 32) | res,
+        .{ .Ok = res },
+    ) catch return Error.AllocatorFailure;
     
     return res;
 }
@@ -2694,10 +2710,10 @@ fn constructArrayFromList(self: *Folder, arr: TypeID, child: TypeID, range: defi
 }
 
 fn evalScoping(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Value.Ptr {
-    if (self.typechecker.symbols.resolutionMap.get(.{
+    if (self.typechecker.symbols.resolutionMap.get(toKey(.{
         .file = self.typechecker.currentFile,
         .expr = expr,
-    })) |decl| {
+    }))) |decl| {
         return self.evalDecl(decl, null);
     }
 
@@ -2757,10 +2773,10 @@ pub fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Type
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
     _ = try self.typechecker.typecheckCall(extraPtr, maybeExpected);
 
-    if (self.typechecker.symbols.resolutionMap.get(.{
+    if (self.typechecker.symbols.resolutionMap.get(toKey(.{
         .file = self.typechecker.currentFile,
         .expr = ast.extra[extraPtr], 
-    })) |builtinPtr| blk: {
+    }))) |builtinPtr| blk: {
         const decl = self.typechecker.symbols.declarations.get(builtinPtr);
 
         if (decl.kind != .Builtin) {
@@ -3426,7 +3442,7 @@ fn cacheValue(self: *Folder, ptr: FolderCacheKey, val: Comptime.Value.Ptr) Error
         else => { },
     }
 
-    self.cache.put(self.arena.allocator(), ptr, val)
+    self.cache.put(self.arena.allocator(), ptr, .{ .Ok = val })
         catch return Error.AllocatorFailure;
 }
 
