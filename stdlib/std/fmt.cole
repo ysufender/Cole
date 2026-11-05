@@ -4,6 +4,15 @@ import std::string as String;
 import std;
 
 pub let print = fn (fmt: []u8, T: type) -> *fn (T, Allocator::Allocator, Stream::Output::Stream) -> void {
+    switch typeInfo(T) {
+        @Struct -> |s| {
+            if !s.isTuple {
+                compileError("Expected format tuple type.");
+            }
+        }
+        else -> compileError("Expected format tuple type.");
+    }
+
     let info = typeInfo(T).Struct;
 
     let strings: [info.fields.len + 1]mut []u8 = undefined;
@@ -30,12 +39,12 @@ pub let print = fn (fmt: []u8, T: type) -> *fn (T, Allocator::Allocator, Stream:
         }
     }
 
-    if start != fmt.len {
-        strings[index] = fmt[start..fmt.len];
-    }
-
     if index != strings.len - 1 {
         compileError("Unhandled format values.");
+    }
+
+    if start != fmt.len {
+        strings[index] = fmt[start..fmt.len];
     }
 
     return fn (args: T, gpa: Allocator::Allocator, out: Stream::Output::Stream) -> void {

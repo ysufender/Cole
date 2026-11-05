@@ -687,7 +687,7 @@ fn typecheckWhileStatement(self: *Typechecker, extraPtr: defines.OpaquePtr, expe
     try self.typecheckStatement(bodyPtr, expected);
 }
 
-fn typecheckSwitchStatement(self: *Typechecker, extraPtr: defines.OpaquePtr, expected: TypeID) Error!void {
+pub fn typecheckSwitchStatement(self: *Typechecker, extraPtr: defines.OpaquePtr, expected: TypeID) Error!void {
     const ast = self.context.getAST(self.currentFile);
 
     const item = ast.extra[extraPtr];

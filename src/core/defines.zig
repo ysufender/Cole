@@ -67,6 +67,6 @@ pub fn EitherType(This: type, That: type) type {
 pub const StringPtr = u32;
 
 pub const rehashLimit = 512;
-pub const callstackLimit = 16;
+pub const callstackLimit = 20;
 pub const subscopeMax = 512;
-pub const comptimeStackLimit = 512;
+pub const comptimeStackLimit = 1000;

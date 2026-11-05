@@ -118,8 +118,12 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
         const psc = self.typechecker.folder.setFlag(.StaticPass, true);
         defer _ = self.typechecker.folder.setFlag(.StaticPass, psc);
 
-        try self.typechecker.typecheckStatement(func.body, returnType);
-        if (!(
+        const early = if (self.typechecker.typecheckStatement(func.body, returnType)) |_| false else |err| switch (err) {
+            Error.EarlyEval => true,
+            else => return err,
+        };
+
+        if (!early and !(
             self.typechecker.typeTable.get(returnType).isZeroBit()
             or self.typechecker.getFlag(.CoveredAllPaths)
         )) {
@@ -405,6 +409,60 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
                         .kind = .Block,
                         .data = .{ .block = {} },
                     });
+                }
+            },
+            .Switch => {
+                const itemPtr = try self.typechecker.folder.eval(ast.extra[statement.value], null);
+
+                var labelType: TypeID = undefined;
+                var tag: u32 = undefined;
+                var payload = itemPtr;
+                switch (self.typechecker.folder.getValue(itemPtr)) {
+                    .Enum => |e| {
+                        labelType = e.Type;
+                        tag = @intCast(e.Value);
+                    },
+                    .Union => |u| {
+                        labelType = self.typechecker.typeTable.get(u.Type).Union.tag;
+                        tag = @intCast(u.Tag);
+                        payload = u.Value;
+                    },
+                    else => return common.debug.ShouldBeImpossible(undefined, @src()),
+                }
+
+                var case = ast.extra[statement.value + 1];
+                while (case < ast.extra[statement.value + 2]) : (case += 4) {
+                    if (ast.extra[case] != 0) {
+                        const label: u32 = @intCast(self.typechecker.folder.getValue(
+                            try self.typechecker.folder.eval(ast.extra[case], labelType),
+                        ).Enum.Value);
+
+                        if (label != tag) continue;
+                    }
+
+                    const bod = ast.statements.get(ast.extra[case + 3]);
+                    try self.stack.push(.{
+                        .pc = 0,
+                        .variables = .empty,
+                        .body =
+                            if (bod.type == .Block) ast.extra[ast.extra[bod.value]..ast.extra[bod.value + 1]]
+                            else ast.extra[case + 3..case + 4],
+                        .kind = .Block,
+                        .data = .{ .block = {} },
+                    });
+
+                    if (ast.extra[case + 1] == 1) {
+                        const captureName = tokens.get(ast.expressions.get(ast.extra[case + 2]).value)
+                            .lexeme(self.typechecker.context, ast.tokens);
+
+                        self.stack.peek().variables.put(
+                            self.arena.allocator(),
+                            try self.typechecker.builder.internString(captureName),
+                            payload,
+                        ) catch return Error.AllocatorFailure;
+                    }
+
+                    break;
                 }
             },
             .InlineC, .Import => {

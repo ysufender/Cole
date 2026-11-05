@@ -1119,7 +1119,14 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
                 }
             }
 
-            const valuePtr = try self.expectDefined(decl.node, maybeExpected);
+            const valuePtr =
+                if (self.getFlag(.StaticPass) and !decl.topLevel) early: {
+                    const prevAttempt = self.typechecker.setFlag(.AttemptingEval, true);
+                    defer _ = self.typechecker.setFlag(.AttemptingEval, prevAttempt);
+
+                    break :early self.expectDefined(decl.node, maybeExpected) catch return Error.EarlyEval;
+                }
+                else try self.expectDefined(decl.node, maybeExpected);
 
             break :blk self.castValue(valuePtr, expected, false);
         },
@@ -2597,12 +2604,7 @@ pub fn constructFromList(self: *Folder, typeID: TypeID, _range: defines.Range) E
         .Pointer => self.eval(ast.extra[range.at(0)], typeID),
 
         .Type => {
-            if (range.len() == 1) {
-                return self.expectDefined(ast.extra[range.at(0)], typeID);
-            }
-            else {
-                return self.evalNewTuple(range);
-            }
+            return self.evalNewTuple(range);
         },
 
         .Noreturn, .CChar, .CUChar, .CDouble, .CInt, .CLong,
