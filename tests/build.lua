@@ -3,9 +3,9 @@ local Efile = require "efile"
 local suites = require "suites"
 
 local cole_build =
-    "debug"
+    -- "debug"
     -- "safe"
-    -- "fast"
+    "fast"
 
 local cole_version = "v0.1.4"
 
