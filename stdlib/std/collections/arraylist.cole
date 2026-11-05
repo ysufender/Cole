@@ -1,0 +1,69 @@
+import std::memory::allocator as Malloc;
+import std;
+
+let Allocator = Malloc::Allocator;
+let Error = Malloc::Error;
+let Res = std::Result;
+let Opt = std::Option;
+
+pub let ArrayList = fn (T: type) -> type {
+    return struct {
+        items   : mut []mut T,
+        capacity: mut u32,
+
+        let Self = this();
+        let Elem = T;
+        let Overhead = 32;
+
+        pub let init = fn (allocator: Allocator, size: u32) -> Opt(Self) {
+            let self: mut Self = (undefined, 0);
+            switch Malloc::alloc(T)(allocator, size) {
+                @Ok -> |mem| self.items = mem[0..0];
+                else -> return (@None, ());
+            }
+
+            self.capacity = Overhead;
+            return (@Some, self);
+        };
+
+        pub let reserve = fn (self: *mut Self, allocator: Allocator, size: u32) -> Res(void, Error) {
+            if self.capacity >= size {
+                return (@Ok, ());
+            }
+
+            switch Malloc::realloc(T)(allocator, self.items[0..self.capacity], size) {
+                @Ok -> {
+                    self.capacity = size;
+                }
+                @Err -> |err| return (@Err, err);
+            }
+
+            return (@Ok, ());
+        };
+
+        pub let append = fn (self: *mut Self, allocator: Allocator, elem: T) -> Res(void, Error) {
+            switch addOne(self, allocator) {
+                @Ok -> |index| {
+                    self.items[index] = elem;
+                    return (@Ok, ());
+                }
+                @Err -> |err| return (@Err, err); 
+            }
+
+            return (@Err, @Undefined);
+        };
+
+        pub let addOne = fn (self: *mut Self, allocator: Allocator) -> Res(u32, Error) {
+            if self.items.len >= self.capacity {
+                switch reserve(self, allocator, if (self.capacity == 0) Overhead else self.capacity * 2) {
+                    @Ok -> { }
+                    @Err -> |err| return (@Err, err);
+                }
+            }
+
+            let index = if (self.items.len == 0) 0 else self.items.len - 1;
+            self.items = self.items[0..self.items.len + 1];
+            return (@Ok, index);
+        };
+    };
+}; 

@@ -1,6 +1,6 @@
 import std::io::console as Console;
 
-let Identity = fn (T: type) -> any {
+let Identity = fn (T: type) -> *fn(T)->T {
     return fn (a: T) -> T {
         return a;
     };

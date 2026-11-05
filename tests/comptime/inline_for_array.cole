@@ -1,0 +1,26 @@
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let P = struct { a: i32, b: i32 };
+
+let main = fn (args: [][]u8) -> i32 {
+    let nums = [3]i32(10, 20, 30);
+    for #(@inline) nums, |v| {
+        pi(v);
+    }
+    Console::log("-");
+    let arr: [3]P = ((1, 2), (3, 4), (5, 6));
+    for #(@inline) arr, |p| {
+        pi(p.a + p.b);
+    }
+    Console::log("-");
+    for #(@inline) "abc", |c| {
+        pi(c);
+    }
+    return 0;
+};

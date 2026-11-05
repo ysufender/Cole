@@ -1,0 +1,24 @@
+/*
+ * See the HashMapUnmanaged implementation in zig standard library, this is
+ * a replica of that.
+ */
+
+import std::memory::allocator as Malloc;
+import std::debug;
+import std;
+
+let Allocator = Malloc::Allocator;
+let Error = Malloc::Error;
+let Res = std::Result;
+let Opt = std::Option;
+
+pub let HashMap = fn (K: type, V: type, Context: type, MLP: u32) -> type {
+    if MLP <= 0 or MLP >= 100 {
+        compileError("Max Load Percentage must be between 0 and 100.");
+    }
+
+    // @TODO
+
+    let HM = struct { };
+    return HM;
+};

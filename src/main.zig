@@ -33,12 +33,24 @@ pub fn main(init: std.process.Init) void {
             Error.NotImplemented => common.log.err(
                 "The compiler has hit an unfinished part of the codebase, stay tuned.", .{ }
             ),
+            Error.AllocatorFailure => common.log.err(
+                "The compiler has ran out of memory, this is probably because of an internal error."
+                ++ " Please report this to the author(s), along with a stack trace.", .{ }
+            ),
+            Error.OutOfMemory => common.log.err(
+                "The compiler has ran out of memory DURING compile-time execution. This suggests"
+                ++ " to a stack overflow in the compile-time callstack. Please report this to the"
+                ++ " author(s), along with a stack trace.", .{ }
+            ),
             Error.Terminate => break :blk,
             else => { }, 
         }
 
         if (@errorReturnTrace()) |trace| {
             std.debug.dumpErrorReturnTrace(@ptrCast(trace));
+        }
+        else {
+            common.log.err("Stack trace is not available.", .{});
         }
 
         return common.log.err(

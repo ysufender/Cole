@@ -1,5 +1,3 @@
-// comptime/generic_type_sibling_order
-// Instantiation order must not decide which instance a sibling call binds to.
 import std::io::console as Console;
 import std::string as String;
 import std::c as C;

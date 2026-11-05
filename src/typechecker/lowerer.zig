@@ -16,6 +16,7 @@ const Error = common.CompilerError;
 const Resolver = @import("../typechecker/resolver.zig");
 
 const assert = std.debug.assert;
+const toKey = Resolver.toKey;
 
 const Scope = u32;
 
@@ -163,7 +164,7 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
         },
         .Union => |uni| uni: {
             const tagConst = try self.typechecker.builder.addConstant(.{ .Integer = .{ .u32 = uni.Tag } });
-            const valueConst = try self.addConstant(uni.Value, ofType.Union.fields[uni.Tag + 1].valueType);
+            const valueConst = try self.addConstant(uni.Value, ofType.Union.fields[uni.Tag + @intFromBool(ofType.Union.isTagged)].valueType);
 
             const start = self.typechecker.builder.constants.len;
             _ = try self.typechecker.builder.addConstant(self.typechecker.builder.constants.get(tagConst));
@@ -327,11 +328,8 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
 
     const enumOrUnionType = try typechecker.typecheckExpression(ast.extra[extraPtr], null);
     const enumOrUnionExpr = try self.expression(ast.extra[extraPtr], enumOrUnionType);
-    const maybeComptimeEnumOrUnionPtr = typechecker.folder.cache.get(.{
-        .file = typechecker.currentFile,
-        .expr = ast.extra[extraPtr],
-        .instantiation = self.typechecker.folder.instKey(),
-    });
+    const maybeComptimeEnumOrUnionPtr = self.typechecker.folder.attemptEval(ast.extra[extraPtr], enumOrUnionType);
+
     const maybeComptimeEnumOrUnion =
         if (maybeComptimeEnumOrUnionPtr) |ptr| typechecker.folder.getValue(ptr)
         else null;
@@ -545,8 +543,10 @@ fn variableDef(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
         return vdef;
     }
 
+    const maybeConstant = self.typechecker.folder.attemptEval(decl.node, typeID);
+
     const node =
-        if (self.typechecker.folder.cache.get(.{ .instantiation = self.typechecker.folder.instKey(), .file = self.typechecker.currentFile, .expr = decl.node })) |someVal|
+        if (maybeConstant) |someVal|
             try self.typechecker.builder.literal(try self.addConstant(someVal, typeID))
         else
             try self.expression(decl.node, typeID);
@@ -555,8 +555,7 @@ fn variableDef(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
         decl.topLevel,
         typeID,
         decl.name,
-        if (self.typechecker.folder.cache.get(.{ .instantiation = self.typechecker.folder.instKey(), .file = self.typechecker.currentFile, .expr = decl.node })) |i|
-            self.typechecker.folder.getValue(i) == .Undefined
+        if (maybeConstant) |i| self.typechecker.folder.getValue(i) == .Undefined
         else false,
         node,
         decl.node,
@@ -981,6 +980,13 @@ fn inlineForLoop(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser
             catch return Error.AllocatorFailure;
         defer _ = self.typechecker.folder.declCache.remove(captureDeclPtr);
 
+        {
+            const prevl = self.typechecker.setFlag(.InLoop, true);
+            defer _ = self.typechecker.setFlag(.InLoop, prevl);
+
+            try self.typechecker.typecheckStatement(bodyPtr, comptime Comptime.Folder.Builtin.Type("any"));
+        }
+
         self.lastLoop = base;
         const body = try self.statement(bodyPtr);
 
@@ -1049,7 +1055,9 @@ fn loop(
 
     const conditionPtr = ast.extra[extraPtr];
 
-    if (self.typechecker.folder.cache.get(.{ .instantiation = self.typechecker.folder.instKey(), .file = self.typechecker.currentFile, .expr = conditionPtr })) |res| {
+    const maybeRes = self.typechecker.folder.attemptEval(conditionPtr, comptime Comptime.Folder.Builtin.Type("bool"));
+
+    if (maybeRes) |res| {
         if (self.typechecker.folder.getValue(res).Bool) {
             var loopData: [5]JIR.Ptr = undefined;
 
@@ -1094,7 +1102,9 @@ fn loop(
 fn conditional(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.AST) Error!JIR.Ptr {
     const conditionExpr = ast.extra[extraPtr];
 
-    if (self.typechecker.folder.cache.get(.{ .instantiation = self.typechecker.folder.instKey(), .file = self.typechecker.currentFile, .expr = conditionExpr })) |comptimeConditionPtr| {
+    const maybeComptimeCondition = self.typechecker.folder.attemptEval(conditionExpr, Comptime.Folder.Builtin.Type("bool"));
+
+    if (maybeComptimeCondition) |comptimeConditionPtr| {
         const comptimeCondition = self.typechecker.folder.getValue(comptimeConditionPtr).Bool;
 
         if (comptimeCondition) {
@@ -1200,8 +1210,8 @@ fn block(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
 }
 
 pub fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID) Error!JIR.Ptr {
-    if (self.typechecker.folder.attemptEval(exprPtr, ofType)) |_| {
-        return self.literal(exprPtr, ofType);
+    if (self.typechecker.folder.attemptEval(exprPtr, ofType)) |value| {
+        return self.typechecker.builder.literal(try self.addConstant(value, ofType));
     }
 
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
@@ -1304,10 +1314,10 @@ fn scoping(self: *Lowerer, _extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
         rightMost = rtoken.end;
         leftMost = rtoken.start;
 
-        if (self.typechecker.symbols.resolutionMap.get(.{
+        if (self.typechecker.symbols.resolutionMap.get(toKey(.{
             .expr = lhs,
             .file = ast.tokens,
-        })) |decl| {
+        }))) |decl| {
             const declType = try self.typechecker.typecheckDecl(decl, null);
             if (declType == comptime Comptime.Folder.Builtin.Type("type")) {
                 const prevc = self.typechecker.folder.setFlag(.ComptimeBanned, false);
@@ -1391,8 +1401,7 @@ fn switchExpr(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error
     const enumOrUnionType = try typechecker.typecheckExpression(ast.extra[extraPtr], null);
     const enumOrUnionExpr = try self.expression(ast.extra[extraPtr], enumOrUnionType);
     const maybeComptimeEnumOrUnion =
-        if (self.typechecker.folder.cache.get(.{ .instantiation = self.typechecker.folder.instKey(), .file = self.typechecker.currentFile, .expr = ast.extra[extraPtr] })) |ptr|
-            typechecker.folder.getValue(ptr)
+        if (self.typechecker.folder.attemptEval(ast.extra[extraPtr], enumOrUnionType)) |ptr| self.typechecker.folder.getValue(ptr)
         else null;
 
     var cachedDef: ?JIR.Ptr = null;
@@ -1573,10 +1582,10 @@ fn call(
     };
 
     if (ast.expressions.items(.type)[func] == .Identifier) blk: {
-        if (self.typechecker.symbols.resolutionMap.get(.{
+        if (self.typechecker.symbols.resolutionMap.get(toKey(.{
             .file = self.typechecker.currentFile,
             .expr = func,
-        })) |builtinPtr| {
+        }))) |builtinPtr| {
             const decl = self.typechecker.symbols.declarations.get(builtinPtr);
 
             if (decl.kind != .Builtin) {
@@ -1674,6 +1683,13 @@ fn builtinCall(
         BI("alignOf") => self.alignOf(extraPtr, ofType),
         BI("compileLog"), BI("compileError") => self.typechecker.builder.label(
             try self.typechecker.folder.generateRandomName(.BuiltinCall),
+        ),
+        BI("field") => self.typechecker.builder.dot(
+            try self.expression(ast.extra[args.at(0)], try self.typechecker.typecheckExpression(ast.extra[args.at(0)], null)),
+            try self.typechecker.builder.internString(self.typechecker.folder.getValue(
+                try self.typechecker.folder.eval(ast.extra[args.at(1)], null),
+            ).String.str),
+            try self.typechecker.typecheckExpression(ast.extra[args.at(0)], null),
         ),
         else => common.debug.NotImplemented(self.typechecker.context.log, @src()),
     };
@@ -1807,7 +1823,7 @@ fn cast(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR.P
                     const srcElemSize = self.typechecker.sizeOf(rptr.child) / 8;
                     const dstElemSize = self.typechecker.sizeOf(tptr.child) / 8;
 
-                    const newSize = if (srcElemSize == dstElemSize or srcElemSize == 0)
+                    const newSize = if (srcElemSize == dstElemSize)
                         len
                     else blk: {
                         const itemSize = try self.typechecker.builder.literal(

@@ -1,6 +1,3 @@
-// bugs/bug_sizeof_bool_slice
-// sizeOf(bool) is 0 and sizeOf([]u8) is 12 although the C structs are 1 and 16 bytes.
-// KNOWN BUG: sizeOf ignores padding for slices and returns 0 for bool.
 import std::io::console as Console;
 import std::string as String;
 import std::c as C;

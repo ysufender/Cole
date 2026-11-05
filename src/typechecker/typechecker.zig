@@ -34,17 +34,20 @@ const BuiltinIndex = Resolver.BuiltinIndex;
 const deepCopy = collections.deepCopy;
 const assert = std.debug.assert;
 const eql = std.meta.eql;
+const toKey = Resolver.toKey;
 
 pub const TypeTable = MultiArrayList(TypeInfo);
 pub const TypeMap = collections.HashMap(TypeInfo, TypeID);
 pub const TypeNameMap = std.AutoHashMapUnmanaged(TypeID, defines.StringPtr);
-pub const MetadataMap = collections.HashMap(Resolver.ResolutionKey, []const Comptime.Value.Ptr);
+pub const MetadataMap = collections.HashMap(u64, []const Comptime.Value.Ptr);
 
 const DeclCache = collections.HashMap(defines.DeclPtr, TypecheckStatus);
-const ExprCache = collections.HashMap(Resolver.ResolutionKey, struct { TypeID, FlagMap });
+const ExprCache = collections.HashMap(u64, struct { TypeID, FlagMap });
 const AnonFuncList = collections.MultiArrayList(JIR.Function);
 const AnonQueue = collections.HashMap(defines.ScopePtr, void);
 const AnonTypeList = std.ArrayList(TypeID);
+const BodyKey = u128;
+const BodyMap = collections.HashMap(BodyKey, void);
 
 pub const Flags = enum(u8) {
     ConcreteValue = 0,
@@ -61,7 +64,7 @@ pub const Flags = enum(u8) {
 };
 
 const TypecheckStatus = struct {
-    status: enum {
+    status: enum(u32) {
         Checked,
         InProgress,
         NotChecked,
@@ -87,6 +90,8 @@ exprCache: ExprCache,
 
 anonFunctions: AnonFuncList,
 anonQueued: AnonQueue,
+
+typecheckedBodies: BodyMap,
 
 metadata: MetadataMap,
 
@@ -124,6 +129,7 @@ pub fn init(
     var typenameMap = TypeNameMap.empty;
     var exprCache = ExprCache.empty;
     var anonQueued = AnonQueue.empty;
+    var bodyMap = BodyMap.empty;
 
     typenameMap.ensureTotalCapacity(allocator, 50 + typeCount + @as(u32, @intCast(Comptime.Folder.builtinTypes.len))) catch return Error.AllocatorFailure;
     typeMap.ensureTotalCapacity(allocator, 50 + typeCount + @as(u32, @intCast(Comptime.Folder.builtinTypes.len))) catch return Error.AllocatorFailure;
@@ -131,6 +137,7 @@ pub fn init(
     metadata.ensureTotalCapacity(allocator, counts.meta * 3) catch return Error.AllocatorFailure;
     exprCache.ensureTotalCapacity(allocator, symbolTable.resolutionMap.count()) catch return Error.AllocatorFailure;
     anonQueued.ensureTotalCapacity(allocator, counts.functions) catch return Error.AllocatorFailure;
+    bodyMap.ensureTotalCapacity(allocator, counts.functions) catch return Error.AllocatorFailure;
 
     return .{
         .context = context,
@@ -145,6 +152,7 @@ pub fn init(
         .executer = undefined,
         .builder = undefined,
         .lowerer = undefined,
+        .typecheckedBodies = bodyMap,
         .symbols = symbolTable,
         .currentFile = 0,
         .currentScope = 0,
@@ -241,7 +249,7 @@ pub fn typecheck(self: *Typechecker, allocator: Allocator) Error!JIR {
         }
     }
 
-    // TODO:                                             This part is not really nice, fix it.
+    // @TODO:                                             This part is not really nice, fix it.
     const mainPtr = self.symbols.lookup.get(.{ .scope = self.modules.modules.len - 1, .name = "main" }).?;
     const mainDecl = self.symbols.getDecl(mainPtr);
 
@@ -488,18 +496,22 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
                 else if (decl.topLevel) self.modules.modules.get(self.symbols.scopes.items(.module)[decl.scope]).name
                 else try self.folder.generateRandomNameString(.Function);
 
-            const newName =
-                if (
-                    self.hasMetadata(func.expr, "@export")
-                    or self.hasMetadata(func.expr, "@extern")
-                    and decl.topLevel
-                ) symName
-                else if (!decl.topLevel) namespace
-                else std.fmt.allocPrint(self.arena.allocator(), "{s}::{s}", .{
-                    namespace,
-                    symName,
-                }) catch return Error.AllocatorFailure;
-            // const new = try self.builder.internString(newName);
+                const keepName = keep: {
+                    const prevFile = self.currentFile;
+                    self.currentFile = func.source;
+                    defer self.currentFile = prevFile;
+                    break :keep
+                        self.hasMetadata(func.expr, "@export")
+                        or self.hasMetadata(func.expr, "@extern")
+                        and decl.topLevel;
+                };
+
+                const newName = if (keepName) symName
+                    else if (!decl.topLevel) namespace
+                    else std.fmt.allocPrint(self.arena.allocator(), "{s}::{s}", .{
+                        namespace,
+                        symName,
+                    }) catch return Error.AllocatorFailure;
 
             if (std.mem.eql(u8, namespace, "root") and std.mem.eql(u8, newName, "main")) {
                 self.report("Main function can't be exported.", .{});
@@ -507,7 +519,6 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
             }
 
             try self.builder.modifyInternedString(func.name, newName);
-            // func.name = try self.builder.internString(newName);
         },
         else => { },
     }
@@ -591,7 +602,9 @@ fn typecheckFor(self: *Typechecker, extraPtr: defines.OpaquePtr, expected: TypeI
         const prev = self.setFlag(.InLoop, true);
         defer _ = self.setFlag(.InLoop, prev);
 
-        try self.typecheckStatement(body, expected);
+        if (!self.hasMetadata(range.start, "@inline")) {
+            try self.typecheckStatement(body, expected);
+        }
     }
     else {
         const loopExpr = ast.extra[extraPtr];
@@ -645,7 +658,9 @@ fn typecheckFor(self: *Typechecker, extraPtr: defines.OpaquePtr, expected: TypeI
         const prev = self.setFlag(.InLoop, true);
         defer _ = self.setFlag(.InLoop, prev);
 
-        try self.typecheckStatement(body, expected);
+        if (!self.hasMetadata(loopExpr, "@inline")) {
+            try self.typecheckStatement(body, expected);
+        }
     }
 }
 
@@ -680,7 +695,7 @@ fn typecheckWhileStatement(self: *Typechecker, extraPtr: defines.OpaquePtr, expe
     try self.typecheckStatement(bodyPtr, expected);
 }
 
-fn typecheckSwitchStatement(self: *Typechecker, extraPtr: defines.OpaquePtr, expected: TypeID) Error!void {
+pub fn typecheckSwitchStatement(self: *Typechecker, extraPtr: defines.OpaquePtr, expected: TypeID) Error!void {
     const ast = self.context.getAST(self.currentFile);
 
     const item = ast.extra[extraPtr];
@@ -812,7 +827,6 @@ fn typecheckSwitchStatementOnUnion(
 
             _ = try self.typecheckDecl(captureDecl, captureType);
 
-            // Bind the capture to its comptime payload so the body can fold on it.
             if (comptimeItem) |p| switch (self.folder.getValue(p)) {
                 .Union => |u| self.folder.declCache.put(self.folder.arena.allocator(), captureDecl, u.Value)
                     catch return Error.AllocatorFailure,
@@ -1044,10 +1058,11 @@ fn typecheckAssignment(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!vo
 
     if (ast.expressions.get(expr).type == .Indexing) {
         const indexable = ast.extra[ast.expressions.get(expr).value];
-        const indexableType = try self.typecheckExpression(indexable, vtype);
+        const indexableType = try self.typecheckExpression(indexable, null);
 
         if (
-            self.typeTable.get(indexableType) == .Array
+            false
+            and self.typeTable.get(indexableType) == .Array
             and !self.mutable(indexableType)
         ) {
             self.report("Attempt to modify non-mutable value of type '{s}'.", .{
@@ -1080,7 +1095,9 @@ fn typecheckExpressionStatement(self: *Typechecker, exprPtr: defines.OpaquePtr) 
 
     const expression = ast.expressions.get(exprPtr);
 
-    if (expression.type == .Assignment) return self.typecheckAssignment(expression.value);
+    if (expression.type == .Assignment) {
+        return self.typecheckAssignment(expression.value);
+    }
 
     const resultType = try self.typecheckExpression(exprPtr, null);
 
@@ -1127,7 +1144,7 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
     };
 
     if (self.folder.currentInstantiation == null) {
-        if (self.exprCache.get(key)) |tuple| {
+        if (self.exprCache.get(toKey(key))) |tuple| {
             const attempting = self.getFlag(.AttemptingEval);
             const inLoop = self.getFlag(.InLoop);
             const inDefer = self.getFlag(.InDefer);
@@ -1200,7 +1217,7 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
     });
 
     if (self.folder.currentInstantiation == null and !self.folder.getFlag(.InComptimeCall)) {
-        self.exprCache.put(self.arena.allocator(), key, .{typeID, self.flags})
+        self.exprCache.put(self.arena.allocator(), toKey(key), .{typeID, self.flags})
             catch return Error.AllocatorFailure;
     }
 
@@ -1560,10 +1577,10 @@ fn typecheckUnionInitialization(self: *Typechecker, ast: *const Parser.AST, uni:
 }
 
 pub fn typecheckScoping(self: *Typechecker, expr: defines.ExpressionPtr) Error!TypeID {
-    if (self.symbols.resolutionMap.get(.{
+    if (self.symbols.resolutionMap.get(toKey(.{
         .file = self.currentFile,
         .expr = expr,
-    })) |decl| {
+    }))) |decl| {
         if (self.folder.currentInstantiation == null) {
             return self.typecheckDecl(decl, null);
         }
@@ -1664,12 +1681,21 @@ pub fn discoverScopeDef(
         .name = self.builder.getInternedString(member.name),
     }) orelse return common.debug.ShouldBeImpossible(self.context.log, @src());
 
-    self.symbols.resolutionMap.put(self.arena.allocator(), .{
+    self.symbols.resolutionMap.put(self.arena.allocator(), toKey(.{
         .file = self.currentFile,
         .expr = expr,
-    }, decl) catch return Error.AllocatorFailure;
+    }), decl) catch return Error.AllocatorFailure;
+
+    const prevs = self.currentScope;
+    self.currentScope = scope;
+    defer self.currentScope = prevs;
+
+    const prevDiscovering = self.folder.discoveringScope;
+    self.folder.discoveringScope = scope;
+    defer self.folder.discoveringScope = prevDiscovering;
 
     const discoveredType = try self.typecheckDecl(decl, null);
+
     const memberIndex = try self.definitionIndex(from, member.name);
 
     assert(self.symbols.getDecl(decl).public);
@@ -1732,10 +1758,10 @@ pub fn discoverScopeDef(
 pub fn typecheckCall(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID) Error!TypeID {
     const ast = self.context.getAST(self.currentFile);
 
-    if (self.symbols.resolutionMap.get(.{
+    if (self.symbols.resolutionMap.get(toKey(.{
         .file = self.currentFile,
         .expr = ast.extra[extraPtr], 
-    })) |builtinPtr| blk: {
+    }))) |builtinPtr| blk: {
         const decl = self.symbols.declarations.get(builtinPtr);
 
         if (decl.kind != .Builtin) {
@@ -1779,22 +1805,12 @@ pub fn typecheckCall(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpec
             );
         },
         .Function => |func| func,
-        else =>
-            if (self.folder.attemptEval(ast.extra[extraPtr], lhsType)) |val| switch (self.folder.getValue(val)) {
-                .Function => |func| self.typeTable.get(func.signature).Function,
-                else => {
-                    self.report("Attempt to call non-function type '{s}'.", .{
-                        try self.typeName(self.arena.allocator(), lhsType),
-                    });
-                    return Error.TypeIsNotCallable;
-                }
-            }
-            else {
-                self.report("Attempt to call non-function type '{s}'.", .{
-                    try self.typeName(self.arena.allocator(), lhsType),
-                });
-                return Error.TypeIsNotCallable;
-            },
+        else => {
+            self.report("Attempt to call non-function type '{s}'.", .{
+                try self.typeName(self.arena.allocator(), lhsType),
+            });
+            return Error.TypeIsNotCallable;
+        },
     };
 
     const exprList = ast.expressions.items(.value)[ast.extra[extraPtr + 1]];
@@ -1827,11 +1843,15 @@ pub fn typecheckCall(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpec
         return Error.ArgumentCountMismatch;
     }
 
-    if (func.returnType == comptime Comptime.Folder.Builtin.Type("noreturn")) {
+    const returnType = 
+        if (func.isComptime) try self.folder.determineComptimeReturnType(func.returnType, ast.extra[extraPtr], args, func.argTypes)
+        else func.returnType;
+
+    if (returnType == comptime Comptime.Folder.Builtin.Type("noreturn")) {
         _ = self.setFlag(.CoveredAllPaths, true);
     }
 
-    return func.returnType;
+    return returnType;
 }
 
 pub fn typecheckBuiltinCall(self: *Typechecker, extraPtr: defines.ExpressionPtr, declPtr: defines.DeclPtr, maybeExpected: ?TypeID) Error!TypeID {
@@ -1898,11 +1918,39 @@ pub fn typecheckBuiltinCall(self: *Typechecker, extraPtr: defines.ExpressionPtr,
         BI("unreachable") => comptime Comptime.Folder.Builtin.Type("noreturn"),
         BI("this") => comptime Comptime.Folder.Builtin.Type("type"),
         BI("isComptime") => comptime Comptime.Folder.Builtin.Type("bool"),
+        BI("field") => self.typecheckFieldBuiltin(extraPtr),
         else => {
             self.report("Builtin '{s}' is not usable in this context.", .{Resolver.builtins[declPtr]});
             return Error.ComptimeNotPossible;
         },
     };
+}
+
+pub fn typecheckFieldBuiltin(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!TypeID {
+    const ast = self.context.getAST(self.currentFile);
+    const expressionList = ast.expressions.items(.value)[ast.extra[extraPtr + 1]];
+    const args = defines.Range{
+        .start = ast.extra[expressionList],
+        .end = ast.extra[expressionList + 1],
+    };
+
+    if (args.len() != 2) {
+        self.report("'getMetadata' expects a single expression argument, received {d}.", .{
+            args.len(),
+        });
+        return Error.ArgumentCountMismatch;
+    }
+
+    const from = try self.typecheckExpression(ast.extra[args.at(0)], null);
+    const field = switch (self.folder.getValue(try self.folder.eval(ast.extra[args.at(1)], comptime Comptime.Folder.Builtin.Type("[]u8")))) {
+        .String => |str| str.str,
+        else => {
+            self.report("Expected a compile-time string.", .{});
+            return Error.TypeMismatch;
+        },
+    };
+
+    return self.typecheckFieldAccess(from, field);
 }
 
 pub fn typecheckGetMetadata(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!TypeID {
@@ -2201,7 +2249,7 @@ pub fn lowerFunction(self: *Typechecker, function: JIR.Function, token: ?defines
         self.folder.currentInstantiation = func.scope;
     defer self.folder.currentInstantiation = prevInst;
 
-    if (!self.hasMetadata(func.expr, "@extern")) {
+    if (!self.hasMetadata(func.expr, "@extern") and !self.typecheckedBodies.contains((@as(u128, func.source) << 64) | (@as(u128, func.body) << 32) | self.folder.instKey())) {
         const pc = self.setFlag(.CoveredAllPaths, false);
         defer _ = self.setFlag(.CoveredAllPaths, pc);
 
@@ -2215,6 +2263,9 @@ pub fn lowerFunction(self: *Typechecker, function: JIR.Function, token: ?defines
             });
             return Error.UncoveredCodePath;
         }
+
+        self.typecheckedBodies.put(self.arena.allocator(), (@as(u128, func.source) << 64) | (@as(u128, func.body) << 32) | self.folder.instKey(), {})
+            catch return Error.AllocatorFailure;
     }
 
     const prt = self.lowerer.lastReturnType;
@@ -2910,9 +2961,11 @@ pub fn typecheckSwitchExpression(self: *Typechecker, extraPtr: defines.OpaquePtr
         .end = ast.extra[extraPtr + 2],
     };
 
+    const comptimeItem = self.folder.attemptEval(item, itemTypeID);
+
     return switch (itemType) {
-        .Enum => |enm| self.typecheckSwitchOnEnum(ast, itemTypeID, &enm, range, maybeExpected),
-        .Union => |uni| self.typecheckSwitchOnUnion(ast, itemTypeID, &uni, range, maybeExpected),
+        .Enum => |enm| self.typecheckSwitchOnEnum(ast, itemTypeID, &enm, range, maybeExpected, comptimeItem),
+        .Union => |uni| self.typecheckSwitchOnUnion(ast, itemTypeID, &uni, range, maybeExpected, comptimeItem),
         else => return common.debug.ShouldBeImpossible(self.context.log, @src()),
     };
 }
@@ -2924,6 +2977,7 @@ fn typecheckSwitchOnUnion(
     uni: *const Types.Union,
     range: defines.Range,
     maybeExpected: ?TypeID,
+    comptimeItem: ?Comptime.Value.Ptr,
 ) Error!TypeID {
     // @Beware Hardcoded field size, must be kept in sync with parser.(union|struct|enum)Definition
     var fieldBuffer: [512]u32 = undefined;
@@ -2934,6 +2988,12 @@ fn typecheckSwitchOnUnion(
     var fieldMap = std.DynamicBitSet.initEmpty(bufferAllocator.allocator(), tag.fields.len)
         catch return common.debug.ShouldBeImpossible(self.context.log, @src());
 
+    const liveTag: ?u32 = if (comptimeItem) |p| switch (self.folder.getValue(p)) {
+        .Union => |u| @intCast(u.Tag),
+        else => null,
+    } else null;
+    var liveMatched = false;
+
     var expected: ?TypeID = determineExpected(maybeExpected);
     var case = range.start;
     while (case < range.end) : (case += 4) {
@@ -2942,6 +3002,7 @@ fn typecheckSwitchOnUnion(
             return Error.UnreachableCodePath;
         }
 
+        var labelIdx: ?usize = null;
         const caseLabel = ast.extra[case];
         const fieldName = 
             if (caseLabel == 0) blk: {
@@ -2974,8 +3035,15 @@ fn typecheckSwitchOnUnion(
                 }
 
                 fieldMap.set(enumeration);
+                labelIdx = enumeration;
                 break :blk tag.fields[enumeration].name;
             };
+
+        if (liveTag) |lt| {
+            const live = if (labelIdx) |l| l == lt else !liveMatched;
+            if (!live) continue;
+            liveMatched = true;
+        }
 
         const prev = self.currentScope;
         defer self.currentScope = prev;
@@ -2996,7 +3064,20 @@ fn typecheckSwitchOnUnion(
             ].valueType;
 
             _ = try self.typecheckDecl(captureDecl, captureType);
+
+            // Bind the capture to its comptime payload so the body can fold on it.
+            if (comptimeItem) |p| switch (self.folder.getValue(p)) {
+                .Union => |u| self.folder.declCache.put(self.folder.arena.allocator(), captureDecl, u.Value)
+                    catch return Error.AllocatorFailure,
+                else => {},
+            };
         }
+        defer if (hasCapture and comptimeItem != null) {
+            _ = self.folder.declCache.remove(self.symbols.findDecl(.{
+                .file = self.currentFile,
+                .expr = ast.extra[case + 2],
+            }));
+        };
 
         const prevc = self.setFlag(.CoveredAllPaths, false);
         const branchType = try self.typecheckExpression(ast.extra[case + 3], expected);
@@ -3043,6 +3124,7 @@ fn typecheckSwitchOnEnum(
     enm: *const Types.Enum,
     range: defines.Range,
     maybeExpected: ?TypeID,
+    comptimeItem: ?Comptime.Value.Ptr,
 ) Error!TypeID {
     // @Beware Hardcoded field size, must be kept in sync with parser.(union|struct|enum)Definition
     var fieldBuffer: [512]u32 = undefined;
@@ -3050,6 +3132,12 @@ fn typecheckSwitchOnEnum(
 
     var fieldMap = std.DynamicBitSet.initEmpty(bufferAllocator.allocator(), enm.fields.len)
         catch return common.debug.ShouldBeImpossible(self.context.log, @src());
+
+    const liveTag: ?u32 = if (comptimeItem) |p| switch (self.folder.getValue(p)) {
+        .Enum => |e| @intCast(e.Value),
+        else => null,
+    } else null;
+    var liveMatched = false;
 
     var expected: ?TypeID = determineExpected(maybeExpected);
     var case = range.start;
@@ -3059,6 +3147,7 @@ fn typecheckSwitchOnEnum(
             return Error.UnreachableCodePath;
         }
 
+        var labelIdx: ?usize = null;
         const caseLabel = ast.extra[case];
         const field = 
             if (caseLabel == 0) blk: {
@@ -3091,8 +3180,15 @@ fn typecheckSwitchOnEnum(
                 }
 
                 fieldMap.set(enumeration);
+                labelIdx = enumeration;
                 break :blk enm.fields[enumeration].name;
             };
+
+        if (liveTag) |lt| {
+            const live = if (labelIdx) |l| l == lt else !liveMatched;
+            if (!live) continue;
+            liveMatched = true;
+        }
 
         const hasCapture = ast.extra[case + 1] == 1;
         if (hasCapture) {
@@ -3450,8 +3546,11 @@ pub fn nominallyIdentical(self: *const Typechecker, this: TypeID, that: TypeID) 
             arr.len == tb.Array.len
             and self.nominallyIdentical(arr.child, tb.Array.child),
         .Pointer => |ptr|
-            ptr.size == tb.Pointer.size
-            and self.nominallyIdentical(ptr.child, tb.Pointer.child),
+            (
+                ptr.size == tb.Pointer.size
+                or ptr.size == .C
+                or tb.Pointer.size == .C
+            ) and self.nominallyIdentical(ptr.child, tb.Pointer.child),
         .Function => |f| blk: {
             const g = tb.Function;
             if (
@@ -3671,9 +3770,9 @@ pub fn maybeSwitchable(self: *const Typechecker, this: TypeID) ?TypeInfo {
 /// Checks which of 'this' or 'that' is more suitable in general.
 pub fn coerce(self: *Typechecker, this: TypeID, that: TypeID) Error!TypeID {
     self.assertCanCoerce(this, that) catch |err| {
-        self.report("Failed to infer type ('{s}' vs {s}')", .{
-            try self.typeName(self.arena.allocator(), this),
+        self.report("Failed to infer type, '{s}' can't coerce to '{s}'.", .{
             try self.typeName(self.arena.allocator(), that),
+            try self.typeName(self.arena.allocator(), this),
         });
         return err;
     };
@@ -4126,7 +4225,11 @@ pub fn typeName(self: *Typechecker, allocator: Allocator, typeID: TypeID) Error!
                 }
 
 
-                res = std.fmt.allocPrint(allocator, "{s}) -> {s}", .{res, try self.typeName(allocator, func.returnType)}) catch return Error.AllocatorFailure;
+                res = std.fmt.allocPrint(allocator, "{s}) -> {s}", .{
+                    res,
+                    if (func.isComptime) "dependent"
+                    else try self.typeName(allocator, func.returnType)
+                }) catch return Error.AllocatorFailure;
                 self.typenameMap.putNoClobber(allocator, typeID, try self.builder.internString(res)) catch unreachable;
                 break :ret res;
             },
@@ -4189,20 +4292,20 @@ pub fn setMetadata(
     element: defines.ExpressionPtr,
     metadata: []const Comptime.Value.Ptr,
 ) Error!void {
-    return self.metadata.put(self.arena.allocator(), .{
+    return self.metadata.put(self.arena.allocator(), toKey(.{
         .file = self.currentFile,
         .expr = element,
-    }, metadata) catch Error.AllocatorFailure;
+    }), metadata) catch Error.AllocatorFailure;
 }
 
 pub fn getMetadata(
     self: *const Typechecker,
     value: defines.ExpressionPtr,
 ) ?[]const Comptime.Value.Ptr{
-    return self.metadata.get(.{
+    return self.metadata.get(toKey(.{
         .file = self.currentFile,
         .expr = value,
-    });
+    }));
 }
 
 pub fn hasMetadata(

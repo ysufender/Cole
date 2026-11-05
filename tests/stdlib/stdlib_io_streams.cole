@@ -1,6 +1,3 @@
-// stdlib/stdlib_io_streams
-// std::io output streams: single bytes, lines and buffers.
-
 import std::io as Io;
 import std::io::stream as Stream;
 

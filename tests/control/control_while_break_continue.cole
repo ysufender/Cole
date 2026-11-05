@@ -1,5 +1,3 @@
-// control/control_while_break_continue
-// break and continue inside while loops.
 import std::io::console as Console;
 import std::string as String;
 import std::c as C;

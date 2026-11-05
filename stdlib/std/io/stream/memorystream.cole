@@ -1,0 +1,149 @@
+import std::memory::allocator as Allocator;
+import std::io::stream as Stream;
+import std::c::memory as Memory;
+import std::ascii as ASCII;
+
+pub let MemoryStream = struct {
+    buffer: []mut u8,
+    windex: mut u32,
+    rindex: mut u32,
+};
+
+pub let init = fn (buffer: []mut u8) -> MemoryStream {
+    return (buffer, 0, 0);
+};
+
+pub let ostream = fn (self: *mut MemoryStream) -> Stream::Output::Stream {
+    return (self, write, writeline, writebuffer, oseek, close, flush);
+};
+
+pub let istream = fn (self: *mut MemoryStream) -> Stream::Input::Stream {
+    return (self, read, readline, readbuffer, exhaust, iseek, tell, close);
+};
+
+pub let write = fn (ctx: *mut void, ch: u8) -> Stream::Result {
+    let self: *mut MemoryStream = cast(ctx);
+
+    if self.windex >= self.buffer.len {
+        return @Err;
+    }
+
+    self.buffer[self.windex] = ch;
+    self.windex = self.windex + 1;
+
+    return @Ok;
+};
+
+pub let writeline = fn (ctx: *mut void, buffer: []u8) -> Stream::Result {
+    _ = writebuffer(ctx, buffer);
+    return write(ctx, ASCII::NEWLINE);
+};
+
+pub let writebuffer = fn (ctx: *mut void, buffer: []u8) -> Stream::Result {
+    let self: *mut MemoryStream = cast(ctx);
+
+    for buffer, |ch| {
+        if self.windex >= self.buffer.len {
+            return @Err;
+        }
+
+        self.buffer[self.windex] = ch;
+        self.windex = self.windex + 1;
+    }
+
+    return @Ok;
+};
+
+pub let oseek = fn (ctx: *mut void, off: u32) -> Stream::Result {
+    let self: *mut MemoryStream = cast(ctx);
+    
+    if off >= self.buffer.len {
+        return @Err;
+    }
+    
+    self.windex = off;
+    return @Ok;
+};
+
+pub let close = fn (ctx: *mut void) -> Stream::Result { return @Ok; };
+pub let flush = fn (ctx: *mut void) -> Stream::Result { return @Ok; };
+
+pub let read = fn (ctx: *mut void) -> Stream::Input::ReadResult {
+    let self: *mut MemoryStream = cast(ctx);
+
+    if self.rindex >= self.buffer.len {
+        return (@EOS, ());
+    }
+
+    let ch = self.buffer[self.rindex];
+    self.rindex = self.rindex + 1;
+    return (@Ok, ch);
+};
+
+pub let readline = fn (ctx: *mut void, gpa: Allocator::Allocator) -> Stream::Input::ReadLineResult {
+    let self: *mut MemoryStream = cast(ctx);
+
+    let start = self.rindex;
+    let ch = self.buffer[self.rindex];
+    while ch != ASCII::NEWLINE {
+        if self.rindex >= self.buffer.len {
+            return (@EOS, ());
+        }
+        self.rindex = self.rindex + 1;
+    }
+    self.rindex = self.rindex + 1;
+
+    switch Allocator::alloc(u8)(gpa, self.rindex - 1 - start) {
+        @Ok -> |mem| {
+            Memory::copy(cast(mem.ptr), cast(self.buffer[start..self.rindex - 1]), mem.len);
+            return (@Ok, mem);
+        }
+        @Err -> return (@Err, ());
+    }
+
+    return unreachable();
+};
+
+pub let readbuffer = fn (ctx: *mut void, buffer: []mut u8) -> Stream::Input::ReadLineResult {
+    let self: *mut MemoryStream = cast(ctx);
+
+    for 0..buffer.len, |i| {
+        switch read(ctx) {
+            @Ok -> |c| buffer[i] = c;
+            @Err -> return @Err;
+            @EOS -> return @EOS;
+        }
+    }
+
+    return (@Ok, buffer);
+};
+
+pub let exhaust = fn (ctx: *mut void, gpa: Allocator::Allocator) -> Stream::Input::ReadLineResult {
+    let self: *mut MemoryStream = cast(ctx);
+
+    switch Allocator::alloc(u8)(gpa, self.buffer.len) {
+        @Ok -> |mem| {
+            Memory::copy(cast(mem.ptr), cast(self.buffer.ptr), mem.len);
+            return (@Ok, mem);
+        }
+        @Err -> return @Err;
+    }
+
+    return unreachable();
+};
+
+pub let iseek = fn (ctx: *mut void, off: u32) -> Stream::Result {
+    let self: *mut MemoryStream = cast(ctx);
+    
+    if off >= self.buffer.len {
+        return @Err;
+    }
+    
+    self.rindex = off;
+    return @Ok;
+};
+
+pub let tell = fn (ctx: *mut void) -> i32 {
+    let self: *mut MemoryStream = cast(ctx);
+    return unsafeCast(self.rindex);
+};

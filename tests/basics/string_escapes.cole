@@ -1,5 +1,3 @@
-// basics/string_escapes
-// String literals support \t, \n and \\; percent signs are printed verbatim.
 import std::io::console as Console;
 
 let main = fn (args: [][]u8) -> i32 {

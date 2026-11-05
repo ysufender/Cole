@@ -59,14 +59,23 @@ pub let readline = fn (handle: *mut void, allocator: Allocator::Allocator) -> St
         return (@Err, ());
     }
 
-    let buffer = Allocator::alloc(allocator, len, 1);
-    let res = readbuffer(handle, cast(buffer));
+    let _buffer = Allocator::alloc(u8)(allocator, len);
 
-    if fseek(handle, end, File::Base::Start) != 0 {
-        return (@Err, ());
+    switch _buffer {
+        @Ok -> |buffer| {
+            let res = readbuffer(handle, cast(buffer));
+
+            if fseek(handle, end, File::Base::Start) != 0 {
+                return (@Err, ());
+            }
+
+            return res;
+        }
+        else -> return (@Err, ());
     }
 
-    return res;
+    unreachable();
+    return undefined;
 };
 
 pub let readbuffer = fn (handle: *mut void, buffer: []mut u8) -> Stream::Input::ReadLineResult {
@@ -91,8 +100,16 @@ pub let exhaust = fn (handle: *mut void, allocator: Allocator::Allocator) -> Str
     _ = fseek(handle, 0, File::Base::End);
     let size = ftell(handle);
 
-    let mem: []mut u8 = unsafeCast(Allocator::alloc(allocator, size, sizeOf(u8)));
-    return readbuffer(handle, mem);
+    let _mem = Allocator::alloc(u8)(allocator, size);
+
+    switch _mem {
+        @Ok -> |mem| {
+            return readbuffer(handle, mem);
+        }
+        else -> { }
+    }
+
+    return (@Err, ());
 };
 
 pub let seek = fn (handle: *mut void, pos: u32) -> Stream::Result {

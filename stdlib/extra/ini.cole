@@ -196,15 +196,14 @@ let PairList = struct {
     let initial = 8;
 
     pub let init = fn (allocator: Allocator::Allocator) -> mut PairList {
-        let _new = Allocator::alloc(allocator, initial, sizeOf(Pair));
-        let new: mut []mut Pair = cast(_new);
+        let new: mut any = Allocator::alloc(Pair)(allocator, initial).Ok;
         new = new[0..0];
         return (new, initial);
     };
 
     pub let grow = fn (self: *mut PairList, allocator: Allocator::Allocator) -> void {
         self.capacity = self.capacity * 2;
-        let new: []mut Pair = unsafeCast(Allocator::realloc(allocator, cast(self.items), self.capacity * sizeOf(Pair)));
+        let new: []mut Pair = Allocator::realloc(Pair)(allocator, cast(self.items), self.capacity).Ok;
         self.items = new[0..self.items.len];
     };
 
@@ -219,7 +218,7 @@ let PairList = struct {
     };
 
     pub let slice = fn (self: *mut PairList, allocator: Allocator::Allocator) -> []Pair {
-        let slice = Allocator::alloc(allocator, self.items.len, sizeOf(Pair));
+        let slice = Allocator::alloc(Pair)(allocator, self.items.len).Ok;
         Memory::copy(cast(slice.ptr), self.items.ptr, self.items.len * sizeOf(Pair));
         self.items = self.items[0..0];
         return unsafeCast(slice);
@@ -234,16 +233,14 @@ let SectionList = struct {
     let initial = 32;
 
     pub let init = fn (allocator: Allocator::Allocator) -> mut SectionList {
-        let _new = Allocator::alloc(allocator, initial, sizeOf(Section));
-        let new: mut []mut Section = cast(_new);
+        let new: mut []mut Section = Allocator::alloc(Section)(allocator, initial).Ok;
         new = new[0..0];
         return (new, initial);
     };
 
     pub let grow = fn (self: *mut SectionList, allocator: Allocator::Allocator) -> void {
         self.capacity = self.capacity * 2;
-        let _new = Allocator::realloc(allocator, cast(self.items), self.capacity * sizeOf(Section));
-        let new: []mut Section = cast(_new);
+        let new: []mut Section = Allocator::realloc(Section)(allocator, cast(self.items), self.capacity).Ok;
         self.items = new[0..self.items.len];
     };
 
@@ -267,7 +264,7 @@ let SectionList = struct {
     };
 
     pub let slice = fn (self: *mut SectionList, allocator: Allocator::Allocator) -> []Section {
-        let slice = Allocator::alloc(allocator, self.items.len, sizeOf(Section));
+        let slice = Allocator::alloc(Section)(allocator, self.items.len).Ok;
         Memory::copy(cast(slice.ptr), self.items.ptr, self.items.len * sizeOf(Section));
         self.items = self.items[0..0];
         return unsafeCast(slice);
@@ -410,8 +407,7 @@ let number = fn (allocator: Allocator::Allocator, stream: Stream::Input::Stream)
     let len = end - start - 1;
     _ = Stream::Input::seek(stream, start);
 
-    let _value = Allocator::alloc(allocator, len, 1);
-    let value: []mut u8 = unsafeCast(_value);
+    let value: []mut u8 = Allocator::alloc(u8)(allocator, len).Ok;
 
     for 0..len, |index| {
         let res = Stream::Input::read(stream);
@@ -448,8 +444,7 @@ let identifier = fn (allocator: Allocator::Allocator, stream: Stream::Input::Str
     let len = end - start - 1;
     _ = Stream::Input::seek(stream, start);
 
-    let _value = Allocator::alloc(allocator, len, 1);
-    let value: []mut u8 = unsafeCast(_value);
+    let value: []mut u8 = Allocator::alloc(u8)(allocator, len).Ok;
 
     for 0..len, |index| {
         let res = Stream::Input::read(stream);

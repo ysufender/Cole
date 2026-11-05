@@ -1,6 +1,6 @@
 import std::io::console as Console;
 
-let Second = fn (A: type, B: type) -> any {
+let Second = fn (A: type, B: type) -> *fn (A, B) -> B {
     return fn (a: A, b: B) -> B {
         return b;
     };

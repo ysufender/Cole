@@ -1,6 +1,3 @@
-// bugs/bug_fn_pointer_param
-// A function pointer used as a parameter type is emitted as int32_t const (*)(int32_t const) f.
-// KNOWN BUG: the parameter name is placed after the function pointer type instead of inside it.
 import std::io::console as Console;
 import std::string as String;
 import std::c as C;

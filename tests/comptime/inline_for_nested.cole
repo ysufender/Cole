@@ -1,0 +1,32 @@
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    for #(@inline) 0..2, |i| {
+        for #(@inline) 0..4, |j| {
+            if j == 2 { break; }
+            pi(i * 10 + j);
+        }
+    }
+    Console::log("-");
+    for #(@inline) 0..2, |i| {
+        for 0..5, |j| {
+            if j == 1 { break; }
+            pi(100 + i);
+        }
+        pi(200 + i);
+    }
+    Console::log("-");
+    for #(@inline) 0..2, |i| {
+        let x = i * 10;
+        for 0..2, |j| {
+            pi(x + j);
+        }
+    }
+    return 0;
+};

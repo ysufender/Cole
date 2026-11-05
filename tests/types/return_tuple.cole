@@ -12,15 +12,15 @@ let foo2 = fn () -> (i32, i32) {
 
 let main = fn (args: [][]u8) -> i32 {
     let tuple = foo();
-    let a = tuple._0; // 2
-    let b = tuple._1; // 3
+    let a = tuple._0;
+    let b = tuple._1;
 
     Console::log(String::intToStr(a, C::Allocator));
     Console::log(String::intToStr(b, C::Allocator));
 
     let tuple2 = foo2();
-    let a2 = tuple2._0; // 2
-    let b2 = tuple2._1; // 3
+    let a2 = tuple2._0;
+    let b2 = tuple2._1;
 
     Console::log(String::intToStr(a2, C::Allocator));
     Console::log(String::intToStr(b2, C::Allocator));

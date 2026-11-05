@@ -1,13 +1,262 @@
-import std;
 import std::memory::allocator as Allocator;
 import std::io::stream as Stream;
+import std::numeric as Numeric;
 import std::string as String;
+import std::debug as Debug;
+import std;
 
-pub let print = fn (T: type) -> any {
-    return fn (arg: T, allocator: Allocator::Allocator, out: Stream::Output::Stream) -> void {
-        _  = Stream::Output::writebuffer(out, switch String::toStr(T)(arg, allocator) {
-            @Some -> |s| s,
-            @None -> "<out_of_memory>",
-        });
+let OStream = Stream::Output::Stream;
+let Malloc = Allocator::Allocator;
+let Formatter = fn (T: type) -> type { return *fn (T, OStream) -> void; };
+
+pub let format = fn (T: type) -> Formatter(T) {
+    switch typeInfo(T) {
+        @Integer  -> return formatInt(T, false);
+        @CInt     -> return formatInt(T, false);
+        @CUInt    -> return formatInt(T, false);
+        @CChar    -> return formatInt(T, false);
+        @CUChar   -> return formatInt(T, false);
+        @CLong    -> return formatInt(T, false);
+        @CULong   -> return formatInt(T, false);
+        @CShort   -> return formatInt(T, false);
+        @CUShort  -> return formatInt(T, false);
+        @CSize    -> return formatInt(T, false);
+        @Pointer  -> return formatPtr(T);
+        @Float    -> return formatFloat(T);
+        @CDouble  -> return formatFloat(T);
+        @Bool     -> return fn (arg: bool, out: OStream) -> void {
+            _ = Stream::Output::writebuffer(out, if (arg) "true" else "false");
+        };
+        @Array    -> return formatArray(T);
+        else      -> {
+            compileError("Runtime formatting is not possible with this type.");
+        }
+    }
+
+    return unreachable();
+};
+
+pub let print = fn (fmt: []u8, T: type) -> *fn (T, Malloc, OStream) -> void {
+    switch typeInfo(T) {
+        @Struct -> |s| {
+            if !s.isTuple {
+                compileError("Expected format tuple type.");
+            }
+        }
+        else -> compileError("Expected format tuple type.");
+    }
+
+    let info = typeInfo(T).Struct;
+
+    let strings: [info.fields.len + 1]mut []u8 = undefined;
+
+    let index: mut u32 = 0;
+    let start: mut u32 = 0;
+    let escaping: mut bool = false;
+    for 0..fmt.len, |i| {
+        if escaping {
+            escaping = false;
+        }
+        else if fmt[i] == '%' {
+            if i + 1 < fmt.len and fmt[i + 1] == '%' {
+                escaping = true;
+            }
+            else if index >= strings.len {
+                compileError("Excess format specifiers.");
+            }
+            else {
+                strings[index] = fmt[start..i];
+                start = i + 1;
+                index = index + 1;
+            }
+        }
+    }
+
+    if index != strings.len - 1 {
+        compileError("Unhandled format values.");
+    }
+
+    if start != fmt.len {
+        strings[index] = fmt[start..fmt.len];
+    }
+    else {
+        strings[index] = fmt[0..0];
+    }
+
+    return fn (args: T, gpa: Malloc, out: OStream) -> void {
+        for #(@inline) 0..strings.len, |i| {
+            if strings[i].len > 0 {
+                _ = Stream::Output::writebuffer(out, strings[i]);
+            }
+
+            if i < strings.len - 1 {
+                format(info.fields[i].valueType)(field(args, info.fields[i].name), out);
+            }
+        }
+
+        _ = Stream::Output::writebuffer(out, "\n");
+    };
+};
+
+/*
+ * Private Implementations
+ */
+
+let formatInt = fn (T: type, hex: bool) -> Formatter(T) {
+    let divider = if (hex) 16 else 10;
+
+    return fn (num: T, out: OStream) -> void {
+        if hex {
+            _ = Stream::Output::writebuffer(out, "0x");
+        }
+
+        if Numeric::Signed::Check(T) {
+            let isSigned = if (Numeric::Unsigned::Check(T)) false else num < 0;
+            let tmp: mut any = num * (if (isSigned) -1 else 1);
+
+            if isSigned {
+                _ = Stream::Output::write(out, '-');
+            }
+
+            let place: mut any = tmp - tmp + 1;
+            while tmp / place >= divider {
+                place = place * divider;
+            }
+
+            while place > 0 {
+                let digit = (tmp / place) % divider;
+                let ch =
+                    if (hex and digit >= 10) 'A' + digit - 10
+                    else '0' + digit;
+
+                _ = Stream::Output::write(out, ch);
+                place = place / divider;
+            }
+        }
+        else {
+            let tmp: mut any = num;
+
+            let place: mut any = tmp - tmp + 1;
+            while tmp / place >= divider {
+                place = place * divider;
+            }
+
+            while place > 0 {
+                let digit = (tmp / place) % divider;
+                let ch =
+                    if (hex and digit >= 10) 'A' + digit - 10
+                    else '0' + digit;
+
+                _ = Stream::Output::write(out, ch);
+                place = place / divider;
+            }
+        }
+    };
+};
+
+let formatPtr = fn (T: type) -> Formatter(T) {
+    let info = typeInfo(T).Pointer;
+
+    return fn (_ptr: T, out: OStream) -> void {
+        if info.size == @Slice and (info.child == u8 or info.child == mut u8) {
+            _ = Stream::Output::writebuffer(out, _ptr);
+        }
+        else if info.size == @Slice {
+            formatArray(T)(_ptr, out);
+        }
+        else {
+            let ptr: usize = unsafeCast(_ptr);
+
+            _ = Stream::Output::writebuffer(out, "<pointer@");
+            formatInt(usize, true)(ptr, out);
+            _ = Stream::Output::writebuffer(out, ">");
+        }
+    };
+};
+
+let formatFloat = fn (T: type) -> Formatter(T) {
+    return fn (num: T, out: OStream) -> void {
+        let precision: u32 = 9;
+        let negative: bool = num < 0;
+        let value: mut c_double = cast(num);
+        if negative { value = -value; }
+
+        if negative {
+            _ = Stream::Output::write(out, '-');
+        }
+
+        let special: mut []u8 = "";
+        if value != value { special = "nan"; }
+        else if value >= 9223372036854775808.0 { special = "inf"; }
+
+        if special.len > 0 {
+            _ = Stream::Output::writebuffer(out, special);
+            return;
+        }
+
+        let whole: mut c_ulong = cast(value);
+        let frac: mut c_double = value - cast(whole);
+
+        let fracDigits: mut u32 = 0;
+        let i: mut u32 = 0;
+        while i < precision {
+            frac = frac * 10;
+            let digit: u32 = cast(frac);
+            fracDigits = fracDigits * 10 + digit;
+            frac = frac - cast(digit);
+            i = i + 1;
+        }
+
+        if frac > 0.5 or (frac == 0.5 and fracDigits % 2 == 1) {
+            fracDigits = fracDigits + 1;
+            if fracDigits == 1000000000 {
+                fracDigits = 0;
+                whole = whole + 1;
+            }
+        }
+
+        let divisor: mut c_ulong = 1;
+        let scan: mut c_ulong = whole / 10;
+        while scan > 0 {
+            divisor = divisor * 10;
+            scan = scan / 10;
+        }
+
+        while divisor > 0 {
+            _ = Stream::Output::write(out, '0' + cast((whole / divisor) % 10));
+            divisor = divisor / 10;
+        }
+
+        _ = Stream::Output::write(out, '.');
+
+        let fracDiv: mut u32 = 1;
+        let j: mut u32 = 1;
+        while j < precision {
+            fracDiv = fracDiv * 10;
+            j = j + 1;
+        }
+
+        let k: mut u32 = 0;
+        while k < precision {
+            _ = Stream::Output::write(out, '0' + cast((fracDigits / fracDiv) % 10));
+            fracDiv = fracDiv / 10;
+            k = k + 1;
+        }
+    };
+};
+
+let formatArray = fn (T: type) -> Formatter(T) {
+    return fn (arr: T, out: OStream) -> void {
+        _ = Stream::Output::write(out, '[');
+        let idx: mut u32 = 0;
+        for arr, |elem| {
+            _ = Stream::Output::write(out, ' ');
+            format(typeOf(elem))(elem, out);
+            if idx != arr.len - 1 {
+                _ = Stream::Output::write(out, ',');
+            }
+            idx = idx + 1;
+        }
+        _ = Stream::Output::writebuffer(out, " ]");
     };
 };

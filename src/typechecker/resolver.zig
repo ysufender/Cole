@@ -19,7 +19,8 @@ const assert = std.debug.assert;
 pub const ScopeList = MultiArrayList(Scope);
 pub const DeclarationList = MultiArrayList(Declaration);
 pub const LookupMap = collections.HashMap(LookupKey([]const u8), defines.DeclPtr);
-pub const ResolutionMap = collections.HashMap(ResolutionKey, defines.DeclPtr);
+
+pub const ResolutionMap = collections.HashMap(u64, defines.DeclPtr);
 
 pub const Scope = struct {
     pub const Kind = enum {
@@ -98,7 +99,7 @@ pub const Resolution = struct {
     scopes: ScopeList,
 
     pub fn tryGetDecl(self: *const Resolution, key: ResolutionKey) ?defines.DeclPtr {
-        return self.resolutionMap.get(key);
+        return self.resolutionMap.get(toKey(key));
     }
 
     pub fn getDecl(self: *const Resolution, key: defines.DeclPtr) Declaration {
@@ -107,8 +108,8 @@ pub const Resolution = struct {
     }
 
     pub fn findDecl(self: *const Resolution, key: ResolutionKey) defines.DeclPtr {
-        assert(self.resolutionMap.contains(key));
-        return self.resolutionMap.get(key).?;
+        assert(self.resolutionMap.contains(toKey(key)));
+        return self.resolutionMap.get(toKey(key)).?;
     }
 
     pub fn findGetDecl(self: *const Resolution, key: ResolutionKey) Declaration {
@@ -408,10 +409,10 @@ fn resolveStatement(self: *Resolver, stmt: defines.StatementPtr, topLevel: bool)
                 .topLevel = false,
             });
 
-            self.resolved.put(allocator, .{
+            self.resolved.put(allocator, toKey(.{
                 .file = self.dataIndex(),
                 .expr = capture,
-            }, decl) catch return Error.AllocatorFailure;
+            }), decl) catch return Error.AllocatorFailure;
 
             const lexeme = tokens.get(captureToken).lexeme(self.context, self.dataIndex());
             self.lookup.putNoClobber(allocator, .{ .name = lexeme, .scope = self.currentScope }, decl)
@@ -555,7 +556,7 @@ fn resolveExpression(self: *Resolver, exprPtr: defines.ExpressionPtr) Error!void
 
             const decl = try self.look(identifier);
 
-            const status = self.resolved.getOrPut(allocator, .{ .file = self.dataIndex(), .expr = exprPtr })
+            const status = self.resolved.getOrPut(allocator, toKey(.{ .file = self.dataIndex(), .expr = exprPtr }))
                 catch return Error.AllocatorFailure;
 
             if (status.found_existing) {
@@ -605,10 +606,10 @@ fn resolveExpression(self: *Resolver, exprPtr: defines.ExpressionPtr) Error!void
                 .kind = .Struct,
             });
 
-            self.resolved.putNoClobber(allocator, .{
+            self.resolved.putNoClobber(allocator, toKey(.{
                 .file = self.dataIndex(),
                 .expr = exprPtr,
-            }, body) catch return Error.AllocatorFailure;
+            }), body) catch return Error.AllocatorFailure;
 
             const previous = self.currentScope;
             defer self.currentScope = previous;
@@ -642,10 +643,10 @@ fn resolveExpression(self: *Resolver, exprPtr: defines.ExpressionPtr) Error!void
                 .kind = .Enum,
             });
 
-            self.resolved.putNoClobber(allocator, .{
+            self.resolved.putNoClobber(allocator, toKey(.{
                 .file = self.dataIndex(),
                 .expr = exprPtr,
-            }, body) catch return Error.AllocatorFailure;
+            }), body) catch return Error.AllocatorFailure;
 
             const previous = self.currentScope;
             defer self.currentScope = previous;
@@ -680,10 +681,10 @@ fn resolveExpression(self: *Resolver, exprPtr: defines.ExpressionPtr) Error!void
                 .kind = .Union,
             });
 
-            self.resolved.putNoClobber(allocator, .{
+            self.resolved.putNoClobber(allocator, toKey(.{
                 .file = self.dataIndex(),
                 .expr = exprPtr,
-            }, body) catch return Error.AllocatorFailure;
+            }), body) catch return Error.AllocatorFailure;
 
             const previous = self.currentScope;
             defer self.currentScope = previous;
@@ -734,10 +735,10 @@ fn resolveExpression(self: *Resolver, exprPtr: defines.ExpressionPtr) Error!void
                 .kind = .Block,
             });
 
-            self.resolved.putNoClobber(allocator, .{
+            self.resolved.putNoClobber(allocator, toKey(.{
                 .file = self.dataIndex(),
                 .expr = exprPtr,
-            }, function) catch return Error.AllocatorFailure;
+            }), function) catch return Error.AllocatorFailure;
 
             const previous = self.currentScope;
             defer self.currentScope = previous;
@@ -839,10 +840,10 @@ fn resolveScoping(
             const left = tokens.get(lhs.value).lexeme(self.context, ast.tokens);
 
             if (try self.tryLookName(left)) |found| {
-                self.resolved.putNoClobber(self.arena.allocator(), .{
+                self.resolved.putNoClobber(self.arena.allocator(), toKey(.{
                     .file = ast.tokens,
                     .expr = lhsPtr,
-                }, found) catch return Error.AllocatorFailure;
+                }), found) catch return Error.AllocatorFailure;
             }
 
             break :blk @as(defines.Offset, tokens.items(.start)[lhs.value]);
@@ -861,19 +862,19 @@ fn resolveScoping(
         const scoping = file[left..rightMost];
 
         if (try self.tryLookName(scoping)) |decl| {
-            self.resolved.putNoClobber(self.arena.allocator(), .{
+            self.resolved.putNoClobber(self.arena.allocator(), toKey(.{
                 .file = ast.tokens,
                 .expr = expr,
-            }, decl) catch return Error.AllocatorFailure;
+            }), decl) catch return Error.AllocatorFailure;
 
             return leftMost;
         }
     }
 
-    if (self.resolved.get(.{
+    if (self.resolved.get(toKey(.{
         .file = ast.tokens,
         .expr = lhsPtr
-    })) |declPtr| blk: {
+    }))) |declPtr| blk: {
         const decl = self.decls.get(declPtr);
 
         if (decl.kind != .Namespace) {
@@ -883,10 +884,10 @@ fn resolveScoping(
         const member = tokens.get(ast.extra[extra + 1]).lexeme(self.context, ast.tokens);
 
         if (try self.tryLookNameAt(member, decl.node)) |foundPtr| {
-            self.resolved.putNoClobber(self.arena.allocator(), .{
+            self.resolved.putNoClobber(self.arena.allocator(), toKey(.{
                 .file = ast.tokens,
                 .expr = expr,
-            }, foundPtr) catch return Error.AllocatorFailure;
+            }), foundPtr) catch return Error.AllocatorFailure;
 
             return leftMost;
         }
@@ -919,7 +920,7 @@ fn resolveScoping(
 
     if (
         leftMost != null
-        and self.resolved.get(.{ .file = ast.tokens, .expr = lhsPtr }) == null
+        and self.resolved.get(toKey(.{ .file = ast.tokens, .expr = lhsPtr })) == null
     ) {
         self.report("Couldn't resolve given identifier '{s}'.", .{moduleName});
         return Error.InvalidIdentifier;
@@ -1061,10 +1062,10 @@ fn resolveSwitch(
                 .topLevel = false,
             });
 
-            self.resolved.put(allocator, .{
+            self.resolved.put(allocator, toKey(.{
                 .file = self.dataIndex(),
                 .expr = firstCapture,
-            }, decl) catch return Error.AllocatorFailure;
+            }), decl) catch return Error.AllocatorFailure;
 
             const lexeme = tokens.get(captureToken).lexeme(self.context, self.dataIndex());
             self.lookup.putNoClobber(allocator, .{ .name = lexeme, .scope = self.currentScope }, decl)
@@ -1277,6 +1278,10 @@ fn getModuleName(self: *Resolver, module: defines.ExpressionPtr) []const u8 {
     return self.context.getFile(self.dataIndex())[start..end];
 }
 
+pub inline fn toKey(key: ResolutionKey) u64 {
+    return 0 | @as(u64, key.file) << 32 | @as(u64, key.expr);
+}
+
 pub const builtins = [_][]const u8 {
     "u32", "i32", "u8", "i8", "bool",
     "c_int", "c_uint", "c_char", "c_uchar", "c_double", "c_long", "c_ulong", "c_short", "c_ushort", "c_size",
@@ -1291,6 +1296,7 @@ pub const builtins = [_][]const u8 {
     "alignOf", "compileBreak", "typeInfo",
     "src", "buildInfo", "inComptime",
     "getMetadata", "this", "isComptime",
+    "field",
 };
 
 pub fn BuiltinIndex(comptime builtin: []const u8) u32 {

@@ -1,5 +1,3 @@
-// stdlib/stdlib_console_levels
-// info, warn and error print ANSI coloured prefixes.
 import std::io::console as Console;
 
 let main = fn (args: [][]u8) -> i32 {

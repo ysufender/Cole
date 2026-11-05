@@ -165,6 +165,13 @@ return {
         "comptime_buildinfo",
         "comptime_src_info",
         "comptime_nocomptime_mark",
+        "inline_for_range",
+        "inline_for_array",
+        "inline_for_nested",
+        "inline_for_typeinfo_fields",
+        "this_generic_member",
+        "this_plain_struct",
+        "this_self_member",
     },
 
     ["interop"] = {
@@ -178,6 +185,7 @@ return {
     },
 
     ["stdlib"] = {
+        "fmt",
         "string",
         "math",
         "io",
@@ -234,7 +242,6 @@ return {
         "bug_precedence_documented",
         "bug_unreachable_builtin",
         "bug_static_assert",
-        "bug_bytearray_append",
         "bug_import_std_root",
         "bug_file_output",
         "bug_typeof_folded_variable",

@@ -1,6 +1,9 @@
 import std::memory::allocator as Allocator;
-import std::io::console as Console;
+import std::fmt as Fmt;
+import std::numeric as Numeric;
+import std::io::stream::memorystream as MemStream;
 import std;
+import std::debug as Debug;
 
 /*
  * PUBLIC
@@ -20,53 +23,129 @@ pub let equals = fn (str1: []u8, str2: []u8) -> bool {
     return true;
 };
 
-pub let toStr = fn (T: type) -> any {
-    return fn (arg: T, allocator: Allocator::Allocator) -> std::Option([]u8) {
-        return switch typeInfo(T) {
-            @Integer -> safeIntToStr(arg, allocator),
-            else -> (@None, ()),
+pub let toStr = fn (T: type) -> *fn (T, Allocator::Allocator) -> std::Option([]u8) {
+    switch typeInfo(T) {
+        @Integer -> return fn (arg: T, gpa: Allocator::Allocator) -> std::Option([]u8) {
+            return safeIntToStr(cast(arg), gpa);
         };
-    };
+        @Float -> return fn (arg: T, gpa: Allocator::Allocator) -> std::Option([]u8) {
+            return safeFloatToStr(cast(arg), gpa);
+        };
+        @Bool -> return fn (arg: T, gpa: Allocator::Allocator) -> std::Option([]u8) {
+            return (@Some, boolToStr(arg));
+        };
+        @Pointer -> return fn (arg: T, gpa: Allocator::Allocator) -> std::Option([]u8) {
+            let info = typeInfo(T).Pointer;
+            if info.size == @Slice and (info.child == u8 or info.child == mut u8) {
+                return (@Some, arg);
+            }
+            return (@Some, "<pointer>");
+        };
+        else -> return fn (arg: T, gpa: Allocator::Allocator) -> std::Option([]u8) {
+            return (@None, ());
+        };
+    }
+
+    unreachable();
+    return undefined;
 };
 
-/*
- * PRIVATE
- */
+pub let intToStr =  fn (num: c_long, gpa: Allocator::Allocator) -> []u8 {
+    return safeIntToStr(num, gpa).Some;
+};
 
-let safeIntToStr = fn (num: c_long, allocator: Allocator::Allocator) -> std::Option([]u8) {
+pub let floatToStr =  fn (num: float, gpa: Allocator::Allocator) -> []u8 {
+    return safeFloatToStr(num, gpa).Some;
+};
+
+pub let safeIntToStr = fn (num: c_long, gpa: Allocator::Allocator) -> std::Option([]u8) {
     let isSigned = num < 0;
-    let tmp: mut any = num * (if (isSigned) -1 else 1);
+    let tmp: mut c_long = num * (if (isSigned) -1 else 1);
     let digitCount: mut u32 = 0;
     while tmp != 0 {
         tmp = tmp / 10;
         digitCount = digitCount + 1;
     }
+    let size: u32 = (if (digitCount == 0) 1 else digitCount) + (if (isSigned) 1 else 0);
 
-    digitCount = if (digitCount == 0) 1 else digitCount + (if (isSigned) 1 else 0);
-    let result: []mut u8 = cast(Allocator::alloc(allocator, digitCount + 1, 1));
-
-    if result.ptr == undefined {
-        return (@None, ());
+    switch Allocator::alloc(u8)(gpa, size) {
+        @Ok -> |mem| {
+            let stream: mut any = MemStream::init(mem);
+            Fmt::format(c_long)(num, MemStream::ostream(stream.&));
+            return (@Some, mem);
+        }
+        @Err -> return (@None, ());
     }
 
-    tmp = num * (if (isSigned) -1 else 1);
-    let index: mut u32 = digitCount;
-    while index > (if (isSigned) 1 else 0) {
-        result[index - 1] = '0' + tmp % 10;
-        tmp = tmp / 10;
-        index = index - 1;
-    }
-    result[0] = if (num < 0) '-' else result[0];
-    result[result.len - 1] = 0;
-
-    return (@Some, result);
+    unreachable();
+    return undefined;
 };
 
-pub let strToInt = fn (str: mut []u8) -> c_long {
+pub let safeFloatToStr = fn (num: float, gpa: Allocator::Allocator) -> std::Option([]u8) {
+    let precision: u32 = 9;
+    let negative: bool = num < 0;
+    let value: mut c_double = cast(num);
+    if negative { value = -value; }
+
+    let size: mut u32 = if (negative) 1 else 0;
+
+    if value != value or value >= 9223372036854775808.0 {
+        size = size + 3;
+    }
+    else {
+        let whole: mut c_ulong = cast(value);
+        let frac: mut c_double = value - cast(whole);
+
+        let fracDigits: mut u32 = 0;
+        let i: mut u32 = 0;
+        while i < precision {
+            frac = frac * 10;
+            let digit: u32 = cast(frac);
+            fracDigits = fracDigits * 10 + digit;
+            frac = frac - cast(digit);
+            i = i + 1;
+        }
+
+        if frac > 0.5 or (frac == 0.5 and fracDigits % 2 == 1) {
+            fracDigits = fracDigits + 1;
+            if fracDigits == 1000000000 {
+                fracDigits = 0;
+                whole = whole + 1;
+            }
+        }
+
+        let wholeDigits: mut u32 = 1;
+        let scan: mut c_ulong = whole / 10;
+        while scan > 0 {
+            wholeDigits = wholeDigits + 1;
+            scan = scan / 10;
+        }
+
+        size = size + wholeDigits + 1 + precision;
+    }
+
+    switch Allocator::alloc(u8)(gpa, size) {
+        @Ok -> |mem| {
+            let stream: mut any = MemStream::init(mem);
+            Fmt::format(float)(num, MemStream::ostream(stream.&));
+            return (@Some, mem);
+        }
+        @Err -> return (@None, ());
+    }
+
+    unreachable();
+    return undefined;
+};
+
+pub let boolToStr = fn (b: bool) -> []u8 {
+    return if (b) "true" else "false";
+};
+
+pub let strToInt = fn (str: []u8) -> c_long {
     let isSigned = str[0] == '-';
     let res: mut c_long = 0;
     for (if (isSigned) 1 else 0)..str.len, |index| {
-        res = (res * 10) + (str[index] - '0');
+        res = (res * 10) + cast(str[index] - '0');
     }
     return res * (if (isSigned) -1 else 1);
 };
@@ -81,7 +160,7 @@ pub let strToFloat = fn (str: mut []u8) -> float {
     let base: mut u32 = 0;
     let index: mut u32 = 0;
     while str[index] != '.' {
-        base = (base * 10) + (str[index] - '0');
+        base = (base * 10) + cast(str[index] - '0');
         index = index + 1;
     }
     index = index + 1;
@@ -93,97 +172,7 @@ pub let strToFloat = fn (str: mut []u8) -> float {
         divisor = divisor * 10;
     }
 
-    return (as(float, cast(base)) + decimal) * (if (negative) -1 else 1);
-};
-
-let safeFloatToStr = fn (num: float, allocator: Allocator::Allocator) -> std::Option([]u8) {
-    let precision: u32 = 9;
-    let negative: bool = num < 0;
-    let value: mut c_double = cast(num);
-    if negative { value = -value; }
-
-    let special: mut []u8 = "";
-    if value != value { special = "nan"; }
-    else if value >= 9223372036854775808.0 { special = if (negative) "-inf" else "inf"; }
-
-    if special.len > 0 {
-        let text: []mut u8 = cast(Allocator::alloc(allocator, special.len + 1, 1));
-        for 0..special.len, |i| {
-            text[i] = special[i];
-        }
-        text[special.len] = 0;
-        return (@Some, text[0..special.len]);
-    }
-
-    let whole: mut c_ulong = cast(value);
-    let frac: mut c_double = value - cast(whole);
-
-    let fracDigits: mut u32 = 0;
-    for 0..precision, |i| {
-        frac = frac * 10;
-        let digit: u32 = cast(frac);
-        fracDigits = fracDigits * 10 + digit;
-        frac = frac - cast(digit);
-    }
-
-    if frac > 0.5 or (frac == 0.5 and fracDigits % 2 == 1) {
-        fracDigits = fracDigits + 1;
-        if fracDigits == 1000000000 {
-            fracDigits = 0;
-            whole = whole + 1;
-        }
-    }
-
-    let wholeDigits: mut u32 = 1;
-    let rest: mut c_ulong = whole / 10;
-    while rest > 0 {
-        wholeDigits = wholeDigits + 1;
-        rest = rest / 10;
-    }
-
-    let length: u32 = (if (negative) 1 else 0) + wholeDigits + 1 + precision;
-    let result: []mut u8 = cast(Allocator::alloc(allocator, length + 1, 1));
-
-    if result.ptr == undefined {
-        return (@None, ());
-    }
-
-    let pos: mut u32 = length;
-    result[pos] = 0;
-
-    for 0..precision, |i| {
-        pos = pos - 1;
-        result[pos] = '0' + cast(fracDigits % 10);
-        fracDigits = fracDigits / 10;
-    }
-
-    pos = pos - 1;
-    result[pos] = '.';
-
-    pos = pos - 1;
-    result[pos] = '0' + cast(whole % 10);
-    whole = whole / 10;
-    while whole > 0 {
-        pos = pos - 1;
-        result[pos] = '0' + cast(whole % 10);
-        whole = whole / 10;
-    }
-
-    if negative { result[0] = '-'; }
-
-    return (@Some, result[0..length]);
-};
-
-pub let floatToStr = fn (num: float, allocator: Allocator::Allocator) -> []u8 {
-    return safeFloatToStr(num, allocator).Some;
-};
-
-pub let intToStr = fn (num: c_long, allocator: Allocator::Allocator) -> []u8 {
-    return safeIntToStr(num, allocator).Some;
-};
-
-pub let boolToStr = fn (b: bool) -> []u8 {
-    return if (b) "true" else "false";
+    return (as(float, cast(base)) + decimal) * (if (negative) -1.0 else 1.0);
 };
 
 pub let strToBool = fn (str: []u8) -> bool {
