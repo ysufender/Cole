@@ -1,0 +1,39 @@
+let Hasher = fn (T: type, Hasher: type) -> type { return *fn (T, *mut Hasher) -> void; };
+
+pub let generic = fn (T: type, H: type) -> Hasher(T, H) {
+    return switch typeInfo(T) {
+        @Pointer -> compileError("Unsupported type."),
+        @Union -> compileError("Unsupported type."),
+
+        @Struct -> |str| fn (arg: T, hasher: *mut H) -> void {
+            for #(@inline) str.fields, |fld| {
+                generic(fld.valueType, H)(field(arg, fld.name), hasher);
+            }
+        },
+
+        else -> fn (arg: T, hasher: *mut H) -> void {
+            let ptr = as([@c]u8, unsafeCast(arg.&));
+            H::writeBytes(hasher.&, ptr[0..sizeOf(T)]);
+        }
+    };
+};
+
+pub let Stateful = struct {
+    state: usize,
+
+    pub let init = fn () -> Stateful {
+        return (cast(-3750763034362895579));
+    };
+
+    pub let writeBytes = fn (self: *mut Stateful, data: []u8) -> void {
+        let FNV_prime: usize = 1099511628211;
+        for data, |byte| {
+            self.state = self.state ^ cast(byte);
+            self.state = self.state * FNV_prime;
+        }
+    };
+
+    pub let finalize = fn (self: Hasher) -> usize {
+        return self.state;
+    };
+};

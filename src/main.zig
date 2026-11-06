@@ -16,6 +16,10 @@ const Typechecker = @import("typechecker/typechecker.zig");
 pub var start: std.Io.Timestamp = undefined;
 
 pub fn main(init: std.process.Init) void {
+    if (@sizeOf(usize) != @sizeOf(u64)) {
+        @compileError("Cole can't target architectures where usize != u64.");
+    }
+
     start = std.Io.Clock.now(.real, init.io);
     MainProcInit = init;
 

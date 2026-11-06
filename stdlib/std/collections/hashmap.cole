@@ -12,13 +12,8 @@ let Error = Malloc::Error;
 let Res = std::Result;
 let Opt = std::Option;
 
+let assert = std::debug::assert;
+
 pub let HashMap = fn (K: type, V: type, Context: type, MLP: u32) -> type {
-    if MLP <= 0 or MLP >= 100 {
-        compileError("Max Load Percentage must be between 0 and 100.");
-    }
-
-    // @TODO
-
-    let HM = struct { };
-    return HM;
+    return unreachable();
 };

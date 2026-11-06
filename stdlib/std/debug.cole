@@ -10,20 +10,19 @@ import std::c as C;
 
 pub let print = fn (fmt: []u8, T: type) -> *fn (T) -> void {
     return fn (arg: T) -> void {
-        Format::print(fmt, T)(arg, C::Allocator, Io::StdOut());
+        Format::print(fmt, T)(arg, Io::StdOut());
     };
 };
 
 pub let assert = fn (cnd: bool, msg: []u8) -> void {
     if !cnd {
-        Console::error(msg);
-        unreachable();
-    }
-};
-
-pub let staticAssert = #(@comptime) fn (cnd: bool, msg: []u8) -> void {
-    if !cnd {
-        compileError(msg);
+        if inComptime() {
+            compileError(msg);
+        }
+        else {
+            Console::error(msg);
+            unreachable();
+        }
     }
 };
 

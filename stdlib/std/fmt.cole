@@ -36,7 +36,7 @@ pub let format = fn (T: type) -> Formatter(T) {
     return unreachable();
 };
 
-pub let print = fn (fmt: []u8, T: type) -> *fn (T, Malloc, OStream) -> void {
+pub let print = fn (fmt: []u8, T: type) -> *fn (T, OStream) -> void {
     switch typeInfo(T) {
         @Struct -> |s| {
             if !s.isTuple {
@@ -83,7 +83,7 @@ pub let print = fn (fmt: []u8, T: type) -> *fn (T, Malloc, OStream) -> void {
         strings[index] = fmt[0..0];
     }
 
-    return fn (args: T, gpa: Malloc, out: OStream) -> void {
+    return fn (args: T, out: OStream) -> void {
         for #(@inline) 0..strings.len, |i| {
             if strings[i].len > 0 {
                 _ = Stream::Output::writebuffer(out, strings[i]);
