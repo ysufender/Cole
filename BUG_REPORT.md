@@ -1,21 +1,50 @@
 # Known Bugs
 
-## Major Performance Issues (46)
+## Comptime Recursion Bug (47)
 
-The `bug_numeric_traits` test is passing in this commit, but has major performance
-issues. The reason is unbeknownst as for now.
+When a comptime function recurses on itself, the arguments get jumbled. The bug can be seen
+in the `std::hash::generic` function.
 
 ### Reproduction
 
-Just run the `bug_numeric_traits` test.
+```rust
+import std::debug as debug;
+import std::hash as Hash;
+
+let Str = struct {
+    a: u32,
+    b: float,
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let str1 = Str(1, 2);
+    let str2 = Str(1, 2);
+
+    let hasher: mut any = Hash::Stateful::init();
+    Hash::generic(Str, Hash::Stateful)(str1, hasher.&);
+    let h1 = Hash::Stateful::finalize(hasher);
+
+    hasher = Hash::Stateful::init();
+    Hash::generic(Str, Hash::Stateful)(str2, hasher.&);
+    let h2 = Hash::Stateful::finalize(hasher);
+
+    return 0;
+};
+```
 
 ### Expected Output
 
-A build time less than (or equal to) 1 seconds.
+Successful compilation.
 
 ### Received Output
 
-Around almost 1 minute build time, terrible.
+```bash
+error: Argument type mismatch in function call. In argument 0: expected root::Str, received u32
+error: .... In /home/mkdude/proj/Cole/stdlib/std/hash.cole 10:54
+error:                 generic(fld.valueType, H)(field(arg, fld.name), hasher);
+error:                                                      ^^^
+error: Compiler exited with code 150 <TypeMismatch>
+```
 
 ## Illegal Memory Access (31)
 
@@ -36,3 +65,4 @@ else is holding a reference to the said memory.
 ## Comptime Definition Lowering (47)
 ## Switch Capture Folding (48)
 ## Extern Structs Keep Getting Codegen'd (49)
+## Major Performance Issues (46)
