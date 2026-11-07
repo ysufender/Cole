@@ -357,7 +357,7 @@ pub fn dot(self: *Builder, object: JIR.Ptr, field: StringPtr, objType: TypeID) E
                 const safetyCheck = try self.cjump(okLabelName, cnd);
                 const segfault = try self.typechecker.builder.inlineC(
                     try self.internString(
-                        std.fmt.allocPrint(self.allocator, "__union_access__: __union_access((long)&&__union_access__, \"{s}\");", .{
+                        std.fmt.allocPrint(self.allocator, "$$union_access$$: $$union_access((long)&&$$union_access$$, \"{s}\");", .{
                             self.getInternedString(uni.fields[fieldIndex].name),
                         }) catch return Error.AllocatorFailure,
                     ),
