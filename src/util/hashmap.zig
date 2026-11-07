@@ -14,7 +14,7 @@ fn Context(comptime Key: type) type {
             const Self = @This();
 
             pub fn hash(_: Self, key: Key) u64 { 
-                var hasher = std.hash.XxHash64.init(0);
+                var hasher = std.hash.Fnv1a_64.init();
                 std.hash.autoHashStrat(&hasher, key, .DeepRecursive);
                 return hasher.final();
             }
@@ -64,7 +64,7 @@ fn Context(comptime Key: type) type {
 }
 
 pub fn HashMap(comptime Key: type, comptime Value: type) type {
-    return std.hash_map.HashMapUnmanaged(Key, Value, Context(Key), std.hash_map.default_max_load_percentage);
+    return std.hash_map.HashMapUnmanaged(Key, Value, Context(Key), 75);
 }
 
 pub fn HashMapCustom(comptime Key: type, comptime Value: type, comptime _eql: *const fn (*anyopaque, Key, Key) bool) type {

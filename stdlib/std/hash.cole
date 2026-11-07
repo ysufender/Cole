@@ -1,9 +1,59 @@
 let Hasher = fn (T: type, Hasher: type) -> type { return *fn (T, *mut Hasher) -> void; };
 
-pub let generic = fn (T: type, H: type) -> Hasher(T, H) {
+pub let Hashable = struct {
+    pub let Check = fn (T: type) -> bool {
+        switch typeInfo(T) {
+            @Union -> return false;
+            @Pointer -> |ptr| return switch ptr.size {
+                @Slice -> Check(ptr.child),
+                else -> false,
+            };
+            @Array -> |arr| return Check(arr.child);
+            @Struct -> |str| {
+                for str.fields, |fld| {
+                    if !Check(fld.valueType) {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+            else -> return true;
+        }
+
+        return unreachable();
+    };
+
+    pub let Trait = fn (T: type) -> type {
+        return
+            if (Check(T)) T
+            else compileError("Given type does not satisfy the Hashable trait.");
+    };
+};
+
+pub let hash = fn (T: type, H: type) -> *fn (T) -> usize {
+    return fn (arg: T) -> usize {
+        let hasher = H::init();
+        generic(T, H)(arg, hasher.&);
+        return H::finalize(hasher);
+    };
+};
+
+pub let generic = fn (T: type, H: type) -> Hasher(Hashable::Trait(T), H) {
     switch typeInfo(T) {
-        @Pointer -> compileError("Unsupported type.");
-        @Union -> compileError("Unsupported type.");
+        @Union -> unreachable();
+
+        @Pointer -> |ptr| return fn (arg: T, hasher: *mut H) -> void {
+            for arg, |item| {
+                generic(ptr.child, H)(item, hasher);
+            }
+        };
+
+        @Array -> |arr| return fn (arg: T, hasher: *mut H) -> void {
+            for arg, |item| {
+                generic(arr.child, H)(item, hasher);
+            }
+        };
 
         @Struct -> |str| return fn (arg: T, hasher: *mut H) -> void {
             for #(@inline) str.fields, |fld| {
@@ -20,14 +70,14 @@ pub let generic = fn (T: type, H: type) -> Hasher(T, H) {
     return unreachable();
 };
 
-pub let Stateful = struct {
+pub let FNV1a64 = struct {
     state: mut usize,
 
-    pub let init = fn () -> Stateful {
+    pub let init = fn () -> mut FNV1a64 {
         return (as(usize, cast(-3750763034362895579)));
     };
 
-    pub let writeBytes = fn (self: *mut Stateful, data: []u8) -> void {
+    pub let writeBytes = fn (self: *mut FNV1a64, data: []u8) -> void {
         let FNV_prime: usize = 1099511628211;
         for data, |byte| {
             self.state = self.state ^ cast(byte);
@@ -35,7 +85,7 @@ pub let Stateful = struct {
         }
     };
 
-    pub let finalize = fn (self: Stateful) -> usize {
+    pub let finalize = fn (self: FNV1a64) -> usize {
         return self.state;
     };
 };

@@ -37,8 +37,8 @@ const eql = std.meta.eql;
 const toKey = Resolver.toKey;
 
 pub const TypeTable = MultiArrayList(TypeInfo);
-pub const TypeMap = collections.HashMap(TypeInfo, TypeID);
-pub const TypeNameMap = std.AutoHashMapUnmanaged(TypeID, defines.StringPtr);
+pub const TypeMap = std.HashMapUnmanaged(TypeInfo, TypeID, TypeInfoHasher, 75);
+pub const TypeNameMap = collections.HashMap(TypeID, defines.StringPtr);
 pub const MetadataMap = collections.HashMap(u64, []const Comptime.Value.Ptr);
 
 const DeclCache = collections.HashMap(defines.DeclPtr, TypecheckStatus);
@@ -48,6 +48,19 @@ const AnonQueue = collections.HashMap(defines.ScopePtr, void);
 const AnonTypeList = std.ArrayList(TypeID);
 const BodyKey = u128;
 const BodyMap = collections.HashMap(BodyKey, void);
+
+const TypeInfoHasher = struct {
+    typeTable: *TypeTable,
+
+    pub fn hash(self: TypeInfoHasher, key: TypeInfo) u64 {
+        var hasher = std.hash.Fnv1a_64.init();
+        return key.hash(self.typeTable, &hasher);
+    }
+
+    pub fn eql(self: TypeInfoHasher, a: TypeInfo, b: TypeInfo) bool {
+        return a.eql(b, self.typeTable);
+    }
+};
 
 pub const Flags = enum(u8) {
     ConcreteValue = 0,
@@ -132,7 +145,7 @@ pub fn init(
     var bodyMap = BodyMap.empty;
 
     typenameMap.ensureTotalCapacity(allocator, 50 + typeCount + @as(u32, @intCast(Comptime.Folder.builtinTypes.len))) catch return Error.AllocatorFailure;
-    typeMap.ensureTotalCapacity(allocator, 50 + typeCount + @as(u32, @intCast(Comptime.Folder.builtinTypes.len))) catch return Error.AllocatorFailure;
+    typeMap.ensureTotalCapacityContext(allocator, 50 + typeCount + @as(u32, @intCast(Comptime.Folder.builtinTypes.len)), .{ .typeTable = &typeTable }) catch return Error.AllocatorFailure;
     lookup.ensureTotalCapacity(allocator, symbolTable.declarations.len) catch return Error.AllocatorFailure;
     metadata.ensureTotalCapacity(allocator, counts.meta * 3) catch return Error.AllocatorFailure;
     exprCache.ensureTotalCapacity(allocator, symbolTable.resolutionMap.count()) catch return Error.AllocatorFailure;
@@ -184,7 +197,7 @@ pub fn typecheck(self: *Typechecker, allocator: Allocator) Error!JIR {
 
     inline for (Comptime.Folder.builtinTypes, 0..) |builtin, id| {
         self.typeTable.appendAssumeCapacity(builtin.info);
-        self.typeMap.putAssumeCapacityNoClobber(builtin.info, @intCast(id));
+        self.typeMap.putAssumeCapacityNoClobberContext(builtin.info, @intCast(id), .{ .typeTable = &self.typeTable });
         self.typenameMap.putAssumeCapacityNoClobber(
             id,
             try self.builder.internString(builtin.name),
@@ -217,7 +230,7 @@ pub fn typecheck(self: *Typechecker, allocator: Allocator) Error!JIR {
     inline for (complexBuiltinTypes, 0..) |builtin, id| {
         const typeID = self.typeTable.len;
         self.typeTable.appendAssumeCapacity(builtin);
-        self.typeMap.putAssumeCapacityNoClobber(builtin, @intCast(id + entryPointID));
+        self.typeMap.putAssumeCapacityNoClobberContext(builtin, @intCast(id + entryPointID), .{ .typeTable = &self.typeTable });
         self.typenameMap.putAssumeCapacityNoClobber(
             @intCast(typeID),
             try self.builder.internString(complexBuiltinNames[id])
@@ -357,7 +370,7 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
                     });
                 }
                 else if (decl.topLevel) self.modules.modules.get(self.symbols.scopes.items(.module)[decl.scope]).name
-                else (try self.folder.generateRandomNameString(.Type))[2..];
+                else try self.folder.generateRandomNameString(.Type);
 
             const newName =
                 if (self.hasMetadata(decl.node, "@extern") and decl.topLevel) symName
@@ -1689,6 +1702,12 @@ pub fn discoverScopeDef(
     const prevs = self.currentScope;
     self.currentScope = scope;
     defer self.currentScope = prevs;
+
+    const previ = self.folder.currentInstantiation;
+    self.folder.currentInstantiation =
+        if (self.folder.captures.contains(scope)) scope
+        else self.folder.currentInstantiation;
+    defer self.folder.currentInstantiation = previ;
 
     const prevDiscovering = self.folder.discoveringScope;
     self.folder.discoveringScope = scope;
@@ -3295,7 +3314,7 @@ pub fn registerType(self: *Typechecker, _newType: TypeInfo) Error!TypeID {
         }
     }
 
-    const isPresent = self.typeMap.getOrPut(self.arena.allocator(), newType)
+    const isPresent = self.typeMap.getOrPutContext(self.arena.allocator(), newType, .{ .typeTable = &self.typeTable })
         catch return Error.AllocatorFailure;
 
     if (!isPresent.found_existing) {
@@ -3609,7 +3628,7 @@ pub fn assertCanCoerce(self: *Typechecker, this: TypeID, that: TypeID) Error!voi
                     }
                 }
 
-                if (fromPtr.child == toPtr.child) {
+                if (self.nominallyIdentical(fromPtr.child, toPtr.child)) {
                     return;
                 }
 
@@ -3621,7 +3640,7 @@ pub fn assertCanCoerce(self: *Typechecker, this: TypeID, that: TypeID) Error!voi
                 const fromMut = try self.registerType(self.makeMutable(self.typeTable.get(fromPtr.child)));
                 const mutVoid = try self.registerType(.{ .Void = true });
 
-                if (toMut == fromMut) {
+                if (self.nominallyIdentical(toMut, fromMut)) {
                     return;
                 }
 

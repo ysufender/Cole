@@ -8,224 +8,224 @@ let AllocatorResult = std::memory::allocator::Result;
 let Option = std::Option;
 
 pub let HashMap = fn (K: type, V: type, Hasher: type, MLP: u32) -> type {
-    if !std::hash::Hashable::Check(K) {
-        compileError("Given type is not suitable to be a hash key.");
-    }
+    if !std::hash::Hashable::Check(K) {
+        compileError("Given key is not hashable.");
+    }
 
-    if MLP >= 100 {
-        compileError("Max load percentage should be between 0 and 100 (exclusive).");
-    }
+    if MLP >= 100 {
+        compileError("Max load percentage should be between 0 and 100 (exclusive).");
+    }
 
-    let hashKey = std::hash::hash(K, Hasher);
-    let cmpKey  = std::comparator::generic(K);
+    let hashKey = std::hash::hash(K, Hasher);
+    let cmpKey  = std::comparator::generic(K);
 
-    return struct {
-        let Self   = this();
-        let MinCap = 16;
-        let Status = u8; 
+    return struct {
+        let Self   = this();
+        let MinCap = 16;
+        let Status = u8; 
 
-        let Entry = struct {
-            key   : *K,
-            value : *mut V,
-        };
+        let Entry = struct {
+            key   : *K,
+            value : *mut V,
+        };
 
-        let AdvancedEntry = struct {
-            key     : *mut K,
-            value   : *mut V,
-            metadata: *mut Status,
-        };
+        let AdvancedEntry = struct {
+            key     : *mut K,
+            value   : *mut V,
+            metadata: *mut Status,
+        };
 
-        let Free      = 0;
-        let Used      = 1;
-        let Tombstone = 2;
+        let Free      = 0;
+        let Used      = 1;
+        let Tombstone = 2;
 
-        keys    : mut []mut K,
-        values  : mut []mut V,
-        metadata: mut []mut Status,
-        size    : mut u32,
-        capacity: mut u32,
+        keys    : mut []mut K,
+        values  : mut []mut V,
+        metadata: mut []mut Status,
+        size    : mut u32,
+        capacity: mut u32,
 
-        pub let init = fn (gpa: Allocator) -> Option(Self) {
-            let self: mut Self = (undefined, undefined, undefined, 0, 0);
+        pub let init = fn (gpa: Allocator) -> Option(mut Self) {
+            let self: mut Self = (undefined, undefined, undefined, 0, 0);
 
-            switch Allocator::alloc(K)(gpa, MinCap) {
-                @Ok -> |mem| self.keys = mem;
-                else -> return (@None, ());
-            }
-            switch Allocator::alloc(V)(gpa, MinCap) {
-                @Ok -> |mem| self.values = mem;
-                else -> {
-                    Allocator::dealloc(K)(gpa, self.keys);
-                    return (@None, ());
-                }
-            }
-            switch Allocator::alloc(Status)(gpa, MinCap) {
-                @Ok -> |mem| self.metadata = mem;
-                else -> {
-                    Allocator::dealloc(K)(gpa, self.keys);
-                    Allocator::dealloc(V)(gpa, self.values);
-                    return (@None, ());
-                }
-            }
+            switch Allocator::alloc(K)(gpa, MinCap) {
+                @Ok -> |mem| self.keys = mem;
+                else -> return (@None, ());
+            }
+            switch Allocator::alloc(V)(gpa, MinCap) {
+                @Ok -> |mem| self.values = mem;
+                else -> {
+                    Allocator::dealloc(K)(gpa, self.keys);
+                    return (@None, ());
+                }
+            }
+            switch Allocator::alloc(Status)(gpa, MinCap) {
+                @Ok -> |mem| self.metadata = mem;
+                else -> {
+                    Allocator::dealloc(K)(gpa, self.keys);
+                    Allocator::dealloc(V)(gpa, self.values);
+                    return (@None, ());
+                }
+            }
 
-            self.capacity = MinCap;
+            self.capacity = MinCap;
 
-            for 0..self.metadata.len, |i| {
-                self.metadata[i] = Free;
-            }
+            for 0..self.metadata.len, |i| {
+                self.metadata[i] = Free;
+            }
 
-            return (@Some, self);
-        };
+            return (@Some, self);
+        };
 
-        pub let deinit = fn (self: *mut Self, gpa: Allocator) -> void {
-            if self.capacity == 0 { return; }
+        pub let deinit = fn (self: *mut Self, gpa: Allocator) -> void {
+            if self.capacity == 0 { return; }
 
-            Allocator::dealloc(K)(self.keys);
-            Allocator::dealloc(V)(self.values);
-            Allocator::dealloc(Status)(self.metadata);
-        };
+            Allocator::dealloc(K)(self.keys);
+            Allocator::dealloc(V)(self.values);
+            Allocator::dealloc(Status)(self.metadata);
+        };
 
-        pub let contains = fn (self: *Self, key: K) -> bool {
-            return switch getAdvancedEntry(self, key) {
-                @Some -> true,
-                else -> false,
-            };
-        };
+        pub let contains = fn (self: *Self, key: K) -> bool {
+            return switch getAdvancedEntry(self, key) {
+                @Some -> true,
+                else -> false,
+            };
+        };
 
-        pub let get = fn (self: *Self, key: K) -> Option(*mut V) {
-            return switch getAdvancedEntry() {
-                @Some -> |s| s.value,
-                else -> (@None, ()),
-            };
-        };
+        pub let get = fn (self: *Self, key: K) -> Option(*mut V) {
+            return switch getAdvancedEntry() {
+                @Some -> |s| s.value,
+                else -> (@None, ()),
+            };
+        };
 
-        pub let remove = fn (self: *mut Self, key: K) -> bool {
-            switch getAdvancedEntry(self, key) {
-                @Some -> |s| {
-                    s.metadata.* = Tombstone;
-                    return true;
-                }
-                else -> { }
-            }
+        pub let remove = fn (self: *mut Self, key: K) -> bool {
+            switch getAdvancedEntry(self, key) {
+                @Some -> |s| {
+                    s.metadata.* = Tombstone;
+                    return true;
+                }
+                else -> { }
+            }
 
-            return false;
-        };
+            return false;
+        };
 
-        pub let getEntry = fn (self: *mut Self, key: K) -> Option(Entry) {
-            return switch getAdvancedEntry(self, key) {
-                @Some -> |s| (@Some, (s.key, s.value)),
-                else -> (@None, ()),
-            };
-        };
+        pub let getEntry = fn (self: *mut Self, key: K) -> Option(Entry) {
+            return switch getAdvancedEntry(self, key) {
+                @Some -> |s| (@Some, (s.key, s.value)),
+                else -> (@None, ()),
+            };
+        };
 
-        pub let put = fn (self: *mut Self, gpa: Allocator, key: K, value: V) -> AllocatorResult(void) {
-            if (self.size * 100) >= (MLP * self.capacity) {
-                switch rehash(self, gpa) {
-                    @Ok -> { }
-                    @Err -> |err| return (@Err, err);
-                }
-            }
+        pub let put = fn (self: *mut Self, gpa: Allocator, key: K, value: V) -> AllocatorResult(void) {
+            if (self.size * 100) >= (MLP * self.capacity) {
+                switch rehash(self, gpa) {
+                    @Ok -> { }
+                    @Err -> |err| return (@Err, err);
+                }
+            }
 
-            let index: mut any = findIndex(self, key);
+            let index: mut any = findIndex(self, key);
 
-            while true {
-                let status = self.metadata[index];
+            while true {
+                let status = self.metadata[index];
 
-                if status == Free or status == Tombstone {
-                    self.keys[index]     = key;
-                    self.values[index]   = value;
-                    self.metadata[index] = Used;
-                    self.size = self.size + 1;
-                    return (@Ok, ());
-                }
-                else if status == Used and cmpKey(self.keys[index], key) {
-                    self.values[index] = value;
-                    return (@Ok, ());
-                }
+                if status == Free or status == Tombstone {
+                    self.keys[index]     = key;
+                    self.values[index]   = value;
+                    self.metadata[index] = Used;
+                    self.size = self.size + 1;
+                    return (@Ok, ());
+                }
+                else if status == Used and cmpKey(self.keys[index], key) {
+                    self.values[index] = value;
+                    return (@Ok, ());
+                }
 
-                index = (index + 1) & (self.capacity - 1);
-            }
+                index = (index + 1) & (self.capacity - 1);
+            }
 
-            return unreachable();
-        };
+            return unreachable();
+        };
 
-        pub let rehash = fn (self: *mut Self, gpa: Allocator) -> AllocatorResult(void) {
-            let oldCap = self.capacity;
-            let newCap = oldCap * 2;
+        pub let rehash = fn (self: *mut Self, gpa: Allocator) -> AllocatorResult(void) {
+            let oldCap = self.capacity;
+            let newCap = oldCap * 2;
 
-            let oldKeys   = self.keys;
-            let oldValues = self.values;
-            let oldMeta   = self.metadata;
+            let oldKeys   = self.keys;
+            let oldValues = self.values;
+            let oldMeta   = self.metadata;
 
-            switch Allocator::alloc(K)(gpa, newCap) {
-                @Ok -> |mem| self.keys = mem;
-                @Err -> |err| return (@Err, err);
-            }
+            switch Allocator::alloc(K)(gpa, newCap) {
+                @Ok -> |mem| self.keys = mem;
+                @Err -> |err| return (@Err, err);
+            }
 
-            switch Allocator::alloc(V)(gpa, newCap) {
-                @Ok -> |mem| self.values = mem;
-                @Err -> |err| {
-                    self.keys = oldKeys;
-                    Allocator::dealloc(K)(gpa, self.keys);
-                    return (@Err, err);
-                }
-            }
+            switch Allocator::alloc(V)(gpa, newCap) {
+                @Ok -> |mem| self.values = mem;
+                @Err -> |err| {
+                    self.keys = oldKeys;
+                    Allocator::dealloc(K)(gpa, self.keys);
+                    return (@Err, err);
+                }
+            }
 
-            switch Allocator::alloc(Status)(gpa, newCap) {
-                @Ok -> |mem| self.metadata = mem;
-                @Err -> |err| {
-                    self.keys   = oldKeys;
-                    self.values = oldValues;
-                    Allocator::dealloc(K)(gpa, self.keys);
-                    Allocator::dealloc(V)(gpa, self.values);
-                    return (@Err, err);
-                }
-            }
+            switch Allocator::alloc(Status)(gpa, newCap) {
+                @Ok -> |mem| self.metadata = mem;
+                @Err -> |err| {
+                    self.keys   = oldKeys;
+                    self.values = oldValues;
+                    Allocator::dealloc(K)(gpa, self.keys);
+                    Allocator::dealloc(V)(gpa, self.values);
+                    return (@Err, err);
+                }
+            }
 
-            for 0..newCap, |i| {
-                self.metadata[i] = Free;
-            }
+            for 0..newCap, |i| {
+                self.metadata[i] = Free;
+            }
 
-            self.capacity = newCap;
-            self.size     = 0;
+            self.capacity = newCap;
+            self.size     = 0;
 
-            for 0..oldCap, |i| {
-                if oldMeta[i] == Used {
-                    _ = put(self, gpa, oldKeys[i], oldValues[i]);
-                }
-            }
+            for 0..oldCap, |i| {
+                if oldMeta[i] == Used {
+                    _ = put(self, gpa, oldKeys[i], oldValues[i]);
+                }
+            }
 
-            Allocator::dealloc(K)(gpa, oldKeys);
-            Allocator::dealloc(V)(gpa, oldValues);
-            Allocator::dealloc(Status)(gpa, oldMeta);
+            Allocator::dealloc(K)(gpa, oldKeys);
+            Allocator::dealloc(V)(gpa, oldValues);
+            Allocator::dealloc(Status)(gpa, oldMeta);
 
-            return (@Ok, ());
-        };
+            return (@Ok, ());
+        };
 
-        let getAdvancedEntry = fn (self: *mut Self, key: K) -> Option(AdvancedEntry) {
-            if self.size == 0 {
-                return (@None, ());
-            }
+        let getAdvancedEntry = fn (self: *mut Self, key: K) -> Option(AdvancedEntry) {
+            if self.size == 0 {
+                return (@None, ());
+            }
 
-            let index: mut any = findIndex(self, key);
+            let index: mut any = findIndex(self, key);
 
-            while true {
-                let status = self.metadata[index];
-                if status == Free {
-                    return (@None, ());
-                }
-                else if status == Used and cmpKey(self.keys[index], key) {
-                    return (@Some, (self.keys[index].&, self.values[index].&, self.metadata[index].&));
-                }
+            while true {
+                let status = self.metadata[index];
+                if status == Free {
+                    return (@None, ());
+                }
+                else if status == Used and cmpKey(self.keys[index], key) {
+                    return (@Some, (self.keys[index].&, self.values[index].&, self.metadata[index].&));
+                }
 
-                index = (index + 1) & (self.capacity - 1);
-            }
+                index = (index + 1) & (self.capacity - 1);
+            }
 
-            return (@None, ());
-        };
+            return (@None, ());
+        };
 
-        let findIndex = fn (self: *Self, key: K) -> u32 {
-            return as(u32, unsafeCast(hashKey(key))) & (self.capacity - 1);
-        };
-    };
+        let findIndex = fn (self: *Self, key: K) -> u32 {
+            return as(u32, unsafeCast(hashKey(key))) & (self.capacity - 1);
+        };
+    };
 };

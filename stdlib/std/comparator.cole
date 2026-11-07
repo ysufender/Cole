@@ -1,0 +1,82 @@
+let Equator = fn (T: type) -> type { return *fn (T, T) -> bool; };
+
+pub let Equitable = struct {
+    pub let Check = fn (T: type) -> bool {
+        switch typeInfo(T) {
+            @Union -> return false;
+            @Pointer -> |ptr| return switch ptr.size {
+                @Slice -> Check(ptr.child),
+                else -> false,
+            };
+            @Array -> |arr| return Check(arr.child);
+            @Struct -> |str| {
+                for str.fields, |fld| {
+                    if !Check(fld.valueType) {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+            else -> return true;
+        }
+
+        return unreachable();
+    };
+
+    pub let Trait = fn (T: type) -> type {
+        return
+            if (Check(T)) T
+            else compileError("Given type does not satisfy the Equitable trait.");
+    };
+};
+
+pub let generic = fn (T: type) -> Equator(Equitable::Trait(T)) {
+    switch typeInfo(T) {
+        @Union -> unreachable();
+
+        @Pointer -> |ptr| return fn (a: T, b: T) -> bool {
+            if a.len != b.len {
+                return false;
+            }
+
+            for 0..a.len, |i| {
+                if !generic(ptr.child)(a[i], b[i]) {
+                    return false;
+                }
+            }
+
+            return true;
+        };
+
+        @Array -> |arr| return fn (a: T, b: T) -> bool {
+            if a.len != b.len {
+                return false;
+            }
+
+            for 0..a.len, |i| {
+                if !generic(arr.child)(a[i], b[i]) {
+                    return false;
+                }
+            }
+
+            return true;
+        };
+
+        @Struct -> |str| return fn (a: T, b: T) -> bool {
+            for #(@inline) str.fields, |fld| {
+                if !generic(fld.valueType)(field(a, fld.name), field(b, fld.name)) {
+                    return false;
+                }
+            }
+
+            return true;
+        };
+
+        else -> return fn (a: T, b: T) -> bool {
+            return a == b;
+        };
+    }
+
+    return unreachable();
+};

@@ -22,8 +22,8 @@ var targets = [_]std.Target.Query{
 
 const version = std.SemanticVersion{
     .major = 0,
-    .minor = 1,
-    .patch = 5,
+    .minor = 0,
+    .patch = 0,
 };
 
 var config: struct {
@@ -103,11 +103,15 @@ fn addTargets(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
         if (seen.contains(targetName)) continue;
         seen.putNoClobber(targetName, {}) catch unreachable;
 
-        const versionString = print(b.allocator, "v{d}.{d}.{d}", .{
-            version.major,
-            version.minor,
-            version.patch,
-        }) catch unreachable;
+        const versionString =
+            if (version.major == 0 
+                and version.minor == 0
+                and version.patch == 0) "alpha"
+            else print(b.allocator, "v{d}.{d}.{d}", .{
+                version.major,
+                version.minor,
+                version.patch,
+            }) catch unreachable;
 
         const opts = b.addOptions();
         opts.addOption(bool, "isDebug", optimize == .debug);
