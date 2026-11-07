@@ -104,8 +104,14 @@ let main = fn (args: [][]u8) -> i32 {
         player.y = player.y + pVel;
 
         // Draw
-        let pscore = String::intToStr(player.score, C::Allocator);
-        let cscore = String::intToStr(cpu.score, C::Allocator);
+        let pscore = switch String::toStrSentinel(u32)(player.score, 0, C::Allocator) {
+            @Some -> |s| s,
+            @None -> "<err>",
+        };
+        let cscore = switch String::toStrSentinel(u32)(cpu.score, 0, C::Allocator) {
+            @Some -> |s| s,
+            @None -> "<err>",
+        };
 
     	RayLib::BeginDrawing();
             RayLib::ClearBackground(RayLib::Color::Black);

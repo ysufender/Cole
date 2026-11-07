@@ -42,6 +42,22 @@ pub let alloc = fn (T: type) -> *fn (Allocator, u32) -> Result([]mut T) {
     };
 };
 
+pub let allocSentinel = fn (T: type) -> *fn (Allocator, u32, T) -> Result ([]mut T) {
+    return fn (self: Allocator, count: u32, sentinel: T) -> Result([]mut T) {
+        switch self.alloc(self.context, count + 1, sizeOf(T)) {
+            @Ok -> |_mem| {
+                let mem: []mut T = cast(_mem);
+                mem[count] = sentinel;
+                return (@Ok, mem[0..count]);
+            }
+            @Err -> |err| return (@Err, err);
+        }
+
+        unreachable();
+        return (@Err, @Undefined);
+    };
+};
+
 pub let dealloc = fn (T: type) -> *fn (Allocator, []T) -> void {
     return fn (self: Allocator, arr: []T) -> void {
         return self.dealloc(self.context, cast(arr));

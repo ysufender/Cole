@@ -26,10 +26,10 @@ pub let equals = fn (str1: []u8, str2: []u8) -> bool {
 pub let toStr = fn (T: type) -> *fn (T, Allocator::Allocator) -> std::Option([]u8) {
     switch typeInfo(T) {
         @Integer -> return fn (arg: T, gpa: Allocator::Allocator) -> std::Option([]u8) {
-            return safeIntToStr(cast(arg), gpa);
+            return safeIntToStr(cast(arg), (@None, ()), gpa);
         };
         @Float -> return fn (arg: T, gpa: Allocator::Allocator) -> std::Option([]u8) {
-            return safeFloatToStr(cast(arg), gpa);
+            return safeFloatToStr(cast(arg), (@None, ()), gpa);
         };
         @Bool -> return fn (arg: T, gpa: Allocator::Allocator) -> std::Option([]u8) {
             return (@Some, boolToStr(arg));
@@ -46,19 +46,44 @@ pub let toStr = fn (T: type) -> *fn (T, Allocator::Allocator) -> std::Option([]u
         };
     }
 
-    unreachable();
-    return undefined;
+    return unreachable();
+};
+
+pub let toStrSentinel = fn (T: type) -> *fn (T, u8, Allocator::Allocator) -> std::Option([]u8) {
+    switch typeInfo(T) {
+        @Integer -> return fn (arg: T, end: u8, gpa: Allocator::Allocator) -> std::Option([]u8) {
+            return safeIntToStr(cast(arg), (@Some, end), gpa);
+        };
+        @Float -> return fn (arg: T, end: u8, gpa: Allocator::Allocator) -> std::Option([]u8) {
+            return safeFloatToStr(cast(arg), (@Some, end),  gpa);
+        };
+        @Bool -> return fn (arg: T, end: u8, gpa: Allocator::Allocator) -> std::Option([]u8) {
+            return (@Some, boolToStr(arg));
+        };
+        @Pointer -> return fn (arg: T, end: u8, gpa: Allocator::Allocator) -> std::Option([]u8) {
+            let info = typeInfo(T).Pointer;
+            if info.size == @Slice and (info.child == u8 or info.child == mut u8) {
+                return (@Some, arg);
+            }
+            return (@Some, "<pointer>");
+        };
+        else -> return fn (arg: T, end: u8, gpa: Allocator::Allocator) -> std::Option([]u8) {
+            return (@None, ());
+        };
+    }
+
+    return unreachable();
 };
 
 pub let intToStr =  fn (num: c_long, gpa: Allocator::Allocator) -> []u8 {
-    return safeIntToStr(num, gpa).Some;
+    return safeIntToStr(num, (@None, ()), gpa).Some;
 };
 
 pub let floatToStr =  fn (num: float, gpa: Allocator::Allocator) -> []u8 {
-    return safeFloatToStr(num, gpa).Some;
+    return safeFloatToStr(num, (@None, ()), gpa).Some;
 };
 
-pub let safeIntToStr = fn (num: c_long, gpa: Allocator::Allocator) -> std::Option([]u8) {
+pub let safeIntToStr = fn (num: c_long, end: std::Option(u8), gpa: Allocator::Allocator) -> std::Option([]u8) {
     let isSigned = num < 0;
     let tmp: mut c_long = num * (if (isSigned) -1 else 1);
     let digitCount: mut u32 = 0;
@@ -68,20 +93,30 @@ pub let safeIntToStr = fn (num: c_long, gpa: Allocator::Allocator) -> std::Optio
     }
     let size: u32 = (if (digitCount == 0) 1 else digitCount) + (if (isSigned) 1 else 0);
 
-    switch Allocator::alloc(u8)(gpa, size) {
-        @Ok -> |mem| {
-            let stream: mut any = MemStream::init(mem);
-            Fmt::format(c_long)(num, MemStream::ostream(stream.&));
-            return (@Some, mem);
+    switch end {
+        @Some -> |sentinel| switch Allocator::allocSentinel(u8)(gpa, size, sentinel) {
+            @Ok -> |mem| {
+                let stream: mut any = MemStream::init(mem);
+                Fmt::format(c_long)(num, MemStream::ostream(stream.&));
+                return (@Some, mem);
+            }
+            @Err -> return (@None, ());
         }
-        @Err -> return (@None, ());
+        @None -> switch Allocator::alloc(u8)(gpa, size) {
+            @Ok -> |mem| {
+                let stream: mut any = MemStream::init(mem);
+                Fmt::format(c_long)(num, MemStream::ostream(stream.&));
+                return (@Some, mem);
+            }
+            @Err -> return (@None, ());
+        }
     }
 
     unreachable();
     return undefined;
 };
 
-pub let safeFloatToStr = fn (num: float, gpa: Allocator::Allocator) -> std::Option([]u8) {
+pub let safeFloatToStr = fn (num: float, end: std::Option(u8), gpa: Allocator::Allocator) -> std::Option([]u8) {
     let precision: u32 = 9;
     let negative: bool = num < 0;
     let value: mut c_double = cast(num);
@@ -124,13 +159,24 @@ pub let safeFloatToStr = fn (num: float, gpa: Allocator::Allocator) -> std::Opti
         size = size + wholeDigits + 1 + precision;
     }
 
-    switch Allocator::alloc(u8)(gpa, size) {
-        @Ok -> |mem| {
-            let stream: mut any = MemStream::init(mem);
-            Fmt::format(float)(num, MemStream::ostream(stream.&));
-            return (@Some, mem);
+    switch end {
+        @Some -> |sentinel| switch Allocator::allocSentinel(u8)(gpa, size, sentinel) {
+            @Ok -> |mem| {
+                let stream: mut any = MemStream::init(mem);
+                Fmt::format(float)(num, MemStream::ostream(stream.&));
+                return (@Some, mem);
+            }
+            @Err -> return (@None, ());
         }
-        @Err -> return (@None, ());
+
+         @None -> switch Allocator::alloc(u8)(gpa, size) {
+            @Ok -> |mem| {
+                let stream: mut any = MemStream::init(mem);
+                Fmt::format(float)(num, MemStream::ostream(stream.&));
+                return (@Some, mem);
+            }
+            @Err -> return (@None, ());
+        }
     }
 
     unreachable();

@@ -321,35 +321,32 @@ pub fn statement(self: *Lowerer, statementPtr: defines.StatementPtr) Error!JIR.P
 }
 
 fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
-    var typechecker = self.typechecker;
-    var exec = typechecker.folder;
+    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
 
-    const ast = typechecker.context.getAST(self.typechecker.currentFile);
-
-    const enumOrUnionType = try typechecker.typecheckExpression(ast.extra[extraPtr], null);
+    const enumOrUnionType = try self.typechecker.typecheckExpression(ast.extra[extraPtr], null);
     const enumOrUnionExpr = try self.expression(ast.extra[extraPtr], enumOrUnionType);
     const maybeComptimeEnumOrUnionPtr = self.typechecker.folder.attemptEval(ast.extra[extraPtr], enumOrUnionType);
 
     const maybeComptimeEnumOrUnion =
-        if (maybeComptimeEnumOrUnionPtr) |ptr| typechecker.folder.getValue(ptr)
+        if (maybeComptimeEnumOrUnionPtr) |ptr| self.typechecker.folder.getValue(ptr)
         else null;
 
     var cachedDef: ?JIR.Ptr = null;
     var enumOrUnion = enumOrUnionExpr;
     if (maybeComptimeEnumOrUnion == null) {
-        const name = try typechecker.folder.generateRandomName(.SwitchValue);
-        cachedDef = try typechecker.builder.variableDef(false, enumOrUnionType, name, false, enumOrUnionExpr, null);
-        enumOrUnion = try typechecker.builder.identifier(name);
+        const name = try self.typechecker.folder.generateRandomName(.SwitchValue);
+        cachedDef = try self.typechecker.builder.variableDef(false, enumOrUnionType, name, false, enumOrUnionExpr, null);
+        enumOrUnion = try self.typechecker.builder.identifier(name);
     }
 
-    const typeInfo = typechecker.typeTable.get(enumOrUnionType);
+    const typeInfo = self.typechecker.typeTable.get(enumOrUnionType);
     const tag: struct { type: TypeID, fields: []const types.EnumField } = switch (typeInfo) {
         .Enum => |enm| .{ .type = enumOrUnionType, .fields = enm.fields },
-        .Union => |uni| .{ .type = uni.tag, .fields = typechecker.typeTable.get(uni.tag).Enum.fields },
+        .Union => |uni| .{ .type = uni.tag, .fields = self.typechecker.typeTable.get(uni.tag).Enum.fields },
         else => return common.debug.ShouldBeImpossible(undefined, @src()),
     };
 
-    const switchEnd = try exec.generateRandomName(.SwitchEnd);
+    const switchEnd = try self.typechecker.folder.generateRandomName(.SwitchEnd);
 
     const caseRange = defines.Range{
         .start = ast.extra[extraPtr + 1],
@@ -358,7 +355,7 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
 
     var ops =
         if (maybeComptimeEnumOrUnion) |_| @constCast(&.{})
-        else typechecker.arena.allocator().alloc(JIR.Ptr, @divFloor(caseRange.len(), 4) + 2)
+        else self.typechecker.arena.allocator().alloc(JIR.Ptr, @divFloor(caseRange.len(), 4) + 2)
             catch return Error.AllocatorFailure;
     var ptrs = ops[@min(1, ops.len)..];
     if (cachedDef) |def| ops[0] = def;
@@ -381,20 +378,20 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
             }
         }
 
-        const caseValue = exec.getValue(try exec.eval(caseIndex, tag.type)).Enum.Value;
+        const caseValue = self.typechecker.folder.getValue(try self.typechecker.folder.eval(caseIndex, tag.type)).Enum.Value;
 
         const case = try self.expression(caseIndex, tag.type);
 
-        const caseEnd = try exec.generateRandomName(.CaseEnd);
+        const caseEnd = try self.typechecker.folder.generateRandomName(.CaseEnd);
         const cnd =
             if (typeInfo == .Union) res: {
-                const tagFieldName = try typechecker.builder.internString("tag");
-                const tagField = try typechecker.builder.dot(enumOrUnion, tagFieldName, enumOrUnionType);
-                break :res try typechecker.builder.notEqual(tagField, case);
+                const tagFieldName = try self.typechecker.builder.internString("tag");
+                const tagField = try self.typechecker.builder.dot(enumOrUnion, tagFieldName, enumOrUnionType);
+                break :res try self.typechecker.builder.notEqual(tagField, case);
             }
-            else try typechecker.builder.notEqual(enumOrUnion, case);
+            else try self.typechecker.builder.notEqual(enumOrUnion, case);
 
-        const caseJump = try typechecker.builder.cjump(caseEnd, cnd);
+        const caseJump = try self.typechecker.builder.cjump(caseEnd, cnd);
 
         const hasCapture = ast.extra[caseRange.at(idx + 1)] == 1;
         const bodyPtr = ast.extra[caseRange.at(idx + 3)];
@@ -415,17 +412,17 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
                     switch (val) {
                         .Union => |uni|
                             if (uni.Tag == caseValue) {
-                                exec.declCache.put(exec.arena.allocator(), captureDeclPtr, uni.Value)
+                                self.typechecker.folder.declCache.put(self.typechecker.folder.arena.allocator(), captureDeclPtr, uni.Value)
                                     catch return Error.AllocatorFailure;
-                                defer _ = exec.declCache.remove(captureDeclPtr);
+                                defer _ = self.typechecker.folder.declCache.remove(captureDeclPtr);
                                 return try self.statement(bodyPtr);
                             },
 
                         .Enum => |enm|
                             if (enm.Value == caseValue) {
-                                exec.declCache.put(exec.arena.allocator(), captureDeclPtr, maybeComptimeEnumOrUnionPtr.?)
+                                self.typechecker.folder.declCache.put(self.typechecker.folder.arena.allocator(), captureDeclPtr, maybeComptimeEnumOrUnionPtr.?)
                                     catch return Error.AllocatorFailure;
-                                defer _ = exec.declCache.remove(captureDeclPtr);
+                                defer _ = self.typechecker.folder.declCache.remove(captureDeclPtr);
                                 return try self.statement(bodyPtr);
                             },
 
@@ -434,24 +431,24 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
                     continue;
                 }
 
-                const capture = try typechecker.builder.variableDef(
+                const capture = try self.typechecker.builder.variableDef(
                     false,
                     caseField.valueType,
                     name,
                     false,
-                    try typechecker.builder.dot(enumOrUnion, caseField.name, enumOrUnionType),
+                    try self.typechecker.builder.dot(enumOrUnion, caseField.name, enumOrUnionType),
                     null,
                 );
 
                 const body = try self.statement(bodyPtr);
-                const caseEndLbl = try typechecker.builder.label(caseEnd);
+                const caseEndLbl = try self.typechecker.builder.label(caseEnd);
 
-                break :res try typechecker.builder.scope(
-                    try exec.generateRandomName(.Case), &.{
+                break :res try self.typechecker.builder.scope(
+                    try self.typechecker.folder.generateRandomName(.Case), &.{
                         caseJump,
                         capture,
                         body,
-                        try typechecker.builder.jump(switchEnd),
+                        try self.typechecker.builder.jump(switchEnd),
                         caseEndLbl,
                     },
                 );
@@ -467,13 +464,13 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
                 }
 
                 const body = try self.statement(bodyPtr);
-                const caseEndLbl = try typechecker.builder.label(caseEnd);
+                const caseEndLbl = try self.typechecker.builder.label(caseEnd);
 
-                break :res try typechecker.builder.scope(
-                    try exec.generateRandomName(.Case), &.{
+                break :res try self.typechecker.builder.scope(
+                    try self.typechecker.folder.generateRandomName(.Case), &.{
                         caseJump,
                         body,
-                        try typechecker.builder.jump(switchEnd),
+                        try self.typechecker.builder.jump(switchEnd),
                         caseEndLbl,
                     },
                 );
@@ -483,11 +480,11 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
         ptrs[@divFloor(idx, 4)] = switchFull;
     }
 
-    const switchEndLabel = try typechecker.builder.label(switchEnd);
+    const switchEndLabel = try self.typechecker.builder.label(switchEnd);
     ptrs[@divFloor(caseRange.len(), 4)] = switchEndLabel;
 
-    return typechecker.builder.scope(
-        try exec.generateRandomName(.Switch),
+    return self.typechecker.builder.scope(
+        try self.typechecker.folder.generateRandomName(.Switch),
         ops,
     );
 }
@@ -2186,7 +2183,7 @@ fn report(self: *Lowerer, comptime fmt: []const u8, args: anytype) void {
 pub fn handler(self: *Lowerer, comptime name: []const u8) Error!JIR.Ptr {
     return self.typechecker.builder.inlineC(
         try self.typechecker.builder.internString(
-            std.fmt.comptimePrint("{s}$$: {s}((long)&&{s}$$);", .{name, name, name})
+            std.fmt.comptimePrint("({{{s}$$: {s}((long)&&{s}$$); *(NULL);}});", .{name, name, name})
         )
     );
 }
