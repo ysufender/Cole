@@ -353,6 +353,17 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
             }
 
             const ast = self.context.getAST(self.currentFile);
+            const typeScope = switch (typeInfo) {
+                .Struct => |str| str.scope,
+                .Union => |uni| uni.scope,
+                .Enum => |enm| enm.scope,
+                else => break :blk,
+            };
+            var maybeScope: ?defines.ScopePtr = decl.scope;
+            while (maybeScope) |s| {
+                if (s == typeScope) break :blk;
+                maybeScope = self.symbols.scopes.items(.parent)[s];
+            }
             const tokens = self.context.getTokens(ast.tokens);
 
             const symName = tokens.get(decl.token).lexeme(self.context, self.currentFile);
@@ -370,7 +381,7 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
                     });
                 }
                 else if (decl.topLevel) self.modules.modules.get(self.symbols.scopes.items(.module)[decl.scope]).name
-                else try self.folder.generateRandomNameString(.Type);
+                else (try self.folder.generateRandomNameString(.Type))[2..];
 
             const newName =
                 if (self.hasMetadata(decl.node, "@extern") and decl.topLevel) symName
@@ -1685,7 +1696,10 @@ pub fn discoverScopeDef(
         return Error.AccessSpecifierMismatch;
     }
 
-    if (member.valueType != comptime Comptime.Folder.Builtin.Type("$$incomplete")) {
+    if (
+        member.valueType != (comptime Comptime.Folder.Builtin.Type("$$incomplete"))
+        and self.folder.getFlag(.InComptimeCall)
+    ) {
         return member.valueType;
     }
 
@@ -3084,7 +3098,6 @@ fn typecheckSwitchOnUnion(
 
             _ = try self.typecheckDecl(captureDecl, captureType);
 
-            // Bind the capture to its comptime payload so the body can fold on it.
             if (comptimeItem) |p| switch (self.folder.getValue(p)) {
                 .Union => |u| self.folder.declCache.put(self.folder.arena.allocator(), captureDecl, u.Value)
                     catch return Error.AllocatorFailure,

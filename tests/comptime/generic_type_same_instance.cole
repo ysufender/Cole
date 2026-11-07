@@ -16,8 +16,8 @@ let take = fn (b: A) -> i32 {
 
 let main = fn (args: [][]u8) -> i32 {
     let b = B(9, 1);
-    if A != B {
-        Console::log("types are not the same: ok");
+    if A == B {
+        Console::log("types are the same: ok");
     }
     if Box(i32) == Box(i32) {
         Console::log("anon types are the same: ok");

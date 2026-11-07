@@ -1161,6 +1161,23 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
                 }
                 else try self.expectDefined(decl.node, maybeExpected);
 
+            if (decl.topLevel and self.getValue(valuePtr) == .Function) {
+                const func = &self.memory.items[valuePtr].Function;
+                const cur = self.typechecker.builder.getInternedString(func.name);
+                if (
+                    std.mem.startsWith(u8, cur, "$$")
+                    and (self.typechecker.hasMetadata(func.expr, "@extern")
+                        or self.typechecker.hasMetadata(func.expr, "@export"))
+                ) {
+                    const tokens = self.typechecker.context.getTokens(self.typechecker.currentFile);
+                    const symName = tokens.get(decl.token).lexeme(
+                        self.typechecker.context,
+                        self.typechecker.currentFile,
+                    );
+                    try self.typechecker.builder.modifyInternedString(func.name, symName);
+                }
+            }
+
             break :blk self.castValue(valuePtr, expected, false);
         },
         .Capture =>
@@ -1566,8 +1583,6 @@ fn evalEnumType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Value
     if (sharedKey) |key| {
         self.cache.put(self.arena.allocator(), key, .{ .Ok = res }) catch return Error.AllocatorFailure;
     }
-
-    try self.resolveScopeDecls(oldScope, scope, ast, tokens, defRange, self.getValue(res).Type);
     
     self.cache.put(
         self.arena.allocator(),
@@ -1661,8 +1676,6 @@ fn evalStructType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Val
         self.cache.put(self.arena.allocator(), key, .{ .Ok = res }) catch return Error.AllocatorFailure;
     }
 
-    try self.resolveScopeDecls(oldScope, scope, ast, tokens, defRange, self.getValue(res).Type);
-    
     self.cache.put(
         self.arena.allocator(),
         (@as(u128, self.typechecker.currentFile) << 64) | (@as(u128, expr) << 32) | res,
@@ -1816,8 +1829,6 @@ fn evalUnionType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Valu
         self.cache.put(self.arena.allocator(), key, .{ .Ok = res }) catch return Error.AllocatorFailure;
     }
 
-    try self.resolveScopeDecls(oldScope, scope, ast, tokens, defRange, self.getValue(res).Type);
-    
     self.cache.put(
         self.arena.allocator(),
         (@as(u128, self.typechecker.currentFile) << 64) | (@as(u128, expr) << 32) | res,
@@ -3146,73 +3157,25 @@ fn handleScopeDecls(
             .scope = newScope,
             .name = symbolName,
         }, newDecl) catch return Error.AllocatorFailure;
+
+        const parentBusy =
+            if (decl.parent) |p|
+                if (self.typechecker.declCache.get(p)) |e| e.status == .InProgress
+                else false
+            else false;
             
         const newName = try self.typechecker.builder.internString(symbolName);
         defs.appendAssumeCapacity(.{
             .public = sig.public,
             .name = newName,
-            .valueType = comptime Builtin.Type("$$incomplete"),
+            .valueType =
+                if (!parentBusy and self.getFlag(.InComptimeCall)) try self.typechecker.typecheckDecl(declPtr, null)
+                else comptime Builtin.Type("$$incomplete"),
             .isComptime = false,
         });
     }
 
     return defs.items;
-}
-
-fn resolveScopeDecls(
-    self: *Folder,
-    originalScope: defines.ScopePtr,
-    instanceScope: defines.ScopePtr,
-    ast: *const Parser.AST,
-    tokens: *const Lexer.TokenList.Slice,
-    defRange: defines.Range,
-    typeID: TypeID,
-) Error!void {
-    if (!self.getFlag(.InComptimeCall)) return;
-
-    var definitions: []types.FieldInfo = @constCast(switch (self.typechecker.typeTable.get(typeID)) {
-        .Struct => |str| str.definitions,
-        .Enum => |enm| enm.definitions,
-        .Union => |uni| uni.definitions,
-        else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
-    });
-
-    const previousInstantiation = self.currentInstantiation;
-    self.currentInstantiation = if (instanceScope != originalScope) instanceScope else self.currentInstantiation;
-    defer self.currentInstantiation = previousInstantiation;
-
-    for (0..defRange.len()) |defIndex| {
-        const defPtr = ast.extra[defRange.at(@intCast(defIndex))];
-        const valPtr: defines.OpaquePtr = ast.statements.items(.value)[defPtr];
-        const signature = ast.extra[valPtr];
-        const sig = ast.signatures.get(signature);
-        const symbolToken = tokens.get(sig.name);
-        const symbolName = symbolToken.lexeme(self.typechecker.context, self.typechecker.currentFile);
-
-        const instanceDecl = self.typechecker.symbols.lookup.get(.{
-            .scope = instanceScope,
-            .name = symbolName,
-        });
-
-        const originalDecl = self.typechecker.symbols.lookup.get(.{
-            .scope = originalScope,
-            .name = symbolName,
-        });
-
-        const declPtr = instanceDecl orelse originalDecl orelse
-            return common.debug.ShouldBeImpossible(undefined, @src());
-        const decl = self.typechecker.symbols.getDecl(declPtr);
-
-        const parentBusy =
-            if (decl.parent) |parent|
-                if (self.typechecker.declCache.get(parent)) |entry| entry.status == .InProgress
-                else false
-            else false;
-
-        if (!parentBusy) {
-            definitions[defIndex].valueType = try self.typechecker.typecheckDecl(declPtr, null);
-        }
-    }
 }
 
 fn castValue(self: *Folder, valuePtr: Comptime.Value.Ptr, to: TypeID, _: bool) Error!Comptime.Value.Ptr {
