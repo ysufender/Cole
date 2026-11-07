@@ -420,6 +420,12 @@ pub fn determineComptimeReturnTypeDirect(
     self.typechecker.currentScope = func.scope;
     defer self.typechecker.currentScope = prevsc;
 
+    const prevInst = self.currentInstantiation;
+    self.currentInstantiation =
+        if (self.captures.contains(func.scope)) func.scope
+        else null;
+    defer self.currentInstantiation = prevInst;
+
     return self.getValue(try self.expectType(returnExpr)).Type;
 }
 
@@ -456,6 +462,16 @@ pub fn determineComptimeReturnType(
     const prevs = self.typechecker.currentFile;
     self.typechecker.currentFile = func.source;
     defer self.typechecker.currentFile = prevs;
+
+    const prevsc = self.typechecker.currentScope;
+    self.typechecker.currentScope = func.scope;
+    defer self.typechecker.currentScope = prevsc;
+
+    const prevInst = self.currentInstantiation;
+    self.currentInstantiation =
+        if (self.captures.contains(func.scope)) func.scope
+        else null;
+    defer self.currentInstantiation = prevInst;
 
     return self.getValue(try self.expectType(returnExpr)).Type;
 }
@@ -2990,13 +3006,20 @@ fn evalArrType(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.
 }
 
 pub fn expectType(self: *Folder, exprPtr: defines.ExpressionPtr) Error!Comptime.Value.Ptr {
+    const prev = self.setFlag(.ComptimeBanned, false);
+    defer _ = self.setFlag(.ComptimeBanned, prev);
+
     const valuePtr = try self.eval(exprPtr, Builtin.Type("type"));
     const value = self.getValue(valuePtr);
+
     return switch (value) {
         .Type => valuePtr,
         else => {
             self.report("Expected a type expression, got '{s}' instead.", .{
-                try self.typechecker.typeName(self.arena.allocator(), try self.typechecker.typecheckValue(valuePtr, null))
+                try self.typechecker.typeName(
+                    self.arena.allocator(),
+                    try self.typechecker.typecheckValue(valuePtr, null)
+                )
             });
             return Error.UnexpectedNonTypeExpression;
         }

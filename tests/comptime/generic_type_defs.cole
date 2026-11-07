@@ -20,8 +20,8 @@ let IntBox = Box(i32);
 let FloatBox = Box(float);
 
 let main = fn (args: [][]u8) -> i32 {
-    let a = IntBox::twice(41);
-    let b = FloatBox::twice(2.5);
+    let a = IntBox::twice(#(@noComptime) 41);
+    let b = FloatBox::twice(#(@noComptime) 2.5);
     let ib = IntBox(5, 1);
     let fb = FloatBox(0.5, 2);
 

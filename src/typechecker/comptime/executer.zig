@@ -79,6 +79,12 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
     defer self.typechecker.currentScope = pscope;
     self.typechecker.currentScope = func.scope;
 
+    const prevInst = self.typechecker.folder.currentInstantiation;
+    self.typechecker.folder.currentInstantiation =
+        if (self.typechecker.folder.captures.contains(func.scope)) func.scope
+        else null;
+    defer self.typechecker.folder.currentInstantiation = prevInst;
+
     const psrc = self.typechecker.currentFile;
     defer self.typechecker.currentFile = psrc;
     self.typechecker.currentFile = func.source;

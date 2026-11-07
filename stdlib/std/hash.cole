@@ -13,7 +13,7 @@ pub let generic = fn (T: type, H: type) -> Hasher(T, H) {
 
         else -> return fn (arg: T, hasher: *mut H) -> void {
             let ptr = as([@c]u8, unsafeCast(arg.&));
-            H::writeBytes(hasher.&, ptr[0..sizeOf(T)]);
+            H::writeBytes(hasher, ptr[0..sizeOf(T)]);
         };
     }
 
@@ -21,7 +21,7 @@ pub let generic = fn (T: type, H: type) -> Hasher(T, H) {
 };
 
 pub let Stateful = struct {
-    state: usize,
+    state: mut usize,
 
     pub let init = fn () -> Stateful {
         return (as(usize, cast(-3750763034362895579)));
