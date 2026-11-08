@@ -94,7 +94,7 @@ pub let safeIntToStr = fn (num: c_long, end: std::Option(u8), gpa: Allocator::Al
     let size: u32 = (if (digitCount == 0) 1 else digitCount) + (if (isSigned) 1 else 0);
 
     switch end {
-        @Some -> |sentinel| switch Allocator::allocSentinel(u8)(gpa, size, sentinel) {
+        @Some -> |sentinel| switch Allocator::Allocator::allocSentinel(u8)(gpa, size, sentinel) {
             @Ok -> |mem| {
                 let stream: mut any = MemStream::init(mem);
                 Fmt::format(c_long)(num, MemStream::ostream(stream.&));
@@ -102,7 +102,7 @@ pub let safeIntToStr = fn (num: c_long, end: std::Option(u8), gpa: Allocator::Al
             }
             @Err -> return (@None, ());
         }
-        @None -> switch Allocator::alloc(u8)(gpa, size) {
+        @None -> switch Allocator::Allocator::alloc(u8)(gpa, size) {
             @Ok -> |mem| {
                 let stream: mut any = MemStream::init(mem);
                 Fmt::format(c_long)(num, MemStream::ostream(stream.&));
@@ -160,7 +160,7 @@ pub let safeFloatToStr = fn (num: float, end: std::Option(u8), gpa: Allocator::A
     }
 
     switch end {
-        @Some -> |sentinel| switch Allocator::allocSentinel(u8)(gpa, size, sentinel) {
+        @Some -> |sentinel| switch Allocator::Allocator::allocSentinel(u8)(gpa, size, sentinel) {
             @Ok -> |mem| {
                 let stream: mut any = MemStream::init(mem);
                 Fmt::format(float)(num, MemStream::ostream(stream.&));
@@ -169,7 +169,7 @@ pub let safeFloatToStr = fn (num: float, end: std::Option(u8), gpa: Allocator::A
             @Err -> return (@None, ());
         }
 
-         @None -> switch Allocator::alloc(u8)(gpa, size) {
+         @None -> switch Allocator::Allocator::alloc(u8)(gpa, size) {
             @Ok -> |mem| {
                 let stream: mut any = MemStream::init(mem);
                 Fmt::format(float)(num, MemStream::ostream(stream.&));

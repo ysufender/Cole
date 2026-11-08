@@ -93,7 +93,7 @@ pub let readline = fn (ctx: *mut void, gpa: Allocator::Allocator) -> Stream::Inp
     }
     self.rindex = self.rindex + 1;
 
-    switch Allocator::alloc(u8)(gpa, self.rindex - 1 - start) {
+    switch Allocator::Allocator::alloc(u8)(gpa, self.rindex - 1 - start) {
         @Ok -> |mem| {
             Memory::copy(cast(mem.ptr), cast(self.buffer[start..self.rindex - 1]), mem.len);
             return (@Ok, mem);
@@ -121,7 +121,7 @@ pub let readbuffer = fn (ctx: *mut void, buffer: []mut u8) -> Stream::Input::Rea
 pub let exhaust = fn (ctx: *mut void, gpa: Allocator::Allocator) -> Stream::Input::ReadLineResult {
     let self: *mut MemoryStream = cast(ctx);
 
-    switch Allocator::alloc(u8)(gpa, self.buffer.len) {
+    switch Allocator::Allocator::alloc(u8)(gpa, self.buffer.len) {
         @Ok -> |mem| {
             Memory::copy(cast(mem.ptr), cast(self.buffer.ptr), mem.len);
             return (@Ok, mem);

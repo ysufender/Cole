@@ -59,7 +59,7 @@ pub let readline = fn (handle: *mut void, allocator: Allocator::Allocator) -> St
         return (@Err, ());
     }
 
-    let _buffer = Allocator::alloc(u8)(allocator, len);
+    let _buffer = Allocator::Allocator::alloc(u8)(allocator, len);
 
     switch _buffer {
         @Ok -> |buffer| {
@@ -100,7 +100,7 @@ pub let exhaust = fn (handle: *mut void, allocator: Allocator::Allocator) -> Str
     _ = fseek(handle, 0, File::Base::End);
     let size = ftell(handle);
 
-    let _mem = Allocator::alloc(u8)(allocator, size);
+    let _mem = Allocator::Allocator::alloc(u8)(allocator, size);
 
     switch _mem {
         @Ok -> |mem| {

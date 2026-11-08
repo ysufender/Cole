@@ -11,64 +11,64 @@ pub let Result = fn (T: type) -> type {
 
 pub let Allocator = struct {
     context: *mut void,
-    create: *fn (*mut void, u32) -> Result(*mut void),
-    destroy: *fn (*mut void, *void) -> void,
-    alloc: *fn (*mut void, u32, u32) -> Result([]mut void),
-    dealloc: *fn (*mut void, []void) -> void,
-    realloc: *fn (*mut void, []mut void, u32, u32) -> Result([]mut void),
-};
+    _create: *fn (*mut void, u32) -> Result(*mut void),
+    _destroy: *fn (*mut void, *void) -> void,
+    _alloc: *fn (*mut void, u32, u32) -> Result([]mut void),
+    _dealloc: *fn (*mut void, []void) -> void,
+    _realloc: *fn (*mut void, []mut void, u32, u32) -> Result([]mut void),
 
-pub let create = fn (T: type) -> *fn (Allocator) -> Result(*mut T) {
-    return fn (self: Allocator) -> Result(*mut T) {
-        return switch self.create(self.context, sizeOf(T)) {
-            @Ok -> |res| (@Ok, cast(res)),
-            @Err -> |err| (@Err, err),
+    pub let create = fn (T: type) -> *fn (Allocator) -> Result(*mut T) {
+        return fn (self: Allocator) -> Result(*mut T) {
+            return switch self.create(self.context, sizeOf(T)) {
+                @Ok -> |res| (@Ok, cast(res)),
+                @Err -> |err| (@Err, err),
+            };
         };
     };
-};
 
-pub let destroy = fn (T: type) -> *fn (Allocator, *T) -> void  {
-    return fn (self: Allocator, ptr: *T) -> void {
-        return self.destroy(self.context, cast(ptr));
-    };
-};
-
-pub let alloc = fn (T: type) -> *fn (Allocator, u32) -> Result([]mut T) {
-    return fn (self: Allocator, count: u32) -> Result([]mut T) {
-        return switch self.alloc(self.context, count, sizeOf(T)) {
-            @Ok -> |res| (@Ok, cast(res)),
-            @Err -> |err| (@Err, err),
+    pub let destroy = fn (T: type) -> *fn (Allocator, *T) -> void  {
+        return fn (self: Allocator, ptr: *T) -> void {
+            return self._destroy(self.context, cast(ptr));
         };
     };
-};
 
-pub let allocSentinel = fn (T: type) -> *fn (Allocator, u32, T) -> Result ([]mut T) {
-    return fn (self: Allocator, count: u32, sentinel: T) -> Result([]mut T) {
-        switch self.alloc(self.context, count + 1, sizeOf(T)) {
-            @Ok -> |_mem| {
-                let mem: []mut T = cast(_mem);
-                mem[count] = sentinel;
-                return (@Ok, mem[0..count]);
+    pub let alloc = fn (T: type) -> *fn (Allocator, u32) -> Result([]mut T) {
+        return fn (self: Allocator, count: u32) -> Result([]mut T) {
+            return switch self._alloc(self.context, count, sizeOf(T)) {
+                @Ok -> |res| (@Ok, cast(res)),
+                @Err -> |err| (@Err, err),
+            };
+        };
+    };
+
+    pub let allocSentinel = fn (T: type) -> *fn (Allocator, u32, T) -> Result ([]mut T) {
+        return fn (self: Allocator, count: u32, sentinel: T) -> Result([]mut T) {
+            switch self._alloc(self.context, count + 1, sizeOf(T)) {
+                @Ok -> |_mem| {
+                    let mem: []mut T = cast(_mem);
+                    mem[count] = sentinel;
+                    return (@Ok, mem[0..count]);
+                }
+                @Err -> |err| return (@Err, err);
             }
-            @Err -> |err| return (@Err, err);
-        }
 
-        unreachable();
-        return (@Err, @Undefined);
+            unreachable();
+            return (@Err, @Undefined);
+        };
     };
-};
 
-pub let dealloc = fn (T: type) -> *fn (Allocator, []T) -> void {
-    return fn (self: Allocator, arr: []T) -> void {
-        return self.dealloc(self.context, cast(arr));
+    pub let dealloc = fn (T: type) -> *fn (Allocator, []T) -> void {
+        return fn (self: Allocator, arr: []T) -> void {
+            return self._dealloc(self.context, cast(arr));
+        };
     };
-};
 
-pub let realloc = fn (T: type) -> *fn (Allocator, []mut T, u32) -> Result([]mut T) {
-    return fn (self: Allocator, arr: []mut T, nlen: u32) -> Result([]mut T) {
-        return switch self.realloc(self.context, cast(arr), nlen, sizeOf(T)) {
-            @Ok -> |res| (@Ok, cast(res)),
-            @Err -> |err| (@Err, err),
+    pub let realloc = fn (T: type) -> *fn (Allocator, []mut T, u32) -> Result([]mut T) {
+        return fn (self: Allocator, arr: []mut T, nlen: u32) -> Result([]mut T) {
+            return switch self._realloc(self.context, cast(arr), nlen, sizeOf(T)) {
+                @Ok -> |res| (@Ok, cast(res)),
+                @Err -> |err| (@Err, err),
+            };
         };
     };
 };

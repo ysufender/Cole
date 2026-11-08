@@ -312,123 +312,69 @@ pub inline fn bitwiseAnd(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.P
 pub inline fn not(self: *Builder, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonSingle(.Not, rhs); }
 pub inline fn negate(self: *Builder, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonSingle(.Negation, rhs); }
 
-
-pub fn dot(self: *Builder, object: JIR.Ptr, field: StringPtr, _objType: TypeID) Error!JIR.Ptr {
-    const realValue = self.nodes.get(object).type == .Identifier;
-    const lvalue = self.typechecker.getFlag(.LValue);
-    const indirect = realValue or lvalue;
-
-    const objType = if (indirect)
-        try self.typechecker.registerType(.{
-            .Pointer = .{
-                .mutable = false,
-                .size = .Single,
-                .child = _objType,
+pub fn dot(self: *Builder, object: JIR.Ptr, field: StringPtr, objType: TypeID) Error!JIR.Ptr {
+    if (self.typechecker.getFlag(.LValue) or self.nodes.get(object).type == .Identifier) {
+        return self.commonBinary(.Dot,
+            switch (self.typechecker.typeTable.get(objType)) {
+                .Pointer => |ptr| switch (ptr.size) {
+                    .Slice => object,
+                    else => try self.dereference(object, objType),
+                },
+                else => object,
             },
-        })
-    else
-        _objType;
+            field
+        );
+    }
 
     const objName = try self.typechecker.folder.generateRandomName(.Obj);
-
-    const objDef = try self.variableDef(
-        false,
-        objType,
-        objName,
-        false,
-        if (indirect) try self.reference(object) else object,
-        null,
-    );
-
+    const objDef = try self.variableDef(false, objType, objName, false, object, null);
     const objIdent = try switch (self.typechecker.typeTable.get(objType)) {
         .Pointer => |ptr| switch (ptr.size) {
             .Slice => self.identifier(objName),
-            else => self.dereference(
-                try self.identifier(objName),
-                objType,
-            ),
+            else => self.dereference(try self.identifier(objName), objType)
         },
         else => self.identifier(objName),
     };
 
-    const objValue = if (indirect) switch (self.typechecker.typeTable.get(_objType)) {
-        .Pointer => |ptr| switch (ptr.size) {
-            .Slice => objIdent,
-            else => try self.dereference(objIdent, _objType),
-        },
-        else => objIdent,
-    } else objIdent;
+    const access = try self.commonBinary(.Dot, objIdent, field);
 
-    const access =
-        if (lvalue)
-            try self.reference(try self.commonBinary(.Dot, objValue, field))
-        else
-            try self.commonBinary(.Dot, objValue, field);
-
-    return switch (self.typechecker.typeTable.get(_objType)) {
-        .Union => |uni| if (
-            self.typechecker.context.settings.buildInfo.isDebug
-            and field != try self.internString("tag")
-        ) {
-            const fieldIndex = try self.typechecker.fieldIndex(_objType, field);
-
-            const tagVal = try self.addConstant(.{
-                .Integer = .{ .u32 = fieldIndex },
-            });
-
-            const tag = try self.commonBinary(
-                .Dot,
-                objValue,
-                try self.internString("tag"),
-            );
-
-            const okLabelName = try self.typechecker.folder.generateRandomName(.UnionSafety);
-
-            const cnd = try self.notEqual(
-                tag,
-                try self.literal(try self.addConstant(.{
+    return switch (self.typechecker.typeTable.get(objType)) {
+        .Union => |uni|
+            if (false and self.typechecker.context.settings.buildInfo.isDebug and field != try self.internString("tag")) {
+                const fieldIndex = try self.typechecker.fieldIndex(objType, field);
+                const tagVal = try self.addConstant(.{ .Integer = .{ .u32 = fieldIndex } });
+                const tag = try self.dot(objIdent, try self.internString("tag"), objType);
+                const okLabelName = try self.typechecker.folder.generateRandomName(.UnionSafety);
+                const cnd = try self.notEqual(tag, try self.literal(try self.addConstant(.{
                     .Aggregate = .{
                         .type = uni.tag,
                         .data = .{
                             .start = tagVal,
                             .end = tagVal + 1,
                         },
-                    },
-                })),
-            );
-
-            const safetyCheck = try self.cjump(okLabelName, cnd);
-
-            const tmpName = try self.typechecker.folder.generateRandomNameString(.PanicHandler);
-
-            const segfault = try self.typechecker.builder.inlineC(
-                try self.typechecker.builder.internString(
-                    std.fmt.allocPrint(
-                        self.typechecker.builder.allocator,
-                        "{s}$$: $$union_access((long)&&{s}$$, \"{s}\");",
-                        .{
-                            tmpName,
-                            tmpName,
+                    }
+                })));
+                const safetyCheck = try self.cjump(okLabelName, cnd);
+                const segfault = try self.typechecker.builder.inlineC(
+                    try self.internString(
+                        std.fmt.allocPrint(self.allocator, "$$union_access$$: $$union_access((long)&&$$union_access$$, \"{s}\");", .{
                             self.getInternedString(uni.fields[fieldIndex].name),
-                        },
-                    ) catch return Error.AllocatorFailure,
-                ),
-            );
+                        }) catch return Error.AllocatorFailure,
+                    ),
+                );
+                const okLabel = try self.label(okLabelName);
 
-            const okLabel = try self.label(okLabelName);
-
-            return self.stmtExpr(access, &.{
-                objDef,
-                safetyCheck,
-                segfault,
-                okLabel,
-            });
-        } else self.stmtExpr(access, &.{objDef}),
-
+                return self.stmtExpr(access, &.{
+                    objDef,
+                    safetyCheck,
+                    segfault,
+                    okLabel,
+                });
+            }
+            else self.stmtExpr(access, &.{objDef}),
         else => self.stmtExpr(access, &.{objDef}),
     };
 }
-
 
 pub inline fn dereference(self: *Builder, expr: JIR.Ptr, exprType: TypeID) Error!JIR.Ptr {
     // @Beware disabled for now

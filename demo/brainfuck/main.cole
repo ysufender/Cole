@@ -35,7 +35,7 @@ let main = fn (args: [][]u8) -> i32 {
 
     let allocator = C::Allocator;
 
-    let bytecode = Allocator::alloc(u8)(allocator, count).Ok;
+    let bytecode = Allocator::Allocator::alloc(u8)(allocator, count).Ok;
     if bytecode.ptr == undefined {
         Console::log("Failed to allocate bytecode.");
         return CompilationError;

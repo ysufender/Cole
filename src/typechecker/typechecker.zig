@@ -2362,6 +2362,9 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
     defer self.lastToken = prevToken;
     defer self.currentFile = prevFile;
     defer self.currentScope = prevScope;
+    const prevDiscovering = self.folder.discoveringScope;
+    if (self.folder.scopeTypes.contains(decl.scope)) { self.folder.discoveringScope = decl.scope; }
+    defer self.folder.discoveringScope = prevDiscovering;
 
     const isPresent = self.declCache.getOrPut(allocator, declPtr) catch return Error.AllocatorFailure;
 
