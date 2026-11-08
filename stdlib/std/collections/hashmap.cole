@@ -19,25 +19,26 @@ pub let HashMap = fn (K: type, V: type, Hasher: type, MLP: u32) -> type {
     let hashKey = std::hash::hash(K, Hasher);
     let cmpKey  = std::comparator::generic(K);
 
+    let Free      = 0;
+    let Used      = 1;
+    let Tombstone = 2;
+
+    let MinCap = 16;
+    let Status = u8;
+
+    let Entry = struct {
+        key   : *K,
+        value : *mut V,
+    };
+
+    let AdvancedEntry = struct {
+        key     : *mut K,
+        value   : *mut V,
+        metadata: *mut Status,
+    };
+
     return struct {
         let Self   = this();
-        let MinCap = 16;
-        let Status = u8; 
-
-        let Entry = struct {
-            key   : *K,
-            value : *mut V,
-        };
-
-        let AdvancedEntry = struct {
-            key     : *mut K,
-            value   : *mut V,
-            metadata: *mut Status,
-        };
-
-        let Free      = 0;
-        let Used      = 1;
-        let Tombstone = 2;
 
         keys    : mut []mut K,
         values  : mut []mut V,

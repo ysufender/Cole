@@ -1,5 +1,19 @@
 # Known Bugs
 
+## Generic Definitions Are Last-Call-Win (53)
+
+Generic definitions are sometimes (for some reason) last-call-win.
+
+### Reproduction
+
+Try putting the outer defs of AdvancedEntry etc. into the HashMap generic type and
+create two different instances. Then try using a member function of the first type.
+It should error with a type mismatch.
+
+## Re: "this()" Builtin Bugs (52)
+
+Check `this_plain_struct` test.
+
 ## Illegal Memory Access (31)
 
 Run the raylib demo. The output source.c is garbled when using a non-preserving allocator
@@ -22,4 +36,3 @@ else is holding a reference to the said memory.
 ## Extern Structs Keep Getting Codegen'd (49)
 ## Comptime Recursion Bug (50)
 ## Type Rebinding Bug (51)
-## "this()" Builtin Bugs (52)
