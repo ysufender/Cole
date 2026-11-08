@@ -63,7 +63,7 @@ void __attribute__((noreturn)) $$unreachable(long const addr) {{
 
 #ifdef COLE_DEBUG
 void __attribute__((noreturn)) $$invalid_index(long const addr) {{
-    fprintf(stderr, "Indexing error at %#018lx\n", addr);
+    fprintf(stderr, "Index out of bounds at %#018lx\n", addr);
     return $$panic_handler(addr);
 }}
 

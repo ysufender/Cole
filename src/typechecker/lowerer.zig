@@ -511,9 +511,11 @@ fn assignment(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
 
     const expr = expr: {
         const prevlhs = self.typechecker.setFlag(.LValue, true);
+        defer _ = self.typechecker.setFlag(.LValue, prevlhs);
+
         const prev = self.typechecker.folder.setFlag(.ComptimeBanned, true);
         defer _ = self.typechecker.folder.setFlag(.ComptimeBanned, prev);
-        defer _ = self.typechecker.setFlag(.LValue, prevlhs);
+
         break :expr try self.expression(vexpr, vt);
     };
 
@@ -687,7 +689,7 @@ fn rangeForLoop(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.
 
     const body = try self.statement(ast.extra[extraPtr + 4]);
 
-    if (false and self.typechecker.context.settings.buildInfo.isDebug) {
+    if (self.typechecker.context.settings.buildInfo.isDebug) {
         const safetyCnd = try self.typechecker.builder.lesserEqual(rangeStartIdent, rangeEndIdent);
         const safetyEnd = try self.typechecker.folder.generateRandomName(.ForSafetyEnd);
         const safetyCheck = try self.typechecker.builder.cjump(safetyEnd, safetyCnd);
@@ -1957,7 +1959,7 @@ fn indexing(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
         },
     });
 
-    if (false and self.typechecker.context.settings.buildInfo.isDebug and !self.typechecker.isCPtr(typeID)) {
+    if (self.typechecker.context.settings.buildInfo.isDebug and !self.typechecker.isCPtr(typeID)) {
         const indexableName = try self.typechecker.folder.generateRandomName(.Indexable);
         const indexableDef = try self.typechecker.builder.variableDef(false, indexedTypeChildPtr, indexableName, false, indexable, null);
         const indexableIdent = try self.typechecker.builder.identifier(indexableName);
@@ -2181,9 +2183,12 @@ fn report(self: *Lowerer, comptime fmt: []const u8, args: anytype) void {
 }
 
 pub fn handler(self: *Lowerer, comptime name: []const u8) Error!JIR.Ptr {
+    const tmpName = try self.typechecker.folder.generateRandomNameString(.PanicHandler);
+
     return self.typechecker.builder.inlineC(
         try self.typechecker.builder.internString(
-            std.fmt.comptimePrint("({{{s}$$: {s}((long)&&{s}$$); *(NULL);}});", .{name, name, name})
+            std.fmt.allocPrint(self.typechecker.builder.allocator, "{s}$$: {s}((long)&&{s}$$);", .{tmpName, name, tmpName})
+                catch return Error.AllocatorFailure
         )
     );
 }
