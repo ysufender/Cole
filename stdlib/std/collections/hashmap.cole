@@ -8,9 +8,9 @@ let AllocatorResult = std::memory::allocator::Result;
 let Option = std::Option;
 
 pub let HashMap = fn (K: type, V: type, Hasher: type, MLP: u32) -> type {
-    if !std::hash::Hashable::Check(K) {
-        compileError("Given key is not hashable.");
-    }
+    // if !std::hash::Hashable::Check(K) {
+    //    compileError("Given key is not hashable.");
+    // }
 
     if MLP >= 100 {
         compileError("Max load percentage should be between 0 and 100 (exclusive).");

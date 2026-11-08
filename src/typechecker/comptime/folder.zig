@@ -1124,16 +1124,6 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
         .Variable => blk: {
             const expected = try self.typechecker.typecheckDecl(declPtr, maybeExpected);
 
-            if (
-                false
-                and !decl.topLevel
-                and !self.typechecker.context.settings.canFold()
-                and !self.typechecker.typeTable.get(expected).isComptime(&self.typechecker.typeTable.slice())
-            ) {
-                self.report("Can't fold comptime expression in Og optimization mode.", .{});
-                return Error.ComptimeNotPossible;
-            }
-
             if (self.typechecker.mutable(expected) and (!self.getFlag(.InComptimeCall) or self.getFlag(.StaticPass))) {
                 self.report("Comptime evaluation of mutable variable is not possible.", .{});
                 return Error.ComptimeNotPossible;
@@ -1575,6 +1565,7 @@ fn evalEnumType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Value
             .definitions = try self.handleScopeDecls(oldScope, scope, ast, tokens, defRange),
             .scope = scope,
             .expr = expr,
+            .bound = false,
         },
     };
 
@@ -1669,6 +1660,7 @@ fn evalStructType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Val
             .scope = scope,
             .expr = expr,
             .isTuple = false,
+            .bound = false,
         },
     };
 
@@ -1753,6 +1745,7 @@ fn evalUnionType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Valu
                 .expr = expr,
             }),
             .expr = expr,
+            .bound = true,
         },
     };
 
@@ -1824,6 +1817,7 @@ fn evalUnionType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Valu
             .definitions = try self.handleScopeDecls(oldScope, scope, ast, tokens, defRange),
             .scope = scope,
             .expr = expr,
+            .bound = false,
         }
     };
 
@@ -2154,6 +2148,7 @@ pub fn evalNewTuple(self: *Folder, range: defines.Range) Error!Comptime.Value.Pt
             .mutable = false,
             .scope = 0,
             .isTuple = true,
+            .bound = false,
         },
     };
 
@@ -3203,6 +3198,10 @@ fn resolveScopeDecls(
     self.currentInstantiation = if (instanceScope != originalScope) instanceScope else self.currentInstantiation;
     defer self.currentInstantiation = previousInstantiation;
 
+    const previousDiscover = self.discoveringScope;
+    self.discoveringScope = instanceScope;
+    defer self.discoveringScope = previousDiscover;
+
     for (0..defRange.len()) |defIndex| {
         const defPtr = ast.extra[defRange.at(@intCast(defIndex))];
         const valPtr: defines.OpaquePtr = ast.statements.items(.value)[defPtr];
@@ -3694,9 +3693,9 @@ pub const builtinTypes = [_]struct {
     // mut any
     .{ .name = "mut any", .info = .{ .Any = true } },
     // $$incomplete
-    .{ .name = "$$incomplete", .info = .{ .Struct = .{ .mutable = false, .name = Resolver.BuiltinIndex("any") + 2, .fields = &.{}, .definitions = &.{}, .scope = 0, .isTuple = false, .expr = 0 } } },
+    .{ .name = "$$incomplete", .info = .{ .Struct = .{ .mutable = false, .name = Resolver.BuiltinIndex("any") + 2, .fields = &.{}, .definitions = &.{}, .scope = 0, .isTuple = false, .expr = 0, .bound = true } } },
     // $$builtin_metadata
-    .{ .name = "$$builtin_metadata", .info = .{ .Enum = .{ .mutable = false, .name = Resolver.BuiltinIndex("any") + 3, .fields = &.{ types.EnumField{ .name = "$$placeholder", .value = 0, } }, .definitions = &.{}, .scope = 0, .expr = 0 } } },
+    .{ .name = "$$builtin_metadata", .info = .{ .Enum = .{ .mutable = false, .name = Resolver.BuiltinIndex("any") + 3, .fields = &.{ types.EnumField{ .name = "$$placeholder", .value = 0, } }, .definitions = &.{}, .scope = 0, .expr = 0, .bound = true } } },
     // []u8
     .{ .name = "[]u8", .info = .{ .Pointer = .{ .mutable = false, .child = 2, .size = .Slice, }, } },
 };

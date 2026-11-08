@@ -54,7 +54,10 @@ pub const Declaration = struct {
     topLevel: bool,
     parent: ?defines.DeclPtr = null,
     kind: Kind,
+
+    // @TODO Bitset instead
     public: bool,
+    renamed: bool = false,
 };
 
 pub const ResolutionKey = struct {

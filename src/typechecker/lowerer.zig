@@ -693,7 +693,7 @@ fn rangeForLoop(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.
         const safetyCnd = try self.typechecker.builder.lesserEqual(rangeStartIdent, rangeEndIdent);
         const safetyEnd = try self.typechecker.folder.generateRandomName(.ForSafetyEnd);
         const safetyCheck = try self.typechecker.builder.cjump(safetyEnd, safetyCnd);
-        const panic = try self.handler("$$invalid_index");
+        const panic = try self.handler("$$invalid_index", comptime Comptime.Folder.Builtin.Type("void"));
         const safetyEndLabel = try self.typechecker.builder.label(safetyEnd);
 
         return self.typechecker.builder.scope(
@@ -1661,7 +1661,7 @@ fn builtinCall(
         BI("typeOf") =>
             self.literal(ast.extra[args.at(0)], ofType),
         BI("unreachable") => blk: {
-            break :blk try self.handler("$$unreachable");
+            break :blk try self.handler("$$unreachable", ofType);
         },
         BI("typeName") => self.typechecker.builder.literal(
             try self.typechecker.builder.addConstant(.{
@@ -1982,7 +1982,7 @@ fn indexing(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
         const cnd = try self.typechecker.builder.lesser(indexIdent, indexableLen);
         const boundsJump = try self.typechecker.builder.cjump(boundsEnd, cnd);
 
-        const segfault = try self.handler("$$invalid_index");
+        const segfault = try self.handler("$$invalid_index", comptime Comptime.Folder.Builtin.Type("void"));
 
         const boundsEndLabel = try self.typechecker.builder.label(boundsEnd);
 
@@ -2182,12 +2182,16 @@ fn report(self: *Lowerer, comptime fmt: []const u8, args: anytype) void {
     return self.typechecker.report("LOWERER: " ++ fmt, args);
 }
 
-pub fn handler(self: *Lowerer, comptime name: []const u8) Error!JIR.Ptr {
+pub fn handler(self: *Lowerer, comptime name: []const u8, ofType: TypeID) Error!JIR.Ptr {
     const tmpName = try self.typechecker.folder.generateRandomNameString(.PanicHandler);
+    var typeName = try self.typechecker.typeName(undefined, ofType);
+    if (std.mem.containsAtLeast(u8, typeName, 1, "noreturn")) {
+        typeName = "void";
+    }
 
     return self.typechecker.builder.inlineC(
         try self.typechecker.builder.internString(
-            std.fmt.allocPrint(self.typechecker.builder.allocator, "{s}$$: {s}((long)&&{s}$$);", .{tmpName, name, tmpName})
+            std.fmt.allocPrint(self.typechecker.builder.allocator, "({{{s}$$: {s}((long)&&{s}$$); *({s}*)(NULL);}});", .{tmpName, name, tmpName, typeName})
                 catch return Error.AllocatorFailure
         )
     );

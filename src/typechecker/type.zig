@@ -488,6 +488,7 @@ pub const Struct = struct {
     // @CompilerOnly
     scope: defines.ScopePtr,
     expr: defines.ExpressionPtr,
+    bound: bool,
 };
 
 pub const Union = struct {
@@ -504,6 +505,7 @@ pub const Union = struct {
     // @CompilerOnly
     scope: defines.ScopePtr,
     expr: defines.ExpressionPtr,
+    bound: bool,
 };
 
 pub const EnumField = struct {
@@ -520,6 +522,7 @@ pub const Enum = struct {
     // @CompilerOnly
     scope: defines.ScopePtr,
     expr: defines.ExpressionPtr,
+    bound: bool,
 };
 
 pub const Pointer = struct {

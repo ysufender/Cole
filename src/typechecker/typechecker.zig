@@ -341,14 +341,14 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
             const newType = self.folder.getValue(try self.folder.eval(decl.node, expected)).Type;
             const typeInfo = self.typeTable.get(newType);
 
-            const prevName = self.builder.getInternedString(switch (typeInfo) {
-                .Struct => |str| str.name,
-                .Union => |uni| uni.name,
-                .Enum => |enm| enm.name,
+            const prevName, const bound = switch (typeInfo) {
+                .Struct => |str| .{ self.builder.getInternedString(str.name), str.bound },
+                .Union => |uni| .{ self.builder.getInternedString(uni.name), uni.bound },
+                .Enum => |enm| .{ self.builder.getInternedString(enm.name), enm.bound },
                 else => break :blk,
-            });
+            };
 
-            if (!std.mem.startsWith(u8, prevName, "$$")) {
+            if (!std.mem.startsWith(u8, prevName, "$$") and bound) {
                 break :blk;
             }
 
@@ -369,18 +369,7 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
             const symName = tokens.get(decl.token).lexeme(self.context, self.currentFile);
 
             const namespace =
-                if (decl.parent != null and self.typeTable.get(try self.typecheckDecl(decl.parent.?, null)) == .Type) hasParent: {
-                    const rtypePtr = try self.folder.eval(self.symbols.getDecl(decl.parent.?).node, null);
-                    const rtype = self.folder.getValue(rtypePtr).Type;
-
-                    break :hasParent self.builder.getInternedString(switch (self.typeTable.get(rtype)) {
-                        .Struct => |str| str.name,
-                        .Enum => |enm| enm.name,
-                        .Union => |uni| uni.name,
-                        else => return common.debug.ShouldBeImpossible(self.context.log, @src()),
-                    });
-                }
-                else if (decl.topLevel) self.modules.modules.get(self.symbols.scopes.items(.module)[decl.scope]).name
+                if (decl.topLevel) self.modules.modules.get(self.symbols.scopes.items(.module)[decl.scope]).name
                 else (try self.folder.generateRandomNameString(.Type))[2..];
 
             const newName =
@@ -402,6 +391,7 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
                         .expr = str.expr,
                         .scope = str.scope,
                         .isTuple = str.isTuple,
+                        .bound = !self.folder.getFlag(.InComptimeCall)
                     },
                 },
 
@@ -413,6 +403,7 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
                         .fields = enm.fields,
                         .expr = enm.expr,
                         .scope = enm.scope,
+                        .bound = !self.folder.getFlag(.InComptimeCall)
                     },
                 },
 
@@ -426,6 +417,7 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
                         .fields = uni.fields,
                         .expr = uni.expr,
                         .scope = uni.scope,
+                        .bound = !self.folder.getFlag(.InComptimeCall)
                     },
                 },
 
@@ -435,18 +427,11 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
             self.typenameMap.put(self.arena.allocator(), newType, new)
                 catch return Error.AllocatorFailure;
 
-            var defs: []Types.FieldInfo = @constCast(switch (self.typeTable.get(newType)) {
-                .Struct => |str| str.definitions,
-                .Enum => |enm| enm.definitions,
-                .Union => |uni| uni.definitions,
+            var defs: []Types.FieldInfo, const scope = switch (self.typeTable.get(newType)) {
+                .Struct => |str| .{ @constCast(str.definitions), str.scope },
+                .Enum => |str| .{ @constCast(str.definitions), str.scope },
+                .Union => |str| .{ @constCast(str.definitions), str.scope },
                 else => return common.debug.ShouldBeImpossible(self.context.log, @src()),
-            });
-
-            const scope = switch (typeInfo) {
-                .Struct => |str| str.scope,
-                .Union => |str| str.scope,
-                .Enum => |str| str.scope,
-                else => return common.debug.ShouldBeImpossible(undefined, @src()),
             };
 
             for (defs, 0..) |def, idx| {
@@ -478,6 +463,9 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
                     .name = nname,
                 }, rres.value);
 
+                self.symbols.declarations.items(.name)[rres.value] = nnname;
+                self.symbols.declarations.items(.renamed)[rres.value] = true;
+
                 if (self.typeTable.get(def.valueType) == .Function) {
                     const prevInst = self.folder.currentInstantiation;
                     self.folder.currentInstantiation = scope;
@@ -506,18 +494,7 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
 
             const symName = tokens.get(decl.token).lexeme(self.context, self.currentFile);
             const namespace =
-                if (decl.parent != null and self.typeTable.get(try self.typecheckDecl(decl.parent.?, null)) == .Type) hasParent: {
-                    const rtypePtr = try self.folder.eval(self.symbols.getDecl(decl.parent.?).node, null);
-                    const rtype = self.folder.getValue(rtypePtr).Type;
-
-                    break :hasParent self.builder.getInternedString(switch (self.typeTable.get(rtype)) {
-                        .Struct => |str| str.name,
-                        .Enum => |enm| enm.name,
-                        .Union => |uni| uni.name,
-                        else => return common.debug.ShouldBeImpossible(self.context.log, @src()),
-                    });
-                }
-                else if (decl.topLevel) self.modules.modules.get(self.symbols.scopes.items(.module)[decl.scope]).name
+                if (decl.topLevel) self.modules.modules.get(self.symbols.scopes.items(.module)[decl.scope]).name
                 else try self.folder.generateRandomNameString(.Function);
 
                 const keepName = keep: {
@@ -1286,6 +1263,7 @@ pub fn typecheckTupleDefinition(self: *Typechecker, exprListPtr: defines.OpaqueP
             .mutable = false,
             .scope = 0,
             .isTuple = true,
+            .bound = false,
         },
     };
 
@@ -1718,9 +1696,7 @@ pub fn discoverScopeDef(
     defer self.currentScope = prevs;
 
     const previ = self.folder.currentInstantiation;
-    self.folder.currentInstantiation =
-        if (self.folder.captures.contains(scope)) scope
-        else self.folder.currentInstantiation;
+    self.folder.currentInstantiation = scope;
     defer self.folder.currentInstantiation = previ;
 
     const prevDiscovering = self.folder.discoveringScope;
@@ -1746,6 +1722,7 @@ pub fn discoverScopeDef(
                     .fields = enm.fields,
                     .expr = enm.expr,
                     .mutable = enm.mutable,
+                    .bound = enm.bound
                 },
             });
         },
@@ -1762,6 +1739,7 @@ pub fn discoverScopeDef(
                     .expr = str.expr,
                     .mutable = str.mutable,
                     .isTuple = str.isTuple,
+                    .bound = str.bound
                 },
             });
         },
@@ -1779,6 +1757,7 @@ pub fn discoverScopeDef(
                     .fields = uni.fields,
                     .expr = uni.expr,
                     .mutable = uni.mutable,
+                    .bound = uni.bound
                 },
             });
         },
@@ -2050,6 +2029,7 @@ pub fn typecheckGetMetadata(self: *Typechecker, extraPtr: defines.OpaquePtr) Err
                 .mutable = false,
                 .scope = 0,
                 .isTuple = true,
+                .bound = false,
             }
         });
     }
@@ -2362,9 +2342,6 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
     defer self.lastToken = prevToken;
     defer self.currentFile = prevFile;
     defer self.currentScope = prevScope;
-    const prevDiscovering = self.folder.discoveringScope;
-    if (self.folder.scopeTypes.contains(decl.scope)) { self.folder.discoveringScope = decl.scope; }
-    defer self.folder.discoveringScope = prevDiscovering;
 
     const isPresent = self.declCache.getOrPut(allocator, declPtr) catch return Error.AllocatorFailure;
 
@@ -2407,23 +2384,17 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
         .public = decl.public,
         .parent = decl.parent,
         .name = res: {
+            if (decl.renamed) {
+                break :res decl.name;
+            }
+
             if (decl.kind != .Variable) {
                 break :res try self.builder.internString(symName);
             }
 
             const namespace =
-                if (decl.parent != null and self.typeTable.get(try self.typecheckDecl(decl.parent.?, null)) == .Type) hasParent: {
-                    const rtypePtr = try self.folder.eval(self.symbols.getDecl(decl.parent.?).node, null);
-                    const rtype = self.folder.getValue(rtypePtr).Type;
-
-                    break :hasParent self.builder.getInternedString(switch (self.typeTable.get(rtype)) {
-                        .Struct => |str| str.name,
-                        .Enum => |enm| enm.name,
-                        .Union => |uni| uni.name,
-                        else => return common.debug.ShouldBeImpossible(self.context.log, @src()),
-                    });
-                }
-                else if (decl.topLevel) self.modules.modules.get(self.symbols.scopes.items(.module)[decl.scope]).name
+                // @Note parent will rename this decl later anyway.
+                if (decl.topLevel) self.modules.modules.get(self.symbols.scopes.items(.module)[decl.scope]).name
                 else null;
 
             const newName =
@@ -2437,6 +2408,7 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
 
             break :res new;
         },
+        .renamed = true,
     });
     decl = self.symbols.declarations.get(declPtr);
 
@@ -2514,6 +2486,7 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
     }
 
     if (decl.topLevel and !self.folder.getFlag(.InComptimeCall)) {
+        decl = self.symbols.declarations.get(declPtr);
         try self.lowerer.topLevelDeclaration(isPresent.key_ptr.*, &decl);
     }
 
@@ -3340,11 +3313,9 @@ pub fn registerType(self: *Typechecker, _newType: TypeInfo) Error!TypeID {
 
         switch (newType) {
             .Struct => {
-
                 newType.Struct.name = name orelse newType.Struct.name;
             },
             .Union => {
-
                 newType.Union.name = name orelse newType.Union.name;
             },
             .Enum => {
@@ -3890,6 +3861,7 @@ pub fn makeMutable(_: *const Typechecker, info: TypeInfo) TypeInfo {
                 .scope = str.scope,
                 .expr = str.expr,
                 .isTuple = str.isTuple,
+                .bound = str.bound, 
             },
         },
         .Union => |uni| .{
@@ -3902,6 +3874,7 @@ pub fn makeMutable(_: *const Typechecker, info: TypeInfo) TypeInfo {
                 .definitions = uni.definitions,
                 .scope = uni.scope,
                 .expr = uni.expr,
+                .bound = uni.bound, 
             },
         },
         .Enum => |enm| .{
@@ -3912,6 +3885,7 @@ pub fn makeMutable(_: *const Typechecker, info: TypeInfo) TypeInfo {
                 .definitions = enm.definitions,
                 .scope = enm.scope,
                 .expr = enm.expr,
+                .bound = enm.bound, 
             },
         },
         .Pointer => |ptr| .{
