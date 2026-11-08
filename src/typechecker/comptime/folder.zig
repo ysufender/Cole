@@ -1033,7 +1033,7 @@ fn captureLocals(self: *Folder, scope: defines.ScopePtr) Error!void {
 }
 
 // @Note prevents duplication of types
-fn needsOwnScope(self: *Folder, scope: defines.ScopePtr) bool {
+pub fn needsOwnScope(self: *Folder, scope: defines.ScopePtr) bool {
     const scopes = self.typechecker.symbols.scopes;
     var maybeCurrent: ?defines.ScopePtr = scope;
     while (maybeCurrent) |current| {
@@ -1100,7 +1100,16 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
         _ = self.setFlag(.InComptimeCall, prevComptimeCall);
     };
 
-    if (self.capturedLocal(decl.name, decl.scope)) |local| {
+    const key: defines.StringPtr = switch (decl.kind) {
+        .Parameter, .Capture, .Field => blk: {
+            const toks = self.typechecker.context.getTokens(self.typechecker.currentFile);
+            const lex = toks.get(decl.token).lexeme(self.typechecker.context, self.typechecker.currentFile);
+            break :blk try self.typechecker.builder.internString(lex);
+        },
+        else => decl.name,
+    };
+
+    if (self.capturedLocal(key, decl.scope)) |local| {
         return local;
     }
     else if (self.declCache.get(declPtr)) |v| {
@@ -1140,7 +1149,7 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
             }
 
             if (self.getFlag(.InComptimeCall) and !decl.topLevel) {
-                if (self.typechecker.executer.getVar(decl.name)) |live| {
+                if (self.typechecker.executer.getVar(key)) |live| {
                     _ = self.setFlag(.Volatile, true);
                     break :blk live;
                 }
@@ -1176,12 +1185,12 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
         },
         .Capture =>
             if (self.getFlag(.InComptimeCall) or self.getFlag(.StaticPass)) {
-                if (self.typechecker.executer.getVar(decl.name)) |v| {
+                if (self.typechecker.executer.getVar(key)) |v| {
                     return v;
                 }
                 else {
                     self.report("Failed to evaluate comptime capture '{s}'.", .{
-                        self.typechecker.builder.getInternedString(decl.name),
+                        self.typechecker.builder.getInternedString(key),
                     });
                     return Error.EarlyEval;
                 }
@@ -1195,7 +1204,7 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
                 const paramType = try self.typechecker.typecheckDecl(declPtr, maybeExpected);
                 decl  = self.typechecker.symbols.declarations.get(declPtr);
 
-                if (self.typechecker.executer.getVar(decl.name)) |v| {
+                if (self.typechecker.executer.getVar(key)) |v| {
                     if (self.typechecker.typeTable.get(paramType).isComptime(&self.typechecker.typeTable.slice())) {
                         self.declCache.put(self.arena.allocator(), declPtr, v)
                             catch return Error.AllocatorFailure;
@@ -1204,14 +1213,14 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
                 }
                 else {
                     self.report("Failed to evaluate comptime parameter '{s}'.", .{
-                        self.typechecker.builder.getInternedString(decl.name),
+                        self.typechecker.builder.getInternedString(key),
                     });
                     return Error.EarlyEval;
                 }
             }
             else {
                 self.report("Attempt to evaluate parameter '{s}' in non-comptime scope.", .{
-                    self.typechecker.builder.getInternedString(decl.name),
+                    self.typechecker.builder.getInternedString(key),
                 });
                 return Error.ComptimeNotPossible;
             },
@@ -1932,7 +1941,7 @@ pub fn evalThis(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value
     };
 
     if (args.len() != 0) {
-        self.report("'this' expects not arguments, received {d}.", .{
+        self.report("'this' expects no arguments, received {d}.", .{
             args.len(),
         });
         return Error.ArgumentCountMismatch;
@@ -3195,7 +3204,7 @@ fn resolveScopeDecls(
     });
 
     const previousInstantiation = self.currentInstantiation;
-    self.currentInstantiation = if (instanceScope != originalScope) instanceScope else self.currentInstantiation;
+    self.currentInstantiation = instanceScope;
     defer self.currentInstantiation = previousInstantiation;
 
     const previousDiscover = self.discoveringScope;

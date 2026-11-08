@@ -31,8 +31,7 @@ pub let Equitable = struct {
     };
 };
 
-// pub let generic = fn (T: type) -> Equator(Equitable::Trait(T)) {
-pub let generic = fn (T: type) -> Equator(T) {
+pub let generic = fn (T: type) -> Equator(Equitable::Trait(T)) {
     switch typeInfo(T) {
         @Union -> unreachable();
 

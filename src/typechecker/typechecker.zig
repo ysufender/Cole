@@ -341,6 +341,14 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
             const newType = self.folder.getValue(try self.folder.eval(decl.node, expected)).Type;
             const typeInfo = self.typeTable.get(newType);
 
+            inline for (.{ self.folder.currentInstantiation, self.folder.discoveringScope }) |maybeInst| {
+                if (maybeInst) |inst| {
+                    if (self.folder.scopeTypes.get(inst)) |owner| {
+                        if (owner == newType) break :blk;
+                    }
+                }
+            }
+
             const prevName, const bound = switch (typeInfo) {
                 .Struct => |str| .{ self.builder.getInternedString(str.name), str.bound },
                 .Union => |uni| .{ self.builder.getInternedString(uni.name), uni.bound },
@@ -348,7 +356,8 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
                 else => break :blk,
             };
 
-            if (!std.mem.startsWith(u8, prevName, "$$") and bound) {
+            _ = bound;
+            if (!std.mem.startsWith(u8, prevName, "$$")) {
                 break :blk;
             }
 
@@ -465,18 +474,25 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
 
                 self.symbols.declarations.items(.name)[rres.value] = nnname;
                 self.symbols.declarations.items(.renamed)[rres.value] = true;
+            }
 
-                if (self.typeTable.get(def.valueType) == .Function) {
+            for (defs) |def| {
+                if (self.typeTable.get(def.valueType) == .Function) { 
+                    const rres = self.symbols.lookup.get(.{
+                        .scope = scope,
+                        .name = self.builder.getInternedString(def.name),
+                    }) orelse return common.debug.ShouldBeImpossible(self.context.log, @src());
+
                     const prevInst = self.folder.currentInstantiation;
                     self.folder.currentInstantiation = scope;
                     defer self.folder.currentInstantiation = prevInst;
 
-                    const funcPtr = try self.folder.evalDecl(rres.value, def.valueType);
+                    const funcPtr = self.folder.evalDecl(rres, def.valueType) catch continue;
                     const func = &self.folder.memory.items[funcPtr].Function;
-                    try self.builder.modifyInternedString(func.name, nname);
-                    func.name = nnname;
+                    try self.builder.modifyInternedString(func.name, self.builder.getInternedString(def.name));
+                    func.name = def.name;
 
-                    self.folder.declCache.put(self.folder.arena.allocator(), rres.value, funcPtr)
+                    self.folder.declCache.put(self.folder.arena.allocator(), rres, funcPtr)
                         catch return Error.AllocatorFailure;
                 }
             }
@@ -487,6 +503,11 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
             const prevName = self.builder.getInternedString(func.name);
             if (!std.mem.startsWith(u8, prevName, "$$")) {
                 break :blk;
+            }
+
+            switch (self.symbols.scopes.items(.kind)[decl.scope]) {
+                .Struct, .Enum, .Union => break :blk,
+                else => {},
             }
 
             const ast = self.context.getAST(self.currentFile);
@@ -2215,8 +2236,12 @@ pub fn instanceDecl(self: *Typechecker, declPtr: defines.DeclPtr) defines.DeclPt
 
     const decl = self.symbols.getDecl(declPtr);
 
+    switch (self.symbols.scopes.items(.kind)[decl.scope]) {
+        .Struct, .Enum, .Union => {},
+        else => return declPtr,
+    }
+
     const ast = self.context.getAST(self.currentFile);
-    if (ast.expressions.items(.type)[decl.node] != .FunctionDefinition) return declPtr;
 
     if (decl.scope == scope) return declPtr;
 
@@ -2258,7 +2283,7 @@ pub fn lowerFunction(self: *Typechecker, function: JIR.Function, token: ?defines
     defer self.currentFile = prevs;
 
     const prevInst = self.folder.currentInstantiation;
-    if (prevInst == null and self.folder.captures.contains(func.scope))
+    if (self.folder.captures.contains(func.scope))
         self.folder.currentInstantiation = func.scope;
     defer self.folder.currentInstantiation = prevInst;
 
@@ -2336,12 +2361,20 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
     const prevToken = self.lastToken;
     const prevFile = self.currentFile;
     const prevScope = self.currentScope;
+    const prevInst = self.folder.currentInstantiation;
+    const prevDiscovering = self.folder.discoveringScope;
+    if (prevInst == null and self.folder.scopeTypes.contains(decl.scope)) {
+        self.folder.currentInstantiation = decl.scope;
+        self.folder.discoveringScope = decl.scope;
+    }
     self.currentFile = self.modules.modules.items(.dataIndex)[self.symbols.scopes.items(.module)[decl.scope]];
     self.lastToken = decl.token;
     self.currentScope = decl.scope;
     defer self.lastToken = prevToken;
     defer self.currentFile = prevFile;
     defer self.currentScope = prevScope;
+    defer self.folder.currentInstantiation = prevInst;
+    defer self.folder.discoveringScope = prevDiscovering;
 
     const isPresent = self.declCache.getOrPut(allocator, declPtr) catch return Error.AllocatorFailure;
 
@@ -2408,7 +2441,7 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
 
             break :res new;
         },
-        .renamed = true,
+        .renamed = decl.renamed,
     });
     decl = self.symbols.declarations.get(declPtr);
 
@@ -2462,6 +2495,7 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
             else => break :fi,
         };
 
+        try self.nameMemberFunction(&decl, func.name);
         try self.lowerFunction(func, decl.token);
     }
 
@@ -2491,6 +2525,30 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
     }
 
     return declType;
+}
+
+fn nameMemberFunction(self: *Typechecker, decl: *const Resolver.Declaration, name: defines.StringPtr) Error!void {
+    switch (self.symbols.scopes.items(.kind)[decl.scope]) {
+        .Struct, .Enum, .Union => {},
+        else => return,
+    }
+    if (!std.mem.startsWith(u8, self.builder.getInternedString(name), "$$")) return;
+    if (self.hasMetadata(decl.node, "@extern")) return;
+
+    const owner = self.folder.scopeTypes.get(decl.scope) orelse return;
+    const ownerName = self.builder.getInternedString(switch (self.typeTable.get(owner)) {
+        .Struct => |str| str.name,
+        .Enum => |enm| enm.name,
+        .Union => |uni| uni.name,
+        else => return,
+    });
+    if (std.mem.startsWith(u8, ownerName, "$$")) return;
+
+    const tokens = self.context.getTokens(self.currentFile);
+    const memberName = tokens.get(decl.token).lexeme(self.context, self.currentFile);
+    const full = std.fmt.allocPrint(self.arena.allocator(), "{s}::{s}", .{ ownerName, memberName })
+        catch return Error.AllocatorFailure;
+    try self.builder.modifyInternedString(name, full);
 }
 
 pub fn typecheckFieldAccess(self: *Typechecker, on: TypeID, field: []const u8) Error!TypeID {
@@ -4083,7 +4141,7 @@ pub fn tryGetDefinitionIndex(self: *Typechecker, from: TypeID, memberNamePtr: de
     };
 
     for (decls, 0..) |decl, index| {
-        if (decl.name == try self.builder.internString(member)) {
+        if (std.mem.eql(u8, self.builder.getInternedString(decl.name), member)) {
             return @intCast(index);
         }
     }

@@ -6,8 +6,10 @@ let pi = fn (n: c_long) -> void {
     Console::log(String::intToStr(n, C::Allocator));
 };
 
-import std::memory::allocator as Alloc;
+import std::memory::allocator;
 import std::c::memory as CMem;
+
+let Alloc = std::memory::allocator::Allocator;
 
 let main = fn (args: [][]u8) -> i32 {
     let src = Alloc::alloc(u8)(C::Allocator, 4).Ok;

@@ -39,8 +39,7 @@ pub let hash = fn (T: type, H: type) -> *fn (T) -> usize {
     };
 };
 
-// pub let generic = fn (T: type, H: type) -> Hasher(Hashable::Trait(T), H) {
-pub let generic = fn (T: type, H: type) -> Hasher(T, H) {
+pub let generic = fn (T: type, H: type) -> Hasher(Hashable::Trait(T), H) {
     switch typeInfo(T) {
         @Union -> unreachable();
 
