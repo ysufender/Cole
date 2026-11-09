@@ -1326,7 +1326,7 @@ fn evalLiteral(self: *Folder, tokenPtr: defines.TokenPtr, maybeExpected: ?TypeID
     const value: Comptime.Value = switch (token.type) {
         .True, .False => .{ .Bool = token.type == .True },
         .Float => .{ .Float = std.fmt.parseFloat(f32, lexeme) catch unreachable },
-        .Integer => .{ .Int = std.fmt.parseInt(i64, lexeme, 10) catch |err| switch (err) {
+        .Integer => .{ .Int = std.fmt.parseInt(i64, lexeme, 0) catch |err| switch (err) {
             error.Overflow => {
                 self.report("Given literal '{s}' is too big for comptime evaluation.", .{lexeme});
                 return Error.IntegerOverflow;

@@ -422,6 +422,11 @@ fn scanToken(self: *Lexer) common.CompilerError!void {
         '@' => break :blk self.addToken(.LiteralPrefix),
         else => |ch| {
             if (std.ascii.isDigit(ch)) {
+                if (ch == '0' and self.peek() == 'x') {
+                    _ = self.advance();
+                    break :blk self.hexLiteral();
+                }
+
                 while (std.ascii.isDigit(self.peek())) {
                     _ = self.advance();
                 }
@@ -463,6 +468,25 @@ fn scanToken(self: *Lexer) common.CompilerError!void {
 
 fn allocator(self: *Lexer) std.mem.Allocator {
     return self.arena.allocator();
+}
+
+fn hexLiteral(self: *Lexer) common.CompilerError!void {
+    const digitStart = self.current;
+    while (std.ascii.isHex(self.peek())) {
+        _ = self.advance();
+    }
+
+    if (self.current == digitStart) {
+        self.report("Expected hex digits after '0x'.", .{});
+        return Error.UnexpectedCharacter;
+    }
+
+    if (std.ascii.isAlphanumeric(self.peek()) or self.peek() == '_') {
+        self.report("Invalid character '{c}' in hex literal.", .{self.peek()});
+        return Error.UnexpectedCharacter;
+    }
+
+    return self.addToken(.Integer);
 }
 
 fn charLiteralValue(self: *Lexer) common.CompilerError!u8 {
