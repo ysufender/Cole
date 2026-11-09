@@ -80,6 +80,5 @@ pub let impossible = fn (T: type) -> *fn () -> T {
         Console::error("Reached unreachable code.");
         dumpTrace(stackTrace(), C::Allocator, Io::StdErr());
         Process::exit(1);
-        return undefined;
     };
 };

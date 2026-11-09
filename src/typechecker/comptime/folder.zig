@@ -1962,6 +1962,15 @@ pub fn evalThis(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value
         }
     }
     if (ty == null) {
+        var maybeScope: ?defines.ScopePtr = current;
+        while (maybeScope) |s| : (maybeScope = scopes.items(.parent)[s]) {
+            if (self.scopeTypes.get(s)) |found| {
+                ty = found;
+                break;
+            }
+        }
+    }
+    if (ty == null) {
         self.report("Use of 'this' outside typed scope.", .{});
         return Error.IllegalSyntax;
     }

@@ -1,0 +1,198 @@
+import std::memory::allocator;
+import std::collections::linkedlist;
+import std;
+
+let Allocator = std::memory::allocator::Allocator;
+let AllocatorResult = std::memory::allocator::Result;
+let Option = std::Option;
+let LinkedList = std::collections::linkedlist::LinkedList;
+
+pub let Arena = struct {
+    let Chunk = struct {
+        capacity : u32,
+        offset   : mut u32,
+        data     : mut []mut u8,
+    };
+
+    let ChunkList = LinkedList(Chunk);
+
+    pub let StandardSize = 65536;
+
+    gpa              : Allocator,
+    defaultChunkSize : u32,
+    activeChunk      : mut Chunk,
+    usedChunks       : mut *mut ChunkList,
+
+    pub let init = fn (gpa: Allocator, defaultChunkSize: u32) -> Option(mut Arena) {
+        let self: mut Arena = (
+            gpa, 
+            defaultChunkSize, 
+            undefined, 
+            undefined
+        );
+
+        switch Allocator::alloc(ChunkList)(gpa, 1) {
+            @Ok -> |mem| {
+                mem[0] = @Nil;
+                self.usedChunks = mem[0].&;
+            }
+            @Err -> return (@None, ());
+        }
+
+        switch Allocator::alloc(u8)(gpa, defaultChunkSize) {
+            @Ok -> |mem| {
+                self.activeChunk = (defaultChunkSize, 0, mem);
+            }
+            @Err -> {
+                Allocator::dealloc(ChunkList)(gpa, self.usedChunks);
+                return (@None, ());
+            }
+        }
+
+        return (@Some, self);
+    };
+
+    pub let deinit = fn (self: *mut Arena) -> void {
+        reset(self);
+        
+        Allocator::dealloc(u8)(self.gpa, self.activeChunk.data);
+        Allocator::dealloc(ChunkList)(self.gpa, self.usedChunks);
+    };
+
+    pub let reset = fn (self: *mut Arena) -> void {
+        self.activeChunk.offset = 0;
+
+        let currentChunk: mut *mut ChunkList = self.usedChunks;
+        while true {
+            switch currentChunk.* {
+                @Cons -> |cons| {
+                    Allocator::dealloc(u8)(self.gpa, cons.head.data);
+                    let next = cons.tail;
+                    Allocator::dealloc(ChunkList)(self.gpa, currentChunk);
+                    currentChunk = next;
+                }
+                @Nil -> break;
+            }
+        }
+
+        switch Allocator::alloc(ChunkList)(self.gpa, 1) {
+            @Ok -> |mem| { mem[0] = @Nil; self.usedChunks = mem[0].&; }
+            @Err -> unreachable();
+        }
+    };
+
+    let _allocBytes = fn (self: *mut Arena, size: u32, alignment: u32) -> AllocatorResult([]mut u8) {
+        let chunk = self.activeChunk.&;
+        
+        let alignedOffset = (chunk.offset + alignment - 1) & ~(alignment - 1);
+
+        if (alignedOffset + size) <= chunk.capacity {
+            let slice = chunk.data[alignedOffset .. alignedOffset + size];
+            chunk.offset = alignedOffset + size;
+            return (@Ok, slice);
+        }
+
+        if size > self.defaultChunkSize {
+            let largeCap = size + alignment;
+            let newMem: mut []mut u8 = undefined;
+            switch Allocator::alloc(u8)(self.gpa, largeCap) {
+                @Ok -> |mem| newMem = mem;
+                @Err -> |err| return (@Err, err);
+            }
+
+            let largeChunk: Chunk = (largeCap, largeCap, newMem);
+            
+            let newNode: mut []mut ChunkList = undefined;
+            switch Allocator::alloc(ChunkList)(self.gpa, 1) {
+                @Ok -> |mem| newNode = mem;
+                @Err -> |err| {
+                    Allocator::dealloc(u8)(self.gpa, newMem);
+                    return (@Err, err);
+                }
+            }
+
+            newNode[0] = @Cons((largeChunk, self.usedChunks));
+            self.usedChunks = newNode[0].&;
+
+            let lAlignedOffset = (0 + alignment - 1) & ~(alignment - 1);
+            return (@Ok, largeChunk.data[lAlignedOffset .. lAlignedOffset + size]);
+        }
+
+        let newMem: mut []mut u8 = undefined;
+        switch Allocator::alloc(u8)(self.gpa, self.defaultChunkSize) {
+            @Ok -> |mem| newMem = mem;
+            @Err -> |err| return (@Err, err);
+        }
+
+        let oldNode: mut []mut ChunkList = undefined;
+        switch Allocator::alloc(ChunkList)(self.gpa, 1) {
+            @Ok -> |mem| oldNode = mem;
+            @Err -> |err| {
+                Allocator::dealloc(u8)(self.gpa, newMem);
+                return (@Err, err);
+            }
+        }
+
+        oldNode[0] = @Cons((chunk.*, self.usedChunks));
+        self.usedChunks = oldNode[0].&;
+
+        chunk.capacity = self.defaultChunkSize;
+        chunk.offset = 0;
+        chunk.data = newMem;
+
+        return _allocBytes(self, size, alignment);
+    };
+
+    let _create = fn (ctx: *mut void, size: u32) -> AllocatorResult(*mut void) {
+        let self: *mut Arena = cast(ctx);
+        return switch _allocBytes(self, size, 8) {
+            @Ok -> |mem| (@Ok, cast(mem[0].&)),
+            @Err -> |err| (@Err, err),
+        };
+    };
+
+    let _destroy = fn (ctx: *mut void, ptr: *void) -> void {
+    };
+
+    let _alloc = fn (ctx: *mut void, count: u32, size: u32) -> AllocatorResult([]mut void) {
+        let self: *mut Arena = cast(ctx);
+        return switch _allocBytes(self, count * size, 8) {
+            @Ok -> |mem| (@Ok, cast(mem)),
+            @Err -> |err| (@Err, err),
+        };
+    };
+
+    let _dealloc = fn (ctx: *mut void, arr: []void) -> void {
+    };
+
+    let _realloc = fn (ctx: *mut void, arr: []mut void, nlen: u32, size: u32) -> AllocatorResult([]mut void) {
+        let self: *mut Arena = cast(ctx);
+        
+        if nlen <= arr.len {
+            let oldMem: []mut u8 = cast(arr);
+            return (@Ok, cast(oldMem[0 .. (nlen * size)]));
+        }
+        
+        switch _allocBytes(self, nlen * size, 8) {
+            @Ok -> |newMem| {
+                let oldMem: []mut u8 = cast(arr);
+                for 0..(arr.len * size), |i| {
+                    newMem[i] = oldMem[i];
+                }
+                return (@Ok, cast(newMem));
+            }
+            @Err -> |err| return (@Err, err);
+        }
+    };
+
+    pub let allocator = fn (self: *mut Arena) -> Allocator {
+        return (
+            cast(self),
+            _create,
+            _destroy,
+            _alloc,
+            _dealloc,
+            _realloc
+        );
+    };
+};

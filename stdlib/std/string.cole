@@ -1,7 +1,7 @@
 import std::memory::allocator as Allocator;
 import std::fmt as Fmt;
 import std::numeric as Numeric;
-import std::io::stream::memorystream as MemStream;
+import std::io::memorystream as MemStream;
 import std;
 import std::debug as Debug;
 

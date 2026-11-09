@@ -86,3 +86,4 @@ let fseek  = #(@extern) fn (stream: mut *mut FILE, offset: mut c_long, whence: m
 let fclose = #(@extern) fn (stream: mut *mut FILE) -> mut c_int { };
 let fopen  = #(@extern) fn (path: mut [@c]c_char, mode: mut [@c]c_char) -> mut *mut FILE { };
 let fflush = #(@extern) fn (stream: mut *mut FILE) -> mut c_int { };
+
