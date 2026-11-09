@@ -17,7 +17,7 @@ let stderr: mut *mut FILE = #(@extern) undefined;
 
 pub let StdOut = fn () -> Stream::Output::Stream {
     return (
-        stdout,
+        cast(stdout),
         OutputFile::write,
         OutputFile::writeline,
         OutputFile::writebuffer,
@@ -29,7 +29,7 @@ pub let StdOut = fn () -> Stream::Output::Stream {
 
 pub let StdErr = fn () -> Stream::Output::Stream {
     return (
-        stderr,
+        cast(stderr),
         OutputFile::write,
         OutputFile::writeline,
         OutputFile::writebuffer,
@@ -41,7 +41,7 @@ pub let StdErr = fn () -> Stream::Output::Stream {
 
 pub let StdIn = fn () -> Stream::Input::Stream {
     return (
-        stdin,
+        cast(stdin),
         InputFile::read,
         InputFile::readline,
         InputFile::readbuffer,

@@ -3673,8 +3673,7 @@ pub fn assertCanCoerce(self: *Typechecker, this: TypeID, that: TypeID) Error!voi
                     }
                 }
 
-                if (fromPtr.child == toPtr.child) {
-                // if (self.nominallyIdentical(fromPtr.child, toPtr.child)) {
+                if (self.nominallyIdentical(fromPtr.child, toPtr.child)) {
                     return;
                 }
 
@@ -3684,15 +3683,9 @@ pub fn assertCanCoerce(self: *Typechecker, this: TypeID, that: TypeID) Error!voi
 
                 const toMut = try self.registerType(self.makeMutable(self.typeTable.get(toPtr.child)));
                 const fromMut = try self.registerType(self.makeMutable(self.typeTable.get(fromPtr.child)));
-                const mutVoid = try self.registerType(.{ .Void = true });
 
-                if (toMut == fromMut) {
-                // if (self.nominallyIdentical(toMut, fromMut)) {
+                if (self.nominallyIdentical(toMut, fromMut)) {
                     return;
-                }
-
-                if (toMut == mutVoid or fromMut == mutVoid) {
-                    return; 
                 }
 
                 return Error.TypeMismatch;
