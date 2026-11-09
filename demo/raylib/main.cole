@@ -1,4 +1,4 @@
-import std::memory::allocator as Allocator;
+import std::memory::allocator;
 import std::string as String;
 import std::c as C;
 import std::io::console as Console;
@@ -8,6 +8,8 @@ import extra::ini as INI;
 import extra::filewatch as FW;
 
 import raylib as RayLib;
+
+let Allocator = std::memory::allocator::Allocator;
 
 /*
  * Types

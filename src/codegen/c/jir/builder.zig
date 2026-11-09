@@ -190,7 +190,7 @@ pub inline fn functionDef(self: *Builder, name: defines.StringPtr, function: JIR
 
     self.functionDefCache.putNoClobber(self.allocator, function, {})
         catch return Error.AllocatorFailure;
-    self.loweredBodies.put(self.allocator, self.functions.get(function).scope, {})
+    self.loweredBodies.putNoClobber(self.allocator, self.functions.get(function).scope, {})
         catch return Error.AllocatorFailure;
     const node = try self.commonBinary(.FunctionDef, name, function);
     try self.typechecker.lowerer.addMetadata(node, self.functions.get(function).expr);

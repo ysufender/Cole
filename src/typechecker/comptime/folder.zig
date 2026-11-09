@@ -3157,20 +3157,22 @@ fn handleScopeDecls(
         const symbolToken = tokens.get(sig.name);
         const symbolName = symbolToken.lexeme(self.typechecker.context, self.typechecker.currentFile);
 
-        const declPtr = self.typechecker.symbols.lookup.get(.{
-            .scope = scope,
-            .name = symbolName,
-        }) orelse return common.debug.ShouldBeImpossible(undefined, @src());
-        const decl = self.typechecker.symbols.getDecl(declPtr);
+        if (newScope != scope) {
+            const declPtr = self.typechecker.symbols.lookup.get(.{
+                .scope = scope,
+                .name = symbolName,
+            }) orelse return common.debug.ShouldBeImpossible(undefined, @src());
+            const decl = self.typechecker.symbols.getDecl(declPtr);
 
-        const newDecl = try self.typechecker.symbols.declarations.addOne(self.typechecker.arena.allocator());
-        self.typechecker.symbols.declarations.set(newDecl, decl);
-        self.typechecker.symbols.declarations.items(.scope)[newDecl] = newScope;
+            const newDecl = try self.typechecker.symbols.declarations.addOne(self.typechecker.arena.allocator());
+            self.typechecker.symbols.declarations.set(newDecl, decl);
+            self.typechecker.symbols.declarations.items(.scope)[newDecl] = newScope;
 
-        self.typechecker.symbols.lookup.put(self.typechecker.arena.allocator(), .{
-            .scope = newScope,
-            .name = symbolName,
-        }, newDecl) catch return Error.AllocatorFailure;
+            self.typechecker.symbols.lookup.put(self.typechecker.arena.allocator(), .{
+                .scope = newScope,
+                .name = symbolName,
+            }, newDecl) catch return Error.AllocatorFailure;
+        }
 
             
         const newName = try self.typechecker.builder.internString(symbolName);

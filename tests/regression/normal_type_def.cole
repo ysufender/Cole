@@ -1,0 +1,14 @@
+import std::debug;
+
+let Struct = struct {
+    field1: i32,
+
+    pub let def = 12;
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let a = Struct(12);
+    std::debug::print("%", (i32))((a.field1));
+    std::debug::print("%", (i32))((Struct::def));
+    return 0;
+};

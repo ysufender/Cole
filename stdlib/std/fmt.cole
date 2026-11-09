@@ -3,6 +3,7 @@ import std::io::stream as Stream;
 import std::numeric as Numeric;
 import std::string as String;
 import std::debug as Debug;
+import std::ascii as ASCII;
 import std;
 
 let OStream = Stream::Output::Stream;
@@ -94,7 +95,7 @@ pub let print = fn (fmt: []u8, T: type) -> *fn (T, OStream) -> void {
             }
         }
 
-        _ = Stream::Output::writebuffer(out, "\n");
+        _ = Stream::Output::write(out, '\n');
     };
 };
 

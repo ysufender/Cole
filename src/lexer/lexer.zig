@@ -396,16 +396,9 @@ fn scanToken(self: *Lexer) common.CompilerError!void {
         '|' => self.addToken(.Pipe),
         '&' => self.addToken(.Ampersand),
         '\'' => {
-            const ch = self.advance();
-            if (ch == '\'') {
-                self.report("Empty character literals are not allowed.", .{});
-                break :blk Error.EmptyCharLiteral;
-            }
-            _ = try self.consume('\'', "Expected closing single quote (')");
+            const value = try self.charLiteralValue();
 
-            var buf: [3]u8 = undefined;
-            _ = std.fmt.bufPrint(&buf, "{d:0>3}", .{ch}) catch unreachable;
-            @memcpy(@constCast(self.source[self.start..self.current]), &buf);
+            writeZeroPadded(@constCast(self.source[self.start..self.current]), value);
 
             try self.addToken(.Integer);
         },
@@ -470,6 +463,73 @@ fn scanToken(self: *Lexer) common.CompilerError!void {
 
 fn allocator(self: *Lexer) std.mem.Allocator {
     return self.arena.allocator();
+}
+
+fn charLiteralValue(self: *Lexer) common.CompilerError!u8 {
+    if (self.isAtEnd()) {
+        self.report("Unterminated character literal", .{});
+        return Error.UnexpectedCharacter;
+    }
+
+    const first = self.advance();
+    const value: u8 = switch (first) {
+        '\'' => {
+            self.report("Empty character literals are not allowed.", .{});
+            return Error.EmptyCharLiteral;
+        },
+        '\\' => try self.escapeValue(),
+        else => first,
+    };
+
+    _ = try self.consume('\'', "Expected closing single quote (')");
+    return value;
+}
+
+fn escapeValue(self: *Lexer) common.CompilerError!u8 {
+    if (self.isAtEnd()) {
+        self.report("Unterminated escape sequence", .{});
+        return Error.UnexpectedCharacter;
+    }
+
+    return switch (self.advance()) {
+        'n' => '\n',
+        'r' => '\r',
+        't' => '\t',
+        '0' => 0,
+        '\\' => '\\',
+        '\'' => '\'',
+        '"' => '"',
+        'x' => {
+            const hi = try self.hexDigit();
+            const lo = try self.hexDigit();
+            return (hi << 4) | lo;
+        },
+        else => |c| {
+            self.report("Unknown escape sequence '\\{c}'", .{c});
+            return Error.UnexpectedCharacter;
+        },
+    };
+}
+
+fn hexDigit(self: *Lexer) common.CompilerError!u8 {
+    const digit = std.fmt.charToDigit(self.peek(), 16) catch {
+        self.report("Expected a hex digit in '\\x' escape", .{});
+        return Error.UnexpectedCharacter;
+    };
+    _ = self.advance();
+    return digit;
+}
+
+fn writeZeroPadded(dst: []u8, value: u8) void {
+    assert(dst.len >= 3);
+    @memset(dst, '0');
+
+    var v = value;
+    var i = dst.len;
+    while (v != 0) : (v /= 10) {
+        i -= 1;
+        dst[i] = '0' + v % 10;
+    }
 }
 
 fn skipWhitespace(self: *Lexer) void {

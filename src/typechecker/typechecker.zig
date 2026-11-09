@@ -4033,7 +4033,7 @@ pub fn sizeOf(self: *const Typechecker, of: TypeID) u32 {
         .CChar, .CUChar => @bitSizeOf(c_char),
         .CInt, .CUInt => @bitSizeOf(c_uint),
         .Pointer => |ptr| switch (ptr.size) {
-            .Slice => @bitSizeOf(*void) + @bitSizeOf(u32),
+            .Slice => @bitSizeOf(*void) + @bitSizeOf(u32) + @abs(@bitSizeOf(*void) - @bitSizeOf(u32)),
             .Single, .C => @bitSizeOf(*void),
         },
         .Function => @bitSizeOf(@TypeOf(&sizeOf)),
@@ -4141,6 +4141,8 @@ pub fn tryGetDefinitionIndex(self: *Typechecker, from: TypeID, memberNamePtr: de
     };
 
     for (decls, 0..) |decl, index| {
+        // @TODO This should've worked, but it does not for some reason.
+        // if (decl.name == try self.builder.internString(member)) {
         if (std.mem.eql(u8, self.builder.getInternedString(decl.name), member)) {
             return @intCast(index);
         }
