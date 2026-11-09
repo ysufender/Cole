@@ -349,14 +349,13 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
                 }
             }
 
-            const prevName, const bound = switch (typeInfo) {
-                .Struct => |str| .{ self.builder.getInternedString(str.name), str.bound },
-                .Union => |uni| .{ self.builder.getInternedString(uni.name), uni.bound },
-                .Enum => |enm| .{ self.builder.getInternedString(enm.name), enm.bound },
+            const prevName = switch (typeInfo) {
+                .Struct => |str| self.builder.getInternedString(str.name),
+                .Union => |uni| self.builder.getInternedString(uni.name),
+                .Enum => |enm| self.builder.getInternedString(enm.name),
                 else => break :blk,
             };
 
-            _ = bound;
             if (!std.mem.startsWith(u8, prevName, "$$")) {
                 break :blk;
             }
@@ -400,7 +399,6 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
                         .expr = str.expr,
                         .scope = str.scope,
                         .isTuple = str.isTuple,
-                        .bound = !self.folder.getFlag(.InComptimeCall)
                     },
                 },
 
@@ -412,7 +410,6 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
                         .fields = enm.fields,
                         .expr = enm.expr,
                         .scope = enm.scope,
-                        .bound = !self.folder.getFlag(.InComptimeCall)
                     },
                 },
 
@@ -426,7 +423,6 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
                         .fields = uni.fields,
                         .expr = uni.expr,
                         .scope = uni.scope,
-                        .bound = !self.folder.getFlag(.InComptimeCall)
                     },
                 },
 
@@ -1284,7 +1280,6 @@ pub fn typecheckTupleDefinition(self: *Typechecker, exprListPtr: defines.OpaqueP
             .mutable = false,
             .scope = 0,
             .isTuple = true,
-            .bound = false,
         },
     };
 
@@ -1743,7 +1738,6 @@ pub fn discoverScopeDef(
                     .fields = enm.fields,
                     .expr = enm.expr,
                     .mutable = enm.mutable,
-                    .bound = enm.bound
                 },
             });
         },
@@ -1760,7 +1754,6 @@ pub fn discoverScopeDef(
                     .expr = str.expr,
                     .mutable = str.mutable,
                     .isTuple = str.isTuple,
-                    .bound = str.bound
                 },
             });
         },
@@ -1778,7 +1771,6 @@ pub fn discoverScopeDef(
                     .fields = uni.fields,
                     .expr = uni.expr,
                     .mutable = uni.mutable,
-                    .bound = uni.bound
                 },
             });
         },
@@ -2050,7 +2042,6 @@ pub fn typecheckGetMetadata(self: *Typechecker, extraPtr: defines.OpaquePtr) Err
                 .mutable = false,
                 .scope = 0,
                 .isTuple = true,
-                .bound = false,
             }
         });
     }
@@ -2484,8 +2475,12 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
             and !decl.topLevel
         );
 
+    const finalStatus: @TypeOf(isPresent.value_ptr.status) = if (instanceDependent) .NotChecked else .Checked;
+
+    const guardFinalizing = declType == (comptime Comptime.Folder.Builtin.Type("type")) and decl.kind == .Variable;
+
     isPresent.value_ptr.* = .{
-        .status = if (instanceDependent) .NotChecked else .Checked,
+        .status = if (guardFinalizing) .InProgress else finalStatus,
         .result = declType,
     };
 
@@ -2501,6 +2496,7 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
 
     if (declType == (comptime Comptime.Folder.Builtin.Type("type")) and decl.kind == .Variable) {
         const typeID = self.folder.getValue(try self.folder.eval(decl.node, declType)).Type;
+        self.declCache.getPtr(declPtr).?.status = finalStatus;
         const node = self.typeTable.get(typeID);
 
         const fields: []Types.FieldInfo = @constCast(switch (node) {
@@ -3331,10 +3327,10 @@ pub fn registerType(self: *Typechecker, _newType: TypeInfo) Error!TypeID {
     // @Note Dedup anon types
     const anonymous = if (name) |n| std.mem.startsWith(u8, self.builder.getInternedString(n), "$$") else false;
     if (anonymous) {
-        const expr = switch (newType) {
-            .Struct => |str| str.expr,
-            .Union => |uni| uni.expr,
-            .Enum => |enm| enm.expr,
+        const expr, const newMut = switch (newType) {
+            .Struct => |str| .{ str.expr, str.mutable },
+            .Union => |uni| .{ uni.expr, uni.mutable },
+            .Enum => |enm| .{ enm.expr, enm.mutable },
             else => unreachable,
         };
 
@@ -3342,10 +3338,10 @@ pub fn registerType(self: *Typechecker, _newType: TypeInfo) Error!TypeID {
             const info = self.typeTable.get(candidate);
             if (std.meta.activeTag(info) != std.meta.activeTag(newType)) continue;
 
-            const candidateName, const candidateExpr = switch (info) {
-                .Struct => |str| .{ str.name, str.expr },
-                .Union => |uni| .{ uni.name, uni.expr },
-                .Enum => |enm| .{ enm.name, enm.expr },
+            const candidateName, const candidateExpr, const candidateMutable = switch (info) {
+                .Struct => |str| .{ str.name, str.expr, str.mutable },
+                .Union => |uni| .{ uni.name, uni.expr, uni.mutable },
+                .Enum => |enm| .{ enm.name, enm.expr, enm.mutable },
                 else => unreachable,
             };
 
@@ -3356,7 +3352,9 @@ pub fn registerType(self: *Typechecker, _newType: TypeInfo) Error!TypeID {
                 continue;
             }
             if (self.assertStructurallyIdenticalValue(info, newType)) |_| {
-                return candidate;
+                if (newMut == candidateMutable) {
+                    return candidate;
+                }
             } else |_| { }
         }
     }
@@ -3558,7 +3556,7 @@ pub fn assertStructurallyIdenticalValue(self: *const Typechecker, fromType: Type
             }
 
             for (fromEnum.fields, toEnum.fields) |fromField, toField| {
-                if (!std.mem.eql(u8, fromField.name, toField.name)) {
+                if (!std.mem.eql(u8, fromField.name, toField.name) or fromField.value != toField.value) {
                     return Error.StructuralMismatch;
                 }
             }
@@ -3914,7 +3912,6 @@ pub fn makeMutable(_: *const Typechecker, info: TypeInfo) TypeInfo {
                 .scope = str.scope,
                 .expr = str.expr,
                 .isTuple = str.isTuple,
-                .bound = str.bound, 
             },
         },
         .Union => |uni| .{
@@ -3927,7 +3924,6 @@ pub fn makeMutable(_: *const Typechecker, info: TypeInfo) TypeInfo {
                 .definitions = uni.definitions,
                 .scope = uni.scope,
                 .expr = uni.expr,
-                .bound = uni.bound, 
             },
         },
         .Enum => |enm| .{
@@ -3938,7 +3934,6 @@ pub fn makeMutable(_: *const Typechecker, info: TypeInfo) TypeInfo {
                 .definitions = enm.definitions,
                 .scope = enm.scope,
                 .expr = enm.expr,
-                .bound = enm.bound, 
             },
         },
         .Pointer => |ptr| .{

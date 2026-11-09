@@ -31,10 +31,10 @@ pub let Arena = struct {
             undefined
         );
 
-        switch Allocator::alloc(ChunkList)(gpa, 1) {
+        switch Allocator::create(ChunkList)(gpa) {
             @Ok -> |mem| {
-                mem[0] = @Nil;
-                self.usedChunks = mem[0].&;
+                mem.* = (@Nil, ());
+                self.usedChunks = mem;
             }
             @Err -> return (@None, ());
         }
@@ -44,7 +44,7 @@ pub let Arena = struct {
                 self.activeChunk = (defaultChunkSize, 0, mem);
             }
             @Err -> {
-                Allocator::dealloc(ChunkList)(gpa, self.usedChunks);
+                Allocator::destroy(ChunkList)(gpa, self.usedChunks);
                 return (@None, ());
             }
         }
