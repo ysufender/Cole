@@ -169,17 +169,19 @@ pub fn init(typechecker: *Typechecker, allocator: Allocator) Error!Executer {
 }
 
 pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.Value.Ptr) Error!Comptime.Value.Ptr {
-    const argValues = self.arena.allocator().alloc(Comptime.Value, args.len)
-    catch return Error.AllocatorFailure;
-    for (args, argValues) |ptr, *out| {
-        out.* = self.typechecker.folder.getValue(ptr);
+    const static = struct {
+        pub var arguments: [64]Comptime.Value = undefined;
+    };
+
+    for (args, 0..) |ptr, i| {
+        static.arguments[i] = self.typechecker.folder.getValue(ptr);
     }
 
-    const key = ExecutionKey{
+    var key = ExecutionKey{
         .function =
             if (self.typechecker.folder.captures.contains(func.scope)) func.scope
             else (@as(u64, 1) << 63) | (@as(u64, func.source) << 32) | func.expr,
-        .args = argValues,
+        .args = static.arguments[0..args.len],
     };
 
     if (self.cache.get(key)) |result| {
@@ -194,6 +196,13 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
             .NotEvaluated => { },
         }
     }
+
+    const argValues = self.arena.allocator().alloc(Comptime.Value, args.len)
+    catch return Error.AllocatorFailure;
+    for (args, argValues) |ptr, *out| {
+        out.* = self.typechecker.folder.getValue(ptr);
+    }
+    key.args = argValues;
 
     if (self.depth >= defines.comptimeCallLimit) {
         self.report("Compile-time call depth limit ({d}) exceeded.", .{defines.comptimeCallLimit});

@@ -1692,7 +1692,9 @@ fn evalStructType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Val
 
     if (!deferIncomplete) {
         for (@constCast(self.typechecker.typeTable.get(typeID).Struct.fields)) |*f| {
+            const pv = f.valueType;
             f.valueType = try self.resolveIncomplete(f.valueType, typeID);
+            self.typechecker.typeTable.set(pv, self.typechecker.typeTable.get(f.valueType));
         }
     }
 
@@ -1860,7 +1862,9 @@ fn evalUnionType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Valu
 
     if (!deferIncomplete) {
         for (@constCast(self.typechecker.typeTable.get(typeID).Union.fields)) |*f| {
+            const pv = f.valueType;
             f.valueType = try self.resolveIncomplete(f.valueType, typeID);
+            self.typechecker.typeTable.set(pv, self.typechecker.typeTable.get(f.valueType));
         }
     }
 

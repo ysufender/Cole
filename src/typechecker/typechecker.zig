@@ -2505,8 +2505,10 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
             else => &.{},
         });
 
-        for (fields) |*field| {
-            field.valueType = try self.folder.resolveIncomplete(field.valueType, typeID);
+        for (fields) |*f| {
+            const pv = f.valueType;
+            f.valueType = try self.folder.resolveIncomplete(f.valueType, typeID);
+            self.typeTable.set(pv, self.typeTable.get(f.valueType));
         }
     }
 

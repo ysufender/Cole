@@ -33,7 +33,6 @@ pub let Base = struct {
 };
 
 pub let Input = struct {
-    pub let OpenResult = ifile::OpenResult;
     pub let File       = ifile::IFile;
     pub let stream     = ifile::stream;
     pub let open       = ifile::open;

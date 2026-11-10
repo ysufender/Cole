@@ -8,11 +8,7 @@ import std::memory::allocator as Allocator;
 import std::io::stream as Stream;
 import std::io::file as File;
 import std::ascii as ASCII;
-
-pub let OpenResult = union(enum) {
-    Ok: IFile,
-    Err: void,
-};
+import std;
 
 pub let IFile = struct {
     handle: *mut FILE,
@@ -100,6 +96,10 @@ pub let exhaust = fn (handle: *mut void, allocator: Allocator::Allocator) -> Str
     _ = fseek(handle, 0, File::Base::End);
     let size = ftell(handle);
 
+    if size == 0 {
+        return (@Ok, "");
+    }
+
     let _mem = Allocator::Allocator::alloc(u8)(allocator, size);
 
     switch _mem {
@@ -128,7 +128,7 @@ pub let close = fn (handle: *mut void) -> Stream::Result {
         else @Err;
 };
 
-pub let open = fn (_path: []u8, allocator: Allocator::Allocator, readWrite: bool) -> OpenResult {
+pub let open = fn (_path: []u8, allocator: Allocator::Allocator, readWrite: bool) -> std::Result(IFile, void) {
     let path: mut any = _path;
     let mode: mut any =
         if (readWrite) "r+"
