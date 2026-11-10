@@ -13,11 +13,11 @@ pub let init = fn (buffer: []mut u8) -> MemoryStream {
     return (buffer, 0, 0);
 };
 
-pub let ostream = fn (self: *mut MemoryStream) -> Stream::Output::Stream {
+pub let ostream = fn (self: *mut MemoryStream) -> Stream::Output {
     return (cast(self), write, writeline, writebuffer, oseek, close, flush);
 };
 
-pub let istream = fn (self: *mut MemoryStream) -> Stream::Input::Stream {
+pub let istream = fn (self: *mut MemoryStream) -> Stream::Input {
     return (cast(self), read, readline, readbuffer, exhaust, iseek, tell, close);
 };
 
@@ -54,14 +54,33 @@ pub let writebuffer = fn (ctx: *mut void, buffer: []u8) -> Stream::Result {
     return @Ok;
 };
 
-pub let oseek = fn (ctx: *mut void, off: u32) -> Stream::Result {
+pub let oseek = fn (ctx: *mut void, off: u32, base: Stream::Base) -> Stream::Result {
     let self: *mut MemoryStream = cast(ctx);
-    
-    if off >= self.buffer.len {
-        return @Err;
+
+    switch base {
+        @Start -> {
+            if off >= self.buffer.len {
+                return @Err;
+            }
+            
+            self.windex = off;
+        }
+        @Current -> {
+            if off + self.windex >= self.buffer.len {
+                return @Err;
+            }
+
+            self.windex = self.windex + off;
+        }
+        @End -> {
+            if off >= self.buffer.len {
+                return @Err;
+            }
+
+            self.windex = self.buffer.len - 1 - off;
+        }
     }
-    
-    self.windex = off;
+
     return @Ok;
 };
 
@@ -132,14 +151,33 @@ pub let exhaust = fn (ctx: *mut void, gpa: Allocator::Allocator) -> Stream::Inpu
     return unreachable();
 };
 
-pub let iseek = fn (ctx: *mut void, off: u32) -> Stream::Result {
+pub let iseek = fn (ctx: *mut void, off: u32, base: Stream::Base) -> Stream::Result {
     let self: *mut MemoryStream = cast(ctx);
-    
-    if off >= self.buffer.len {
-        return @Err;
+
+    switch base {
+        @Start -> {
+            if off >= self.buffer.len {
+                return @Err;
+            }
+            
+            self.rindex = off;
+        }
+        @Current -> {
+            if off + self.windex >= self.buffer.len {
+                return @Err;
+            }
+
+            self.rindex = self.rindex + off;
+        }
+        @End -> {
+            if off >= self.buffer.len {
+                return @Err;
+            }
+
+            self.rindex = self.buffer.len - 1 - off;
+        }
     }
-    
-    self.rindex = off;
+
     return @Ok;
 };
 

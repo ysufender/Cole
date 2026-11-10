@@ -178,7 +178,7 @@ pub fn eval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeI
                     return Error.MissingIdentifier;
                 };
         },
-        .Call => try self.evalCall(expr.value, maybeExpected),
+        .Call => try self.evalCall(expr.value, maybeExpected, exprPtr),
         .Indexing => try self.evalIndexing(expr.value),
         .Scoping => try self.evalScoping(exprPtr),
         .ExpressionList => try self.evalExpressionList(expr.value, maybeExpected),
@@ -205,7 +205,7 @@ pub fn eval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeI
 
         .Mark => try self.evalMark(exprPtr, expr.value, maybeExpected),
 
-        .Dot => try self.evalDot(expr.value),
+        .Dot => try self.evalDot(expr.value, exprPtr),
         
         .FunctionDefinition => try self.evalFunction(exprPtr, expr.value),
 
@@ -580,8 +580,8 @@ fn evalFieldAccess(self: *Folder, resType: TypeID, on: Comptime.Value.Ptr, name:
 
 }
 
-pub fn evalDot(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {
-    const resType = try self.typechecker.typecheckDot(extraPtr);
+pub fn evalDot(self: *Folder, extraPtr: defines.OpaquePtr, expr: defines.ExpressionPtr) Error!Comptime.Value.Ptr {
+    const resType = try self.typechecker.typecheckDot(extraPtr, expr);
 
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
     const tokens = self.typechecker.context.getTokens(ast.tokens);
@@ -1241,10 +1241,10 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
     return res;
 }
 
-fn evalBuiltinCall(self: *Folder, extraPtr: defines.OpaquePtr, declPtr: defines.DeclPtr, maybeExpected: ?TypeID) Error!Comptime.Value.Ptr {
+fn evalBuiltinCall(self: *Folder, extraPtr: defines.OpaquePtr, declPtr: defines.DeclPtr, maybeExpected: ?TypeID, expr: defines.ExpressionPtr) Error!Comptime.Value.Ptr {
     const BI = Resolver.BuiltinIndex;
 
-    _ = try self.typechecker.typecheckBuiltinCall(extraPtr, declPtr, maybeExpected);
+    _ = try self.typechecker.typecheckBuiltinCall(extraPtr, declPtr, maybeExpected, expr);
 
     return switch (declPtr) {
         BI("inComptime") => inComptime: {
@@ -1277,7 +1277,7 @@ fn evalBuiltinCall(self: *Folder, extraPtr: defines.OpaquePtr, declPtr: defines.
         BI("compileLog") => self.evalCompileLog(extraPtr),
         BI("this") => self.evalThis(extraPtr),
         BI("isComptime") => self.evalIsComptime(extraPtr),
-        BI("field") => self.evalField(extraPtr),
+        BI("field") => self.evalField(extraPtr, expr),
         else => {
             self.report("Builtin '{s}' is not usable in this context.", .{Resolver.builtins[declPtr]});
             return Error.ComptimeNotPossible;
@@ -1917,8 +1917,8 @@ fn evalCast(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID, 
     return self.castValue(thingToCast, targetType, false);
 }
 
-pub fn evalField(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {
-    const resType = try self.typechecker.typecheckFieldBuiltin(extraPtr);
+pub fn evalField(self: *Folder, extraPtr: defines.OpaquePtr, expr: defines.ExpressionPtr) Error!Comptime.Value.Ptr {
+    const resType = try self.typechecker.typecheckFieldBuiltin(extraPtr, expr);
 
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
 
@@ -2005,10 +2005,12 @@ pub fn evalThis(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value
         }
     }
     if (ty == null) {
+        if (self.typechecker.getFlag(.CanCycle)) {
+            return Error.DependencyCycle;
+        }
+
         self.report("Use of 'this' outside typed scope.", .{});
-        return
-            if (self.typechecker.getFlag(.CanCycle)) Error.DependencyCycle
-            else Error.IllegalSyntax;
+        return Error.IllegalSyntax;
     }
 
     return self.appendValue(.{
@@ -2866,9 +2868,9 @@ fn evalScoping(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Value.
     }) orelse return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()), null);
 }
 
-pub fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID) Error!Comptime.Value.Ptr {
+pub fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID, expr: defines.ExpressionPtr) Error!Comptime.Value.Ptr {
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
-    _ = try self.typechecker.typecheckCall(extraPtr, maybeExpected);
+    _ = try self.typechecker.typecheckCall(extraPtr, maybeExpected, expr);
 
     if (self.typechecker.symbols.resolutionMap.get(toKey(.{
         .file = self.typechecker.currentFile,
@@ -2884,7 +2886,7 @@ pub fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Type
             break :blk;
         }
 
-        return self.evalBuiltinCall(extraPtr, decl.type, maybeExpected);
+        return self.evalBuiltinCall(extraPtr, decl.type, maybeExpected, expr);
     }
 
     const maybeFunction = self.memory.items[(try self.expectDefined(ast.extra[extraPtr], null))];

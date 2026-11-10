@@ -6,7 +6,7 @@ import std::debug as Debug;
 import std::ascii as ASCII;
 import std;
 
-let OStream = Stream::Output::Stream;
+let OStream = Stream::Output;
 let Malloc = Allocator::Allocator;
 let Formatter = fn (T: type) -> type { return *fn (T, OStream) -> void; };
 

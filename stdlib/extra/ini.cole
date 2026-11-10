@@ -42,7 +42,7 @@ pub let Value = union(enum) {
     Ref      : Reference, 
     List     : []Value,
 
-    pub let print = fn (self: *Value, allocator: Allocator, stream: Stream::Output::Stream) -> void {
+    pub let print = fn (self: *Value, allocator: Allocator, stream: Stream::Output) -> void {
         if self == undefined {
             _ = Stream::Output::writebuffer(stream, "<undefined>");
             return;
@@ -100,7 +100,7 @@ pub let get = fn (self: *INI, sectionName: mut []u8, fieldName: mut []u8) -> *Va
     return undefined;
 };
 
-pub let loadStream = fn (allocator: Allocator, stream: Stream::Input::Stream) -> INI::LoadResult {
+pub let loadStream = fn (allocator: Allocator, stream: Stream::Input) -> INI::LoadResult {
     let list = SectionList::init(allocator);
     let section: mut *mut Section = undefined;
     let values = PairList::init(allocator);
@@ -310,7 +310,7 @@ let Token = struct {
     value: []u8,
 };
 
-let tokenize = fn (allocator: Allocator, stream: Stream::Input::Stream) -> Token {
+let tokenize = fn (allocator: Allocator, stream: Stream::Input) -> Token {
     while true {
         let _ch: mut any = Stream::Input::read(stream);
 
@@ -380,7 +380,7 @@ let tokenize = fn (allocator: Allocator, stream: Stream::Input::Stream) -> Token
     return (@EOF, "Unreachable.");
 };
 
-let number = fn (allocator: Allocator, stream: Stream::Input::Stream) -> Token {
+let number = fn (allocator: Allocator, stream: Stream::Input) -> Token {
     let isFloat: mut bool = false;
     let start = Stream::Input::tell(stream);
 
@@ -426,7 +426,7 @@ let number = fn (allocator: Allocator, stream: Stream::Input::Stream) -> Token {
         else (@Integer, value);
 };
 
-let identifier = fn (allocator: Allocator, stream: Stream::Input::Stream) -> Token {
+let identifier = fn (allocator: Allocator, stream: Stream::Input) -> Token {
     let start = Stream::Input::tell(stream);
 
     while true {

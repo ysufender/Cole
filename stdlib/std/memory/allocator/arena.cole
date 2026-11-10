@@ -56,7 +56,7 @@ pub let Arena = struct {
         reset(self);
         
         Allocator::dealloc(u8)(self.gpa, self.activeChunk.data);
-        Allocator::dealloc(ChunkList)(self.gpa, self.usedChunks);
+        Allocator::destroy(ChunkList)(self.gpa, self.usedChunks);
     };
 
     pub let reset = fn (self: *mut Arena) -> void {
@@ -68,15 +68,18 @@ pub let Arena = struct {
                 @Cons -> |cons| {
                     Allocator::dealloc(u8)(self.gpa, cons.head.data);
                     let next = cons.tail;
-                    Allocator::dealloc(ChunkList)(self.gpa, currentChunk);
+                    Allocator::destroy(ChunkList)(self.gpa, currentChunk);
                     currentChunk = next;
                 }
                 @Nil -> break;
             }
         }
 
-        switch Allocator::alloc(ChunkList)(self.gpa, 1) {
-            @Ok -> |mem| { mem[0] = @Nil; self.usedChunks = mem[0].&; }
+        switch Allocator::create(ChunkList)(self.gpa) {
+            @Ok -> |mem| {
+                mem.* = (@Nil, ());
+                self.usedChunks = mem;
+            }
             @Err -> unreachable();
         }
     };

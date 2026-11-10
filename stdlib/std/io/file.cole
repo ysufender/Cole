@@ -26,12 +26,6 @@ import std::io::file::ifile as ifile;
 import std::io::file::ofile as ofile;
 import std::io::stream as Stream;
 
-pub let Base = struct {
-    pub let Start   = 0;
-    pub let Current = 1;
-    pub let End     = 2;
-};
-
 pub let Input = struct {
     pub let File       = ifile::IFile;
     pub let stream     = ifile::stream;

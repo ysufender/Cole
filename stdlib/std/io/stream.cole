@@ -27,24 +27,11 @@ pub let Result = enum {
     Err,
 };
 
-pub let Input = struct {
-    pub let Stream         = istream::IStream;
-    pub let ReadResult     = istream::ReadResult;
-    pub let ReadLineResult = istream::ReadLineResult;
-    pub let read           = istream::read;
-    pub let readline       = istream::readline;
-    pub let readbuffer     = istream::readbuffer;
-    pub let seek           = istream::seek;
-    pub let tell           = istream::tell;
-    pub let close          = istream::close;
+pub let Base = enum {
+    Start,
+    Current,
+    End,
 };
 
-pub let Output = struct {
-    pub let Stream      = ostream::OStream;
-    pub let write       = ostream::write;
-    pub let writeline   = ostream::writeline;
-    pub let writebuffer = ostream::writebuffer;
-    pub let seek        = ostream::seek;
-    pub let close       = ostream::close;
-    pub let flush       = ostream::flush;
-};
+pub let Input = istream::IStream;
+pub let Output = ostream::OStream;
