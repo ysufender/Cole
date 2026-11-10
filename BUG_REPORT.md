@@ -1,9 +1,5 @@
 # Known Bugs
 
-## Re: "this()" Builtin Bugs (52)
-
-Check `this_plain_struct` test.
-
 ## Illegal Memory Access (31)
 
 Run the raylib demo. The output source.c is garbled when using a non-preserving allocator
@@ -26,4 +22,5 @@ else is holding a reference to the said memory.
 ## Extern Structs Keep Getting Codegen'd (49)
 ## Comptime Recursion Bug (50)
 ## Type Rebinding Bug (51)
+## "this()" Builtin Bugs (52)
 ## Generic Definitions Are Last-Call-Win (53)

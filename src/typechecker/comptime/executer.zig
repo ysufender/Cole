@@ -20,6 +20,102 @@ const TypeInfo = types.TypeInfo;
 const JIR = @import("../../codegen/c/jir.zig");
 
 const Stack = collections.StaticStack(Scope, defines.comptimeStackLimit);
+const Cache = std.hash_map.HashMapUnmanaged(ExecutionKey, ExecutionResult, KeyContext, 75);
+ 
+const KeyContext = struct {
+    pub fn hash(_: KeyContext, key: ExecutionKey) u64 {
+        var h = std.hash.Wyhash.init(key.function);
+        for (key.args) |arg| hashValue(&h, arg);
+        return h.final();
+    }
+ 
+    pub fn eql(_: KeyContext, a: ExecutionKey, b: ExecutionKey) bool {
+        if (a.function != b.function or a.args.len != b.args.len) return false;
+        for (a.args, b.args) |x, y| {
+            if (!eqlValue(x, y)) return false;
+        }
+        return true;
+    }
+};
+ 
+fn hashValue(h: *std.hash.Wyhash, v: Comptime.Value) void {
+    const hash = std.hash.autoHash;
+    hash(h, std.meta.activeTag(v));
+ 
+    switch (v) {
+        .Int => |x| hash(h, x),
+        .Float => |x| hash(h, @as(u64, @bitCast(x))),
+        .Bool => |x| hash(h, x),
+        .Enum => |x| {
+
+            hash(h, x.Type);
+            hash(h, x.Value);
+        },
+        .Union => |x| {
+            hash(h, x.Type);
+            hash(h, x.Tag);
+            hash(h, x.Value);
+        },
+        .Struct => |x| {
+            hash(h, x.Type);
+            hash(h, x.Fields.start);
+            hash(h, x.Fields.end);
+        },
+        .Type => |x| hash(h, x),
+        .Pointer => |x| {
+            hash(h, x.Type);
+            hash(h, x.To);
+        },
+        .String => |x| {
+            hash(h, x.type);
+            h.update(x.str);
+        },
+        .Slice => |x| {
+            hash(h, x.Type);
+            hash(h, x.Size);
+            hash(h, x.To);
+        },
+        .Function => |x| {
+            hash(h, x.scope);
+            hash(h, x.expr);
+
+        },
+        .Void => { },
+        .Undefined => |x| hash(h, x),
+    }
+}
+ 
+fn eqlValue(a: Comptime.Value, b: Comptime.Value) bool {
+    if (std.meta.activeTag(a) != std.meta.activeTag(b)) return false;
+ 
+    return switch (a) {
+        .Int => |x| x == b.Int,
+        .Float => |x| @as(u64, @bitCast(x)) == @as(u64, @bitCast(b.Float)),
+        .Bool => |x| x == b.Bool,
+        .Enum => |x| x.Type == b.Enum.Type and x.Value == b.Enum.Value,
+        .Union => |x| x.Type == b.Union.Type and x.Tag == b.Union.Tag and x.Value == b.Union.Value,
+        .Struct => |x| x.Type == b.Struct.Type and x.Fields.start == b.Struct.Fields.start and x.Fields.end == b.Struct.Fields.end,
+        .Type => |x| x == b.Type,
+        .Pointer => |x| x.Type == b.Pointer.Type and x.To == b.Pointer.To,
+        .String => |x| x.type == b.String.type and std.mem.eql(u8, x.str, b.String.str),
+        .Slice => |x| x.Type == b.Slice.Type and x.Size == b.Slice.Size and x.To == b.Slice.To,
+        .Function => |x| x.scope == b.Function.scope and x.expr == b.Function.expr,
+        .Void => true,
+        .Undefined => |x| x == b.Undefined,
+    };
+}
+
+
+const ExecutionKey = struct {
+    function: u64,
+    args: []const Comptime.Value,
+};
+
+const ExecutionResult = union(enum) {
+    InProgress: void,
+    Evaluated: Comptime.Value.Ptr,
+    NotEvaluated: void,
+};
 
 pub const Scope = struct {
     pub const Variables = collections.HashMap(defines.StringPtr, Comptime.Value.Ptr);
@@ -55,23 +151,59 @@ const Executer = @This();
 typechecker: *Typechecker,
 arena: Arena,
 stack: Stack,
-depth: u32 = 0,
+depth: u32,
+cache: Cache,
 
 pub fn init(typechecker: *Typechecker, allocator: Allocator) Error!Executer {
+    var cache = Cache.empty;
+    cache.ensureTotalCapacity(allocator, 100)
+        catch return Error.AllocatorFailure;
+
     return .{
         .arena = Arena.init(allocator),
         .typechecker = typechecker,
         .stack = .{},
+        .depth = 0,
+        .cache = cache,
     };
 }
 
 pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.Value.Ptr) Error!Comptime.Value.Ptr {
+    const argValues = self.arena.allocator().alloc(Comptime.Value, args.len)
+    catch return Error.AllocatorFailure;
+    for (args, argValues) |ptr, *out| {
+        out.* = self.typechecker.folder.getValue(ptr);
+    }
+
+    const key = ExecutionKey{
+        .function =
+            if (self.typechecker.folder.captures.contains(func.scope)) func.scope
+            else (@as(u64, 1) << 63) | (@as(u64, func.source) << 32) | func.expr,
+        .args = argValues,
+    };
+
+    if (self.cache.get(key)) |result| {
+        switch (result) {
+            .InProgress => {
+                self.report("Dependency cycle during comptime execution. Function {s} depends on itself.", .{
+                    self.typechecker.builder.getInternedString(func.name),
+                });
+                return Error.DependencyCycle;
+            },
+            .Evaluated => |r| return r,
+            .NotEvaluated => { },
+        }
+    }
+
     if (self.depth >= defines.comptimeCallLimit) {
         self.report("Compile-time call depth limit ({d}) exceeded.", .{defines.comptimeCallLimit});
         return Error.StackOverflow;
     }
     self.depth += 1;
     defer self.depth -= 1;
+
+    self.cache.put(self.arena.allocator(), key, .{ .InProgress = {} })
+        catch return Error.AllocatorFailure;
 
     const sign = self.typechecker.typeTable.get(func.signature).Function;
 
@@ -226,9 +358,16 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
             .Discard => _ = try self.typechecker.folder.eval(statement.value, null),
             .Return => {
                 if (statement.value == Parser.AnyType) {
+                    self.cache.put(self.arena.allocator(), key, .{ .Evaluated = @intFromEnum(Comptime.Value.Implicit.Void) })
+                        catch return Error.AllocatorFailure;
                     return @intFromEnum(Comptime.Value.Implicit.Void);
                 }
-                return self.typechecker.folder.eval(statement.value, returnType);
+
+                const res = try self.typechecker.folder.eval(statement.value, returnType);
+
+                self.cache.put(self.arena.allocator(), key, .{ .Evaluated = res })
+                    catch return Error.AllocatorFailure;
+                return res;
             },
             .Block => {
                 try self.stack.push(.{
@@ -494,6 +633,9 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
             },
         }
     }
+
+    self.cache.put(self.arena.allocator(), key, .{ .Evaluated = @intFromEnum(Comptime.Value.Implicit.Void) })
+        catch return Error.AllocatorFailure;
 
     return @intFromEnum(Comptime.Value.Implicit.Void);
 }

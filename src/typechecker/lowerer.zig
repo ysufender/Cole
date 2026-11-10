@@ -1425,7 +1425,7 @@ fn switchExpr(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error
 
     var ops =
         if (maybeComptimeEnumOrUnion) |_| @constCast(&.{})
-        else typechecker.builder.allocator.alloc(JIR.Ptr, numCases + 3)
+        else typechecker.builder.allocator.alloc(JIR.Ptr, numCases + 5)
             catch return Error.AllocatorFailure;
     var ptrs = ops[@min(2, ops.len)..];
 
@@ -1440,6 +1440,8 @@ fn switchExpr(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error
     }
 
     const switchEnd = try typechecker.folder.generateRandomName(.SwitchEnd);
+
+    var slot: usize = 0;
 
     var idx: u32 = 0;
     while (idx < caseRange.len()) : (idx += 4) {
@@ -1458,9 +1460,10 @@ fn switchExpr(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error
                 const placeholder = try typechecker.builder.label(try typechecker.folder.generateRandomName(.Placeholder));
                 const result = try typechecker.builder.assignment(resIdent, body);
 
-                ptrs[@divFloor(idx, 4)] = placeholder;
-                ptrs[@divFloor(idx, 4) + 1] = result;
-                ptrs[@divFloor(idx, 4) + 2] = try typechecker.builder.jump(switchEnd);
+                ptrs[slot] = placeholder;
+                ptrs[slot + 1] = result;
+                ptrs[slot + 2] = try typechecker.builder.jump(switchEnd);
+                slot += 3;
                 continue;
             }
         }
@@ -1553,13 +1556,15 @@ fn switchExpr(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error
             }
         };
 
-        ptrs[@divFloor(idx, 4)] = switchFull;
+        ptrs[slot] = switchFull;
+        slot += 1;
     }
 
     const switchEndLabel = try typechecker.builder.label(switchEnd);
-    ptrs[@divFloor(caseRange.len(), 4)] = switchEndLabel;
+    ptrs[slot] = switchEndLabel;
+    slot += 1;
 
-    return try typechecker.builder.stmtExpr(resIdent, ops);
+    return try typechecker.builder.stmtExpr(resIdent, ops[0 .. 2 + slot]);
 }
 
 fn call(

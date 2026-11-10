@@ -3,64 +3,61 @@ const std = @import("std");
 const Error = @import("../core/common.zig").CompilerError;
 
 fn Context(comptime Key: type) type {
-    return
-        if (
-            Key == []const u8
-            or
-            @typeInfo(Key) == .@"struct"
-            or
-            @typeInfo(Key) == .@"union"
-        ) struct {
-            const Self = @This();
+    return struct {
+        const Self = @This();
 
-            pub fn hash(_: Self, key: Key) u64 { 
-                var hasher = std.hash.Fnv1a_64.init();
-                std.hash.autoHashStrat(&hasher, key, .DeepRecursive);
-                return hasher.final();
+        pub fn hash(_: Self, key: Key) u64 { 
+            var hasher = std.hash.XxHash64.init(5315);
+
+            switch (@typeInfo(Key)) {
+                .float => std.hash.autoHashStrat(&hasher, @as(u64, @bitCast(key)), .DeepRecursive),
+                else => std.hash.autoHashStrat(&hasher, key, .DeepRecursive),
             }
 
-            pub fn eql(_: Self, a: Key, b: Key) bool {
-                return deepEql(Key, a, b);
-            }
+            return hasher.final();
+        }
 
-            fn deepEql(comptime T: type, a: T, b: T) bool {
-                return switch (@typeInfo(T)) {
-                    .@"struct" => |s| blk: {
-                        inline for (s.field_names, 0..) |f, i| {
-                            if (!deepEql(s.field_types[i], @field(a, f), @field(b, f))) break :blk false;
+        pub fn eql(_: Self, a: Key, b: Key) bool {
+            return deepEql(Key, a, b);
+        }
+
+        fn deepEql(comptime T: type, a: T, b: T) bool {
+            return switch (@typeInfo(T)) {
+                .@"struct" => |s| blk: {
+                    inline for (s.field_names, 0..) |f, i| {
+                        if (!deepEql(s.field_types[i], @field(a, f), @field(b, f))) break :blk false;
+                    }
+                    break :blk true;
+                },
+                .pointer => |p| switch (p.size) {
+                    .slice => blk: {
+                        if (a.len != b.len) break :blk false;
+                        for (a, b) |ea, eb| {
+                            if (!deepEql(p.child, ea, eb)) break :blk false;
                         }
                         break :blk true;
                     },
-                    .pointer => |p| switch (p.size) {
-                        .slice => blk: {
-                            if (a.len != b.len) break :blk false;
-                            for (a, b) |ea, eb| {
-                                if (!deepEql(p.child, ea, eb)) break :blk false;
-                            }
-                            break :blk true;
-                        },
-                        else => a == b,
-                    },
-                    .optional => |o| blk: {
-                        if ((a == null) != (b == null)) break :blk false;
-                        return if (a == null) true else deepEql(o.child, a.?, b.?);
-                    },
-                    .@"union" => |u| blk: {
-                        if (u.tag_type == null) break :blk std.mem.eql(u8, std.mem.asBytes(&a), std.mem.asBytes(&b)); const Tag = u.tag_type.?;
-                        const ta: Tag = a;
-                        if (ta != @as(Tag, b)) break :blk false;
-                        inline for (u.field_names, 0..) |f, i| {
-                            if (ta == @field(Tag, f)) {
-                                break :blk deepEql(u.field_types[i], @field(a, f), @field(b, f));
-                            }
-                        }
-                        break :blk false;
-                    },
                     else => a == b,
-                };
-            }
+                },
+                .optional => |o| blk: {
+                    if ((a == null) != (b == null)) break :blk false;
+                    return if (a == null) true else deepEql(o.child, a.?, b.?);
+                },
+                .@"union" => |u| blk: {
+                    if (u.tag_type == null) break :blk std.mem.eql(u8, std.mem.asBytes(&a), std.mem.asBytes(&b)); const Tag = u.tag_type.?;
+                    const ta: Tag = a;
+                    if (ta != @as(Tag, b)) break :blk false;
+                    inline for (u.field_names, 0..) |f, i| {
+                        if (ta == @field(Tag, f)) {
+                            break :blk deepEql(u.field_types[i], @field(a, f), @field(b, f));
+                        }
+                    }
+                    break :blk false;
+                },
+                else => a == b,
+            };
         }
-        else std.hash_map.AutoContext(Key);
+    };
 }
 
 pub fn HashMap(comptime Key: type, comptime Value: type) type {

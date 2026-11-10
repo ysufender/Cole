@@ -9,7 +9,7 @@ let LinkedList = std::collections::linkedlist::LinkedList;
 
 pub let Arena = struct {
     let Chunk = struct {
-        capacity : u32,
+        capacity : mut u32,
         offset   : mut u32,
         data     : mut []mut u8,
     };
@@ -111,7 +111,7 @@ pub let Arena = struct {
                 }
             }
 
-            newNode[0] = @Cons((largeChunk, self.usedChunks));
+            newNode[0] = (@Cons, largeChunk, self.usedChunks);
             self.usedChunks = newNode[0].&;
 
             let lAlignedOffset = (0 + alignment - 1) & ~(alignment - 1);
@@ -133,7 +133,7 @@ pub let Arena = struct {
             }
         }
 
-        oldNode[0] = @Cons((chunk.*, self.usedChunks));
+        oldNode[0] = (@Cons, chunk.*, self.usedChunks);
         self.usedChunks = oldNode[0].&;
 
         chunk.capacity = self.defaultChunkSize;
@@ -157,7 +157,7 @@ pub let Arena = struct {
     let _alloc = fn (ctx: *mut void, count: u32, size: u32) -> AllocatorResult([]mut void) {
         let self: *mut Arena = cast(ctx);
         return switch _allocBytes(self, count * size, 8) {
-            @Ok -> |mem| (@Ok, cast(mem)),
+            @Ok -> |mem| (@Ok, unsafeCast(mem)),
             @Err -> |err| (@Err, err),
         };
     };
@@ -169,20 +169,23 @@ pub let Arena = struct {
         let self: *mut Arena = cast(ctx);
         
         if nlen <= arr.len {
-            let oldMem: []mut u8 = cast(arr);
-            return (@Ok, cast(oldMem[0 .. (nlen * size)]));
+            let oldMem: []mut u8 = unsafeCast(arr);
+            return (@Ok, unsafeCast(oldMem[0 .. (nlen * size)]));
         }
         
         switch _allocBytes(self, nlen * size, 8) {
             @Ok -> |newMem| {
-                let oldMem: []mut u8 = cast(arr);
+                let oldMem: []mut u8 = unsafeCast(arr);
                 for 0..(arr.len * size), |i| {
                     newMem[i] = oldMem[i];
                 }
-                return (@Ok, cast(newMem));
+                return (@Ok, unsafeCast(newMem));
             }
             @Err -> |err| return (@Err, err);
         }
+
+        unreachable();
+        return undefined;
     };
 
     pub let allocator = fn (self: *mut Arena) -> Allocator {

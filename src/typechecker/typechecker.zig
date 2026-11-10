@@ -2506,12 +2506,7 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
         });
 
         for (fields) |*field| {
-            if (!self.folder.isIncomplete(field.valueType)) {
-                continue;
-            }
-
-            const newType = self.typeTable.get(try self.folder.resolveIncomplete(field.valueType, typeID));
-            self.typeTable.set(field.valueType, newType);
+            field.valueType = try self.folder.resolveIncomplete(field.valueType, typeID);
         }
     }
 

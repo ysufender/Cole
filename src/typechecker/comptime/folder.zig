@@ -61,6 +61,7 @@ currentInstantiation: ?defines.ScopePtr = null,
 scopeTypes: std.AutoHashMapUnmanaged(defines.ScopePtr, TypeID) = .empty,
 captures: std.AutoHashMapUnmanaged(defines.ScopePtr, Executer.Scope.Variables) = .empty,
 discoveringScope: ?defines.ScopePtr = null,
+directFieldType: ?defines.ExpressionPtr = null,
 
 cache: Cache,
 declCache: DeclCache,
@@ -1606,6 +1607,7 @@ fn evalEnumType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Value
 }
 
 fn evalStructType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Value.Ptr {
+    const deferIncomplete = self.directFieldType == expr;
     const allocator = self.arena.allocator();
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
     const tokens = self.typechecker.context.getTokens(ast.tokens);
@@ -1639,7 +1641,12 @@ fn evalStructType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Val
         const symbolToken = tokens.get(symbol.name);
         const symbolName = symbolToken.lexeme(self.typechecker.context, self.typechecker.currentFile);
 
-        const fieldType = try self.typechecker.expectType(symbol.type);
+        const fieldType = blk: {
+            const prevDirect = self.directFieldType;
+            self.directFieldType = symbol.type;
+            defer self.directFieldType = prevDirect;
+            break :blk try self.typechecker.expectType(symbol.type);
+        };
 
         fields[index] = types.FieldInfo{
             .public = symbol.public,
@@ -1678,9 +1685,16 @@ fn evalStructType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Val
         },
     };
 
+    const typeID = try self.typechecker.registerType(newType);
     const res = try self.appendValue(.{
-        .Type = try self.typechecker.registerType(newType),
+        .Type = typeID,
     });
+
+    if (!deferIncomplete) {
+        for (@constCast(self.typechecker.typeTable.get(typeID).Struct.fields)) |*f| {
+            f.valueType = try self.resolveIncomplete(f.valueType, typeID);
+        }
+    }
 
     try self.registerInstance(scope, self.getValue(res).Type, ownScope);
 
@@ -1700,6 +1714,7 @@ fn evalStructType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Val
 }
 
 fn evalUnionType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Value.Ptr {
+    const deferIncomplete = self.directFieldType == expr;
     // @Beware manually tagged unions are banned, so some things are hardcoded here.
 
     const allocator = self.arena.allocator();
@@ -1793,7 +1808,12 @@ fn evalUnionType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Valu
         const symbolToken = tokens.get(symbol.name);
         const symbolName = symbolToken.lexeme(self.typechecker.context, self.typechecker.currentFile);
 
-        const fieldType = try self.typechecker.expectType(symbol.type);
+        const fieldType = blk: {
+            const prevDirect = self.directFieldType;
+            self.directFieldType = symbol.type;
+            defer self.directFieldType = prevDirect;
+            break :blk try self.typechecker.expectType(symbol.type);
+        };
 
         fields[index + @intFromBool(tagged)] = types.FieldInfo{
             .public = symbol.public,
@@ -1833,9 +1853,16 @@ fn evalUnionType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Valu
         }
     };
 
+    const typeID = try self.typechecker.registerType(newType);
     const res = try self.appendValue(.{
-        .Type = try self.typechecker.registerType(newType),
+        .Type = typeID,
     });
+
+    if (!deferIncomplete) {
+        for (@constCast(self.typechecker.typeTable.get(typeID).Union.fields)) |*f| {
+            f.valueType = try self.resolveIncomplete(f.valueType, typeID);
+        }
+    }
 
     try self.registerInstance(scope, self.getValue(res).Type, ownScope);
 
@@ -1975,7 +2002,9 @@ pub fn evalThis(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value
     }
     if (ty == null) {
         self.report("Use of 'this' outside typed scope.", .{});
-        return Error.IllegalSyntax;
+        return
+            if (self.typechecker.getFlag(.CanCycle)) Error.DependencyCycle
+            else Error.IllegalSyntax;
     }
 
     return self.appendValue(.{
@@ -3451,29 +3480,96 @@ pub fn getValue(self: *const Folder, address: defines.Offset) Comptime.Value {
     return self.memory.items[address];
 }
 
+const VisitSet = struct {
+    ids: [64]TypeID = undefined,
+    len: usize = 0,
+
+    fn visit(self: *VisitSet, id: TypeID) bool {
+        for (self.ids[0..self.len]) |seen| {
+            if (seen == id) return true;
+        }
+        if (self.len == self.ids.len) return true;
+        self.ids[self.len] = id;
+        self.len += 1;
+        return false;
+    }
+};
+
 pub fn isIncomplete(self: *const Folder, typeID: TypeID) bool {
+    var visited: VisitSet = .{};
+    return self.isIncompleteImpl(typeID, &visited);
+}
+
+fn isIncompleteImpl(self: *const Folder, typeID: TypeID, visited: *VisitSet) bool {
+    if (typeID == Builtin.Type("$$incomplete")) return true;
+    if (visited.visit(typeID)) return false;
+
     return switch (self.typechecker.typeTable.get(typeID)) {
-        .Pointer => |ptr| ptr.child == Builtin.Type("$$incomplete") 
-                       or self.isIncomplete(ptr.child),
-        else => typeID == Builtin.Type("$$incomplete"),
+        .Pointer => |ptr| self.isIncompleteImpl(ptr.child, visited),
+        .Array => |arr| self.isIncompleteImpl(arr.child, visited),
+        .Struct => |str| self.anyFieldIncomplete(str.fields, visited),
+        .Union => |uni| self.anyFieldIncomplete(uni.fields, visited),
+        else => false,
     };
 }
 
+fn anyFieldIncomplete(self: *const Folder, fields: []const types.FieldInfo, visited: *VisitSet) bool {
+    for (fields) |field| {
+        if (self.isIncompleteImpl(field.valueType, visited)) return true;
+    }
+    return false;
+}
+
 pub fn resolveIncomplete(self: *Folder, typeID: TypeID, resolvedTo: TypeID) Error!TypeID {
+    var visited: VisitSet = .{};
+    return self.resolveIncompleteImpl(typeID, resolvedTo, &visited);
+}
+
+fn resolveIncompleteImpl(self: *Folder, typeID: TypeID, resolvedTo: TypeID, visited: *VisitSet) Error!TypeID {
+    if (typeID == Builtin.Type("$$incomplete")) return resolvedTo;
+    if (visited.visit(typeID)) return typeID;
+
     const info = self.typechecker.typeTable.get(typeID);
-    return switch (info) {
+    switch (info) {
         .Pointer => |ptr| {
-            self.typechecker.typeTable.set(typeID, .{
+            return self.typechecker.registerType(.{
                 .Pointer = .{
                     .size = ptr.size,
                     .mutable = ptr.mutable,
-                    .child = try self.resolveIncomplete(ptr.child, resolvedTo),
+                    .child =
+                        if (self.isIncomplete(ptr.child)) try self.resolveIncompleteImpl(ptr.child, resolvedTo, visited)
+                        else ptr.child,
                 },
             });
+        },
+        .Array => |arr| {
+            return self.typechecker.registerType(.{
+                .Array = .{
+                    .len = arr.len,
+                    .mutable = arr.mutable,
+                    .child =
+                        if (self.isIncomplete(arr.child)) try self.resolveIncompleteImpl(arr.child, resolvedTo, visited)
+                        else arr.child,
+                },
+            });
+        },
+        .Struct => |str| {
+            try self.resolveFields(str.fields, resolvedTo, visited);
             return typeID;
         },
-        else => resolvedTo,
-    };
+        .Union => |uni| {
+            try self.resolveFields(uni.fields, resolvedTo, visited);
+            return typeID;
+        },
+        else => return typeID,
+    }
+}
+
+fn resolveFields(self: *Folder, fields: []const types.FieldInfo, resolvedTo: TypeID, visited: *VisitSet) Error!void {
+    for (@constCast(fields)) |*field| {
+        if (!self.isIncomplete(field.valueType)) continue;
+        field.valueType = try self.resolveIncompleteImpl(field.valueType, resolvedTo, visited);
+    }
 }
 
 fn cacheDecl(self: *Folder, key: defines.DeclPtr, val: Comptime.Value.Ptr) Error!void {

@@ -1,7 +1,6 @@
-// @TODO Fix the compiler to somehow do this.
-
 pub let LinkedList = fn (T: type) -> type {
-    let Self = union(enum) {
+    return union(enum) {
+        let Self = this();
         pub let End = Self(@Nil, ());
 
         Cons: struct {
@@ -10,5 +9,4 @@ pub let LinkedList = fn (T: type) -> type {
         },
         Nil: void,
     };
-    return Self;
 };

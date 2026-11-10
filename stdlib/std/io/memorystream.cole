@@ -14,11 +14,11 @@ pub let init = fn (buffer: []mut u8) -> MemoryStream {
 };
 
 pub let ostream = fn (self: *mut MemoryStream) -> Stream::Output::Stream {
-    return (self, write, writeline, writebuffer, oseek, close, flush);
+    return (cast(self), write, writeline, writebuffer, oseek, close, flush);
 };
 
 pub let istream = fn (self: *mut MemoryStream) -> Stream::Input::Stream {
-    return (self, read, readline, readbuffer, exhaust, iseek, tell, close);
+    return (cast(self), read, readline, readbuffer, exhaust, iseek, tell, close);
 };
 
 pub let write = fn (ctx: *mut void, ch: u8) -> Stream::Result {

@@ -22,7 +22,7 @@ let main = fn (args: [][]u8) -> i32 {
     dst[1] = 0;
     dst[2] = 0;
     dst[3] = 0;
-    CMem::copy(dst.ptr, src.ptr, 4);
+    CMem::copy(cast(dst.ptr), cast(src.ptr), 4);
     pi(dst[0] + dst[1] + dst[2] + dst[3]);
     Alloc::dealloc(u8)(C::Allocator, src);
     Alloc::dealloc(u8)(C::Allocator, dst);
