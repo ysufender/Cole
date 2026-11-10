@@ -2889,7 +2889,26 @@ pub fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Type
         return self.evalBuiltinCall(extraPtr, decl.type, maybeExpected, expr);
     }
 
-    const maybeFunction = self.memory.items[(try self.expectDefined(ast.extra[extraPtr], null))];
+    const calleePtr = ast.extra[extraPtr];
+
+    const member: ?defines.DeclPtr =
+        if (ast.expressions.items(.type)[calleePtr] == .Dot)
+            self.typechecker.symbols.resolutionMap.get(toKey(.{
+                .file = self.typechecker.currentFile,
+                .expr = calleePtr,
+            }))
+        else null;
+
+    const maybeFunction =
+        if (member) |decl| blk: {
+            const prevInst = self.currentInstantiation;
+            self.currentInstantiation = self.typechecker.symbols.getDecl(decl).scope;
+            defer self.currentInstantiation = prevInst;
+
+            break :blk self.memory.items[try self.evalDecl(decl, null)];
+        }
+        else self.memory.items[(try self.expectDefined(calleePtr, null))];
+
     const function = switch (maybeFunction) {
         .Type => |id| {
             return self.evalExpressionList(
@@ -2924,10 +2943,39 @@ pub fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Type
         .end = ast.extra[argsList + 1],
     };
 
-    var args = self.arena.allocator().alloc(Comptime.Value.Ptr, argsRange.len())
+    const offset: usize = if (member != null) 1 else 0;
+
+    var args = self.arena.allocator().alloc(Comptime.Value.Ptr, argsRange.len() + offset)
         catch return Error.AllocatorFailure;
 
-    for (argsRange.start..argsRange.end, 0..) |ptr, idx| {
+    if (member != null) {
+        if (signature.argTypes.len == 0) {
+            return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
+        }
+
+        const selfType = signature.argTypes[0];
+        const objPtr = ast.extra[ast.expressions.get(calleePtr).value];
+        const objType = try self.typechecker.typecheckExpression(objPtr, null);
+        const obj = try self.expectDefined(objPtr, null);
+
+        args[0] = recv: {
+            if (self.typechecker.suitable(selfType, objType)) break :recv obj;
+
+            switch (self.typechecker.typeTable.get(objType)) {
+                .Pointer => |ptr| if (ptr.size != .Slice and self.typechecker.suitable(selfType, ptr.child)) {
+                    switch (self.getValue(obj)) {
+                        .Pointer => |p| break :recv p.To,
+                        else => { },
+                    }
+                },
+                else => { },
+            }
+
+            return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
+        };
+    }
+
+    for (argsRange.start..argsRange.end, offset..) |ptr, idx| {
         args[idx] = try self.eval(ast.extra[@intCast(ptr)], signature.argTypes[idx]);
     }
 

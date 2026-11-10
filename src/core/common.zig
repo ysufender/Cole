@@ -151,5 +151,6 @@ pub const CompilerError = error {
     ImportInSubLevel,
     MetadataOfNonVariable,
     MissngMetadata,
+    TooMuchIndirection,
     Terminate,
 };

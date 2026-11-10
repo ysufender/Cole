@@ -1602,13 +1602,32 @@ fn call(
         }
     }
 
-    const args = self.typechecker.builder.allocator.alloc(JIR.Ptr, argsRange.len())
-        catch return Error.AllocatorFailure;
-
     const funcType = try self.typechecker.typecheckExpression(func, null);
+    _ = self.typechecker.setFlag(.MemberCall, false);
     const fti = self.typechecker.typeTable.get(funcType);
 
-    for (argsRange.start..argsRange.end, 0..) |ptr, i| {
+    const memberDecl: ?defines.DeclPtr =
+        if (ast.expressions.items(.type)[func] == .Dot)
+            self.typechecker.symbols.resolutionMap.get(toKey(.{
+                .file = self.typechecker.currentFile,
+                .expr = func,
+            }))
+        else null;
+    const offset: usize = if (memberDecl != null) 1 else 0;
+
+    const args = self.typechecker.builder.allocator.alloc(JIR.Ptr, argsRange.len() + offset)
+        catch return Error.AllocatorFailure;
+
+    if (memberDecl) |_| {
+        const selfType = switch (fti) {
+            .Function => |function| if (function.argTypes.len > 0) function.argTypes[0]
+                else return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
+            else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
+        };
+        args[0] = try self.memberReceiver(func, selfType);
+    }
+
+    for (argsRange.start..argsRange.end, offset..) |ptr, i| {
         args[i] = try self.expression(ast.extra[@intCast(ptr)], try self.typechecker.typecheckExpression(ast.extra[@intCast(ptr)], switch (fti) {
             .Function => |function| if (i >= function.argTypes.len) null else function.argTypes[i],
             else => null,
@@ -1630,7 +1649,15 @@ fn call(
             }
             else self.typechecker.builder.call(
                 stmt,
-                try self.expression(func, funcType),
+                if (memberDecl) |decl| callee: {
+                    const prevInst = self.typechecker.folder.currentInstantiation;
+                    self.typechecker.folder.currentInstantiation = self.typechecker.symbols.getDecl(decl).scope;
+                    defer self.typechecker.folder.currentInstantiation = prevInst;
+
+                    const val = try self.typechecker.folder.evalDecl(decl, funcType);
+                    break :callee try self.typechecker.builder.literal(try self.addConstant(val, funcType));
+                }
+                else try self.expression(func, funcType),
                 args
             ),
         else => |t| {
@@ -2077,6 +2104,27 @@ fn dot(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
         if (ref) self.typechecker.builder.reference(obj)
         else if (deref) self.typechecker.builder.dereference(obj, exprType)
         else self.typechecker.builder.dot(obj, try self.typechecker.builder.internString(member), exprType);
+}
+
+fn memberReceiver(self: *Lowerer, dotExprPtr: defines.ExpressionPtr, selfType: TypeID) Error!JIR.Ptr {
+    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+
+    const objPtr = ast.extra[ast.expressions.get(dotExprPtr).value];
+    const objType = try self.typechecker.typecheckExpression(objPtr, null);
+    const obj = try self.expression(objPtr, objType);
+
+    if (self.typechecker.suitable(selfType, objType)) {
+        return obj;
+    }
+
+    switch (self.typechecker.typeTable.get(objType)) {
+        .Pointer => |ptr| if (ptr.size != .Slice and self.typechecker.suitable(selfType, ptr.child)) {
+            return self.typechecker.builder.dereference(obj, objType);
+        },
+        else => { },
+    }
+
+    return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
 }
 
 fn conditionalExpr(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR.Ptr {

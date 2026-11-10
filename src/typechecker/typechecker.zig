@@ -1850,7 +1850,10 @@ pub fn typecheckCall(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpec
         if (self.setFlag(.MemberCall, false)) 1
         else 0;
 
-    for (func.argTypes[@min(args.len, func.argTypes.len, start)..@min(args.len, func.argTypes.len)], args[0..@min(args.len, func.argTypes.len)], start..) |argType, expr, index| {
+    const paramTypes = func.argTypes[@min(start, func.argTypes.len)..];
+    const checked = @min(args.len, paramTypes.len);
+
+    for (paramTypes[0..checked], args[0..checked], start..) |argType, expr, index| {
         const exprType = try self.typecheckExpression(expr, argType);
 
         self.assertCanCoerce(argType, exprType) catch {
@@ -1864,7 +1867,6 @@ pub fn typecheckCall(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpec
             return Error.TypeMismatch;
         };
     }
-
     if (args.len != func.argTypes.len - start and !func.variadic) {
         self.report("Mismatching argument counts in function call. Expected {d}, received {d}.", .{
             func.argTypes.len,
@@ -2699,19 +2701,25 @@ pub fn typecheckMemberAccess(self: *Typechecker, on: TypeID, member: defines.Str
         });
         return Error.IllegalSyntax;
     }
-    if (
-        defTypeInfo.Function.argTypes.len == 0
-        or !(
-            self.suitable(defTypeInfo.Function.argTypes[0], on)
-            and self.suitable(defTypeInfo.Function.argTypes[0], parent orelse on)
-        )
-    ) {
+    else if (defTypeInfo.Function.argTypes.len == 0) {
+        self.report("Attempt to call non-member function '{s}' of type '{s}'.", .{
+            self.builder.getInternedString(def.name),
+            try self.typeName(undefined, on),
+        });
+        return Error.IllegalSyntax;
+    }
+    else if (
+        !self.suitable(defTypeInfo.Function.argTypes[0], on)
+        and !self.suitable(defTypeInfo.Function.argTypes[0], parent orelse on)
+    )
+    {
         self.report("Argument type mismatch in member function call to member function '{s}' of type '{s}': expected '{s}', received '{s}'.", .{
             self.builder.getInternedString(def.name),
             try self.typeName(undefined, on),
             try self.typeName(undefined, defTypeInfo.Function.argTypes[0]),
             try self.typeName(undefined, parent orelse on),
         });
+        return Error.TypeMismatch;
     }
 
     _ = self.setFlag(.MemberCall, true);
@@ -4155,9 +4163,18 @@ pub fn alignOf(self: *const Typechecker, of: TypeID) u32 {
 }
 
 pub fn tryGetDefinitionIndex(self: *Typechecker, from: TypeID, memberNamePtr: defines.StringPtr, shorthand: bool) Error!?defines.Offset {
-    const fromName = self.builder.getInternedString(self.typenameMap.get(from)
-            orelse return common.debug.ShouldBeImpossible(undefined, @src()));
-    const isAnon = fromName[0] == '$';
+    const baseName = self.builder.getInternedString(switch (self.typeTable.get(from)) {
+        .Struct => |str| str.name,
+        .Union => |uni| uni.name,
+        .Enum => |enm| enm.name,
+        else => {
+            self.report("Definition index can only be used for structs, enums and unions. Received '{s}' instead.", .{
+                try self.typeName(self.arena.allocator(), from),
+            });
+            return Error.IllegalSyntax;
+        },
+    });
+    const isAnon = baseName[0] == '$';
 
     const member =
         if (isAnon) member: {
@@ -4166,7 +4183,7 @@ pub fn tryGetDefinitionIndex(self: *Typechecker, from: TypeID, memberNamePtr: de
             break :member memberName[lastPtr..];
         }
         else if (shorthand) std.fmt.allocPrint(self.arena.allocator(), "{s}::{s}", .{
-            try self.typeName(undefined, from),
+            baseName,
             self.builder.getInternedString(memberNamePtr),
         }) catch return Error.AllocatorFailure
         else self.builder.getInternedString(memberNamePtr);

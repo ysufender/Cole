@@ -1,0 +1,22 @@
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let pi = fn (n: c_long) -> void {
+    Console::log(String::intToStr(n, C::Allocator));
+};
+
+let Point = struct {
+    x: i32,
+    y: i32,
+
+    pub let dot = fn (self: Point, other: Point) -> i32 { return self.x * other.x + self.y * other.y; };
+    pub let len2 = fn (self: Point) -> i32 { return self.dot(self); };
+};
+
+let main = fn (args: [][]u8) -> i32 {
+    let p = Point(3, 4);
+    pi(p.len2());
+    pi(p.dot(Point(1, 1)));
+    return 0;
+};
