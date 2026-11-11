@@ -7,8 +7,17 @@ pub let Result = fn (Ok: type, Err: type) -> type {
 
 pub let Option = fn (T: type) -> type {
     return union(enum) {
+        let Self = this();
+
         Some: T,
         None: void,
+
+        pub let defined = fn (self: Self) -> bool {
+            return switch self {
+                @Some -> true,
+                else -> false,
+            };
+        };
     };
 };
 

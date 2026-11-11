@@ -36,7 +36,7 @@ pub let write = fn (ctx: *mut void, ch: u8) -> Stream::Result {
 
 pub let writeline = fn (ctx: *mut void, buffer: []u8) -> Stream::Result {
     _ = writebuffer(ctx, buffer);
-    return write(ctx, ASCII::NEWLINE);
+    return write(ctx, '\n');
 };
 
 pub let writebuffer = fn (ctx: *mut void, buffer: []u8) -> Stream::Result {
@@ -104,7 +104,7 @@ pub let readline = fn (ctx: *mut void, gpa: Allocator::Allocator) -> Stream::Inp
 
     let start = self.rindex;
     let ch = self.buffer[self.rindex];
-    while ch != ASCII::NEWLINE {
+    while ch != '\n' {
         if self.rindex >= self.buffer.len {
             return (@EOS, ());
         }

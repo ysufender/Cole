@@ -1,6 +1,3 @@
-pub let NEWLINE = 10;
-pub let NULL = 0;
-
 pub let isDigit = fn (ch: u8) -> bool {
     return '0' <= ch and ch <= '9';
 };
@@ -11,8 +8,15 @@ pub let isAlpha = fn (ch: u8) -> bool {
         or ('A' <= ch and ch <= 'Z');
 };
 
+pub let isAlphaNumeric = fn (ch: u8) -> bool {
+    return isDigit(ch) or isAlpha(ch);
+};
+
 pub let isWhitespace = fn (ch: u8) -> bool {
     return
         ch == ' '
-        or ch == NEWLINE;
+        or ch == '\n'
+        or ch == '\r'
+        or ch == '\0'
+        or ch == '\t';
 };

@@ -30,7 +30,7 @@ pub let write = fn (handle: *mut void, ch: u8) -> Stream::Result {
 
 pub let writeline = fn (handle: *mut void, line: []u8) -> Stream::Result {
     if writebuffer(cast(handle), line) == @Ok {
-        let ch = ASCII::NEWLINE;
+        let ch = '\n';
         return
             if (fwrite(cast(ch.&), 1, 1, cast(handle)) == 1) @Ok
             else @Err;

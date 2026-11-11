@@ -26,6 +26,19 @@ import std::numeric as Numeric;
 
 pub let Epsilon = 0.000000119209;
 
+pub let max = fn (T: type) -> *fn (T, T) -> T {
+    return fn (a: T, b: T) -> T {
+        return if (a > b) a else b;
+    };
+};
+
+pub let min = fn (T: type) -> *fn (T, T) -> T {
+    return fn (a: T, b: T) -> T {
+        return if (a > b) b else a;
+    };
+};
+
+
 pub let abs = fn (val: float) -> float {
     return sign(val) * val;
 };

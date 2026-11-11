@@ -12,6 +12,10 @@ import std;
 
 pub let IFile = struct {
     handle: *mut FILE,
+
+    pub let stream = fn (self: IFile) -> Stream::Input {
+        return (cast(self.handle), read, readline, readbuffer, exhaust, seek, tell, close);
+    };
 };
 
 pub let stream = fn (self: IFile) -> Stream::Input {
@@ -38,7 +42,7 @@ pub let readline = fn (handle: *mut void, allocator: Allocator::Allocator) -> St
         switch res {
             @EOS -> break;
             @Err -> return (@Err, ());
-            @Ok  -> if (res.Ok == ASCII::NEWLINE) {
+            @Ok  -> if (res.Ok == '\n') {
                 break;
             }
         }

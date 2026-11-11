@@ -277,7 +277,10 @@ let formatStruct = fn (T: type) -> Formatter(T) {
         for #(@inline) 0..info.fields.len, |i| {
             let fld = info.fields[i];
 
-            write(".% = ", ([]u8))((fld.name), out);
+            _ = Stream::Output::write(out, '.');
+            _ = Stream::Output::writebuffer(out, fld.name);
+            _ = Stream::Output::writebuffer(out, " = ");
+
             format(fld.valueType)(field(str, fld.name), out);
 
             if i < info.fields.len - 1 {
@@ -301,7 +304,9 @@ let formatUnion = fn (T: type) -> Formatter(T) {
             let fld = info.fields[i];
 
             if i - 1 == cast(uni.tag) {
-                write(".% = ", ([]u8))((fld.name), out);
+                _ = Stream::Output::write(out, '.');
+                _ = Stream::Output::writebuffer(out, fld.name);
+                _ = Stream::Output::writebuffer(out, " = ");
 
                 if sizeOf(fld.valueType) != 0 {
                     format(fld.valueType)(field(uni, fld.name), out);
