@@ -6,8 +6,8 @@ import builtin;
 let main = fn (args: [][]u8) -> i32 {
     let bi = builtin::ColeInfo;
 
-    fmt::print("Hi from %, this is a test from Cole v%.%.%!", ([]u8, u32, u32, u32))
-        ((bi.name, bi.versionMajor, bi.versionMinor, bi.versionPatch), io::StdOut());
+    fmt::print("Hi from %, this is a test from %!", ([]u8, []u8))
+        ((bi.name, bi.name), io::StdOut());
 
     return 0;
 };

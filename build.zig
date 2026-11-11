@@ -22,8 +22,8 @@ var targets = [_]std.Target.Query{
 
 const version = std.SemanticVersion{
     .major = 0,
-    .minor = 0,
-    .patch = 0,
+    .minor = 1,
+    .patch = 6,
 };
 
 var config: struct {
