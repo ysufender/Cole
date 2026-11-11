@@ -136,8 +136,8 @@ let main = fn (args: [][]u8) -> i32 {
                 
     	RayLib::EndDrawing();
 
-        Allocator::dealloc(u8)(C::Allocator, pscore);
-        Allocator::dealloc(u8)(C::Allocator, cscore);
+        C::Allocator.dealloc(u8)(pscore);
+        C::Allocator.dealloc(u8)(cscore);
     }
 
     RayLib::CloseWindow();

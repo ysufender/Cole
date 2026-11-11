@@ -124,6 +124,7 @@ return {
         "member_call_chained_calls",
         "member_call_generic",
         "member_call_comptime",
+        "member_call_generic_fn",
     },
 
     ["modules"] = {

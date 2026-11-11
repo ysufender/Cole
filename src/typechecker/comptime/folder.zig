@@ -583,6 +583,17 @@ fn evalFieldAccess(self: *Folder, resType: TypeID, on: Comptime.Value.Ptr, name:
 pub fn evalDot(self: *Folder, extraPtr: defines.OpaquePtr, expr: defines.ExpressionPtr) Error!Comptime.Value.Ptr {
     const resType = try self.typechecker.typecheckDot(extraPtr, expr);
 
+    if (self.typechecker.symbols.resolutionMap.get(toKey(.{
+        .file = self.typechecker.currentFile,
+        .expr = expr,
+    }))) |decl| {
+        const prevInst = self.currentInstantiation;
+        self.currentInstantiation = self.typechecker.symbols.getDecl(decl).scope;
+        defer self.currentInstantiation = prevInst;
+
+        return self.evalDecl(decl, null);
+    }
+
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
     const tokens = self.typechecker.context.getTokens(ast.tokens);
 
@@ -2891,16 +2902,11 @@ pub fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Type
 
     const calleePtr = ast.extra[extraPtr];
 
-    const member: ?defines.DeclPtr =
-        if (ast.expressions.items(.type)[calleePtr] == .Dot)
-            self.typechecker.symbols.resolutionMap.get(toKey(.{
-                .file = self.typechecker.currentFile,
-                .expr = calleePtr,
-            }))
-        else null;
+    const member = self.typechecker.memberCallee(calleePtr);
 
     const maybeFunction =
-        if (member) |decl| blk: {
+        if (member != null and !member.?.generic) blk: {
+            const decl = member.?.decl;
             const prevInst = self.currentInstantiation;
             self.currentInstantiation = self.typechecker.symbols.getDecl(decl).scope;
             defer self.currentInstantiation = prevInst;
@@ -2954,7 +2960,7 @@ pub fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Type
         }
 
         const selfType = signature.argTypes[0];
-        const objPtr = ast.extra[ast.expressions.get(calleePtr).value];
+        const objPtr = member.?.object;
         const objType = try self.typechecker.typecheckExpression(objPtr, null);
         const obj = try self.expectDefined(objPtr, null);
 
@@ -3881,4 +3887,5 @@ pub const builtinMetadata = [_][]const u8 {
     "@opaque",
     "@packed",
     "@inline",
+    "@generic",
 };

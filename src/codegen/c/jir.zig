@@ -423,11 +423,7 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
 
 
                 if (uni.isTagged) {
-                    try self.write(out, "typedef struct {s}{s} {{\n", .{
-                        if (self.typeToJirMap.get(@intCast(typeID))) |ptr|
-                            if (self.hasMetadata(ptr, "@packed")) "__attribute__((aligned (sizeof(uint8_t)))) "
-                            else ""
-                        else "",
+                    try self.write(out, "typedef struct {s} {{\n", .{
                         name
                     });
                     try self.write(out, "\t{s} {s};\n", .{

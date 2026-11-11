@@ -1846,9 +1846,39 @@ pub fn typecheckCall(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpec
         ast.extra[exprList + 1]
     ];
 
+    const member = self.memberCallee(ast.extra[extraPtr]);
+
     const start: u32 =
-        if (self.setFlag(.MemberCall, false)) 1
+        if (self.setFlag(.MemberCall, false) or (member != null and member.?.generic)) 1
         else 0;
+
+    if (member != null and member.?.generic) {
+        const m = member.?;
+        const declName = self.builder.getInternedString(self.symbols.getDecl(m.decl).name);
+
+        if (func.argTypes.len == 0) {
+            self.report("Attempt to call non-member function '{s}'.", .{ declName });
+            return Error.IllegalSyntax;
+        }
+
+        const selfType = func.argTypes[0];
+        const objType = try self.typecheckExpression(m.object, null);
+        const fits =
+            self.suitable(selfType, objType)
+            or switch (self.typeTable.get(objType)) {
+                .Pointer => |ptr| ptr.size != .Slice and self.suitable(selfType, ptr.child),
+                else => false,
+            };
+
+        if (!fits) {
+            self.report("Argument type mismatch in member function call to generic member function '{s}': expected '{s}', received '{s}'.", .{
+                declName,
+                try self.typeName(self.arena.allocator(), selfType),
+                try self.typeName(self.arena.allocator(), objType),
+            });
+            return Error.TypeMismatch;
+        }
+    }
 
     const paramTypes = func.argTypes[@min(start, func.argTypes.len)..];
     const checked = @min(args.len, paramTypes.len);
@@ -2674,6 +2704,48 @@ pub fn typecheckFieldAccess(self: *Typechecker, on: TypeID, field: []const u8, p
     return fields[index].valueType;
 }
 
+pub const MemberCallee = struct {
+    decl: defines.DeclPtr,
+    dot: defines.ExpressionPtr,
+    object: defines.ExpressionPtr,
+    generic: bool,
+};
+
+pub fn isGenericMember(self: *Typechecker, declPtr: defines.DeclPtr) bool {
+    const decl = self.symbols.getDecl(declPtr);
+
+    const prevFile = self.currentFile;
+    self.currentFile = self.modules.modules.items(.dataIndex)[self.symbols.scopes.items(.module)[decl.scope]];
+    defer self.currentFile = prevFile;
+
+    return self.hasMetadata(decl.node, "@generic");
+}
+
+pub fn memberCallee(self: *Typechecker, callee: defines.ExpressionPtr) ?MemberCallee {
+    const ast = self.context.getAST(self.currentFile);
+
+    var dot = callee;
+    const viaCall = ast.expressions.items(.type)[dot] == .Call;
+    if (viaCall) dot = ast.extra[ast.expressions.items(.value)[dot]];
+
+    if (ast.expressions.items(.type)[dot] != .Dot) return null;
+
+    const decl = self.symbols.resolutionMap.get(toKey(.{
+        .file = self.currentFile,
+        .expr = dot,
+    })) orelse return null;
+
+    const generic = self.isGenericMember(decl);
+    if (generic != viaCall) return null;
+
+    return .{
+        .decl = decl,
+        .dot = dot,
+        .object = ast.extra[ast.expressions.items(.value)[dot]],
+        .generic = generic,
+    };
+}
+
 pub fn typecheckMemberAccess(self: *Typechecker, on: TypeID, member: defines.StringPtr, parent: ?TypeID, expr: defines.ExpressionPtr) Error!TypeID {
     const objectType = self.typeTable.get(on);
 
@@ -2694,12 +2766,20 @@ pub fn typecheckMemberAccess(self: *Typechecker, on: TypeID, member: defines.Str
     const defType = try self.discoverScopeDef(on, &def, scope, expr);
     const defTypeInfo = self.typeTable.get(defType);
 
+    const generic =
+        if (self.symbols.lookup.get(.{ .scope = scope, .name = self.builder.getInternedString(def.name) })) |decl|
+            self.isGenericMember(decl)
+        else false;
+
     if (defTypeInfo != .Function) {
         self.report("Attempt to access non member function definition '{s}' of type '{s}'. Use scoping instead.", .{
             self.builder.getInternedString(def.name),
             try self.typeName(undefined, on),
         });
         return Error.IllegalSyntax;
+    }
+    else if (generic) {
+        return defType;
     }
     else if (defTypeInfo.Function.argTypes.len == 0) {
         self.report("Attempt to call non-member function '{s}' of type '{s}'.", .{
@@ -4092,6 +4172,15 @@ pub fn sizeOf(self: *const Typechecker, of: TypeID) u32 {
         .Array => |arr| arr.len * self.sizeOf(arr.child),
         .ComptimeInt => @bitSizeOf(i64),
         .Struct => |str| {
+            if (self.hasMetadata(str.expr, "@packed")) {
+                var size: u32 = 0;
+                for (str.fields) |field| {
+                    size += self.sizeOf(field.valueType);
+                }
+
+                return size;
+            }
+
             var size: u32 = 0;
             var max_align: u32 = 8;
             for (str.fields) |field| {

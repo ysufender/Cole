@@ -1606,25 +1606,19 @@ fn call(
     _ = self.typechecker.setFlag(.MemberCall, false);
     const fti = self.typechecker.typeTable.get(funcType);
 
-    const memberDecl: ?defines.DeclPtr =
-        if (ast.expressions.items(.type)[func] == .Dot)
-            self.typechecker.symbols.resolutionMap.get(toKey(.{
-                .file = self.typechecker.currentFile,
-                .expr = func,
-            }))
-        else null;
-    const offset: usize = if (memberDecl != null) 1 else 0;
+    const member = self.typechecker.memberCallee(func);
+    const offset: usize = if (member != null) 1 else 0;
 
     const args = self.typechecker.builder.allocator.alloc(JIR.Ptr, argsRange.len() + offset)
         catch return Error.AllocatorFailure;
 
-    if (memberDecl) |_| {
+    if (member) |m| {
         const selfType = switch (fti) {
             .Function => |function| if (function.argTypes.len > 0) function.argTypes[0]
                 else return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
             else => return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()),
         };
-        args[0] = try self.memberReceiver(func, selfType);
+        args[0] = try self.memberReceiver(m.dot, selfType);
     }
 
     for (argsRange.start..argsRange.end, offset..) |ptr, i| {
@@ -1649,7 +1643,8 @@ fn call(
             }
             else self.typechecker.builder.call(
                 stmt,
-                if (memberDecl) |decl| callee: {
+                if (member != null and !member.?.generic) callee: {
+                    const decl = member.?.decl;
                     const prevInst = self.typechecker.folder.currentInstantiation;
                     self.typechecker.folder.currentInstantiation = self.typechecker.symbols.getDecl(decl).scope;
                     defer self.typechecker.folder.currentInstantiation = prevInst;
