@@ -591,6 +591,9 @@ pub fn evalDot(self: *Folder, extraPtr: defines.OpaquePtr, expr: defines.Express
         self.currentInstantiation = self.typechecker.symbols.getDecl(decl).scope;
         defer self.currentInstantiation = prevInst;
 
+        const memberCall = self.typechecker.getFlag(.MemberCall);
+        defer _ = self.typechecker.setFlag(.MemberCall, memberCall);
+
         return self.evalDecl(decl, null);
     }
 
@@ -3885,7 +3888,6 @@ pub const builtinMetadata = [_][]const u8 {
     "@extern",
     "@variadic",
     "@opaque",
-    "@packed",
     "@inline",
     "@generic",
 };

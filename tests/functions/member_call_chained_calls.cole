@@ -6,17 +6,19 @@ let pi = fn (n: c_long) -> void {
     Console::log(String::intToStr(n, C::Allocator));
 };
 
-let Point = struct {
+let Vec2 = struct {
     x: i32,
     y: i32,
 
-    pub let dot = fn (self: Point, other: Point) -> i32 { return self.x * other.x + self.y * other.y; };
-    pub let len2 = fn (self: Point) -> i32 { return self.dot(self); };
+    pub let scale = fn (self: Vec2, scalar: i32) -> Vec2 { return (self.x * scalar, self.y * scalar); };
+    pub let dot = fn (self: Vec2, other: Vec2) -> i32 { return self.x * other.x + self.y * other.y; };
+    pub let len2 = fn (self: Vec2) -> i32 { return self.dot(self); };
 };
 
 let main = fn (args: [][]u8) -> i32 {
-    let p = Point(3, 4);
+    let p = Vec2(3, 4);
     pi(p.len2());
-    pi(p.dot(Point(1, 1)));
+    pi(p.dot(Vec2(1, 1)));
+    pi(p.scale(2).len2());
     return 0;
 };

@@ -1848,8 +1848,9 @@ pub fn typecheckCall(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpec
 
     const member = self.memberCallee(ast.extra[extraPtr]);
 
+    const flagged = self.setFlag(.MemberCall, false);
     const start: u32 =
-        if (self.setFlag(.MemberCall, false) or (member != null and member.?.generic)) 1
+        if (flagged or member != null) 1
         else 0;
 
     if (member != null and member.?.generic) {
@@ -4172,15 +4173,6 @@ pub fn sizeOf(self: *const Typechecker, of: TypeID) u32 {
         .Array => |arr| arr.len * self.sizeOf(arr.child),
         .ComptimeInt => @bitSizeOf(i64),
         .Struct => |str| {
-            if (self.hasMetadata(str.expr, "@packed")) {
-                var size: u32 = 0;
-                for (str.fields) |field| {
-                    size += self.sizeOf(field.valueType);
-                }
-
-                return size;
-            }
-
             var size: u32 = 0;
             var max_align: u32 = 8;
             for (str.fields) |field| {
