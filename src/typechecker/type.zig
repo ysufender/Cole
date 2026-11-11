@@ -468,13 +468,10 @@ pub const FieldInfo = struct {
     // @CompilerOnly
     pub fn eql(this: *const FieldInfo, that: FieldInfo, typechecker: *const Typechecker) bool {
         return
-            (this.public and !that.public or this.public == that.public)
+            this.public == that.public
             and this.name == that.name
-            and typechecker.nominallyIdentical(this.valueType, that.valueType)
-            and (
-                typechecker.mutable(this.valueType) and !typechecker.mutable(that.valueType)
-                or typechecker.mutable(this.valueType) == typechecker.mutable(that.valueType)
-            );
+            and this.valueType == that.valueType
+            and typechecker.mutable(this.valueType) == typechecker.mutable(that.valueType);
     }
 };
 

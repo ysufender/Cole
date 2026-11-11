@@ -2,12 +2,14 @@ import std::io::console as Console;
 import std::io::file as File;
 import std::c as C;
 import std::ascii as ACII;
-import std::memory::allocator as Allocator;
+import std::memory::allocator;
 import std::io::stream as Stream;
 import std::io as IO;
 import std::debug;
 
 import cpu as CPU;
+
+let Allocator = std::memory::allocator::Allocator;
 
 let Ok = 0;
 let ArgumentError = 1;
@@ -21,8 +23,7 @@ let main = fn (args: [][]u8) -> i32 {
     }
 
     let path = args[0];
-    _ = Stream::Output::writebuffer(IO::StdOut(), "Source File: ");
-    Console::log(path);
+    std::debug::print("Source File: %", ([]u8))((path));
 
     let count = countBytecodeSize(path);
     if count < 0 {
@@ -32,26 +33,28 @@ let main = fn (args: [][]u8) -> i32 {
         Console::log("Given code is too big.");
         return CompilationError;
     }
+    std::debug::print("Bytecode size: %", (i32))((count));
 
     let allocator = C::Allocator;
 
-    let tmp = Allocator::alloc(allocator, count, 1)[0..count];
-    let bytecode: []mut u8 = unsafeCast(tmp);
-    code { if (bytecode.ptr == NULL) } {
+    let bytecode = allocator.alloc(u8)(count).Ok;
+    if bytecode.ptr == undefined {
         Console::log("Failed to allocate bytecode.");
-        code { return 2; }
+        return CompilationError;
     }
 
+    Console::log("Reading byte code...");
     if !populateBytecode(bytecode, path) {
         Console::log("Failed to read bytecode.");
         return CompilationError;
     }
 
+    Console::log("Initializing CPU...");
     let cpu: mut any = CPU::init(bytecode);
 
     while CPU::cycle(cpu.&) { }
 
-    Allocator::dealloc(allocator, cast(bytecode.ptr));
+    allocator.dealloc(u8)(bytecode);
     return Ok;
 };
 
@@ -59,8 +62,7 @@ let populateBytecode = fn (bytecode: mut []mut u8, path: []u8) -> bool {
     let _source = File::Input::open(path, C::Allocator, false);
 
     if _source.tag == @Err {
-        _ = Stream::Output::writebuffer(IO::StdOut(), "Failed to read file at path: ");
-        Console::log(path);
+        std::debug::print("Failed to read file at path: %", ([]u8))((path));
         return false;
     }
 
@@ -69,7 +71,7 @@ let populateBytecode = fn (bytecode: mut []mut u8, path: []u8) -> bool {
 
     let idx: mut u32 = 0;
     let _ch: mut any = Stream::Input::read(source);
-    while _ch.Ok >= 0 {
+    while _ch.tag != @EOS {
         let op: u8 = unsafeCast(_ch.Ok);
 
         if 
@@ -97,8 +99,7 @@ let countBytecodeSize = fn (path: []u8) -> i32 {
     let _source = File::Input::open(path, C::Allocator, false);
 
     if _source.tag == @Err {
-        _ = Stream::Output::writebuffer(IO::StdOut(), "Failed to read file at path: ");
-        Console::log(path);
+        std::debug::print("Failed to read file at path: %", ([]u8))((path));
         return -1;
     }
 

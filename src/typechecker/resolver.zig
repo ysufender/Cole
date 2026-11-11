@@ -54,7 +54,10 @@ pub const Declaration = struct {
     topLevel: bool,
     parent: ?defines.DeclPtr = null,
     kind: Kind,
+
+    // @TODO Bitset instead
     public: bool,
+    renamed: bool = false,
 };
 
 pub const ResolutionKey = struct {
@@ -1296,7 +1299,7 @@ pub const builtins = [_][]const u8 {
     "alignOf", "compileBreak", "typeInfo",
     "src", "buildInfo", "inComptime",
     "getMetadata", "this", "isComptime",
-    "field",
+    "field"
 };
 
 pub fn BuiltinIndex(comptime builtin: []const u8) u32 {

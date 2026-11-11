@@ -61,6 +61,7 @@ currentInstantiation: ?defines.ScopePtr = null,
 scopeTypes: std.AutoHashMapUnmanaged(defines.ScopePtr, TypeID) = .empty,
 captures: std.AutoHashMapUnmanaged(defines.ScopePtr, Executer.Scope.Variables) = .empty,
 discoveringScope: ?defines.ScopePtr = null,
+directFieldType: ?defines.ExpressionPtr = null,
 
 cache: Cache,
 declCache: DeclCache,
@@ -177,7 +178,7 @@ pub fn eval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeI
                     return Error.MissingIdentifier;
                 };
         },
-        .Call => try self.evalCall(expr.value, maybeExpected),
+        .Call => try self.evalCall(expr.value, maybeExpected, exprPtr),
         .Indexing => try self.evalIndexing(expr.value),
         .Scoping => try self.evalScoping(exprPtr),
         .ExpressionList => try self.evalExpressionList(expr.value, maybeExpected),
@@ -204,7 +205,7 @@ pub fn eval(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?TypeI
 
         .Mark => try self.evalMark(exprPtr, expr.value, maybeExpected),
 
-        .Dot => try self.evalDot(expr.value),
+        .Dot => try self.evalDot(expr.value, exprPtr),
         
         .FunctionDefinition => try self.evalFunction(exprPtr, expr.value),
 
@@ -579,8 +580,22 @@ fn evalFieldAccess(self: *Folder, resType: TypeID, on: Comptime.Value.Ptr, name:
 
 }
 
-pub fn evalDot(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {
-    const resType = try self.typechecker.typecheckDot(extraPtr);
+pub fn evalDot(self: *Folder, extraPtr: defines.OpaquePtr, expr: defines.ExpressionPtr) Error!Comptime.Value.Ptr {
+    const resType = try self.typechecker.typecheckDot(extraPtr, expr);
+
+    if (self.typechecker.symbols.resolutionMap.get(toKey(.{
+        .file = self.typechecker.currentFile,
+        .expr = expr,
+    }))) |decl| {
+        const prevInst = self.currentInstantiation;
+        self.currentInstantiation = self.typechecker.symbols.getDecl(decl).scope;
+        defer self.currentInstantiation = prevInst;
+
+        const memberCall = self.typechecker.getFlag(.MemberCall);
+        defer _ = self.typechecker.setFlag(.MemberCall, memberCall);
+
+        return self.evalDecl(decl, null);
+    }
 
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
     const tokens = self.typechecker.context.getTokens(ast.tokens);
@@ -1033,7 +1048,7 @@ fn captureLocals(self: *Folder, scope: defines.ScopePtr) Error!void {
 }
 
 // @Note prevents duplication of types
-fn needsOwnScope(self: *Folder, scope: defines.ScopePtr) bool {
+pub fn needsOwnScope(self: *Folder, scope: defines.ScopePtr) bool {
     const scopes = self.typechecker.symbols.scopes;
     var maybeCurrent: ?defines.ScopePtr = scope;
     while (maybeCurrent) |current| {
@@ -1077,6 +1092,10 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
     }
     defer self.typechecker.lastToken = prevToken;
     defer self.typechecker.currentFile = prevFile;
+    const prevDiscovering = self.discoveringScope;
+    if (self.scopeTypes.contains(decl.scope)) { self.discoveringScope = decl.scope; }
+    defer self.discoveringScope = prevDiscovering;
+    defer self.typechecker.currentScope = prevScope;
     defer self.typechecker.currentScope = prevScope;
 
     const sharedFunction =
@@ -1096,7 +1115,16 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
         _ = self.setFlag(.InComptimeCall, prevComptimeCall);
     };
 
-    if (self.capturedLocal(decl.name, decl.scope)) |local| {
+    const key: defines.StringPtr = switch (decl.kind) {
+        .Parameter, .Capture, .Field => blk: {
+            const toks = self.typechecker.context.getTokens(self.typechecker.currentFile);
+            const lex = toks.get(decl.token).lexeme(self.typechecker.context, self.typechecker.currentFile);
+            break :blk try self.typechecker.builder.internString(lex);
+        },
+        else => decl.name,
+    };
+
+    if (self.capturedLocal(key, decl.scope)) |local| {
         return local;
     }
     else if (self.declCache.get(declPtr)) |v| {
@@ -1120,16 +1148,6 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
         .Variable => blk: {
             const expected = try self.typechecker.typecheckDecl(declPtr, maybeExpected);
 
-            if (
-                false
-                and !decl.topLevel
-                and !self.typechecker.context.settings.canFold()
-                and !self.typechecker.typeTable.get(expected).isComptime(&self.typechecker.typeTable.slice())
-            ) {
-                self.report("Can't fold comptime expression in Og optimization mode.", .{});
-                return Error.ComptimeNotPossible;
-            }
-
             if (self.typechecker.mutable(expected) and (!self.getFlag(.InComptimeCall) or self.getFlag(.StaticPass))) {
                 self.report("Comptime evaluation of mutable variable is not possible.", .{});
                 return Error.ComptimeNotPossible;
@@ -1146,11 +1164,18 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
             }
 
             if (self.getFlag(.InComptimeCall) and !decl.topLevel) {
-                if (self.typechecker.executer.getVar(decl.name)) |live| {
+                if (self.typechecker.executer.getVar(key)) |live| {
                     _ = self.setFlag(.Volatile, true);
                     break :blk live;
                 }
             }
+
+            const guardedEntry = if (expected == (comptime Builtin.Type("type"))) self.typechecker.declCache.getPtr(declPtr) else null;
+            const prevStatus = if (guardedEntry) |entry| entry.status else .Checked;
+            if (guardedEntry) |entry| entry.status = .InProgress;
+            defer if (guardedEntry != null) {
+                if (self.typechecker.declCache.getPtr(declPtr)) |entry| entry.status = prevStatus;
+            };
 
             const valuePtr =
                 if (self.getFlag(.StaticPass) and !decl.topLevel) early: {
@@ -1161,16 +1186,33 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
                 }
                 else try self.expectDefined(decl.node, maybeExpected);
 
+            if (decl.topLevel and self.getValue(valuePtr) == .Function) {
+                const func = &self.memory.items[valuePtr].Function;
+                const cur = self.typechecker.builder.getInternedString(func.name);
+                if (
+                    std.mem.startsWith(u8, cur, "$$")
+                    and (self.typechecker.hasMetadata(func.expr, "@extern")
+                        or self.typechecker.hasMetadata(func.expr, "@export"))
+                ) {
+                    const tokens = self.typechecker.context.getTokens(self.typechecker.currentFile);
+                    const symName = tokens.get(decl.token).lexeme(
+                        self.typechecker.context,
+                        self.typechecker.currentFile,
+                    );
+                    try self.typechecker.builder.modifyInternedString(func.name, symName);
+                }
+            }
+
             break :blk self.castValue(valuePtr, expected, false);
         },
         .Capture =>
             if (self.getFlag(.InComptimeCall) or self.getFlag(.StaticPass)) {
-                if (self.typechecker.executer.getVar(decl.name)) |v| {
+                if (self.typechecker.executer.getVar(key)) |v| {
                     return v;
                 }
                 else {
                     self.report("Failed to evaluate comptime capture '{s}'.", .{
-                        self.typechecker.builder.getInternedString(decl.name),
+                        self.typechecker.builder.getInternedString(key),
                     });
                     return Error.EarlyEval;
                 }
@@ -1184,7 +1226,7 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
                 const paramType = try self.typechecker.typecheckDecl(declPtr, maybeExpected);
                 decl  = self.typechecker.symbols.declarations.get(declPtr);
 
-                if (self.typechecker.executer.getVar(decl.name)) |v| {
+                if (self.typechecker.executer.getVar(key)) |v| {
                     if (self.typechecker.typeTable.get(paramType).isComptime(&self.typechecker.typeTable.slice())) {
                         self.declCache.put(self.arena.allocator(), declPtr, v)
                             catch return Error.AllocatorFailure;
@@ -1193,14 +1235,14 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
                 }
                 else {
                     self.report("Failed to evaluate comptime parameter '{s}'.", .{
-                        self.typechecker.builder.getInternedString(decl.name),
+                        self.typechecker.builder.getInternedString(key),
                     });
                     return Error.EarlyEval;
                 }
             }
             else {
                 self.report("Attempt to evaluate parameter '{s}' in non-comptime scope.", .{
-                    self.typechecker.builder.getInternedString(decl.name),
+                    self.typechecker.builder.getInternedString(key),
                 });
                 return Error.ComptimeNotPossible;
             },
@@ -1213,10 +1255,10 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
     return res;
 }
 
-fn evalBuiltinCall(self: *Folder, extraPtr: defines.OpaquePtr, declPtr: defines.DeclPtr, maybeExpected: ?TypeID) Error!Comptime.Value.Ptr {
+fn evalBuiltinCall(self: *Folder, extraPtr: defines.OpaquePtr, declPtr: defines.DeclPtr, maybeExpected: ?TypeID, expr: defines.ExpressionPtr) Error!Comptime.Value.Ptr {
     const BI = Resolver.BuiltinIndex;
 
-    _ = try self.typechecker.typecheckBuiltinCall(extraPtr, declPtr, maybeExpected);
+    _ = try self.typechecker.typecheckBuiltinCall(extraPtr, declPtr, maybeExpected, expr);
 
     return switch (declPtr) {
         BI("inComptime") => inComptime: {
@@ -1249,7 +1291,7 @@ fn evalBuiltinCall(self: *Folder, extraPtr: defines.OpaquePtr, declPtr: defines.
         BI("compileLog") => self.evalCompileLog(extraPtr),
         BI("this") => self.evalThis(extraPtr),
         BI("isComptime") => self.evalIsComptime(extraPtr),
-        BI("field") => self.evalField(extraPtr),
+        BI("field") => self.evalField(extraPtr, expr),
         else => {
             self.report("Builtin '{s}' is not usable in this context.", .{Resolver.builtins[declPtr]});
             return Error.ComptimeNotPossible;
@@ -1306,7 +1348,7 @@ fn evalLiteral(self: *Folder, tokenPtr: defines.TokenPtr, maybeExpected: ?TypeID
     const value: Comptime.Value = switch (token.type) {
         .True, .False => .{ .Bool = token.type == .True },
         .Float => .{ .Float = std.fmt.parseFloat(f32, lexeme) catch unreachable },
-        .Integer => .{ .Int = std.fmt.parseInt(i64, lexeme, 10) catch |err| switch (err) {
+        .Integer => .{ .Int = std.fmt.parseInt(i64, lexeme, 0) catch |err| switch (err) {
             error.Overflow => {
                 self.report("Given literal '{s}' is too big for comptime evaluation.", .{lexeme});
                 return Error.IntegerOverflow;
@@ -1566,9 +1608,9 @@ fn evalEnumType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Value
     if (sharedKey) |key| {
         self.cache.put(self.arena.allocator(), key, .{ .Ok = res }) catch return Error.AllocatorFailure;
     }
-
-    try self.resolveScopeDecls(oldScope, scope, ast, tokens, defRange, self.getValue(res).Type);
     
+    try self.resolveScopeDecls(oldScope, scope, ast, tokens, defRange, self.getValue(res).Type);
+
     self.cache.put(
         self.arena.allocator(),
         (@as(u128, self.typechecker.currentFile) << 64) | (@as(u128, expr) << 32) | res,
@@ -1579,6 +1621,7 @@ fn evalEnumType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Value
 }
 
 fn evalStructType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Value.Ptr {
+    const deferIncomplete = self.directFieldType == expr;
     const allocator = self.arena.allocator();
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
     const tokens = self.typechecker.context.getTokens(ast.tokens);
@@ -1612,7 +1655,12 @@ fn evalStructType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Val
         const symbolToken = tokens.get(symbol.name);
         const symbolName = symbolToken.lexeme(self.typechecker.context, self.typechecker.currentFile);
 
-        const fieldType = try self.typechecker.expectType(symbol.type);
+        const fieldType = blk: {
+            const prevDirect = self.directFieldType;
+            self.directFieldType = symbol.type;
+            defer self.directFieldType = prevDirect;
+            break :blk try self.typechecker.expectType(symbol.type);
+        };
 
         fields[index] = types.FieldInfo{
             .public = symbol.public,
@@ -1651,9 +1699,18 @@ fn evalStructType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Val
         },
     };
 
+    const typeID = try self.typechecker.registerType(newType);
     const res = try self.appendValue(.{
-        .Type = try self.typechecker.registerType(newType),
+        .Type = typeID,
     });
+
+    if (!deferIncomplete) {
+        for (@constCast(self.typechecker.typeTable.get(typeID).Struct.fields)) |*f| {
+            const pv = f.valueType;
+            f.valueType = try self.resolveIncomplete(f.valueType, typeID);
+            self.typechecker.typeTable.set(pv, self.typechecker.typeTable.get(f.valueType));
+        }
+    }
 
     try self.registerInstance(scope, self.getValue(res).Type, ownScope);
 
@@ -1662,7 +1719,7 @@ fn evalStructType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Val
     }
 
     try self.resolveScopeDecls(oldScope, scope, ast, tokens, defRange, self.getValue(res).Type);
-    
+
     self.cache.put(
         self.arena.allocator(),
         (@as(u128, self.typechecker.currentFile) << 64) | (@as(u128, expr) << 32) | res,
@@ -1673,6 +1730,7 @@ fn evalStructType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Val
 }
 
 fn evalUnionType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Value.Ptr {
+    const deferIncomplete = self.directFieldType == expr;
     // @Beware manually tagged unions are banned, so some things are hardcoded here.
 
     const allocator = self.arena.allocator();
@@ -1766,7 +1824,12 @@ fn evalUnionType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Valu
         const symbolToken = tokens.get(symbol.name);
         const symbolName = symbolToken.lexeme(self.typechecker.context, self.typechecker.currentFile);
 
-        const fieldType = try self.typechecker.expectType(symbol.type);
+        const fieldType = blk: {
+            const prevDirect = self.directFieldType;
+            self.directFieldType = symbol.type;
+            defer self.directFieldType = prevDirect;
+            break :blk try self.typechecker.expectType(symbol.type);
+        };
 
         fields[index + @intFromBool(tagged)] = types.FieldInfo{
             .public = symbol.public,
@@ -1806,9 +1869,18 @@ fn evalUnionType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Valu
         }
     };
 
+    const typeID = try self.typechecker.registerType(newType);
     const res = try self.appendValue(.{
-        .Type = try self.typechecker.registerType(newType),
+        .Type = typeID,
     });
+
+    if (!deferIncomplete) {
+        for (@constCast(self.typechecker.typeTable.get(typeID).Union.fields)) |*f| {
+            const pv = f.valueType;
+            f.valueType = try self.resolveIncomplete(f.valueType, typeID);
+            self.typechecker.typeTable.set(pv, self.typechecker.typeTable.get(f.valueType));
+        }
+    }
 
     try self.registerInstance(scope, self.getValue(res).Type, ownScope);
 
@@ -1817,7 +1889,7 @@ fn evalUnionType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Valu
     }
 
     try self.resolveScopeDecls(oldScope, scope, ast, tokens, defRange, self.getValue(res).Type);
-    
+
     self.cache.put(
         self.arena.allocator(),
         (@as(u128, self.typechecker.currentFile) << 64) | (@as(u128, expr) << 32) | res,
@@ -1859,8 +1931,8 @@ fn evalCast(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID, 
     return self.castValue(thingToCast, targetType, false);
 }
 
-pub fn evalField(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {
-    const resType = try self.typechecker.typecheckFieldBuiltin(extraPtr);
+pub fn evalField(self: *Folder, extraPtr: defines.OpaquePtr, expr: defines.ExpressionPtr) Error!Comptime.Value.Ptr {
+    const resType = try self.typechecker.typecheckFieldBuiltin(extraPtr, expr);
 
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
 
@@ -1917,7 +1989,7 @@ pub fn evalThis(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value
     };
 
     if (args.len() != 0) {
-        self.report("'this' expects not arguments, received {d}.", .{
+        self.report("'this' expects no arguments, received {d}.", .{
             args.len(),
         });
         return Error.ArgumentCountMismatch;
@@ -1938,6 +2010,19 @@ pub fn evalThis(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value
         }
     }
     if (ty == null) {
+        var maybeScope: ?defines.ScopePtr = current;
+        while (maybeScope) |s| : (maybeScope = scopes.items(.parent)[s]) {
+            if (self.scopeTypes.get(s)) |found| {
+                ty = found;
+                break;
+            }
+        }
+    }
+    if (ty == null) {
+        if (self.typechecker.getFlag(.CanCycle)) {
+            return Error.DependencyCycle;
+        }
+
         self.report("Use of 'this' outside typed scope.", .{});
         return Error.IllegalSyntax;
     }
@@ -2797,9 +2882,9 @@ fn evalScoping(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Value.
     }) orelse return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src()), null);
 }
 
-pub fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID) Error!Comptime.Value.Ptr {
+pub fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID, expr: defines.ExpressionPtr) Error!Comptime.Value.Ptr {
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
-    _ = try self.typechecker.typecheckCall(extraPtr, maybeExpected);
+    _ = try self.typechecker.typecheckCall(extraPtr, maybeExpected, expr);
 
     if (self.typechecker.symbols.resolutionMap.get(toKey(.{
         .file = self.typechecker.currentFile,
@@ -2815,10 +2900,24 @@ pub fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Type
             break :blk;
         }
 
-        return self.evalBuiltinCall(extraPtr, decl.type, maybeExpected);
+        return self.evalBuiltinCall(extraPtr, decl.type, maybeExpected, expr);
     }
 
-    const maybeFunction = self.memory.items[(try self.expectDefined(ast.extra[extraPtr], null))];
+    const calleePtr = ast.extra[extraPtr];
+
+    const member = self.typechecker.memberCallee(calleePtr);
+
+    const maybeFunction =
+        if (member != null and !member.?.generic) blk: {
+            const decl = member.?.decl;
+            const prevInst = self.currentInstantiation;
+            self.currentInstantiation = self.typechecker.symbols.getDecl(decl).scope;
+            defer self.currentInstantiation = prevInst;
+
+            break :blk self.memory.items[try self.evalDecl(decl, null)];
+        }
+        else self.memory.items[(try self.expectDefined(calleePtr, null))];
+
     const function = switch (maybeFunction) {
         .Type => |id| {
             return self.evalExpressionList(
@@ -2853,10 +2952,39 @@ pub fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Type
         .end = ast.extra[argsList + 1],
     };
 
-    var args = self.arena.allocator().alloc(Comptime.Value.Ptr, argsRange.len())
+    const offset: usize = if (member != null) 1 else 0;
+
+    var args = self.arena.allocator().alloc(Comptime.Value.Ptr, argsRange.len() + offset)
         catch return Error.AllocatorFailure;
 
-    for (argsRange.start..argsRange.end, 0..) |ptr, idx| {
+    if (member != null) {
+        if (signature.argTypes.len == 0) {
+            return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
+        }
+
+        const selfType = signature.argTypes[0];
+        const objPtr = member.?.object;
+        const objType = try self.typechecker.typecheckExpression(objPtr, null);
+        const obj = try self.expectDefined(objPtr, null);
+
+        args[0] = recv: {
+            if (self.typechecker.suitable(selfType, objType)) break :recv obj;
+
+            switch (self.typechecker.typeTable.get(objType)) {
+                .Pointer => |ptr| if (ptr.size != .Slice and self.typechecker.suitable(selfType, ptr.child)) {
+                    switch (self.getValue(obj)) {
+                        .Pointer => |p| break :recv p.To,
+                        else => { },
+                    }
+                },
+                else => { },
+            }
+
+            return common.debug.ShouldBeImpossible(self.typechecker.context.log, @src());
+        };
+    }
+
+    for (argsRange.start..argsRange.end, offset..) |ptr, idx| {
         args[idx] = try self.eval(ast.extra[@intCast(ptr)], signature.argTypes[idx]);
     }
 
@@ -3132,20 +3260,23 @@ fn handleScopeDecls(
         const symbolToken = tokens.get(sig.name);
         const symbolName = symbolToken.lexeme(self.typechecker.context, self.typechecker.currentFile);
 
-        const declPtr = self.typechecker.symbols.lookup.get(.{
-            .scope = scope,
-            .name = symbolName,
-        }) orelse return common.debug.ShouldBeImpossible(undefined, @src());
-        const decl = self.typechecker.symbols.getDecl(declPtr);
+        if (newScope != scope) {
+            const declPtr = self.typechecker.symbols.lookup.get(.{
+                .scope = scope,
+                .name = symbolName,
+            }) orelse return common.debug.ShouldBeImpossible(undefined, @src());
+            const decl = self.typechecker.symbols.getDecl(declPtr);
 
-        const newDecl = try self.typechecker.symbols.declarations.addOne(self.typechecker.arena.allocator());
-        self.typechecker.symbols.declarations.set(newDecl, decl);
-        self.typechecker.symbols.declarations.items(.scope)[newDecl] = newScope;
+            const newDecl = try self.typechecker.symbols.declarations.addOne(self.typechecker.arena.allocator());
+            self.typechecker.symbols.declarations.set(newDecl, decl);
+            self.typechecker.symbols.declarations.items(.scope)[newDecl] = newScope;
 
-        self.typechecker.symbols.lookup.put(self.typechecker.arena.allocator(), .{
-            .scope = newScope,
-            .name = symbolName,
-        }, newDecl) catch return Error.AllocatorFailure;
+            self.typechecker.symbols.lookup.put(self.typechecker.arena.allocator(), .{
+                .scope = newScope,
+                .name = symbolName,
+            }, newDecl) catch return Error.AllocatorFailure;
+        }
+
             
         const newName = try self.typechecker.builder.internString(symbolName);
         defs.appendAssumeCapacity(.{
@@ -3178,8 +3309,12 @@ fn resolveScopeDecls(
     });
 
     const previousInstantiation = self.currentInstantiation;
-    self.currentInstantiation = if (instanceScope != originalScope) instanceScope else self.currentInstantiation;
+    self.currentInstantiation = instanceScope;
     defer self.currentInstantiation = previousInstantiation;
+
+    const previousDiscover = self.discoveringScope;
+    self.discoveringScope = instanceScope;
+    defer self.discoveringScope = previousDiscover;
 
     for (0..defRange.len()) |defIndex| {
         const defPtr = ast.extra[defRange.at(@intCast(defIndex))];
@@ -3408,29 +3543,96 @@ pub fn getValue(self: *const Folder, address: defines.Offset) Comptime.Value {
     return self.memory.items[address];
 }
 
+const VisitSet = struct {
+    ids: [64]TypeID = undefined,
+    len: usize = 0,
+
+    fn visit(self: *VisitSet, id: TypeID) bool {
+        for (self.ids[0..self.len]) |seen| {
+            if (seen == id) return true;
+        }
+        if (self.len == self.ids.len) return true;
+        self.ids[self.len] = id;
+        self.len += 1;
+        return false;
+    }
+};
+
 pub fn isIncomplete(self: *const Folder, typeID: TypeID) bool {
+    var visited: VisitSet = .{};
+    return self.isIncompleteImpl(typeID, &visited);
+}
+
+fn isIncompleteImpl(self: *const Folder, typeID: TypeID, visited: *VisitSet) bool {
+    if (typeID == Builtin.Type("$$incomplete")) return true;
+    if (visited.visit(typeID)) return false;
+
     return switch (self.typechecker.typeTable.get(typeID)) {
-        .Pointer => |ptr| ptr.child == Builtin.Type("$$incomplete") 
-                       or self.isIncomplete(ptr.child),
-        else => typeID == Builtin.Type("$$incomplete"),
+        .Pointer => |ptr| self.isIncompleteImpl(ptr.child, visited),
+        .Array => |arr| self.isIncompleteImpl(arr.child, visited),
+        .Struct => |str| self.anyFieldIncomplete(str.fields, visited),
+        .Union => |uni| self.anyFieldIncomplete(uni.fields, visited),
+        else => false,
     };
 }
 
+fn anyFieldIncomplete(self: *const Folder, fields: []const types.FieldInfo, visited: *VisitSet) bool {
+    for (fields) |field| {
+        if (self.isIncompleteImpl(field.valueType, visited)) return true;
+    }
+    return false;
+}
+
 pub fn resolveIncomplete(self: *Folder, typeID: TypeID, resolvedTo: TypeID) Error!TypeID {
+    var visited: VisitSet = .{};
+    return self.resolveIncompleteImpl(typeID, resolvedTo, &visited);
+}
+
+fn resolveIncompleteImpl(self: *Folder, typeID: TypeID, resolvedTo: TypeID, visited: *VisitSet) Error!TypeID {
+    if (typeID == Builtin.Type("$$incomplete")) return resolvedTo;
+    if (visited.visit(typeID)) return typeID;
+
     const info = self.typechecker.typeTable.get(typeID);
-    return switch (info) {
+    switch (info) {
         .Pointer => |ptr| {
-            self.typechecker.typeTable.set(typeID, .{
+            return self.typechecker.registerType(.{
                 .Pointer = .{
                     .size = ptr.size,
                     .mutable = ptr.mutable,
-                    .child = try self.resolveIncomplete(ptr.child, resolvedTo),
+                    .child =
+                        if (self.isIncomplete(ptr.child)) try self.resolveIncompleteImpl(ptr.child, resolvedTo, visited)
+                        else ptr.child,
                 },
             });
+        },
+        .Array => |arr| {
+            return self.typechecker.registerType(.{
+                .Array = .{
+                    .len = arr.len,
+                    .mutable = arr.mutable,
+                    .child =
+                        if (self.isIncomplete(arr.child)) try self.resolveIncompleteImpl(arr.child, resolvedTo, visited)
+                        else arr.child,
+                },
+            });
+        },
+        .Struct => |str| {
+            try self.resolveFields(str.fields, resolvedTo, visited);
             return typeID;
         },
-        else => resolvedTo,
-    };
+        .Union => |uni| {
+            try self.resolveFields(uni.fields, resolvedTo, visited);
+            return typeID;
+        },
+        else => return typeID,
+    }
+}
+
+fn resolveFields(self: *Folder, fields: []const types.FieldInfo, resolvedTo: TypeID, visited: *VisitSet) Error!void {
+    for (@constCast(fields)) |*field| {
+        if (!self.isIncomplete(field.valueType)) continue;
+        field.valueType = try self.resolveIncompleteImpl(field.valueType, resolvedTo, visited);
+    }
 }
 
 fn cacheDecl(self: *Folder, key: defines.DeclPtr, val: Comptime.Value.Ptr) Error!void {
@@ -3672,9 +3874,9 @@ pub const builtinTypes = [_]struct {
     // mut any
     .{ .name = "mut any", .info = .{ .Any = true } },
     // $$incomplete
-    .{ .name = "$$incomplete", .info = .{ .Struct = .{ .mutable = false, .name = Resolver.BuiltinIndex("any") + 2, .fields = &.{}, .definitions = &.{}, .scope = 0, .isTuple = false, .expr = 0 } } },
+    .{ .name = "$$incomplete", .info = .{ .Struct = .{ .mutable = false, .name = Resolver.BuiltinIndex("any") + 2, .fields = &.{}, .definitions = &.{}, .scope = 0, .isTuple = false, .expr = 0, } } },
     // $$builtin_metadata
-    .{ .name = "$$builtin_metadata", .info = .{ .Enum = .{ .mutable = false, .name = Resolver.BuiltinIndex("any") + 3, .fields = &.{ types.EnumField{ .name = "$$placeholder", .value = 0, } }, .definitions = &.{}, .scope = 0, .expr = 0 } } },
+    .{ .name = "$$builtin_metadata", .info = .{ .Enum = .{ .mutable = false, .name = Resolver.BuiltinIndex("any") + 3, .fields = &.{ types.EnumField{ .name = "$$placeholder", .value = 0, } }, .definitions = &.{}, .scope = 0, .expr = 0, } } },
     // []u8
     .{ .name = "[]u8", .info = .{ .Pointer = .{ .mutable = false, .child = 2, .size = .Slice, }, } },
 };
@@ -3686,6 +3888,6 @@ pub const builtinMetadata = [_][]const u8 {
     "@extern",
     "@variadic",
     "@opaque",
-    "@packed",
     "@inline",
+    "@generic",
 };

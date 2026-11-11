@@ -2,6 +2,7 @@ const std = @import("std");
 const defines = @import("../core/defines.zig");
 const types = @import("type.zig");
 const backend = @import("../codegen/backend.zig");
+const common = @import("../core/common.zig");
 
 const assert = std.debug.assert;
 

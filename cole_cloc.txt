@@ -1,0 +1,6 @@
+#use "cloc --vcs=git --read-lang-def=cole_cloc.txt"
+
+Cole
+    filter call_regexp_common C
+    extension cole
+    3rd_gen_scale 1.00

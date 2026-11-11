@@ -15,9 +15,9 @@ let stdout: mut *mut FILE = #(@extern) undefined;
 let stdin: mut *mut FILE = #(@extern) undefined;
 let stderr: mut *mut FILE = #(@extern) undefined;
 
-pub let StdOut = fn () -> Stream::Output::Stream {
+pub let StdOut = fn () -> Stream::Output {
     return (
-        stdout,
+        cast(stdout),
         OutputFile::write,
         OutputFile::writeline,
         OutputFile::writebuffer,
@@ -27,9 +27,9 @@ pub let StdOut = fn () -> Stream::Output::Stream {
     );
 };
 
-pub let StdErr = fn () -> Stream::Output::Stream {
+pub let StdErr = fn () -> Stream::Output {
     return (
-        stderr,
+        cast(stderr),
         OutputFile::write,
         OutputFile::writeline,
         OutputFile::writebuffer,
@@ -39,9 +39,9 @@ pub let StdErr = fn () -> Stream::Output::Stream {
     );
 };
 
-pub let StdIn = fn () -> Stream::Input::Stream {
+pub let StdIn = fn () -> Stream::Input {
     return (
-        stdin,
+        cast(stdin),
         InputFile::read,
         InputFile::readline,
         InputFile::readbuffer,
@@ -56,7 +56,7 @@ let noexhaust = fn (stream: *mut void, allocator: Allocator::Allocator) -> Strea
     return undefined;
 };
 
-let noseek = fn (stream: *mut void, off: u32) -> Stream::Result {
+let noseek = fn (stream: *mut void, off: u32, base: Stream::Base) -> Stream::Result {
     return @Ok;
 };
 

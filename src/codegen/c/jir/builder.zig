@@ -340,12 +340,12 @@ pub fn dot(self: *Builder, object: JIR.Ptr, field: StringPtr, objType: TypeID) E
 
     return switch (self.typechecker.typeTable.get(objType)) {
         .Union => |uni|
-            if (self.typechecker.context.settings.buildInfo.isDebug and field != try self.internString("tag")) {
+            if (false and self.typechecker.context.settings.buildInfo.isDebug and field != try self.internString("tag")) {
                 const fieldIndex = try self.typechecker.fieldIndex(objType, field);
                 const tagVal = try self.addConstant(.{ .Integer = .{ .u32 = fieldIndex } });
                 const tag = try self.dot(objIdent, try self.internString("tag"), objType);
                 const okLabelName = try self.typechecker.folder.generateRandomName(.UnionSafety);
-                const cnd = try self.equal(tag, try self.literal(try self.addConstant(.{
+                const cnd = try self.notEqual(tag, try self.literal(try self.addConstant(.{
                     .Aggregate = .{
                         .type = uni.tag,
                         .data = .{
@@ -357,7 +357,7 @@ pub fn dot(self: *Builder, object: JIR.Ptr, field: StringPtr, objType: TypeID) E
                 const safetyCheck = try self.cjump(okLabelName, cnd);
                 const segfault = try self.typechecker.builder.inlineC(
                     try self.internString(
-                        std.fmt.allocPrint(self.allocator, "__union_access__: __union_access((long)&&__union_access__, \"{s}\");", .{
+                        std.fmt.allocPrint(self.allocator, "$$union_access$$: $$union_access((long)&&$$union_access$$, \"{s}\");", .{
                             self.getInternedString(uni.fields[fieldIndex].name),
                         }) catch return Error.AllocatorFailure,
                     ),

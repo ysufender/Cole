@@ -63,7 +63,7 @@ void __attribute__((noreturn)) $$unreachable(long const addr) {{
 
 #ifdef COLE_DEBUG
 void __attribute__((noreturn)) $$invalid_index(long const addr) {{
-    fprintf(stderr, "Indexing error at %#018lx\n", addr);
+    fprintf(stderr, "Index out of bounds at %#018lx\n", addr);
     return $$panic_handler(addr);
 }}
 
@@ -91,7 +91,11 @@ int main(int const argc, char const* const* const argv) {{
     }};
 #endif
 
-    Slice_uint8_t* const strings = (Slice_uint8_t*)malloc(sizeof(Slice_uint8_t) * (argc - 1));
+    Slice_uint8_t* const strings =
+        argc > 1
+        ? (Slice_uint8_t*)malloc(sizeof(Slice_uint8_t) * (argc - 1))
+        : NULL;
+
     for (int i = 1; i < argc; i++) {{
         strings[i - 1].ptr = (uint8_t*)argv[i];
         strings[i - 1].len = strlen(argv[i]);

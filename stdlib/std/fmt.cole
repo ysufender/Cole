@@ -3,9 +3,10 @@ import std::io::stream as Stream;
 import std::numeric as Numeric;
 import std::string as String;
 import std::debug as Debug;
+import std::ascii as ASCII;
 import std;
 
-let OStream = Stream::Output::Stream;
+let OStream = Stream::Output;
 let Malloc = Allocator::Allocator;
 let Formatter = fn (T: type) -> type { return *fn (T, OStream) -> void; };
 
@@ -28,6 +29,9 @@ pub let format = fn (T: type) -> Formatter(T) {
             _ = Stream::Output::writebuffer(out, if (arg) "true" else "false");
         };
         @Array    -> return formatArray(T);
+        @Struct   -> return formatStruct(T);
+        @Union    -> return formatUnion(T);
+        @Enum     -> return formatEnum(T);
         else      -> {
             compileError("Runtime formatting is not possible with this type.");
         }
@@ -36,7 +40,7 @@ pub let format = fn (T: type) -> Formatter(T) {
     return unreachable();
 };
 
-pub let print = fn (fmt: []u8, T: type) -> *fn (T, OStream) -> void {
+pub let write = fn (fmt: []u8, T: type) -> *fn (T, OStream) -> void {
     switch typeInfo(T) {
         @Struct -> |s| {
             if !s.isTuple {
@@ -93,8 +97,13 @@ pub let print = fn (fmt: []u8, T: type) -> *fn (T, OStream) -> void {
                 format(info.fields[i].valueType)(field(args, info.fields[i].name), out);
             }
         }
+    };
+};
 
-        _ = Stream::Output::writebuffer(out, "\n");
+pub let print = fn (fmt: []u8, T: type) -> *fn (T, OStream) -> void {
+    return fn (args: T, out: OStream) -> void {
+        write(fmt, T)(args, out);
+        _ = Stream::Output::write(out, '\n');
     };
 };
 
@@ -248,15 +257,81 @@ let formatFloat = fn (T: type) -> Formatter(T) {
 let formatArray = fn (T: type) -> Formatter(T) {
     return fn (arr: T, out: OStream) -> void {
         _ = Stream::Output::write(out, '[');
-        let idx: mut u32 = 0;
-        for arr, |elem| {
+        for 0..arr.len, |idx| {
+            let elem = arr[idx];
             _ = Stream::Output::write(out, ' ');
             format(typeOf(elem))(elem, out);
             if idx != arr.len - 1 {
                 _ = Stream::Output::write(out, ',');
             }
-            idx = idx + 1;
         }
         _ = Stream::Output::writebuffer(out, " ]");
+    };
+};
+
+let formatStruct = fn (T: type) -> Formatter(T) {
+    let info = typeInfo(T).Struct;
+
+    return fn (str: T, out: OStream) -> void {
+        _ = Stream::Output::writebuffer(out, "{ ");
+        for #(@inline) 0..info.fields.len, |i| {
+            let fld = info.fields[i];
+
+            write(".% = ", ([]u8))((fld.name), out);
+            format(fld.valueType)(field(str, fld.name), out);
+
+            if i < info.fields.len - 1 {
+                _ = Stream::Output::writebuffer(out, ", ");
+            }
+        }
+        _ = Stream::Output::writebuffer(out, " }");
+    };
+};
+
+let formatUnion = fn (T: type) -> Formatter(T) {
+    let info = typeInfo(T).Union;
+
+    if !info.isTagged {
+        compileError("Can't format untagged union.");
+    }
+
+    return fn (uni: T, out: OStream) -> void {
+        _ = Stream::Output::writebuffer(out, "{ ");
+        for #(@inline) 1..info.fields.len, |i| {
+            let fld = info.fields[i];
+
+            if i - 1 == cast(uni.tag) {
+                write(".% = ", ([]u8))((fld.name), out);
+
+                if sizeOf(fld.valueType) != 0 {
+                    format(fld.valueType)(field(uni, fld.name), out);
+                }
+                else {
+                    _ = Stream::Output::writebuffer(out, "()");
+                }
+            }
+
+            if i < info.fields.len - 2 {
+                _ = Stream::Output::writebuffer(out, ", ");
+            }
+        }
+        _ = Stream::Output::writebuffer(out, " }");
+    };
+};
+
+let formatEnum = fn (T: type) -> Formatter(T) {
+    let info = typeInfo(T).Enum;
+
+    let fieldMap: [info.fields.len]mut []u8 = undefined;
+    for 0..info.fields.len, |i| {
+        fieldMap[i] = info.fields[i].name;
+    }
+
+    return fn (enm: T, out: OStream) -> void {
+        let static = struct {
+            pub let EnumFieldStrings = fieldMap;
+        };
+
+        write("@%", ([]u8))((static::EnumFieldStrings[as(u32, cast(enm))]), out);
     };
 };

@@ -1,4 +1,4 @@
-import std::memory::allocator as Allocator;
+import std::memory::allocator;
 import std::io::stream as Stream;
 import std::c::memory as Memory;
 import std::io::file as File;
@@ -8,13 +8,15 @@ import std::io::console as Console;
 import std::string as String;
 import std::io as IO;
 
+let Allocator = std::memory::allocator::Allocator;
+
 pub let INI = struct {
     pub let LoadResult = union(enum) {
         Ok: INI,
         Err: void,
     };
 
-    allocator: Allocator::Allocator,
+    allocator: Allocator,
     sections: []Section,
 };
 
@@ -40,7 +42,7 @@ pub let Value = union(enum) {
     Ref      : Reference, 
     List     : []Value,
 
-    pub let print = fn (self: *Value, allocator: Allocator::Allocator, stream: Stream::Output::Stream) -> void {
+    pub let print = fn (self: *Value, allocator: Allocator, stream: Stream::Output) -> void {
         if self == undefined {
             _ = Stream::Output::writebuffer(stream, "<undefined>");
             return;
@@ -55,7 +57,7 @@ pub let Value = union(enum) {
     };
 };
 
-pub let loadFile = fn (allocator: Allocator::Allocator, path: []u8) -> INI::LoadResult {
+pub let loadFile = fn (allocator: Allocator, path: []u8) -> INI::LoadResult {
     let file = File::Input::open(path, allocator, false);
 
     return switch file {
@@ -98,7 +100,7 @@ pub let get = fn (self: *INI, sectionName: mut []u8, fieldName: mut []u8) -> *Va
     return undefined;
 };
 
-pub let loadStream = fn (allocator: Allocator::Allocator, stream: Stream::Input::Stream) -> INI::LoadResult {
+pub let loadStream = fn (allocator: Allocator, stream: Stream::Input) -> INI::LoadResult {
     let list = SectionList::init(allocator);
     let section: mut *mut Section = undefined;
     let values = PairList::init(allocator);
@@ -195,19 +197,19 @@ let PairList = struct {
 
     let initial = 8;
 
-    pub let init = fn (allocator: Allocator::Allocator) -> mut PairList {
-        let new: mut any = Allocator::alloc(Pair)(allocator, initial).Ok;
+    pub let init = fn (allocator: Allocator) -> mut PairList {
+        let new: mut any = allocator.alloc(Pair)(initial).Ok;
         new = new[0..0];
         return (new, initial);
     };
 
-    pub let grow = fn (self: *mut PairList, allocator: Allocator::Allocator) -> void {
+    pub let grow = fn (self: *mut PairList, allocator: Allocator) -> void {
         self.capacity = self.capacity * 2;
-        let new: []mut Pair = Allocator::realloc(Pair)(allocator, cast(self.items), self.capacity).Ok;
+        let new: []mut Pair = allocator.realloc(Pair)(cast(self.items), self.capacity).Ok;
         self.items = new[0..self.items.len];
     };
 
-    pub let append = fn (self: *mut PairList, allocator: Allocator::Allocator, name: []u8, value: Value) -> void {
+    pub let append = fn (self: *mut PairList, allocator: Allocator, name: []u8, value: Value) -> void {
         if self.items.len >= self.capacity {
             grow(self, allocator);
         }
@@ -217,9 +219,9 @@ let PairList = struct {
         self.items[idx] = (name, value);
     };
 
-    pub let slice = fn (self: *mut PairList, allocator: Allocator::Allocator) -> []Pair {
-        let slice = Allocator::alloc(Pair)(allocator, self.items.len).Ok;
-        Memory::copy(cast(slice.ptr), self.items.ptr, self.items.len * sizeOf(Pair));
+    pub let slice = fn (self: *mut PairList, allocator: Allocator) -> []Pair {
+        let slice = allocator.alloc(Pair)(self.items.len).Ok;
+        Memory::copy(cast(slice.ptr), cast(self.items.ptr), self.items.len * sizeOf(Pair));
         self.items = self.items[0..0];
         return unsafeCast(slice);
     };
@@ -232,19 +234,19 @@ let SectionList = struct {
 
     let initial = 32;
 
-    pub let init = fn (allocator: Allocator::Allocator) -> mut SectionList {
-        let new: mut []mut Section = Allocator::alloc(Section)(allocator, initial).Ok;
+    pub let init = fn (allocator: Allocator) -> mut SectionList {
+        let new: mut []mut Section = allocator.alloc(Section)(initial).Ok;
         new = new[0..0];
         return (new, initial);
     };
 
-    pub let grow = fn (self: *mut SectionList, allocator: Allocator::Allocator) -> void {
+    pub let grow = fn (self: *mut SectionList, allocator: Allocator) -> void {
         self.capacity = self.capacity * 2;
         let new: []mut Section = Allocator::realloc(Section)(allocator, cast(self.items), self.capacity).Ok;
         self.items = new[0..self.items.len];
     };
 
-    pub let append = fn (self: *mut SectionList, allocator: Allocator::Allocator, section: []u8) -> *mut Section {
+    pub let append = fn (self: *mut SectionList, allocator: Allocator, section: []u8) -> *mut Section {
         {
             for 0..self.items.len, |idx| {
                 if String::equals(self.items[idx].name, section) {
@@ -263,9 +265,9 @@ let SectionList = struct {
         return self.items[idx].&;
     };
 
-    pub let slice = fn (self: *mut SectionList, allocator: Allocator::Allocator) -> []Section {
-        let slice = Allocator::alloc(Section)(allocator, self.items.len).Ok;
-        Memory::copy(cast(slice.ptr), self.items.ptr, self.items.len * sizeOf(Section));
+    pub let slice = fn (self: *mut SectionList, allocator: Allocator) -> []Section {
+        let slice = allocator.alloc(Section)(self.items.len).Ok;
+        Memory::copy(cast(slice.ptr), cast(self.items.ptr), self.items.len * sizeOf(Section));
         self.items = self.items[0..0];
         return unsafeCast(slice);
     };
@@ -308,7 +310,7 @@ let Token = struct {
     value: []u8,
 };
 
-let tokenize = fn (allocator: Allocator::Allocator, stream: Stream::Input::Stream) -> Token {
+let tokenize = fn (allocator: Allocator, stream: Stream::Input) -> Token {
     while true {
         let _ch: mut any = Stream::Input::read(stream);
 
@@ -343,11 +345,11 @@ let tokenize = fn (allocator: Allocator::Allocator, stream: Stream::Input::Strea
             return (@Section, sectionName.value);
         }
         else if ASCII::isDigit(ch) {
-            _ = Stream::Input::seek(stream, Stream::Input::tell(stream) - 1);
+            _ = Stream::Input::seek(stream, Stream::Input::tell(stream) - 1, Stream::Base::Start);
             return number(allocator, stream);
         }
         else if ASCII::isAlpha(ch) {
-            _ = Stream::Input::seek(stream, Stream::Input::tell(stream) - 1);
+            _ = Stream::Input::seek(stream, Stream::Input::tell(stream) - 1, Stream::Base::Start);
             return identifier(allocator, stream);
         }
         else if ch == '{' {
@@ -378,7 +380,7 @@ let tokenize = fn (allocator: Allocator::Allocator, stream: Stream::Input::Strea
     return (@EOF, "Unreachable.");
 };
 
-let number = fn (allocator: Allocator::Allocator, stream: Stream::Input::Stream) -> Token {
+let number = fn (allocator: Allocator, stream: Stream::Input) -> Token {
     let isFloat: mut bool = false;
     let start = Stream::Input::tell(stream);
 
@@ -405,9 +407,9 @@ let number = fn (allocator: Allocator::Allocator, stream: Stream::Input::Stream)
 
     let end = Stream::Input::tell(stream);
     let len = end - start - 1;
-    _ = Stream::Input::seek(stream, start);
+    _ = Stream::Input::seek(stream, start, Stream::Base::Start);
 
-    let value: []mut u8 = Allocator::alloc(u8)(allocator, len).Ok;
+    let value: []mut u8 = allocator.alloc(u8)(len).Ok;
 
     for 0..len, |index| {
         let res = Stream::Input::read(stream);
@@ -424,7 +426,7 @@ let number = fn (allocator: Allocator::Allocator, stream: Stream::Input::Stream)
         else (@Integer, value);
 };
 
-let identifier = fn (allocator: Allocator::Allocator, stream: Stream::Input::Stream) -> Token {
+let identifier = fn (allocator: Allocator, stream: Stream::Input) -> Token {
     let start = Stream::Input::tell(stream);
 
     while true {
@@ -442,9 +444,9 @@ let identifier = fn (allocator: Allocator::Allocator, stream: Stream::Input::Str
     let end = Stream::Input::tell(stream);
 
     let len = end - start - 1;
-    _ = Stream::Input::seek(stream, start);
+    _ = Stream::Input::seek(stream, start, Stream::Base::Start);
 
-    let value: []mut u8 = Allocator::alloc(u8)(allocator, len).Ok;
+    let value: []mut u8 = allocator.alloc(u8)(len).Ok;
 
     for 0..len, |index| {
         let res = Stream::Input::read(stream);

@@ -1,0 +1,12 @@
+pub let LinkedList = fn (T: type) -> type {
+    return union(enum) {
+        let Self = this();
+        pub let End = Self(@Nil, ());
+
+        Cons: struct {
+            head: T,
+            tail: *Self, // @Note Guaranteed to be valid since Nil exists.
+        },
+        Nil: void,
+    };
+};

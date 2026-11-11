@@ -70,6 +70,7 @@ pub const Flags = enum(u8) {
     CoveredAllPaths = 4,
     InLoop = 5,
     InDefer = 6,
+    MemberCall = 7,
 
     pub fn flag(flagToGet: Flags) u8 {
         return @intFromEnum(flagToGet);
@@ -341,36 +342,44 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
             const newType = self.folder.getValue(try self.folder.eval(decl.node, expected)).Type;
             const typeInfo = self.typeTable.get(newType);
 
-            const prevName = self.builder.getInternedString(switch (typeInfo) {
-                .Struct => |str| str.name,
-                .Union => |uni| uni.name,
-                .Enum => |enm| enm.name,
+            inline for (.{ self.folder.currentInstantiation, self.folder.discoveringScope }) |maybeInst| {
+                if (maybeInst) |inst| {
+                    if (self.folder.scopeTypes.get(inst)) |owner| {
+                        if (owner == newType) break :blk;
+                    }
+                }
+            }
+
+            const prevName = switch (typeInfo) {
+                .Struct => |str| self.builder.getInternedString(str.name),
+                .Union => |uni| self.builder.getInternedString(uni.name),
+                .Enum => |enm| self.builder.getInternedString(enm.name),
                 else => break :blk,
-            });
+            };
 
             if (!std.mem.startsWith(u8, prevName, "$$")) {
                 break :blk;
             }
 
             const ast = self.context.getAST(self.currentFile);
+            const typeScope = switch (typeInfo) {
+                .Struct => |str| str.scope,
+                .Union => |uni| uni.scope,
+                .Enum => |enm| enm.scope,
+                else => break :blk,
+            };
+            var maybeScope: ?defines.ScopePtr = decl.scope;
+            while (maybeScope) |s| {
+                if (s == typeScope) break :blk;
+                maybeScope = self.symbols.scopes.items(.parent)[s];
+            }
             const tokens = self.context.getTokens(ast.tokens);
 
             const symName = tokens.get(decl.token).lexeme(self.context, self.currentFile);
 
             const namespace =
-                if (decl.parent != null and self.typeTable.get(try self.typecheckDecl(decl.parent.?, null)) == .Type) hasParent: {
-                    const rtypePtr = try self.folder.eval(self.symbols.getDecl(decl.parent.?).node, null);
-                    const rtype = self.folder.getValue(rtypePtr).Type;
-
-                    break :hasParent self.builder.getInternedString(switch (self.typeTable.get(rtype)) {
-                        .Struct => |str| str.name,
-                        .Enum => |enm| enm.name,
-                        .Union => |uni| uni.name,
-                        else => return common.debug.ShouldBeImpossible(self.context.log, @src()),
-                    });
-                }
-                else if (decl.topLevel) self.modules.modules.get(self.symbols.scopes.items(.module)[decl.scope]).name
-                else try self.folder.generateRandomNameString(.Type);
+                if (decl.topLevel) self.modules.modules.get(self.symbols.scopes.items(.module)[decl.scope]).name
+                else (try self.folder.generateRandomNameString(.Type))[2..];
 
             const newName =
                 if (self.hasMetadata(decl.node, "@extern") and decl.topLevel) symName
@@ -424,18 +433,11 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
             self.typenameMap.put(self.arena.allocator(), newType, new)
                 catch return Error.AllocatorFailure;
 
-            var defs: []Types.FieldInfo = @constCast(switch (self.typeTable.get(newType)) {
-                .Struct => |str| str.definitions,
-                .Enum => |enm| enm.definitions,
-                .Union => |uni| uni.definitions,
+            var defs: []Types.FieldInfo, const scope = switch (self.typeTable.get(newType)) {
+                .Struct => |str| .{ @constCast(str.definitions), str.scope },
+                .Enum => |str| .{ @constCast(str.definitions), str.scope },
+                .Union => |str| .{ @constCast(str.definitions), str.scope },
                 else => return common.debug.ShouldBeImpossible(self.context.log, @src()),
-            });
-
-            const scope = switch (typeInfo) {
-                .Struct => |str| str.scope,
-                .Union => |str| str.scope,
-                .Enum => |str| str.scope,
-                else => return common.debug.ShouldBeImpossible(undefined, @src()),
             };
 
             for (defs, 0..) |def, idx| {
@@ -467,17 +469,27 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
                     .name = nname,
                 }, rres.value);
 
-                if (self.typeTable.get(def.valueType) == .Function) {
+                self.symbols.declarations.items(.name)[rres.value] = nnname;
+                self.symbols.declarations.items(.renamed)[rres.value] = true;
+            }
+
+            for (defs) |def| {
+                if (self.typeTable.get(def.valueType) == .Function) { 
+                    const rres = self.symbols.lookup.get(.{
+                        .scope = scope,
+                        .name = self.builder.getInternedString(def.name),
+                    }) orelse return common.debug.ShouldBeImpossible(self.context.log, @src());
+
                     const prevInst = self.folder.currentInstantiation;
                     self.folder.currentInstantiation = scope;
                     defer self.folder.currentInstantiation = prevInst;
 
-                    const funcPtr = try self.folder.evalDecl(rres.value, def.valueType);
+                    const funcPtr = self.folder.evalDecl(rres, def.valueType) catch continue;
                     const func = &self.folder.memory.items[funcPtr].Function;
-                    try self.builder.modifyInternedString(func.name, nname);
-                    func.name = nnname;
+                    try self.builder.modifyInternedString(func.name, self.builder.getInternedString(def.name));
+                    func.name = def.name;
 
-                    self.folder.declCache.put(self.folder.arena.allocator(), rres.value, funcPtr)
+                    self.folder.declCache.put(self.folder.arena.allocator(), rres, funcPtr)
                         catch return Error.AllocatorFailure;
                 }
             }
@@ -490,23 +502,17 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
                 break :blk;
             }
 
+            switch (self.symbols.scopes.items(.kind)[decl.scope]) {
+                .Struct, .Enum, .Union => break :blk,
+                else => {},
+            }
+
             const ast = self.context.getAST(self.currentFile);
             const tokens = self.context.getTokens(ast.tokens);
 
             const symName = tokens.get(decl.token).lexeme(self.context, self.currentFile);
             const namespace =
-                if (decl.parent != null and self.typeTable.get(try self.typecheckDecl(decl.parent.?, null)) == .Type) hasParent: {
-                    const rtypePtr = try self.folder.eval(self.symbols.getDecl(decl.parent.?).node, null);
-                    const rtype = self.folder.getValue(rtypePtr).Type;
-
-                    break :hasParent self.builder.getInternedString(switch (self.typeTable.get(rtype)) {
-                        .Struct => |str| str.name,
-                        .Enum => |enm| enm.name,
-                        .Union => |uni| uni.name,
-                        else => return common.debug.ShouldBeImpossible(self.context.log, @src()),
-                    });
-                }
-                else if (decl.topLevel) self.modules.modules.get(self.symbols.scopes.items(.module)[decl.scope]).name
+                if (decl.topLevel) self.modules.modules.get(self.symbols.scopes.items(.module)[decl.scope]).name
                 else try self.folder.generateRandomNameString(.Function);
 
                 const keepName = keep: {
@@ -1192,7 +1198,7 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
                 break :typeID discoveredType;
             },
             .Indexing => try self.typecheckIndexing(expr.value),
-            .Call => try self.typecheckCall(expr.value, maybeExpected),
+            .Call => try self.typecheckCall(expr.value, maybeExpected, expressionPtr),
             .Scoping => try self.typecheckScoping(expressionPtr),
             .ExpressionList => try self.typecheckExpressionList(expr.value, maybeExpected),
 
@@ -1212,7 +1218,7 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
 
             .Mark => try self.typecheckMark(expressionPtr, expr.value, maybeExpected),
 
-            .Dot => try self.typecheckDot(expr.value),
+            .Dot => try self.typecheckDot(expr.value, expressionPtr),
 
             .Assignment => |t| {
                 self.report("Expected an expression, received '{s}' instead.", .{
@@ -1666,7 +1672,7 @@ pub fn typecheckScoping(self: *Typechecker, expr: defines.ExpressionPtr) Error!T
         else => return common.debug.NotImplemented(self.context.log, @src()),
     }
 
-    const index = try self.definitionIndex(lhsTypeID, try self.builder.internString(member));
+    const index = try self.definitionIndex(lhsTypeID, try self.builder.internString(member), false);
 
     return self.discoverScopeDef(lhsTypeID, &defs[index], scope, expr);
 }
@@ -1678,14 +1684,17 @@ pub fn discoverScopeDef(
     scope: defines.ScopePtr,
     expr: defines.ExpressionPtr
 ) Error!TypeID {
-    if (!member.public) {
+    if (!member.public and !self.symbols.canAccess(self.currentScope, scope)) {
         self.report("{s} is inaccessible due to its visibility level.", .{
             self.builder.getInternedString(member.name),
         });
         return Error.AccessSpecifierMismatch;
     }
 
-    if (member.valueType != comptime Comptime.Folder.Builtin.Type("$$incomplete")) {
+    if (
+        member.valueType != (comptime Comptime.Folder.Builtin.Type("$$incomplete"))
+        and self.folder.getFlag(.InComptimeCall)
+    ) {
         return member.valueType;
     }
 
@@ -1704,9 +1713,7 @@ pub fn discoverScopeDef(
     defer self.currentScope = prevs;
 
     const previ = self.folder.currentInstantiation;
-    self.folder.currentInstantiation =
-        if (self.folder.captures.contains(scope)) scope
-        else self.folder.currentInstantiation;
+    self.folder.currentInstantiation = scope;
     defer self.folder.currentInstantiation = previ;
 
     const prevDiscovering = self.folder.discoveringScope;
@@ -1715,7 +1722,7 @@ pub fn discoverScopeDef(
 
     const discoveredType = try self.typecheckDecl(decl, null);
 
-    const memberIndex = try self.definitionIndex(from, member.name);
+    const memberIndex = try self.definitionIndex(from, member.name, false);
 
     assert(self.symbols.getDecl(decl).public);
 
@@ -1774,7 +1781,7 @@ pub fn discoverScopeDef(
     return discoveredType;
 }
 
-pub fn typecheckCall(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID) Error!TypeID {
+pub fn typecheckCall(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID, _expr: defines.ExpressionPtr) Error!TypeID {
     const ast = self.context.getAST(self.currentFile);
 
     if (self.symbols.resolutionMap.get(toKey(.{
@@ -1791,7 +1798,7 @@ pub fn typecheckCall(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpec
             break :blk;
         }
 
-        return self.typecheckBuiltinCall(extraPtr, decl.type, maybeExpected);
+        return self.typecheckBuiltinCall(extraPtr, decl.type, maybeExpected, _expr);
     }
 
     const lhsType = try self.typecheckExpression(ast.extra[extraPtr], null);
@@ -1839,7 +1846,45 @@ pub fn typecheckCall(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpec
         ast.extra[exprList + 1]
     ];
 
-    for (func.argTypes[0..@min(args.len, func.argTypes.len)], args[0..@min(args.len, func.argTypes.len)], 0..) |argType, expr, index| {
+    const member = self.memberCallee(ast.extra[extraPtr]);
+
+    const flagged = self.setFlag(.MemberCall, false);
+    const start: u32 =
+        if (flagged or member != null) 1
+        else 0;
+
+    if (member != null and member.?.generic) {
+        const m = member.?;
+        const declName = self.builder.getInternedString(self.symbols.getDecl(m.decl).name);
+
+        if (func.argTypes.len == 0) {
+            self.report("Attempt to call non-member function '{s}'.", .{ declName });
+            return Error.IllegalSyntax;
+        }
+
+        const selfType = func.argTypes[0];
+        const objType = try self.typecheckExpression(m.object, null);
+        const fits =
+            self.suitable(selfType, objType)
+            or switch (self.typeTable.get(objType)) {
+                .Pointer => |ptr| ptr.size != .Slice and self.suitable(selfType, ptr.child),
+                else => false,
+            };
+
+        if (!fits) {
+            self.report("Argument type mismatch in member function call to generic member function '{s}': expected '{s}', received '{s}'.", .{
+                declName,
+                try self.typeName(self.arena.allocator(), selfType),
+                try self.typeName(self.arena.allocator(), objType),
+            });
+            return Error.TypeMismatch;
+        }
+    }
+
+    const paramTypes = func.argTypes[@min(start, func.argTypes.len)..];
+    const checked = @min(args.len, paramTypes.len);
+
+    for (paramTypes[0..checked], args[0..checked], start..) |argType, expr, index| {
         const exprType = try self.typecheckExpression(expr, argType);
 
         self.assertCanCoerce(argType, exprType) catch {
@@ -1853,8 +1898,7 @@ pub fn typecheckCall(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpec
             return Error.TypeMismatch;
         };
     }
-
-    if (args.len != func.argTypes.len and !func.variadic) {
+    if (args.len != func.argTypes.len - start and !func.variadic) {
         self.report("Mismatching argument counts in function call. Expected {d}, received {d}.", .{
             func.argTypes.len,
             args.len,
@@ -1873,7 +1917,7 @@ pub fn typecheckCall(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpec
     return returnType;
 }
 
-pub fn typecheckBuiltinCall(self: *Typechecker, extraPtr: defines.ExpressionPtr, declPtr: defines.DeclPtr, maybeExpected: ?TypeID) Error!TypeID {
+pub fn typecheckBuiltinCall(self: *Typechecker, extraPtr: defines.ExpressionPtr, declPtr: defines.DeclPtr, maybeExpected: ?TypeID, expr: defines.ExpressionPtr) Error!TypeID {
     const BI = Resolver.BuiltinIndex;
 
     const ast = self.context.getAST(self.currentFile);
@@ -1937,7 +1981,7 @@ pub fn typecheckBuiltinCall(self: *Typechecker, extraPtr: defines.ExpressionPtr,
         BI("unreachable") => comptime Comptime.Folder.Builtin.Type("noreturn"),
         BI("this") => comptime Comptime.Folder.Builtin.Type("type"),
         BI("isComptime") => comptime Comptime.Folder.Builtin.Type("bool"),
-        BI("field") => self.typecheckFieldBuiltin(extraPtr),
+        BI("field") => self.typecheckFieldBuiltin(extraPtr,  expr),
         else => {
             self.report("Builtin '{s}' is not usable in this context.", .{Resolver.builtins[declPtr]});
             return Error.ComptimeNotPossible;
@@ -1945,7 +1989,7 @@ pub fn typecheckBuiltinCall(self: *Typechecker, extraPtr: defines.ExpressionPtr,
     };
 }
 
-pub fn typecheckFieldBuiltin(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!TypeID {
+pub fn typecheckFieldBuiltin(self: *Typechecker, extraPtr: defines.OpaquePtr, exprPtr: defines.ExpressionPtr) Error!TypeID {
     const ast = self.context.getAST(self.currentFile);
     const expressionList = ast.expressions.items(.value)[ast.extra[extraPtr + 1]];
     const args = defines.Range{
@@ -1969,7 +2013,7 @@ pub fn typecheckFieldBuiltin(self: *Typechecker, extraPtr: defines.OpaquePtr) Er
         },
     };
 
-    return self.typecheckFieldAccess(from, field);
+    return self.typecheckFieldAccess(from, field, null, exprPtr);
 }
 
 pub fn typecheckGetMetadata(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!TypeID {
@@ -2221,8 +2265,12 @@ pub fn instanceDecl(self: *Typechecker, declPtr: defines.DeclPtr) defines.DeclPt
 
     const decl = self.symbols.getDecl(declPtr);
 
+    switch (self.symbols.scopes.items(.kind)[decl.scope]) {
+        .Struct, .Enum, .Union => {},
+        else => return declPtr,
+    }
+
     const ast = self.context.getAST(self.currentFile);
-    if (ast.expressions.items(.type)[decl.node] != .FunctionDefinition) return declPtr;
 
     if (decl.scope == scope) return declPtr;
 
@@ -2264,7 +2312,7 @@ pub fn lowerFunction(self: *Typechecker, function: JIR.Function, token: ?defines
     defer self.currentFile = prevs;
 
     const prevInst = self.folder.currentInstantiation;
-    if (prevInst == null and self.folder.captures.contains(func.scope))
+    if (self.folder.captures.contains(func.scope))
         self.folder.currentInstantiation = func.scope;
     defer self.folder.currentInstantiation = prevInst;
 
@@ -2342,12 +2390,20 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
     const prevToken = self.lastToken;
     const prevFile = self.currentFile;
     const prevScope = self.currentScope;
+    const prevInst = self.folder.currentInstantiation;
+    const prevDiscovering = self.folder.discoveringScope;
+    if (prevInst == null and self.folder.scopeTypes.contains(decl.scope)) {
+        self.folder.currentInstantiation = decl.scope;
+        self.folder.discoveringScope = decl.scope;
+    }
     self.currentFile = self.modules.modules.items(.dataIndex)[self.symbols.scopes.items(.module)[decl.scope]];
     self.lastToken = decl.token;
     self.currentScope = decl.scope;
     defer self.lastToken = prevToken;
     defer self.currentFile = prevFile;
     defer self.currentScope = prevScope;
+    defer self.folder.currentInstantiation = prevInst;
+    defer self.folder.discoveringScope = prevDiscovering;
 
     const isPresent = self.declCache.getOrPut(allocator, declPtr) catch return Error.AllocatorFailure;
 
@@ -2390,23 +2446,17 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
         .public = decl.public,
         .parent = decl.parent,
         .name = res: {
+            if (decl.renamed) {
+                break :res decl.name;
+            }
+
             if (decl.kind != .Variable) {
                 break :res try self.builder.internString(symName);
             }
 
             const namespace =
-                if (decl.parent != null and self.typeTable.get(try self.typecheckDecl(decl.parent.?, null)) == .Type) hasParent: {
-                    const rtypePtr = try self.folder.eval(self.symbols.getDecl(decl.parent.?).node, null);
-                    const rtype = self.folder.getValue(rtypePtr).Type;
-
-                    break :hasParent self.builder.getInternedString(switch (self.typeTable.get(rtype)) {
-                        .Struct => |str| str.name,
-                        .Enum => |enm| enm.name,
-                        .Union => |uni| uni.name,
-                        else => return common.debug.ShouldBeImpossible(self.context.log, @src()),
-                    });
-                }
-                else if (decl.topLevel) self.modules.modules.get(self.symbols.scopes.items(.module)[decl.scope]).name
+                // @Note parent will rename this decl later anyway.
+                if (decl.topLevel) self.modules.modules.get(self.symbols.scopes.items(.module)[decl.scope]).name
                 else null;
 
             const newName =
@@ -2420,6 +2470,7 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
 
             break :res new;
         },
+        .renamed = decl.renamed,
     });
     decl = self.symbols.declarations.get(declPtr);
 
@@ -2462,8 +2513,12 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
             and !decl.topLevel
         );
 
+    const finalStatus: @TypeOf(isPresent.value_ptr.status) = if (instanceDependent) .NotChecked else .Checked;
+
+    const guardFinalizing = declType == (comptime Comptime.Folder.Builtin.Type("type")) and decl.kind == .Variable;
+
     isPresent.value_ptr.* = .{
-        .status = if (instanceDependent) .NotChecked else .Checked,
+        .status = if (guardFinalizing) .InProgress else finalStatus,
         .result = declType,
     };
 
@@ -2473,11 +2528,13 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
             else => break :fi,
         };
 
+        try self.nameMemberFunction(&decl, func.name);
         try self.lowerFunction(func, decl.token);
     }
 
     if (declType == (comptime Comptime.Folder.Builtin.Type("type")) and decl.kind == .Variable) {
         const typeID = self.folder.getValue(try self.folder.eval(decl.node, declType)).Type;
+        self.declCache.getPtr(declPtr).?.status = finalStatus;
         const node = self.typeTable.get(typeID);
 
         const fields: []Types.FieldInfo = @constCast(switch (node) {
@@ -2486,24 +2543,46 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
             else => &.{},
         });
 
-        for (fields) |*field| {
-            if (!self.folder.isIncomplete(field.valueType)) {
-                continue;
-            }
-
-            const newType = self.typeTable.get(try self.folder.resolveIncomplete(field.valueType, typeID));
-            self.typeTable.set(field.valueType, newType);
+        for (fields) |*f| {
+            const pv = f.valueType;
+            f.valueType = try self.folder.resolveIncomplete(f.valueType, typeID);
+            self.typeTable.set(pv, self.typeTable.get(f.valueType));
         }
     }
 
     if (decl.topLevel and !self.folder.getFlag(.InComptimeCall)) {
+        decl = self.symbols.declarations.get(declPtr);
         try self.lowerer.topLevelDeclaration(isPresent.key_ptr.*, &decl);
     }
 
     return declType;
 }
 
-pub fn typecheckFieldAccess(self: *Typechecker, on: TypeID, field: []const u8) Error!TypeID {
+fn nameMemberFunction(self: *Typechecker, decl: *const Resolver.Declaration, name: defines.StringPtr) Error!void {
+    switch (self.symbols.scopes.items(.kind)[decl.scope]) {
+        .Struct, .Enum, .Union => {},
+        else => return,
+    }
+    if (!std.mem.startsWith(u8, self.builder.getInternedString(name), "$$")) return;
+    if (self.hasMetadata(decl.node, "@extern")) return;
+
+    const owner = self.folder.scopeTypes.get(decl.scope) orelse return;
+    const ownerName = self.builder.getInternedString(switch (self.typeTable.get(owner)) {
+        .Struct => |str| str.name,
+        .Enum => |enm| enm.name,
+        .Union => |uni| uni.name,
+        else => return,
+    });
+    if (std.mem.startsWith(u8, ownerName, "$$")) return;
+
+    const tokens = self.context.getTokens(self.currentFile);
+    const memberName = tokens.get(decl.token).lexeme(self.context, self.currentFile);
+    const full = std.fmt.allocPrint(self.arena.allocator(), "{s}::{s}", .{ ownerName, memberName })
+        catch return Error.AllocatorFailure;
+    try self.builder.modifyInternedString(name, full);
+}
+
+pub fn typecheckFieldAccess(self: *Typechecker, on: TypeID, field: []const u8, parent: ?TypeID, expr: defines.ExpressionPtr) Error!TypeID {
     const objectType = self.typeTable.get(on);
 
     switch (objectType) {
@@ -2545,7 +2624,7 @@ pub fn typecheckFieldAccess(self: *Typechecker, on: TypeID, field: []const u8) E
         .Struct => |str| str.fields,
         .Pointer => |ptr| switch (ptr.size) {
             .Single, .C => switch (self.typeTable.get(ptr.child)) {
-                .Struct, .Union => return self.typecheckFieldAccess(ptr.child, field),
+                .Struct, .Union => return self.typecheckFieldAccess(ptr.child, field, on, expr),
                 .Pointer => |childPtr| switch (childPtr.size) {
                     .Slice => 
                         if (std.mem.eql(u8, field, "len")) {
@@ -2621,11 +2700,114 @@ pub fn typecheckFieldAccess(self: *Typechecker, on: TypeID, field: []const u8) E
         },
     };
 
-    const index = try self.fieldIndex(on, member);
+    const index = (try self.tryGetFieldIndex(on, member))
+        orelse return self.typecheckMemberAccess(on, member, parent, expr);
     return fields[index].valueType;
 }
 
-pub fn typecheckDot(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!TypeID {
+pub const MemberCallee = struct {
+    decl: defines.DeclPtr,
+    dot: defines.ExpressionPtr,
+    object: defines.ExpressionPtr,
+    generic: bool,
+};
+
+pub fn isGenericMember(self: *Typechecker, declPtr: defines.DeclPtr) bool {
+    const decl = self.symbols.getDecl(declPtr);
+
+    const prevFile = self.currentFile;
+    self.currentFile = self.modules.modules.items(.dataIndex)[self.symbols.scopes.items(.module)[decl.scope]];
+    defer self.currentFile = prevFile;
+
+    return self.hasMetadata(decl.node, "@generic");
+}
+
+pub fn memberCallee(self: *Typechecker, callee: defines.ExpressionPtr) ?MemberCallee {
+    const ast = self.context.getAST(self.currentFile);
+
+    var dot = callee;
+    const viaCall = ast.expressions.items(.type)[dot] == .Call;
+    if (viaCall) dot = ast.extra[ast.expressions.items(.value)[dot]];
+
+    if (ast.expressions.items(.type)[dot] != .Dot) return null;
+
+    const decl = self.symbols.resolutionMap.get(toKey(.{
+        .file = self.currentFile,
+        .expr = dot,
+    })) orelse return null;
+
+    const generic = self.isGenericMember(decl);
+    if (generic != viaCall) return null;
+
+    return .{
+        .decl = decl,
+        .dot = dot,
+        .object = ast.extra[ast.expressions.items(.value)[dot]],
+        .generic = generic,
+    };
+}
+
+pub fn typecheckMemberAccess(self: *Typechecker, on: TypeID, member: defines.StringPtr, parent: ?TypeID, expr: defines.ExpressionPtr) Error!TypeID {
+    const objectType = self.typeTable.get(on);
+
+    const definitions, const scope = switch (objectType) {
+        .Struct => |str| .{ str.definitions, str.scope },
+        .Union => |str| .{ str.definitions, str.scope },
+        .Enum => |str| .{ str.definitions, str.scope },
+        else => {
+            self.report("Attempt to access member functions on non-aggregate type '{s}'", .{
+                try self.typeName(undefined, on),
+            });
+            return Error.MissingDefinition;
+        }
+    };
+
+    const index = try self.definitionIndex(on, member, true);
+    const def = definitions[index];
+    const defType = try self.discoverScopeDef(on, &def, scope, expr);
+    const defTypeInfo = self.typeTable.get(defType);
+
+    const generic =
+        if (self.symbols.lookup.get(.{ .scope = scope, .name = self.builder.getInternedString(def.name) })) |decl|
+            self.isGenericMember(decl)
+        else false;
+
+    if (defTypeInfo != .Function) {
+        self.report("Attempt to access non member function definition '{s}' of type '{s}'. Use scoping instead.", .{
+            self.builder.getInternedString(def.name),
+            try self.typeName(undefined, on),
+        });
+        return Error.IllegalSyntax;
+    }
+    else if (generic) {
+        return defType;
+    }
+    else if (defTypeInfo.Function.argTypes.len == 0) {
+        self.report("Attempt to call non-member function '{s}' of type '{s}'.", .{
+            self.builder.getInternedString(def.name),
+            try self.typeName(undefined, on),
+        });
+        return Error.IllegalSyntax;
+    }
+    else if (
+        !self.suitable(defTypeInfo.Function.argTypes[0], on)
+        and !self.suitable(defTypeInfo.Function.argTypes[0], parent orelse on)
+    )
+    {
+        self.report("Argument type mismatch in member function call to member function '{s}' of type '{s}': expected '{s}', received '{s}'.", .{
+            self.builder.getInternedString(def.name),
+            try self.typeName(undefined, on),
+            try self.typeName(undefined, defTypeInfo.Function.argTypes[0]),
+            try self.typeName(undefined, parent orelse on),
+        });
+        return Error.TypeMismatch;
+    }
+
+    _ = self.setFlag(.MemberCall, true);
+    return defType;
+}
+
+pub fn typecheckDot(self: *Typechecker, extraPtr: defines.OpaquePtr, expr: defines.ExpressionPtr) Error!TypeID {
     // @Important TODO: This doesn't allow member function calls yet! Add them!
 
     const ast = self.context.getAST(self.currentFile);
@@ -2679,7 +2861,7 @@ pub fn typecheckDot(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!TypeI
 
     const memberName = memberToken.lexeme(self.context, ast.tokens);
 
-    return self.typecheckFieldAccess(objectTypeID, memberName);
+    return self.typecheckFieldAccess(objectTypeID, memberName, null, expr);
 }
 
 pub fn applyMark(self: *Typechecker, ptr: defines.ExpressionPtr, extraPtr: defines.OpaquePtr) Error!void {
@@ -3084,7 +3266,6 @@ fn typecheckSwitchOnUnion(
 
             _ = try self.typecheckDecl(captureDecl, captureType);
 
-            // Bind the capture to its comptime payload so the body can fold on it.
             if (comptimeItem) |p| switch (self.folder.getValue(p)) {
                 .Union => |u| self.folder.declCache.put(self.folder.arena.allocator(), captureDecl, u.Value)
                     catch return Error.AllocatorFailure,
@@ -3284,10 +3465,10 @@ pub fn registerType(self: *Typechecker, _newType: TypeInfo) Error!TypeID {
     // @Note Dedup anon types
     const anonymous = if (name) |n| std.mem.startsWith(u8, self.builder.getInternedString(n), "$$") else false;
     if (anonymous) {
-        const expr = switch (newType) {
-            .Struct => |str| str.expr,
-            .Union => |uni| uni.expr,
-            .Enum => |enm| enm.expr,
+        const expr, const newMut = switch (newType) {
+            .Struct => |str| .{ str.expr, str.mutable },
+            .Union => |uni| .{ uni.expr, uni.mutable },
+            .Enum => |enm| .{ enm.expr, enm.mutable },
             else => unreachable,
         };
 
@@ -3295,10 +3476,10 @@ pub fn registerType(self: *Typechecker, _newType: TypeInfo) Error!TypeID {
             const info = self.typeTable.get(candidate);
             if (std.meta.activeTag(info) != std.meta.activeTag(newType)) continue;
 
-            const candidateName, const candidateExpr = switch (info) {
-                .Struct => |str| .{ str.name, str.expr },
-                .Union => |uni| .{ uni.name, uni.expr },
-                .Enum => |enm| .{ enm.name, enm.expr },
+            const candidateName, const candidateExpr, const candidateMutable = switch (info) {
+                .Struct => |str| .{ str.name, str.expr, str.mutable },
+                .Union => |uni| .{ uni.name, uni.expr, uni.mutable },
+                .Enum => |enm| .{ enm.name, enm.expr, enm.mutable },
                 else => unreachable,
             };
 
@@ -3309,7 +3490,9 @@ pub fn registerType(self: *Typechecker, _newType: TypeInfo) Error!TypeID {
                 continue;
             }
             if (self.assertStructurallyIdenticalValue(info, newType)) |_| {
-                return candidate;
+                if (newMut == candidateMutable) {
+                    return candidate;
+                }
             } else |_| { }
         }
     }
@@ -3324,11 +3507,9 @@ pub fn registerType(self: *Typechecker, _newType: TypeInfo) Error!TypeID {
 
         switch (newType) {
             .Struct => {
-
                 newType.Struct.name = name orelse newType.Struct.name;
             },
             .Union => {
-
                 newType.Union.name = name orelse newType.Union.name;
             },
             .Enum => {
@@ -3513,7 +3694,7 @@ pub fn assertStructurallyIdenticalValue(self: *const Typechecker, fromType: Type
             }
 
             for (fromEnum.fields, toEnum.fields) |fromField, toField| {
-                if (!std.mem.eql(u8, fromField.name, toField.name)) {
+                if (!std.mem.eql(u8, fromField.name, toField.name) or fromField.value != toField.value) {
                     return Error.StructuralMismatch;
                 }
             }
@@ -3638,14 +3819,9 @@ pub fn assertCanCoerce(self: *Typechecker, this: TypeID, that: TypeID) Error!voi
 
                 const toMut = try self.registerType(self.makeMutable(self.typeTable.get(toPtr.child)));
                 const fromMut = try self.registerType(self.makeMutable(self.typeTable.get(fromPtr.child)));
-                const mutVoid = try self.registerType(.{ .Void = true });
 
                 if (self.nominallyIdentical(toMut, fromMut)) {
                     return;
-                }
-
-                if (toMut == mutVoid or fromMut == mutVoid) {
-                    return; 
                 }
 
                 return Error.TypeMismatch;
@@ -3985,7 +4161,7 @@ pub fn sizeOf(self: *const Typechecker, of: TypeID) u32 {
         .CChar, .CUChar => @bitSizeOf(c_char),
         .CInt, .CUInt => @bitSizeOf(c_uint),
         .Pointer => |ptr| switch (ptr.size) {
-            .Slice => @bitSizeOf(*void) + @bitSizeOf(u32),
+            .Slice => @bitSizeOf(*void) + @bitSizeOf(u32) + @abs(@bitSizeOf(*void) - @bitSizeOf(u32)),
             .Single, .C => @bitSizeOf(*void),
         },
         .Function => @bitSizeOf(@TypeOf(&sizeOf)),
@@ -4067,10 +4243,19 @@ pub fn alignOf(self: *const Typechecker, of: TypeID) u32 {
     };
 }
 
-pub fn tryGetDefinitionIndex(self: *Typechecker, from: TypeID, memberNamePtr: defines.StringPtr) Error!?defines.Offset {
-    const fromName = self.builder.getInternedString(self.typenameMap.get(from)
-        orelse return common.debug.ShouldBeImpossible(undefined, @src()));
-    const isAnon = fromName[0] == '$';
+pub fn tryGetDefinitionIndex(self: *Typechecker, from: TypeID, memberNamePtr: defines.StringPtr, shorthand: bool) Error!?defines.Offset {
+    const baseName = self.builder.getInternedString(switch (self.typeTable.get(from)) {
+        .Struct => |str| str.name,
+        .Union => |uni| uni.name,
+        .Enum => |enm| enm.name,
+        else => {
+            self.report("Definition index can only be used for structs, enums and unions. Received '{s}' instead.", .{
+                try self.typeName(self.arena.allocator(), from),
+            });
+            return Error.IllegalSyntax;
+        },
+    });
+    const isAnon = baseName[0] == '$';
 
     const member =
         if (isAnon) member: {
@@ -4078,6 +4263,10 @@ pub fn tryGetDefinitionIndex(self: *Typechecker, from: TypeID, memberNamePtr: de
             const lastPtr = if (std.mem.lastIndexOfScalar(u8, memberName, ':')) |idx| idx + 1 else 0;
             break :member memberName[lastPtr..];
         }
+        else if (shorthand) std.fmt.allocPrint(self.arena.allocator(), "{s}::{s}", .{
+            baseName,
+            self.builder.getInternedString(memberNamePtr),
+        }) catch return Error.AllocatorFailure
         else self.builder.getInternedString(memberNamePtr);
 
     const decls = switch (self.typeTable.get(from)) {
@@ -4093,7 +4282,10 @@ pub fn tryGetDefinitionIndex(self: *Typechecker, from: TypeID, memberNamePtr: de
     };
 
     for (decls, 0..) |decl, index| {
-        if (decl.name == try self.builder.internString(member)) {
+        // @TODO This should've worked, but it does not for some reason.
+        // if (decl.name == try self.builder.internString(member)) {
+        // @TODO This should've worked, but it does not for some reason.
+        if (std.mem.eql(u8, self.builder.getInternedString(decl.name), member)) {
             return @intCast(index);
         }
     }
@@ -4101,8 +4293,8 @@ pub fn tryGetDefinitionIndex(self: *Typechecker, from: TypeID, memberNamePtr: de
     return null;
 }
 
-pub fn definitionIndex(self: *Typechecker, from: TypeID, member: defines.StringPtr) Error!defines.Offset {
-    if (try self.tryGetDefinitionIndex(from, member)) |found| {
+pub fn definitionIndex(self: *Typechecker, from: TypeID, member: defines.StringPtr, shorthand: bool) Error!defines.Offset {
+    if (try self.tryGetDefinitionIndex(from, member, shorthand)) |found| {
         return found;
     }
 
@@ -4153,7 +4345,7 @@ pub fn fieldIndex(self: *Typechecker, from: TypeID, fieldNamePtr: defines.String
         self.builder.getInternedString(fieldNamePtr),
         try self.typeName(self.arena.allocator(), from),
     });
-    return Error.MissingDefinition;
+    return Error.MissingField;
 }
 
 pub fn findType(self: *Typechecker, name: []const u8) ?TypeID {

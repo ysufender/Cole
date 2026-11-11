@@ -51,6 +51,7 @@ pub const CompilerError = error {
     MissingModuleName,
     DuplicateSymbol,
     MissingDefinition,
+    MissingField,
     NotImplemented,
     InvalidEnumeration,
     TypeMismatch,
@@ -150,5 +151,6 @@ pub const CompilerError = error {
     ImportInSubLevel,
     MetadataOfNonVariable,
     MissngMetadata,
+    TooMuchIndirection,
     Terminate,
 };

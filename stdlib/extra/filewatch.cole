@@ -31,7 +31,7 @@ pub let Signal = struct {
 pub let FileInfo = struct {
     modify: c_long,
 
-    pub let print = fn (self: *FileInfo, stream: Stream::Output::Stream, allocator: Allocator::Allocator) -> void {
+    pub let print = fn (self: *FileInfo, stream: Stream::Output, allocator: Allocator::Allocator) -> void {
         _ = Stream::Output::writebuffer(stream, "(modify_time = ");
         _ = Stream::Output::writebuffer(stream, String::intToStr(self.modify, allocator));
         _ = Stream::Output::writebuffer(stream, " )");
@@ -53,7 +53,7 @@ pub let poll = fn (self: *mut Watcher) -> bool {
     return false;
 };
 
-pub let print = fn (self: *Watcher, stream: Stream::Output::Stream, allocator: Allocator::Allocator) -> void {
+pub let print = fn (self: *Watcher, stream: Stream::Output, allocator: Allocator::Allocator) -> void {
     _ = Stream::Output::writebuffer(stream, "( file = ");
     _ = Stream::Output::writebuffer(stream, self.file);
     _ = Stream::Output::writebuffer(stream, ", info = ");

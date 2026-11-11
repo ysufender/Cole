@@ -385,11 +385,7 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
                 }
                 res.key_ptr.* = name;
 
-                try self.write(out, "typedef struct {s}{s} {{\n", .{
-                    if (self.typeToJirMap.get(@intCast(typeID))) |ptr|
-                        if (self.hasMetadata(ptr, "@packed")) "__attribute__((aligned (sizeof(uint8_t)))) "
-                        else ""
-                    else "",
+                try self.write(out, "typedef struct {s} {{\n", .{
                     name,
                 });
                 for (str.fields) |field| {
@@ -423,11 +419,7 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
 
 
                 if (uni.isTagged) {
-                    try self.write(out, "typedef struct {s}{s} {{\n", .{
-                        if (self.typeToJirMap.get(@intCast(typeID))) |ptr|
-                            if (self.hasMetadata(ptr, "@packed")) "__attribute__((aligned (sizeof(uint8_t)))) "
-                            else ""
-                        else "",
+                    try self.write(out, "typedef struct {s} {{\n", .{
                         name
                     });
                     try self.write(out, "\t{s} {s};\n", .{
@@ -1136,14 +1128,27 @@ fn literal(self: *JIR, out: *Writer, ptr: Constant.Ptr) Error!void {
             },
             .Cole => {
                 const rstr = self.strings[str.str];
+                const len = calculateStringLength(rstr);
+
                 try self.write(out, "({s}){{(uint8_t*)\"{s}\", {d}}}", .{
                     try self.getCName(comptime Comptime.Folder.Builtin.Type("[]u8"), null, true, false),
                     rstr,
-                    rstr.len,
+                    len,
                 });
             }
         },
     };
+}
+
+fn calculateStringLength(_str: []const u8) u32 {
+    var str = _str;
+    var minus: u32 = 0;
+    while (std.mem.findScalar(u8, str, '\\')) |bsp| {
+        minus += 1;
+        str = str[bsp+1..];
+    }
+
+    return @intCast(_str.len - minus);
 }
 
 fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool, noSymbol: bool) Error![]const u8 {

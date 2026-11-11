@@ -40,6 +40,7 @@ pub let breakpoint = fn () -> void {
     }
     else {
         _ = raise(cast(Signal::Trap));
+        unreachable();
     }
 };
 
@@ -54,7 +55,7 @@ pub let stackTrace = fn () -> builtin::StackTrace {
 pub let dumpTrace = fn (
     trace: builtin::StackTrace,
     allocator: Allocator::Allocator,
-    stream: Stream::Output::Stream
+    stream: Stream::Output
 ) -> void {
     if buildInfo().optimization == @Og {
         let current: mut any = trace.&;
@@ -80,6 +81,5 @@ pub let impossible = fn (T: type) -> *fn () -> T {
         Console::error("Reached unreachable code.");
         dumpTrace(stackTrace(), C::Allocator, Io::StdErr());
         Process::exit(1);
-        return undefined;
     };
 };

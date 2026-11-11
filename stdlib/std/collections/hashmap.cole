@@ -16,13 +16,18 @@ pub let HashMap = fn (K: type, V: type, Hasher: type, MLP: u32) -> type {
         compileError("Max load percentage should be between 0 and 100 (exclusive).");
     }
 
-    let hashKey = std::hash::hash(K, Hasher);
-    let cmpKey  = std::comparator::generic(K);
-
     return struct {
         let Self   = this();
+
+        let hashKey = std::hash::hash(K, Hasher);
+        let cmpKey  = std::comparator::generic(K);
+
+        let Free      = 0;
+        let Used      = 1;
+        let Tombstone = 2;
+
         let MinCap = 16;
-        let Status = u8; 
+        let Status = u8;
 
         let Entry = struct {
             key   : *K,
@@ -30,38 +35,35 @@ pub let HashMap = fn (K: type, V: type, Hasher: type, MLP: u32) -> type {
         };
 
         let AdvancedEntry = struct {
-            key     : *mut K,
-            value   : *mut V,
-            metadata: *mut Status,
+            key      : *mut K,
+            value    : *mut V,
+            metadata : *mut Status,
         };
 
-        let Free      = 0;
-        let Used      = 1;
-        let Tombstone = 2;
-
-        keys    : mut []mut K,
-        values  : mut []mut V,
-        metadata: mut []mut Status,
-        size    : mut u32,
-        capacity: mut u32,
+        keys     : mut []mut K,
+        values   : mut []mut V,
+        metadata : mut []mut Status,
+        size     : mut u32,
+        occupied : mut u32,
+        capacity : mut u32,
 
         pub let init = fn (gpa: Allocator) -> Option(mut Self) {
-            let self: mut Self = (undefined, undefined, undefined, 0, 0);
+            let self: mut Self = (undefined, undefined, undefined, 0, 0, 0);
 
             switch Allocator::alloc(K)(gpa, MinCap) {
                 @Ok -> |mem| self.keys = mem;
-                else -> return (@None, ());
+                @Err -> return (@None, ());
             }
             switch Allocator::alloc(V)(gpa, MinCap) {
                 @Ok -> |mem| self.values = mem;
-                else -> {
+                @Err -> {
                     Allocator::dealloc(K)(gpa, self.keys);
                     return (@None, ());
                 }
             }
             switch Allocator::alloc(Status)(gpa, MinCap) {
                 @Ok -> |mem| self.metadata = mem;
-                else -> {
+                @Err -> {
                     Allocator::dealloc(K)(gpa, self.keys);
                     Allocator::dealloc(V)(gpa, self.values);
                     return (@None, ());
@@ -80,22 +82,22 @@ pub let HashMap = fn (K: type, V: type, Hasher: type, MLP: u32) -> type {
         pub let deinit = fn (self: *mut Self, gpa: Allocator) -> void {
             if self.capacity == 0 { return; }
 
-            Allocator::dealloc(K)(self.keys);
-            Allocator::dealloc(V)(self.values);
-            Allocator::dealloc(Status)(self.metadata);
+            Allocator::dealloc(K)(gpa, self.keys);
+            Allocator::dealloc(V)(gpa, self.values);
+            Allocator::dealloc(Status)(gpa, self.metadata);
         };
 
-        pub let contains = fn (self: *Self, key: K) -> bool {
+        pub let contains = fn (self: *mut Self, key: K) -> bool {
             return switch getAdvancedEntry(self, key) {
                 @Some -> true,
-                else -> false,
+                @None -> false,
             };
         };
 
-        pub let get = fn (self: *Self, key: K) -> Option(*mut V) {
-            return switch getAdvancedEntry() {
-                @Some -> |s| s.value,
-                else -> (@None, ()),
+        pub let get = fn (self: *mut Self, key: K) -> Option(*mut V) {
+            return switch getAdvancedEntry(self, key) {
+                @Some -> |s| (@Some, s.value),
+                @None -> (@None, ()),
             };
         };
 
@@ -103,9 +105,10 @@ pub let HashMap = fn (K: type, V: type, Hasher: type, MLP: u32) -> type {
             switch getAdvancedEntry(self, key) {
                 @Some -> |s| {
                     s.metadata.* = Tombstone;
+                    self.size = self.size - 1;
                     return true;
                 }
-                else -> { }
+                @None -> { }
             }
 
             return false;
@@ -114,12 +117,12 @@ pub let HashMap = fn (K: type, V: type, Hasher: type, MLP: u32) -> type {
         pub let getEntry = fn (self: *mut Self, key: K) -> Option(Entry) {
             return switch getAdvancedEntry(self, key) {
                 @Some -> |s| (@Some, (s.key, s.value)),
-                else -> (@None, ()),
+                @None -> (@None, ()),
             };
         };
 
         pub let put = fn (self: *mut Self, gpa: Allocator, key: K, value: V) -> AllocatorResult(void) {
-            if (self.size * 100) >= (MLP * self.capacity) {
+            if (self.occupied * 100) >= (MLP * self.capacity) {
                 switch rehash(self, gpa) {
                     @Ok -> { }
                     @Err -> |err| return (@Err, err);
@@ -127,16 +130,31 @@ pub let HashMap = fn (K: type, V: type, Hasher: type, MLP: u32) -> type {
             }
 
             let index: mut any = findIndex(self, key);
+            
+            let hasTombstone: mut bool = false;
+            let tombstoneIndex: mut u32 = 0;
 
             while true {
                 let status = self.metadata[index];
 
-                if status == Free or status == Tombstone {
-                    self.keys[index]     = key;
-                    self.values[index]   = value;
-                    self.metadata[index] = Used;
+                if status == Free {
+                    let insertIndex = if (hasTombstone) tombstoneIndex else index;
+                    
+                    self.keys[insertIndex]     = key;
+                    self.values[insertIndex]   = value;
+                    self.metadata[insertIndex] = Used;
+                    
                     self.size = self.size + 1;
+                    if !hasTombstone {
+                        self.occupied = self.occupied + 1; 
+                    }
                     return (@Ok, ());
+                }
+                else if status == Tombstone {
+                    if !hasTombstone {
+                        hasTombstone = true;
+                        tombstoneIndex = index;
+                    }
                 }
                 else if status == Used and cmpKey(self.keys[index], key) {
                     self.values[index] = value;
@@ -157,37 +175,42 @@ pub let HashMap = fn (K: type, V: type, Hasher: type, MLP: u32) -> type {
             let oldValues = self.values;
             let oldMeta   = self.metadata;
 
+            let newKeys: mut []mut K = undefined;
+            let newValues: mut []mut V = undefined;
+            let newMeta: mut []mut Status = undefined;
+
             switch Allocator::alloc(K)(gpa, newCap) {
-                @Ok -> |mem| self.keys = mem;
+                @Ok -> |mem| newKeys = mem;
                 @Err -> |err| return (@Err, err);
             }
 
             switch Allocator::alloc(V)(gpa, newCap) {
-                @Ok -> |mem| self.values = mem;
+                @Ok -> |mem| newValues = mem;
                 @Err -> |err| {
-                    self.keys = oldKeys;
-                    Allocator::dealloc(K)(gpa, self.keys);
+                    Allocator::dealloc(K)(gpa, newKeys);
                     return (@Err, err);
                 }
             }
 
             switch Allocator::alloc(Status)(gpa, newCap) {
-                @Ok -> |mem| self.metadata = mem;
+                @Ok -> |mem| newMeta = mem;
                 @Err -> |err| {
-                    self.keys   = oldKeys;
-                    self.values = oldValues;
-                    Allocator::dealloc(K)(gpa, self.keys);
-                    Allocator::dealloc(V)(gpa, self.values);
+                    Allocator::dealloc(K)(gpa, newKeys);
+                    Allocator::dealloc(V)(gpa, newValues);
                     return (@Err, err);
                 }
             }
 
             for 0..newCap, |i| {
-                self.metadata[i] = Free;
+                newMeta[i] = Free;
             }
-
+            
+            self.keys     = newKeys;
+            self.values   = newValues;
+            self.metadata = newMeta;
             self.capacity = newCap;
             self.size     = 0;
+            self.occupied = 0;
 
             for 0..oldCap, |i| {
                 if oldMeta[i] == Used {
@@ -215,7 +238,7 @@ pub let HashMap = fn (K: type, V: type, Hasher: type, MLP: u32) -> type {
                     return (@None, ());
                 }
                 else if status == Used and cmpKey(self.keys[index], key) {
-                    return (@Some, (self.keys[index].&, self.values[index].&, self.metadata[index].&));
+                    return (@Some, self.keys[index].&, self.values[index].&, self.metadata[index].&);
                 }
 
                 index = (index + 1) & (self.capacity - 1);

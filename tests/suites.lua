@@ -116,6 +116,15 @@ return {
         "fn_slice_param",
         "fn_comptime_constant",
         "fn_array_param",
+        "member_call_value",
+        "member_call_ref",
+        "member_call_pointer_variable",
+        "member_call_args",
+        "member_call_mutation",
+        "member_call_chained_calls",
+        "member_call_generic",
+        "member_call_comptime",
+        "member_call_generic_fn",
     },
 
     ["modules"] = {
@@ -205,6 +214,7 @@ return {
     },
 
     ["regression"] = {
+        "normal_type_def",
         "expr_list_union_ctor",
         "builtin_type_info",
         "type_generator",
