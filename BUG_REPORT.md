@@ -30,5 +30,5 @@ else is holding a reference to the said memory.
 ## $closed -- Extern Structs Keep Getting Codegen'd -- (49) -- @ysufender --
 ## $closed -- Comptime Recursion Bug -- (50) -- @ysufender --
 ## $closed -- Type Rebinding Bug -- (51) -- @ysufender --
-## $closed -- "this()" Builtin Bugs -- (52) -- @ysufender --
+## $closed -- "this" Builtin Bugs -- (52) -- @ysufender --
 ## $closed -- Generic Definitions Are Last-Call-Win -- (53) -- @ysufender --
