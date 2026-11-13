@@ -1,20 +1,18 @@
-## $open -- Illegal Memory Access -- (31) -- @unbound --
+## $open -- Illegal Memory Access -- (31) -- @ysufender --
 
-Run the raylib demo. The output source.c is garbled when using a non-preserving allocator
-such as c_allocator. This indicates there is some overwrite to freed memory when someone
-else is holding a reference to the said memory.
+When using a non-preserving allocator, the output C code is garbled with trash data.
 
 ### Reproduction --
 
-...
+Modify the `main.zig` so that it uses a non-preserving allocator. Then run the raylib demo.
 
 ### Expected --
 
-...
+Successful compilation and run.
 
 ### Received --
 
-...
+Garbled out parts in the generated C files.
 
 ## $closed -- Unable to Compile Non Compile Time Code -- (38) -- @ysufender --
 ## $closed -- Switch Captures Referencing -- (39) -- @ysufender --

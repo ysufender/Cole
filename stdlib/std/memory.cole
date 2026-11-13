@@ -38,11 +38,11 @@ pub let findLast = fn (T: type) -> *fn ([]T, T) -> std::Option(u32) {
 };
 
 pub let findNth = fn (T: type) -> *fn ([]T, T, u32) -> std::Option(u32) {
-    return fn (haystack: []t, needle: T, n: u32) -> std::Option(u32) {
+    return fn (haystack: []T, needle: T, n: u32) -> std::Option(u32) {
         let idx : mut u32 = 0;
         let from: mut u32 = 0;
         for 0..n, |i| {
-            switch std::memory::find(T)(haystack, needle) {
+            switch find(T)(haystack, needle) {
                 @Some -> |i| idx = i;
                 else -> return (@None, ());
             }
@@ -79,6 +79,27 @@ pub let findFirstOf = fn (T: type) -> *fn ([]T, []T) -> std::Option(u32) {
                 if Eql::generic(T)(haystack[i], needle) {
                     return (@Some, i);
                 }
+            }
+        }
+
+        return (@None, ());
+    };
+};
+
+pub let findFirstNotOf = fn (T: type) -> *fn ([]T, []T) -> std::Option(u32) {
+    return fn (haystack: []T, needles: []T) -> std::Option(u32) {
+        for 0..haystack.len, |i| {
+            let none: mut bool = true;
+
+            for needles, |needle| {
+                if Eql::generic(T)(haystack[i], needle) {
+                    none = false;
+                    break;
+                }
+            }
+
+            if none {
+                return (@Some, i);
             }
         }
 
