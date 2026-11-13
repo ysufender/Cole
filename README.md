@@ -164,7 +164,7 @@ let main = fn (args: [][]u8) -> i32 {
 
 ## Contributing
 
-Check out the [CONTRIBUTING.md](./CONTRIBUTING.md) and [BUG_REPORT.md](./BUG_REPORT.md)
+Check out the [CONTRIBUTING.md](./CONTRIBUTING.md) and the [Issue Tracker](https://cole-issues.yusufenderosmanoglu.tech) 
 
 ## Testing
 
