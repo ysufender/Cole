@@ -1,4 +1,4 @@
-## $open -- -- Helper Functions for SOA Ease of Use -- #57 -- @ysufender --
+## $open -- Helper Functions for SOA Ease of Use -- #57 -- @ysufender --
 
 The project uses SOA intensively to reduce memory footprint and increase cache hits. For this
 reason, almost every unit of the project uses flattened SOA instead of classic unions (see
