@@ -19,7 +19,7 @@ Helper functions to do it inline would be nice.
 
 ...
 
-## $open -- Unit Testing -- #56 -- @ysufender --
+## $open -- Unit Testing -- #56 -- @casimirknight --
 
 The compiler is currently tested using the Testy framework, which is a custom stdout comparator
 written in Lua. Some of the parts of the compiler (mainly the Lexer) can still be unit tested,
