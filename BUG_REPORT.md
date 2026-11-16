@@ -101,4 +101,4 @@ Garbled out parts in the generated C files.
 ## $closed -- Type Rebinding Bug -- #51 -- @ysufender --
 ## $closed -- "this" Builtin Bugs -- #52 -- @ysufender --
 ## $closed -- Generic Definitions Are Last-Call-Win -- #53 -- @ysufender --
-## $open -- Single Field Union Construction Bug -- #58 -- @ysufender --
+## $closed -- Single Field Union Construction Bug -- #58 -- @ysufender --
