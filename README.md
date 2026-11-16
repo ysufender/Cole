@@ -172,8 +172,10 @@ There is a small test suite under `tests/`, written in the [Testy](https://codeb
 and [Efile](https://codeberg.org/ysufender/Efile) frameworks of mine.
 
 You can run the tests by first changing your working directory to `tests/`
-and then executing `efile run`.
+and then executing `efile <config> run`.
 
-If you wish to record the current outputs, you can use `efile record`.
+If you wish to record the current outputs, you can use `efile <config> record`.
 
-If you want to just build the tests, you can use `efile build`.
+If you want to just build the tests, you can use `efile <config> build`.
+
+Where <onfig> can be: debug, fast, safe.

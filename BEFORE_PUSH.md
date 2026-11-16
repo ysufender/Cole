@@ -4,9 +4,10 @@
 - Make sure all tests pass
 - Modify the version in:
     - `build.zig`
-    - `builtin.cole`
     - `build.zig.zon`
+    - `builtin.cole`
     - `tests/build.lua`
+    - `demo/build.lua`
 
 ## If Pushing Minor Version Change
 
