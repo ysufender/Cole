@@ -1930,6 +1930,7 @@ fn expressionList(self: *Lowerer, extraPtr: defines.OpaquePtr, expected: TypeID)
     return switch (eti) {
         .Array, .Struct => self.typechecker.builder.construct(expected, exs),
         .Union => |uni| blk: {
+            // @TODO: Fix
             if (uni.isTagged and exs.len > 2) {
                 const tagExprPtr = ast.extra[@intCast(exprs.start)];
                 const tagVal = self.typechecker.folder.attemptEval(tagExprPtr, uni.fields[0].valueType)

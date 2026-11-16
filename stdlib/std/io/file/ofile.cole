@@ -8,18 +8,36 @@ import std::memory::allocator as Allocator;
 import std::io::stream as Stream;
 import std::io::file as File;
 import std::ascii as ASCII;
-
-pub let OpenResult = union(enum) {
-    Ok: OFile,
-    Err: void,
-};
+import std::c::memory;
+import std;
 
 pub let OFile = struct {
     handle: *mut FILE,
-};
+    dummy: void,
 
-pub let stream = fn (self: OFile) -> Stream::Output {
-    return (cast(self.handle), write, writeline, writebuffer, seek, close, flush);
+    pub let stream = fn (self: OFile) -> Stream::Output {
+        return (cast(self.handle), write, writeline, writebuffer, seek, close, flush);
+    };
+
+    pub let open = fn (gpa: Allocator::Allocator, path: mut []u8, append: bool, readWrite: bool) -> std::Option(OFile) {
+        switch gpa.allocSentinel(u8)(path.len, '\0') {
+            @Ok -> |mem| {
+                std::c::memory::copy(unsafeCast(mem.ptr), unsafeCast(path.ptr), path.len);
+                path = mem;
+            }
+            else -> return (@None, ());
+        }
+
+        let res =
+            if (readWrite and append) fopen(cast(path.ptr), "a+")
+            else if (readWrite) fopen(cast(path.ptr), "w+")
+            else if (append) fopen(cast(path.ptr), "a")
+            else fopen(cast(path.ptr), "w");
+
+        return
+            if (res == undefined) (@None, ())
+            else (@Some, res, ());
+    };
 };
 
 pub let write = fn (handle: *mut void, ch: u8) -> Stream::Result {
@@ -54,18 +72,6 @@ pub let close = fn (handle: *mut void) -> Stream::Result {
     return
         if (fclose(cast(handle)) == 0) @Ok
         else @Err;
-};
-
-pub let open = fn (path: []u8, allocator: Allocator::Allocator, append: bool, readWrite: bool) -> OpenResult {
-    let res =
-        if (readWrite and append) fopen(cast(path.ptr), "a+")
-        else if (readWrite) fopen(cast(path.ptr), "w+")
-        else if (append) fopen(cast(path.ptr), "a")
-        else fopen(cast(path.ptr), "w");
-
-    return
-        if (res == undefined) (@Err, ())
-        else (@Ok, res);
 };
 
 pub let flush = fn (handle: *mut void) -> Stream::Result {

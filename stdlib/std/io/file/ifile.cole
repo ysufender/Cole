@@ -8,13 +8,35 @@ import std::memory::allocator as Allocator;
 import std::io::stream as Stream;
 import std::io::file as File;
 import std::ascii as ASCII;
+import std::c::memory;
 import std;
 
 pub let IFile = struct {
     handle: *mut FILE,
+    dummy: void,
 
     pub let stream = fn (self: IFile) -> Stream::Input {
         return (cast(self.handle), read, readline, readbuffer, exhaust, seek, tell, close);
+    };
+
+    pub let open = fn (gpa: Allocator::Allocator, path: mut []u8, readWrite: bool) -> std::Result(IFile, void) {
+        switch gpa.allocSentinel(u8)(path.len, '\0') {
+            @Ok -> |mem| {
+                std::c::memory::copy(unsafeCast(mem.ptr), unsafeCast(path.ptr), path.len);
+                path = mem;
+            }
+            else -> return (@Err, ());
+        }
+
+        let mode: mut any =
+            if (readWrite) "r+"
+            else "r";
+
+        let res = fopen(cast(path.ptr), cast(mode.ptr));
+
+        return
+            if (res == undefined) (@Err, ())
+            else (@Ok, res, ());
     };
 };
 
@@ -36,28 +58,36 @@ pub let read = fn (handle: *mut void) -> Stream::Input::ReadResult {
 
 pub let readline = fn (handle: *mut void, allocator: Allocator::Allocator) -> Stream::Input::ReadLineResult {
     let start = ftell(cast(handle));
+    let len: mut u32 = 0;
+    let sawAny: mut bool = false;
 
     while true {
         let res = read(cast(handle));
         switch res {
             @EOS -> break;
             @Err -> return (@Err, ());
-            @Ok  -> if (res.Ok == '\n') {
-                break;
+            @Ok  -> {
+                sawAny = true;
+                if (res.Ok == '\n') {
+                    break;
+                }
+                len = len + 1;
             }
         }
     }
-    let end = ftell(cast(handle));
 
-    let len = end - start - 1;
-
-    if len == 0 {
+    if !sawAny {
         return (@EOS, ());
+    }
+    else if len == 0 {
+        return (@Ok, "");
     }
 
     if fseek(cast(handle), start, cast(Stream::Base::Start)) != 0 {
         return (@Err, ());
     }
+
+    let end = ftell(cast(handle));
 
     let _buffer = allocator.alloc(u8)(len);
 
@@ -99,6 +129,7 @@ pub let readbuffer = fn (handle: *mut void, buffer: []mut u8) -> Stream::Input::
 pub let exhaust = fn (handle: *mut void, allocator: Allocator::Allocator) -> Stream::Input::ReadLineResult {
     _ = fseek(cast(handle), 0, cast(Stream::Base::End));
     let size = ftell(cast(handle));
+    _ = fseek(cast(handle), 0, cast(Stream::Base::Start));
 
     if size == 0 {
         return (@Ok, "");
@@ -130,19 +161,6 @@ pub let close = fn (handle: *mut void) -> Stream::Result {
     return
         if (fclose(cast(handle)) == 0) @Ok
         else @Err;
-};
-
-pub let open = fn (_path: []u8, allocator: Allocator::Allocator, readWrite: bool) -> std::Result(IFile, void) {
-    let path: mut any = _path;
-    let mode: mut any =
-        if (readWrite) "r+"
-        else "r";
-
-    let res = fopen(cast(path.ptr), cast(mode.ptr));
-
-    return
-        if (res == undefined) (@Err, ())
-        else (@Ok, res);
 };
 
 let FILE = #(@extern) struct { };

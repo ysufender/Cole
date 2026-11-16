@@ -1,3 +1,19 @@
+## $open -- Single Field Union Construction Bug -- #58 -- @ysufender --
+
+...
+
+### Reproduction --
+
+...
+
+### Expected --
+
+...
+
+### Received --
+
+...
+
 ## $open -- Helper Functions for SOA Ease of Use -- #57 -- @ysufender --
 
 The project uses SOA intensively to reduce memory footprint and increase cache hits. For this

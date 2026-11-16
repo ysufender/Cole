@@ -1167,12 +1167,14 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
             const attempting = self.getFlag(.AttemptingEval);
             const inLoop = self.getFlag(.InLoop);
             const inDefer = self.getFlag(.InDefer);
+            const lvalue = self.getFlag(.LValue);
 
             self.flags = tuple.@"1";
 
             _ = self.setFlag(.AttemptingEval, attempting);
             _ = self.setFlag(.InLoop, inLoop);
             _ = self.setFlag(.InDefer, inDefer);
+            _ = self.setFlag(.LValue, lvalue);
 
             return tuple.@"0";
         }
@@ -3584,10 +3586,10 @@ pub fn assertCastable(self: *Typechecker, from: TypeID, to: TypeID, unsafe: bool
     }
 
     switch (fromType) {
-        .Enum => |enm| switch (toType) {
+        .Enum => switch (toType) {
             .Enum => try self.assertStructurallyIdentical(from, to),
             .Integer => |int| {
-                try functional.throwIf(int.range().max < enm.fields.len - 1, Error.IncompatibleTypes);
+                try functional.throwIf(int.size < 32, Error.IncompatibleTypes);
             },
             else => try functional.throwIf(!self.isInt(to), Error.IncompatibleTypes),
         },
@@ -3600,7 +3602,8 @@ pub fn assertCastable(self: *Typechecker, from: TypeID, to: TypeID, unsafe: bool
             else => try functional.throwIf(
                 !self.isInt(to)
                 and !self.isFloat(to)
-                and toType != .Bool,
+                and toType != .Bool
+                and toType != .Enum,
                 Error.IncompatibleTypes
             ),
         },
@@ -3618,7 +3621,7 @@ pub fn assertCastable(self: *Typechecker, from: TypeID, to: TypeID, unsafe: bool
                 else !toInt.canContain(fromInt),
                 Error.SizeMismatch
             ),
-            else => try functional.throwIf(!self.isInt(to) and !self.isFloat(to), Error.IncompatibleTypes)
+            else => try functional.throwIf(!self.isInt(to) and !self.isFloat(to) and toType != .Enum, Error.IncompatibleTypes)
         },
         .Float => try functional.throwIf(!self.isInt(to) and !self.isFloat(to), Error.IncompatibleTypes),
         .Pointer => |fromPtr| switch (toType) {

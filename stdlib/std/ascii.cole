@@ -15,8 +15,5 @@ pub let isAlphaNumeric = fn (ch: u8) -> bool {
 pub let isWhitespace = fn (ch: u8) -> bool {
     return
         ch == ' '
-        or ch == '\n'
-        or ch == '\r'
-        or ch == '\0'
-        or ch == '\t';
+        or (ch >= 9 and ch <= 13);
 };

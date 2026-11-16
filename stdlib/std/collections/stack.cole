@@ -1,0 +1,100 @@
+import std::memory::allocator;
+
+let Allocator = std::memory::allocator::Allocator;
+let Error = std::memory::allocator::Error;
+let Res = std::Result;
+let Opt = std::Option;
+
+pub let Stack = fn (T: type) -> type {
+    return struct {
+        items   : mut []mut T,
+        capacity: mut u32,
+
+        let Self     = this();
+        let Overhead = 32;
+
+        pub let empty = Self(undefined, 0);
+
+        pub let init = fn (gpa: Allocator, size: u32) -> Opt(Self) {
+            if size == 0 {
+                return (@Some, empty);
+            }
+
+            return switch gpa.alloc(T)(size) {
+                @Some -> |mem| (@Some, mem[0..0], size),
+                else -> (@None, ()),
+            };
+        };
+
+        pub let deinit = fn (self: *mut Self, gpa: Allocator) -> void {
+            gpa.dealloc(T)(self.items);
+            self.capacity = 0;
+        };
+
+        pub let reserve = fn (self: *mut Self, gpa: Allocator, size: u32) -> Res(void, Error) {
+            if self.capacity >= size {
+                return (@Ok, ());
+            }
+
+            if self.capacity == 0 {
+                switch gpa.alloc(T)(size) {
+                    @Ok -> |mem| {
+                        self.items = mem[0..0];
+                        self.capacity = size;
+                        return (@Ok, ());
+                    }
+                    @Err -> |err| return (@Err, err);
+                }
+            }
+
+            switch gpa.realloc(T)(self.items[0..self.capacity], size) {
+                @Ok -> |mem| {
+                    self.items = mem[0..self.items.len];
+                    self.capacity = size;
+                }
+                @Err -> |err| return (@Err, err);
+            }
+
+            return (@Ok, ());
+        };
+
+        pub let push = fn (self: *mut Self, gpa: Allocator, value: T) -> Res(void, Error) {
+            if self.items.len >= self.capacity {
+                switch self.reserve(gpa, self.capacity * 2) {
+                    @Ok -> { }
+                    @Err -> |err| return (@Err, err);
+                }
+            }
+
+            let index = self.items.len;
+            self.items = self.items.ptr[0..index + 1];
+            self.items[index] = value;
+            return (@Ok, ());
+        };
+
+        pub let pop = fn (self: *mut Self) -> Opt(T) {
+            if self.items.len == 0 {
+                return (@None, ());
+            }
+
+            let item = self.items[self.items.len - 1];
+            self.items = self.items.ptr[0..self.items.len - 1];
+            return (@Some, item);
+        };
+
+        pub let isEmpty = fn (self: *Self) -> bool {
+            return self.items.len == 0;
+        };
+
+        pub fn peek(self: *mut Self) -> Opt(*mut T) {
+            return
+                if (self.empty()) (@None, ())
+                else (Some, self.items[self.items.len - 1].&);
+        };
+
+        pub let revert = fn (self: *mut Self, index: u32) -> void {
+            if self.items.len <= index { return; }
+            self.items = self.items[0..index];
+        };
+    };
+};

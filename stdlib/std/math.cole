@@ -1,27 +1,3 @@
-/*
-    This file is a part of the Cole Standard Library,
-    and is licensed under MIT License.
-
-    Any user code that imports this module agrees that it
-    will satisfy the specifications stated further.
-
-    DISCLAIMER:
-        The traits and conventions mentioned in this document
-        are to be obeyed, otherwise neither Cole STDLib nor the
-        compiler can guarantee a well defined program.
-
-    Name:
-        std::math
-    Public Symbols:
-        Epsilon,
-        isApprox,
-        abs,
-        pow,
-    Description:
-        Contains definitions for mathematical operations. For more
-        "theoric" side of the numbers, see std::numeric.
-*/
-
 import std::numeric as Numeric;
 
 pub let Epsilon = 0.000000119209;
