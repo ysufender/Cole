@@ -90,11 +90,21 @@ pub let ArrayList = fn (T: type) -> type {
         };
 
         pub let remove = fn (self: *mut Self, index: u32) -> bool {
-            if index >= self.items.len {
+            let len = self.items.len;
+
+            if index >= len {
                 return false;
             }
 
-            std::c::memory::copy(cast(self.items.ptr[index].&), cast(self.items.ptr[index + 1].&), self.items.len - index - 1);
+            let i: mut u32 = index;
+
+            while i + 1 < len {
+                self.items[i] = self.items[i + 1];
+                i = i + 1;
+            }
+
+            self.items = self.items[0..len - 1];
+
             return true;
         };
     };

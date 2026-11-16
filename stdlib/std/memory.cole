@@ -39,14 +39,17 @@ pub let findLast = fn (T: type) -> *fn ([]T, T) -> std::Option(u32) {
 
 pub let findNth = fn (T: type) -> *fn ([]T, T, u32) -> std::Option(u32) {
     return fn (haystack: []T, needle: T, n: u32) -> std::Option(u32) {
-        let idx : mut u32 = 0;
+        let idx: mut u32 = 0;
         let from: mut u32 = 0;
-        for 0..n, |i| {
-            switch find(T)(haystack, needle) {
-                @Some -> |i| idx = i;
+
+        for 0..n, |discard| {
+            switch find(T)(haystack[from..haystack.len], needle) {
+                @Some -> |i| {
+                    idx = from + i;
+                    from = idx + 1;
+                }
                 else -> return (@None, ());
             }
-            from = idx + 1;
         }
 
         return (@Some, idx);
@@ -61,7 +64,7 @@ pub let count = fn (T: type) -> *fn ([]T, T) -> u32 {
         while true {
             switch find(T)(haystack[start..haystack.len], needle) {
                 @Some -> |idx| {
-                    start = idx + 1;
+                    start = start + idx + 1;
                     count = count + 1;
                 }
                 @None -> break;

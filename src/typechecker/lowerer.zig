@@ -1896,6 +1896,51 @@ fn expressionList(self: *Lowerer, extraPtr: defines.OpaquePtr, expected: TypeID)
 
     const eti = self.typechecker.typeTable.get(expected);
 
+    const unionStructPayload: ?TypeID = switch (eti) {
+        .Union => |uni| blk: {
+            if (!uni.isTagged or exprs.len() <= 1) {
+                break :blk null;
+            }
+
+            const tagExprPtr = ast.extra[@intCast(exprs.start)];
+
+            const tagVal = self.typechecker.folder.attemptEval(
+                tagExprPtr,
+                uni.fields[0].valueType
+            ) orelse break :blk null;
+
+            const tagValue = self.typechecker.folder.getValue(tagVal).Enum.Value;
+            const payloadTypeID = uni.fields[1 + tagValue].valueType;
+
+            if (self.typechecker.typeTable.get(payloadTypeID) == .Struct) {
+                break :blk payloadTypeID;
+            }
+
+            break :blk null;
+        },
+        else => null,
+    };
+
+    var unionPayloadIsWhole = false;
+
+    if (unionStructPayload) |payloadTypeID| {
+        if (exprs.len() == 2) {
+            const payloadExprPtr = ast.extra[@intCast(exprs.start + 1)];
+
+            const maybePayloadType = self.typechecker.typecheckExpression(
+                payloadExprPtr,
+                payloadTypeID
+            ) catch null;
+
+            if (maybePayloadType) |actualType| {
+                unionPayloadIsWhole = self.typechecker.suitable(
+                    payloadTypeID,
+                    actualType
+                );
+            }
+        }
+    }
+
     if (exprs.len() == 1 and switch (eti) { .Struct, .Union, .Enum, .Array => true, else => false }) {
         const innerType = try self.typechecker.typecheckExpression(ast.extra[exprs.start], expected);
         if (self.typechecker.suitable(expected, innerType)) {
@@ -1908,17 +1953,20 @@ fn expressionList(self: *Lowerer, extraPtr: defines.OpaquePtr, expected: TypeID)
             .Array => |arr| arr.child,
             .Struct => |str| str.fields[i].valueType,
             .Union => |uni| blk: {
-                if (uni.isTagged and i > 0) {
-                    const tagExprPtr = ast.extra[@intCast(exprs.start)];
-                    if (self.typechecker.folder.attemptEval(tagExprPtr, uni.fields[0].valueType)) |tagVal| {
-                        const tagValue = self.typechecker.folder.getValue(tagVal).Enum.Value;
-                        const payloadTypeID = uni.fields[1 + tagValue].valueType;
+                if (i > 0) {
+                    if (unionStructPayload) |payloadTypeID| {
+                        if (unionPayloadIsWhole) {
+                            break :blk payloadTypeID;
+                        }
+
                         const payloadTypeInfo = self.typechecker.typeTable.get(payloadTypeID);
+
                         if (payloadTypeInfo == .Struct) {
                             break :blk payloadTypeInfo.Struct.fields[i - 1].valueType;
                         }
                     }
                 }
+
                 break :blk uni.fields[i].valueType;
             },
             .Function => |func| func.argTypes[i],
@@ -1929,17 +1977,21 @@ fn expressionList(self: *Lowerer, extraPtr: defines.OpaquePtr, expected: TypeID)
 
     return switch (eti) {
         .Array, .Struct => self.typechecker.builder.construct(expected, exs),
-        .Union => |uni| blk: {
-            // @TODO: Fix
-            if (uni.isTagged and exs.len > 2) {
-                const tagExprPtr = ast.extra[@intCast(exprs.start)];
-                const tagVal = self.typechecker.folder.attemptEval(tagExprPtr, uni.fields[0].valueType)
-                    orelse break :blk self.typechecker.builder.construct(expected, exs);
-                const tagValue = self.typechecker.folder.getValue(tagVal).Enum.Value;
-                const payloadTypeID = uni.fields[1 + tagValue].valueType;
-                const payloadNode = try self.typechecker.builder.construct(payloadTypeID, exs[1..]);
-                break :blk self.typechecker.builder.construct(expected, &.{ exs[0], payloadNode });
+        .Union => blk: {
+            if (unionStructPayload) |payloadTypeID| {
+                if (!unionPayloadIsWhole) {
+                    const payloadNode = try self.typechecker.builder.construct(
+                        payloadTypeID,
+                        exs[1..]
+                    );
+
+                    break :blk self.typechecker.builder.construct(
+                        expected,
+                        &.{ exs[0], payloadNode }
+                    );
+                }
             }
+
             break :blk self.typechecker.builder.construct(expected, exs);
         },
         else => self.typechecker.builder.grouping(exs),
@@ -2060,8 +2112,10 @@ fn dot(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     const deref = std.mem.eql(u8, member, "*");
 
     var obj = obj: {
+        const prevl = self.typechecker.setFlag(.LValue, ref or self.typechecker.getFlag(.LValue));
         const prev = self.typechecker.folder.setFlag(.ComptimeBanned, ref or deref);
         defer _ = self.typechecker.folder.setFlag(.ComptimeBanned, prev);
+        defer _ = self.typechecker.setFlag(.LValue, prevl);
         break :obj try self.expression(exprPtr, exprType);
     };
 

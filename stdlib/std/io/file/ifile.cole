@@ -83,11 +83,11 @@ pub let readline = fn (handle: *mut void, allocator: Allocator::Allocator) -> St
         return (@Ok, "");
     }
 
+    let end = ftell(cast(handle));
+
     if fseek(cast(handle), start, cast(Stream::Base::Start)) != 0 {
         return (@Err, ());
     }
-
-    let end = ftell(cast(handle));
 
     let _buffer = allocator.alloc(u8)(len);
 
