@@ -1,24 +1,3 @@
-/*
-    this file is a part of the Cole standard library,
-    and is licensed under mit license.
-
-    any user code that imports this module agrees that it
-    will satisfy the specifications stated further.
-
-    disclaimer:
-        the traits and conventions mentioned in this document
-        are to be obeyed, otherwise neither Cole stdlib nor the
-        compiler can guarantee a well defined program.
-
-    name:
-        std::memory::c
-    public symbols:
-        Allocator
-        memCopy
-    description:
-        File operation utilities.
-*/
-
 import std::memory::allocator;
 
 let Result = std::memory::allocator::Result;

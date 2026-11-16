@@ -26,15 +26,6 @@ import std::io::file::ifile as ifile;
 import std::io::file::ofile as ofile;
 import std::io::stream as Stream;
 
-pub let Input = struct {
-    pub let File       = ifile::IFile;
-    pub let stream     = ifile::stream;
-    pub let open       = ifile::open;
-};
+pub let Input = ifile::IFile;
 
-pub let Output = struct {
-    pub let OpenResult  = ofile::OpenResult;
-    pub let File        = ofile::OFile;
-    pub let stream      = ofile::stream;
-    pub let open        = ofile::open;
-};
+pub let Output = ofile::OFile;

@@ -2,12 +2,12 @@ local Efile = require "efile"
 
 local suites = require "suites"
 
-local cole_build =
+local cole_build = arg[1] or
     "debug"
     -- "safe"
     -- "fast"
 
-local cole_version = "v0.1.6"
+local cole_version = "v0.1.7"
 
 local exe_path = string.format("../zig-out/cole-%s-%s-linux-x86_64", cole_version, cole_build)
 
@@ -67,4 +67,4 @@ project
         :action("rm -rf build")
         :action("rm -rf .testy/.cache"))
 
-print(project:build(arg[1] or "build") or "Success")
+print(project:build(arg[2] or "build") or "Success")

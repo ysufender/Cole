@@ -1,0 +1,98 @@
+import std::collections::stack;
+import std::memory::allocator;
+
+let Stack = std::collections::stack::Stack;
+let Allocator = std::memory::allocator::Allocator;
+let Error = std::memory::allocator::Error;
+let Res = std::Result;
+let Opt = std::Option;
+
+pub let Queue = fn (T: type) -> type {
+    return struct {
+        let Self  = this();
+        let Items = Stack(T);
+
+        inbox : mut Items,
+        outbox: mut Items,
+
+        pub let EMPTY = Self(Items::EMPTY, Items::EMPTY);
+
+        pub let init = fn (gpa: Allocator, size: u32) -> Opt(Self) {
+            if size == 0 {
+                return (@Some, EMPTY);
+            }
+
+            let self: mut Self = EMPTY;
+
+            switch Items::init(gpa, size) {
+                @Some -> |s| self.inbox = s;
+                else -> return (@None, ());
+            }
+
+            switch Items::init(gpa, size) {
+                @Some -> |s| self.outbox = s;
+                else -> {
+                    self.inbox.deinit(gpa);
+                    return (@None, ());
+                }
+            }
+
+            return (@Some, self);
+        };
+
+        pub let deinit = fn (self: *mut Self, gpa: Allocator) -> void {
+            self.inbox.deinit(gpa);
+            self.outbox.deinit(gpa);
+        };
+
+        pub let enqueue = fn (self: *mut Self, gpa: Allocator, value: T) -> Res(void, Error) {
+            return self.inbox.push(gpa, value);
+        };
+
+        let shift = fn (self: *mut Self, gpa: Allocator) -> Res(void, Error) {
+            if !self.outbox.is_empty() {
+                return (@Ok, ());
+            }
+
+            switch self.outbox.reserve(gpa, self.inbox.len()) {
+                @Ok -> { }
+                @Err -> |err| return (@Err, err);
+            }
+
+            while !self.inbox.is_empty() {
+                switch self.inbox.pop() {
+                    @Some -> |v| self.outbox.push_assume_capacity(v);
+                    else -> break;
+                }
+            }
+
+            return (@Ok, ());
+        };
+
+        pub let dequeue = fn (self: *mut Self, gpa: Allocator) -> Res(Opt(T), Error) {
+            switch self.shift(gpa) {
+                @Ok -> { }
+                @Err -> |err| return (@Err, err);
+            }
+
+            return (@Ok, self.outbox.pop());
+        };
+
+        pub let peek = fn (self: *mut Self, gpa: Allocator) -> Res(Opt(*mut T), Error) {
+            switch self.shift(gpa) {
+                @Ok -> { }
+                @Err -> |err| return (@Err, err);
+            }
+
+            return (@Ok, self.outbox.peek());
+        };
+
+        pub let len = fn (self: *Self) -> usize {
+            return self.inbox.len() + self.outbox.len();
+        };
+
+        pub let is_empty = fn (self: *Self) -> bool {
+            return self.inbox.is_empty() and self.outbox.is_empty();
+        };
+    };
+};

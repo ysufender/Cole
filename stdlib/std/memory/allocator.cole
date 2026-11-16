@@ -1,3 +1,4 @@
+import std::c::memory;
 import std;
 
 pub let Error = enum {
@@ -69,6 +70,20 @@ pub let Allocator = struct {
                 @Ok -> |res| (@Ok, unsafeCast(res)),
                 @Err -> |err| (@Err, err),
             };
+        };
+    };
+
+    pub let dupe = #(@generic) fn (T: type) -> *fn (Allocator, []mut T) -> Result([]mut T) {
+        return fn (self: Allocator, arr: []mut T) -> Result([]mut T) {
+            switch self.alloc(T)(arr.len) {
+                @Ok -> |mem| {
+                    std::c::memory::copy(cast(mem.ptr), cast(arr.ptr), arr.len);
+                    return (@Ok, mem);
+                }
+                @Err -> { }
+            }
+
+            return (@Err, @OutOfMemory);
         };
     };
 };

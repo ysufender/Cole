@@ -1,4 +1,5 @@
 import std::memory::allocator as Malloc;
+import std::c::memory;
 import std;
 
 let Allocator = Malloc::Allocator;
@@ -12,18 +13,27 @@ pub let ArrayList = fn (T: type) -> type {
         capacity: mut u32,
 
         let Self = this();
-        let Elem = T;
         let Overhead = 32;
 
+        pub let empty: Self = (undefined, 0);
+
         pub let init = fn (allocator: Allocator, size: u32) -> Opt(Self) {
-            let self: mut Self = (undefined, 0);
-            switch Malloc::alloc(T)(allocator, size) {
+            if size == 0 {
+                return (@Some, empty);
+            }
+
+            let self: mut Self = empty;
+            switch allocator.alloc(T)(size) {
                 @Ok -> |mem| self.items = mem[0..0];
                 else -> return (@None, ());
             }
 
-            self.capacity = Overhead;
+            self.capacity = size;
             return (@Some, self);
+        };
+
+        pub let deinit = fn (self: *mut Self, gpa: Allocator) -> void {
+            gpa.dealloc(T)(self.items[0..self.capacity]);
         };
 
         pub let reserve = fn (self: *mut Self, allocator: Allocator, size: u32) -> Res(void, Error) {
@@ -31,8 +41,20 @@ pub let ArrayList = fn (T: type) -> type {
                 return (@Ok, ());
             }
 
-            switch Malloc::realloc(T)(allocator, self.items[0..self.capacity], size) {
-                @Ok -> {
+            if self.capacity == 0 {
+                switch allocator.alloc(T)(size) {
+                    @Ok -> |mem| {
+                        self.items = mem[0..0];
+                        self.capacity = size;
+                        return (@Ok, ());
+                    }
+                    @Err -> |err| return (@Err, err);
+                }
+            }
+
+            switch allocator.realloc(T)(self.items[0..self.capacity], size) {
+                @Ok -> |mem| {
+                    self.items = mem[0..self.items.len];
                     self.capacity = size;
                 }
                 @Err -> |err| return (@Err, err);
@@ -47,23 +69,43 @@ pub let ArrayList = fn (T: type) -> type {
                     self.items[index] = elem;
                     return (@Ok, ());
                 }
-                @Err -> |err| return (@Err, err); 
+                @Err -> |err| return (@Err, err);
             }
 
+            unreachable();
             return (@Err, @Undefined);
         };
 
         pub let addOne = fn (self: *mut Self, allocator: Allocator) -> Res(u32, Error) {
             if self.items.len >= self.capacity {
-                switch reserve(self, allocator, if (self.capacity == 0) Overhead else self.capacity * 2) {
+                switch self.reserve(allocator, if (self.capacity == 0) Overhead else self.capacity * 2) {
                     @Ok -> { }
                     @Err -> |err| return (@Err, err);
                 }
             }
 
-            let index = if (self.items.len == 0) 0 else self.items.len - 1;
-            self.items = self.items[0..self.items.len + 1];
+            let index = self.items.len;
+            self.items = self.items[0..index + 1];
             return (@Ok, index);
         };
+
+        pub let remove = fn (self: *mut Self, index: u32) -> bool {
+            let len = self.items.len;
+
+            if index >= len {
+                return false;
+            }
+
+            let i: mut u32 = index;
+
+            while i + 1 < len {
+                self.items[i] = self.items[i + 1];
+                i = i + 1;
+            }
+
+            self.items = self.items[0..len - 1];
+
+            return true;
+        };
     };
-}; 
+};

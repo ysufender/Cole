@@ -19,7 +19,5 @@ let main = fn (args: [][]u8) -> i32 {
     pb(Ascii::isAlpha('1'));
     pb(Ascii::isWhitespace(' '));
     pb(Ascii::isWhitespace('x'));
-    pi(Ascii::NEWLINE);
-    pi(Ascii::NULL);
     return 0;
 };

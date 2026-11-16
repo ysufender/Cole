@@ -1,0 +1,111 @@
+import std::comparator as Eql;
+import std;
+
+pub let find = fn (T: type) -> *fn ([]T, T) -> std::Option(u32) {
+    return fn (haystack: []T, needle: T) -> std::Option(u32) {
+        for 0..haystack.len, |i| {
+            if Eql::generic(T)(haystack[i], needle) {
+                return (@Some, i);
+            }
+        }
+
+        return (@None, ());
+    };
+};
+
+pub let findFirstNot = fn (T: type) -> *fn ([]T, T) -> std::Option(u32) {
+    return fn (haystack: []T, needle: T) -> std::Option(u32) {
+        for 0..haystack.len, |i| {
+            if !Eql::generic(T)(haystack[i], needle) {
+                return (@Some, i);
+            }
+        }
+
+        return (@None, ());
+    };
+};
+
+pub let findLast = fn (T: type) -> *fn ([]T, T) -> std::Option(u32) {
+    return fn (haystack: []T, needle: T) -> std::Option(u32) {
+        for 0..haystack.len, |i| {
+            if Eql::generic(T)(haystack[haystack.len - 1 - i], needle) {
+                return (@Some, haystack.len - 1 - i);
+            }
+        }
+
+        return (@None, ());
+    };
+};
+
+pub let findNth = fn (T: type) -> *fn ([]T, T, u32) -> std::Option(u32) {
+    return fn (haystack: []T, needle: T, n: u32) -> std::Option(u32) {
+        let idx: mut u32 = 0;
+        let from: mut u32 = 0;
+
+        for 0..n, |discard| {
+            switch find(T)(haystack[from..haystack.len], needle) {
+                @Some -> |i| {
+                    idx = from + i;
+                    from = idx + 1;
+                }
+                else -> return (@None, ());
+            }
+        }
+
+        return (@Some, idx);
+    };
+};
+
+pub let count = fn (T: type) -> *fn ([]T, T) -> u32 {
+    return fn (haystack: []T, needle: T) -> u32 {
+        let start: mut u32 = 0;
+        let count: mut u32 = 0;
+
+        while true {
+            switch find(T)(haystack[start..haystack.len], needle) {
+                @Some -> |idx| {
+                    start = start + idx + 1;
+                    count = count + 1;
+                }
+                @None -> break;
+            }
+        }
+
+        return count;
+    };
+};
+
+pub let findFirstOf = fn (T: type) -> *fn ([]T, []T) -> std::Option(u32) {
+    return fn (haystack: []T, needles: []T) -> std::Option(u32) {
+        for 0..haystack.len, |i| {
+            for needles, |needle| {
+                if Eql::generic(T)(haystack[i], needle) {
+                    return (@Some, i);
+                }
+            }
+        }
+
+        return (@None, ());
+    };
+};
+
+pub let findFirstNotOf = fn (T: type) -> *fn ([]T, []T) -> std::Option(u32) {
+    return fn (haystack: []T, needles: []T) -> std::Option(u32) {
+        for 0..haystack.len, |i| {
+            let none: mut bool = true;
+
+            for needles, |needle| {
+                if Eql::generic(T)(haystack[i], needle) {
+                    none = false;
+                    break;
+                }
+            }
+
+            if none {
+                return (@Some, i);
+            }
+        }
+
+        return (@None, ());
+    };
+};
