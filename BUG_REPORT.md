@@ -1,10 +1,8 @@
 ## $open -- Helper Functions for SOA Ease of Use -- #57 -- @ysufender --
 
 The project uses SOA intensively to reduce memory footprint and increase cache hits. For this
-reason, almost every unit of the project uses flattened SOA instead of classic unions (see
-[parser.zig](https://codeberg.org/ysufender/JASL/src/commit/d950cbde5696f8246efd765418086ed7767d81f8/src/parser/parser.zig#L186)).
-The problem with this approach is that it is tedious to write and read the structures (see
-[typechecker.zig](https://codeberg.org/ysufender/JASL/src/commit/d950cbde5696f8246efd765418086ed7767d81f8/src/typechecker/typechecker.zig#L619)).
+reason, almost every unit of the project uses flattened SOA instead of classic unions (see <a href='https://codeberg.org/ysufender/JASL/src/commit/d950cbde5696f8246efd765418086ed7767d81f8/src/parser/parser.zig#L186'>parser.zig</a>).
+The problem with this approach is that it is tedious to write and read the structures (see <a href='https://codeberg.org/ysufender/JASL/src/commit/d950cbde5696f8246efd765418086ed7767d81f8/src/typechecker/typechecker.zig#L619'>typechecker.zig</a>).
 Helper functions to do it inline would be nice.
 
 ### Reproduction --
