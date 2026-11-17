@@ -77,7 +77,7 @@ pub let Allocator = struct {
         return fn (self: Allocator, arr: []mut T) -> Result([]mut T) {
             switch self.alloc(T)(arr.len) {
                 @Ok -> |mem| {
-                    std::c::memory::copy(cast(mem.ptr), cast(arr.ptr), arr.len);
+                    std::c::memory::copy(T)(mem, arr);
                     return (@Ok, mem);
                 }
                 @Err -> { }

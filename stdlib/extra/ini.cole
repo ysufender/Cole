@@ -58,7 +58,7 @@ pub let Value = union(enum) {
 };
 
 pub let loadFile = fn (allocator: Allocator, path: []u8) -> INI::LoadResult {
-    let file = File::Input::open(path, allocator, false);
+    let file = File::Input::open(allocator, path, false);
 
     return switch file {
         @Ok -> |f| loadStream(allocator, File::Input::stream(f)),
@@ -177,7 +177,7 @@ pub let loadStream = fn (allocator: Allocator, stream: Stream::Input) -> INI::Lo
             else -> {
                 _ = Stream::Output::writebuffer(IO::StdErr(), "Unexpected token: ");
                 _ = Stream::Output::writebuffer(IO::StdErr(), token.value);
-                _ = Stream::Output::write(IO::StdErr(), ASCII::NEWLINE);
+                _ = Stream::Output::write(IO::StdErr(), '\n');
                 return (@Err, ());
             }
         }
@@ -221,7 +221,7 @@ let PairList = struct {
 
     pub let slice = fn (self: *mut PairList, allocator: Allocator) -> []Pair {
         let slice = allocator.alloc(Pair)(self.items.len).Ok;
-        Memory::copy(cast(slice.ptr), cast(self.items.ptr), self.items.len * sizeOf(Pair));
+        Memory::copy(Pair)(slice, self.items);
         self.items = self.items[0..0];
         return unsafeCast(slice);
     };
@@ -267,7 +267,7 @@ let SectionList = struct {
 
     pub let slice = fn (self: *mut SectionList, allocator: Allocator) -> []Section {
         let slice = allocator.alloc(Section)(self.items.len).Ok;
-        Memory::copy(cast(slice.ptr), cast(self.items.ptr), self.items.len * sizeOf(Section));
+        Memory::copy(Section)(slice, self.items);
         self.items = self.items[0..0];
         return unsafeCast(slice);
     };

@@ -1299,7 +1299,7 @@ pub const builtins = [_][]const u8 {
     "alignOf", "compileBreak", "typeInfo",
     "src", "buildInfo", "inComptime",
     "getMetadata", "this", "isComptime",
-    "field"
+    "field", "c_array"
 };
 
 pub fn BuiltinIndex(comptime builtin: []const u8) u32 {

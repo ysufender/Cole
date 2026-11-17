@@ -1,0 +1,115 @@
+code {
+#header_start
+#   include <dirent.h>
+#header_end
+}
+
+import std::memory::allocator;
+import std::c::memory;
+import std;
+
+let Allocator = std::memory::allocator::Allocator;
+
+let isWin = switch buildInfo().platform {
+    @Windows -> compileError("Directory utilities are unsupported on Windows platforms."),
+    else -> false,
+};
+
+pub let Dir = struct {
+    handle: *mut DIR,
+
+    pub let Entry = struct {
+        name: []u8,
+        type: EntryType,
+        
+        pub let deinit = fn (self: Entry, gpa: Allocator) -> void {
+            gpa.dealloc(u8)(self.name);
+        };
+    };
+
+    pub let Iterator = struct {
+        gpa   : Allocator,
+        handle: *mut DIR,
+        finish: mut bool,
+
+        let IntermediaryEntry = struct {
+            name: []c_char,
+            type: c_uchar,
+        };
+
+        pub let next = fn (self: *mut Iterator) -> std::Option(Entry) {
+            if self.finish {
+                return (@None, ());
+            }
+
+            let entry = readdir(self.handle);
+            if entry == undefined {
+                self.finish = true;
+                rewinddir(self.handle);
+                return (@None, ());
+            }
+
+            let intermediate = IntermediaryEntry(entry.d_name.ptr, entry.d_type);
+
+            return (@Some, cast(intermediate.name), cast(intermediate.type));
+        };
+    };
+
+    pub let open = fn (gpa: Allocator, path: mut []u8) -> std::Option(Dir) {
+        _ = isWin;
+
+        switch gpa.allocSentinel(u8)(path.len, '\n') {
+            @Ok -> |mem| {
+                std::c::memory::copy(u8)(mem, path);
+                path = mem;
+            }
+            else -> return (@None, ());
+        }
+
+        let res = opendir(cast(path.ptr));
+
+        return
+            if (res == undefined) (@None, ())
+            else (@Some, res);
+    };
+
+    pub let close = fn (self: Dir) -> void {
+        if self.handle == undefined {
+            return;
+        }
+
+        _ = closedir(self.handle);
+    };
+
+    pub let query = fn (self: Dir, gpa: Allocator) -> Iterator {
+        return (gpa, self.handle, false);
+    };
+};
+
+/*
+ * POSIX
+ */
+let DIR = #(@extern, @opaque) struct { };
+
+let dirent = #(@extern, @struct, @opaque) struct {
+    /* @Beware may have other fields */
+    d_type: c_uchar,
+    d_name: [256]c_char,
+};
+
+let EntryType = enum {
+    Unknown          = 0,
+    NamedPipe        = 1,
+    CharacterDevice  = 2,
+    Directory        = 4,
+    BlockDevice      = 6,
+    RegularFile      = 8,
+    SymbolicLink     = 10,
+    UnixDomainSocket = 12,
+    WHT              = 14
+};
+
+let opendir   = #(@extern) fn (path: mut [@c]c_char) -> mut *mut DIR { };
+let closedir  = #(@extern) fn (dir: mut *mut DIR) -> mut c_int { };
+let rewinddir = #(@extern) fn (dir: mut *mut DIR) -> void { };
+let readdir   = #(@extern) fn (dir: mut* mut DIR) -> mut *mut dirent { };

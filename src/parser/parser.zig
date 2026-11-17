@@ -1423,7 +1423,7 @@ fn typeExpression(self: *Parser) ExpressionResult {
             };
         },
         .Mut => {
-            const res = try self.typeExpression();
+            const res = try self.ifExpression();
 
             const expr = try self.alloc(Expression);
             self.expressionMap.set(expr, .{

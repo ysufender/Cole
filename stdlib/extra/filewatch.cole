@@ -64,11 +64,11 @@ pub let print = fn (self: *Watcher, stream: Stream::Output, allocator: Allocator
 /*
  * POSIX
  */
-let timespec = #(@extern, @opaque) struct {
+let timespec = #(@extern, @struct, @opaque) struct {
     tv_sec: c_long,
 };
 
-let stat = #(@extern, @opaque) struct {
+let stat = #(@extern, @struct, @opaque) struct {
     st_mtim: timespec,  /* Time of last modification */
 
     pub let toFileInfo = fn (self: *stat) -> FileInfo {
@@ -96,7 +96,7 @@ let FILETIME = #(@extern) struct {
     dwHighDateTime: DWORD,
 };
 
-let BY_HANDLE_FILE_INFORMATION = #(@extern, @opaque) struct {
+let BY_HANDLE_FILE_INFORMATION = #(@extern, @struct) struct {
     ftLastWriteTime: FILETIME,  /* Time of last modification */
     pub let toFileInfo = fn (self: *BY_HANDLE_FILE_INFORMATION) -> FileInfo {
         let ft: c_long = ((self.ftLastWriteTime.dwHighDateTime) << 32)

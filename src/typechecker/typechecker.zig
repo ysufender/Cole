@@ -1984,6 +1984,7 @@ pub fn typecheckBuiltinCall(self: *Typechecker, extraPtr: defines.ExpressionPtr,
         BI("this") => comptime Comptime.Folder.Builtin.Type("type"),
         BI("isComptime") => comptime Comptime.Folder.Builtin.Type("bool"),
         BI("field") => self.typecheckFieldBuiltin(extraPtr,  expr),
+        BI("c_array") => comptime Comptime.Folder.Builtin.Type("type"),
         else => {
             self.report("Builtin '{s}' is not usable in this context.", .{Resolver.builtins[declPtr]});
             return Error.ComptimeNotPossible;
@@ -2911,7 +2912,12 @@ pub fn typecheckSlicing(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!T
     const maybeSliceableType = try self.typecheckExpression(ast.extra[extraPtr], null);
     const maybeSliceable = self.typeTable.get(maybeSliceableType);
     const resultType = switch (maybeSliceable) {
-        .Array => |arr| try self.registerType(.{
+        .Array => |arr|
+            if (arr.isCStyle) {
+                self.report("Attempt to slice c-style array.", .{});
+                return Error.IllegalSlicing;
+            }
+            else try self.registerType(.{
             .Pointer = .{
                 .size = .Slice,
                 .mutable = arr.mutable,
@@ -3101,7 +3107,7 @@ pub fn typecheckUnary(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpe
                         });
                         return Error.NegationOfUnsigned;
                     }
-                    else if (self.sizeOf(rhsType) == 0) {
+                    else if (try self.sizeOf(rhsType) == 0) {
                         self.report("Pointless negation of zero-sized integer type '{s}'.", .{
                             try self.typeName(self.arena.allocator(), rhsType),
                         });
@@ -3596,7 +3602,7 @@ pub fn assertCastable(self: *Typechecker, from: TypeID, to: TypeID, unsafe: bool
         .CChar, .CUChar, .CUInt, .CInt, .CLong, .CShort, .CUShort, .CULong, .CSize => switch (toType) {
             .Integer => |toInt| try functional.throwIf(
                 if (unsafe) !self.isInt(to) and !self.isCPtr(to)
-                else toInt.size < self.sizeOf(to),
+                else toInt.size < try self.sizeOf(to),
                 Error.SizeMismatch
             ),
             else => try functional.throwIf(
@@ -3646,9 +3652,9 @@ pub fn castable(self: *Typechecker, from: TypeID, to: TypeID, unsafe: bool) bool
     return true;
 }
 
-pub fn assertCastablePtr(self: *const Typechecker, this: Types.Pointer, that: Types.Pointer, unsafe: bool) Error!void {
+pub fn assertCastablePtr(self: *Typechecker, this: Types.Pointer, that: Types.Pointer, unsafe: bool) Error!void {
     switch (this.size) {
-        .Slice => try functional.throwIf(!unsafe and that.size == .Slice and self.sizeOf(this.child) != self.sizeOf(that.child), Error.MismatchingSliceChildType),
+        .Slice => try functional.throwIf(!unsafe and that.size == .Slice and try self.sizeOf(this.child) != try self.sizeOf(that.child), Error.MismatchingSliceChildType),
         .Single => try functional.throwIf(!unsafe and that.size == .Slice, Error.PointerSizeMismatch),
         .C => try functional.throwIf(!unsafe and that.size == .Slice, Error.PointerSizeMismatch),
     }
@@ -3847,6 +3853,7 @@ pub fn assertCanCoerce(self: *Typechecker, this: TypeID, that: TypeID) Error!voi
             .Array => {
                 try functional.throwIf(std.meta.activeTag(thatType) != .Array, Error.TypeMismatch);
                 try functional.throwIf(!self.nominallyIdentical(this, that), Error.TypeMismatch);
+                try functional.throwIf(thisType.Array.isCStyle != thatType.Array.isCStyle, Error.TypeMismatch);
             },
             else => try functional.throwIf(!self.nominallyIdentical(this, that), Error.TypeMismatch),
             // else => functional.throwIf(std.meta.activeTag(thisType) != std.meta.activeTag(thatType), Error.TypeMismatch),
@@ -4089,6 +4096,7 @@ pub fn makeMutable(_: *const Typechecker, info: TypeInfo) TypeInfo {
                 .mutable = true,
                 .child = arr.child,
                 .len = arr.len,
+                .isCStyle = arr.isCStyle,
             },
         },
         .Function => |func| .{
@@ -4155,7 +4163,7 @@ pub fn sliceOf(self: *Typechecker, of: TypeID) Error!u32 {
 }
 
 /// In bits
-pub fn sizeOf(self: *const Typechecker, of: TypeID) u32 {
+pub fn sizeOf(self: *Typechecker, of: TypeID) Error!u32 {
     return ret: switch (self.typeTable.get(of)) {
         .CSize => @bitSizeOf(usize),
         .CUShort, .CShort => @bitSizeOf(c_ushort),
@@ -4173,13 +4181,20 @@ pub fn sizeOf(self: *const Typechecker, of: TypeID) u32 {
         .Integer => |int| int.size,
         .Bool => @bitSizeOf(c_char),
         .Void, .Noreturn, .EnumLiteral, .Type, .Any => 0,
-        .Array => |arr| arr.len * self.sizeOf(arr.child),
+        .Array => |arr| arr.len * try self.sizeOf(arr.child),
         .ComptimeInt => @bitSizeOf(i64),
         .Struct => |str| {
+            if (self.hasMetadata(str.expr, "@opaque")) {
+                self.report("Attempt to get the size of opaque type '{s}'.", .{
+                    self.builder.getInternedString(str.name),
+                });
+                return Error.SizeOfOpaqueType;
+            }
+
             var size: u32 = 0;
             var max_align: u32 = 8;
             for (str.fields) |field| {
-                const fieldSize = self.sizeOf(field.valueType);
+                const fieldSize = try self.sizeOf(field.valueType);
                 const fieldAlign = self.alignOf(field.valueType) * 8;
                 size = (size + fieldAlign - 1) & ~(fieldAlign - 1);
                 size += fieldSize;
@@ -4192,7 +4207,7 @@ pub fn sizeOf(self: *const Typechecker, of: TypeID) u32 {
             var max_size: u32 = 0;
             var max_align: u32 = 8;
             for (uni.fields) |field| {
-                const fieldSize = self.sizeOf(field.valueType);
+                const fieldSize = try self.sizeOf(field.valueType);
                 const fieldAlign = self.alignOf(field.valueType) * 8;
                 max_size = @max(max_size, (fieldSize + fieldAlign - 1) & ~(fieldAlign - 1));
                 max_align = @max(max_align, fieldAlign);
@@ -4311,7 +4326,16 @@ pub fn definitionIndex(self: *Typechecker, from: TypeID, member: defines.StringP
 pub fn tryGetFieldIndex(self: *Typechecker, from: TypeID, fieldNamePtr: defines.StringPtr) Error!?defines.Offset {
     const fieldName = self.builder.getInternedString(fieldNamePtr);
     const fields = switch (self.typeTable.get(from)) {
-        .Struct => |str| str.fields,
+        .Struct => |str| fields: {
+            if (self.hasMetadata(str.expr, "@opaque")) {
+                self.report("Attempt to access the fields of opaque type '{s}'.", .{
+                    self.builder.getInternedString(str.name),
+                });
+                return Error.FieldAccessOnOpaqueType;
+            }
+
+            break :fields str.fields;
+        },
         .Union => |uni| uni.fields,
         .Enum => |enm| blk: {
             for (enm.fields, 0..) |field, index| {
@@ -4413,16 +4437,26 @@ pub fn typeName(self: *Typechecker, allocator: Allocator, typeID: TypeID) Error!
                 self.typenameMap.putNoClobber(allocator, typeID, try self.builder.internString(res)) catch unreachable;
                 break :ret res;
             },
-            .Array => {
-                const arr: Types.Array = self.typeTable.get(typeID).Array;
+            .Array => |arr| {
                 const child = try self.typeName(allocator, arr.child);
 
                 const prefix = if (arr.mutable) "mut " else "";
-                const size = std.fmt.allocPrint(allocator, "[{d}]", .{arr.len})
-                    catch return Error.AllocatorFailure;
 
-                var res = allocator.alloc(u8, child.len + prefix.len + size.len) catch return Error.AllocatorFailure;
-                res = std.fmt.bufPrint(res, "{s}{s}{s}", .{prefix, size, child}) catch unreachable;
+                var res: []u8 = undefined;
+                if (arr.isCStyle) {
+                    res = std.fmt.allocPrint(allocator, "{s}c_array({d}, {s})", .{
+                        prefix,
+                        arr.len,
+                        child,
+                    }) catch return Error.AllocatorFailure;
+                }
+                else {
+                    const size = std.fmt.allocPrint(allocator, "[{d}]", .{arr.len})
+                        catch return Error.AllocatorFailure;
+                    res = allocator.alloc(u8, child.len + prefix.len + size.len) catch return Error.AllocatorFailure;
+                    res = std.fmt.bufPrint(res, "{s}{s}{s}", .{prefix, size, child}) catch unreachable;
+                }
+
                 self.typenameMap.putNoClobber(allocator, typeID, try self.builder.internString(res)) catch unreachable;
                 break :ret res;
             },

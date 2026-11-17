@@ -1188,11 +1188,16 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
 
             if (decl.topLevel and self.getValue(valuePtr) == .Function) {
                 const func = &self.memory.items[valuePtr].Function;
+                const prevs = self.typechecker.currentFile;
+                self.typechecker.currentFile = func.source;
+                const cond = (self.typechecker.hasMetadata(func.expr, "@extern")
+                        or self.typechecker.hasMetadata(func.expr, "@export"));
+                self.typechecker.currentFile = prevs;
+
                 const cur = self.typechecker.builder.getInternedString(func.name);
                 if (
                     std.mem.startsWith(u8, cur, "$$")
-                    and (self.typechecker.hasMetadata(func.expr, "@extern")
-                        or self.typechecker.hasMetadata(func.expr, "@export"))
+                    and cond
                 ) {
                     const tokens = self.typechecker.context.getTokens(self.typechecker.currentFile);
                     const symName = tokens.get(decl.token).lexeme(
@@ -1292,6 +1297,7 @@ fn evalBuiltinCall(self: *Folder, extraPtr: defines.OpaquePtr, declPtr: defines.
         BI("this") => self.evalThis(extraPtr),
         BI("isComptime") => self.evalIsComptime(extraPtr),
         BI("field") => self.evalField(extraPtr, expr),
+        BI("c_array") => self.evalCArrayType(extraPtr),
         else => {
             self.report("Builtin '{s}' is not usable in this context.", .{Resolver.builtins[declPtr]});
             return Error.ComptimeNotPossible;
@@ -1931,6 +1937,48 @@ fn evalCast(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?TypeID, 
     return self.castValue(thingToCast, targetType, false);
 }
 
+pub fn evalCArrayType(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {
+    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
+
+    const expressionList = ast.expressions.items(.value)[ast.extra[extraPtr + 1]];
+    const args = defines.Range{
+        .start = ast.extra[expressionList],
+        .end = ast.extra[expressionList + 1],
+    };
+
+    if (args.len() != 2) {
+        self.report("'c_array' expects two expression arguments, received {d}.", .{
+            args.len(),
+        });
+        return Error.ArgumentCountMismatch;
+    }
+
+    const ptr = try self.expectDefined(ast.extra[args.at(0)], comptime Builtin.Type("comptime_int"));
+    const count = switch (self.getValue(ptr)) {
+        .Int => |i| i,
+        else => {
+            self.report("Expected a 'comptime_int' value as size specifier. Got '{s}' instead.", .{
+                try self.typechecker.typeName(self.arena.allocator(),
+                    try self.typechecker.typecheckValue(ptr, null),
+                ),
+            });
+            return Error.TypeMismatch;
+        },
+    };
+    const child = try self.typechecker.expectType(ast.extra[args.at(1)]);
+
+    return self.appendValue(.{
+        .Type = try self.typechecker.registerType(.{
+            .Array = .{
+                .isCStyle = true,
+                .child = child,
+                .len = @intCast(count),
+                .mutable = false,
+            },
+        }),
+    });
+}
+
 pub fn evalField(self: *Folder, extraPtr: defines.OpaquePtr, expr: defines.ExpressionPtr) Error!Comptime.Value.Ptr {
     const resType = try self.typechecker.typecheckFieldBuiltin(extraPtr, expr);
 
@@ -1943,7 +1991,7 @@ pub fn evalField(self: *Folder, extraPtr: defines.OpaquePtr, expr: defines.Expre
     };
 
     if (args.len() != 2) {
-        self.report("'field' expects a single expression argument, received {d}.", .{
+        self.report("'field' expects two expression arguments, received {d}.", .{
             args.len(),
         });
         return Error.ArgumentCountMismatch;
@@ -2150,12 +2198,12 @@ pub fn evalBitSizeOf(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.
 
     if (self.attemptEval(ast.extra[args.at(0)], t)) |res| blk: {
         return self.appendValue(.{ .Int = switch (self.getValue(res)) {
-            .Type => |typeID| self.typechecker.sizeOf(typeID),
+            .Type => |typeID| try self.typechecker.sizeOf(typeID),
             else => break :blk, 
         }});
     }
 
-    return self.appendValue(.{ .Int = self.typechecker.sizeOf(t) });
+    return self.appendValue(.{ .Int = try self.typechecker.sizeOf(t) });
 }
 
 pub fn evalSizeOf(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {
@@ -2178,12 +2226,12 @@ pub fn evalSizeOf(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Val
 
     if (self.attemptEval(ast.extra[args.at(0)], t)) |res| blk: {
         return self.appendValue(.{ .Int = switch (self.getValue(res)) {
-            .Type => |typeID| self.typechecker.sizeOf(typeID) / @bitSizeOf(c_char),
+            .Type => |typeID| try self.typechecker.sizeOf(typeID) / @bitSizeOf(c_char),
             else => break :blk, 
         }});
     }
 
-    return self.appendValue(.{ .Int = self.typechecker.sizeOf(t) / @bitSizeOf(c_char) });
+    return self.appendValue(.{ .Int = try self.typechecker.sizeOf(t) / @bitSizeOf(c_char) });
 }
 
 pub fn evalNewTuple(self: *Folder, range: defines.Range) Error!Comptime.Value.Ptr {
@@ -3136,6 +3184,7 @@ fn evalArrType(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.
             .len = @intCast(size),
             .mutable = false,
             .child = inner.Type,
+            .isCStyle = false,
         },
     };
 
@@ -3613,6 +3662,7 @@ fn resolveIncompleteImpl(self: *Folder, typeID: TypeID, resolvedTo: TypeID, visi
                     .child =
                         if (self.isIncomplete(arr.child)) try self.resolveIncompleteImpl(arr.child, resolvedTo, visited)
                         else arr.child,
+                    .isCStyle = arr.isCStyle,
                 },
             });
         },
@@ -3887,6 +3937,7 @@ pub const builtinMetadata = [_][]const u8 {
     "@export",
     "@extern",
     "@variadic",
+    "@struct",
     "@opaque",
     "@inline",
     "@generic",

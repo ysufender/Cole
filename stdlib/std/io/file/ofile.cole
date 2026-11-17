@@ -22,7 +22,7 @@ pub let OFile = struct {
     pub let open = fn (gpa: Allocator::Allocator, path: mut []u8, append: bool, readWrite: bool) -> std::Option(OFile) {
         switch gpa.allocSentinel(u8)(path.len, '\0') {
             @Ok -> |mem| {
-                std::c::memory::copy(unsafeCast(mem.ptr), unsafeCast(path.ptr), path.len);
+                std::c::memory::copy(u8)(mem, path);
                 path = mem;
             }
             else -> return (@None, ());
