@@ -1984,6 +1984,7 @@ pub fn typecheckBuiltinCall(self: *Typechecker, extraPtr: defines.ExpressionPtr,
         BI("this") => comptime Comptime.Folder.Builtin.Type("type"),
         BI("isComptime") => comptime Comptime.Folder.Builtin.Type("bool"),
         BI("field") => self.typecheckFieldBuiltin(extraPtr,  expr),
+        BI("c_array") => comptime Comptime.Folder.Builtin.Type("type"),
         else => {
             self.report("Builtin '{s}' is not usable in this context.", .{Resolver.builtins[declPtr]});
             return Error.ComptimeNotPossible;
@@ -3847,6 +3848,7 @@ pub fn assertCanCoerce(self: *Typechecker, this: TypeID, that: TypeID) Error!voi
             .Array => {
                 try functional.throwIf(std.meta.activeTag(thatType) != .Array, Error.TypeMismatch);
                 try functional.throwIf(!self.nominallyIdentical(this, that), Error.TypeMismatch);
+                try functional.throwIf(thisType.Array.isCStyle != thatType.Array.isCStyle, Error.TypeMismatch);
             },
             else => try functional.throwIf(!self.nominallyIdentical(this, that), Error.TypeMismatch),
             // else => functional.throwIf(std.meta.activeTag(thisType) != std.meta.activeTag(thatType), Error.TypeMismatch),
@@ -4089,6 +4091,7 @@ pub fn makeMutable(_: *const Typechecker, info: TypeInfo) TypeInfo {
                 .mutable = true,
                 .child = arr.child,
                 .len = arr.len,
+                .isCStyle = arr.isCStyle,
             },
         },
         .Function => |func| .{
@@ -4318,7 +4321,16 @@ pub fn definitionIndex(self: *Typechecker, from: TypeID, member: defines.StringP
 pub fn tryGetFieldIndex(self: *Typechecker, from: TypeID, fieldNamePtr: defines.StringPtr) Error!?defines.Offset {
     const fieldName = self.builder.getInternedString(fieldNamePtr);
     const fields = switch (self.typeTable.get(from)) {
-        .Struct => |str| str.fields,
+        .Struct => |str| fields: {
+            if (self.hasMetadata(str.expr, "@opaque")) {
+                self.report("Attempt to access the fields of opaque type '{s}'.", .{
+                    self.builder.getInternedString(str.name),
+                });
+                return Error.FieldAccessOnOpaqueType;
+            }
+
+            break :fields str.fields;
+        },
         .Union => |uni| uni.fields,
         .Enum => |enm| blk: {
             for (enm.fields, 0..) |field, index| {
@@ -4420,16 +4432,26 @@ pub fn typeName(self: *Typechecker, allocator: Allocator, typeID: TypeID) Error!
                 self.typenameMap.putNoClobber(allocator, typeID, try self.builder.internString(res)) catch unreachable;
                 break :ret res;
             },
-            .Array => {
-                const arr: Types.Array = self.typeTable.get(typeID).Array;
+            .Array => |arr| {
                 const child = try self.typeName(allocator, arr.child);
 
                 const prefix = if (arr.mutable) "mut " else "";
-                const size = std.fmt.allocPrint(allocator, "[{d}]", .{arr.len})
-                    catch return Error.AllocatorFailure;
 
-                var res = allocator.alloc(u8, child.len + prefix.len + size.len) catch return Error.AllocatorFailure;
-                res = std.fmt.bufPrint(res, "{s}{s}{s}", .{prefix, size, child}) catch unreachable;
+                var res: []u8 = undefined;
+                if (arr.isCStyle) {
+                    res = std.fmt.allocPrint(allocator, "{s}c_array({d}, {s})", .{
+                        prefix,
+                        arr.len,
+                        child,
+                    }) catch return Error.AllocatorFailure;
+                }
+                else {
+                    const size = std.fmt.allocPrint(allocator, "[{d}]", .{arr.len})
+                        catch return Error.AllocatorFailure;
+                    res = allocator.alloc(u8, child.len + prefix.len + size.len) catch return Error.AllocatorFailure;
+                    res = std.fmt.bufPrint(res, "{s}{s}{s}", .{prefix, size, child}) catch unreachable;
+                }
+
                 self.typenameMap.putNoClobber(allocator, typeID, try self.builder.internString(res)) catch unreachable;
                 break :ret res;
             },

@@ -216,6 +216,7 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
                                 .mutable = ofType.Pointer.mutable,
                                 .child = ofType.Pointer.child,
                                 .len = slice.Size,
+                                .isCStyle = false,
                             },
                         }),
                         .data = .{

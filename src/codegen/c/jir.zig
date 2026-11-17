@@ -321,7 +321,7 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
                 };
 
                 const name = std.fmt.allocPrint(self.allocator, "{s}Array_{s}_{d}", .{
-                    "",
+                    if (arr.isCStyle) "C_" else "",
                     childName,
                     arr.len,
                 }) catch return Error.AllocatorFailure;
@@ -332,6 +332,15 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
                     continue;
                 }
                 res.key_ptr.* = name;
+
+                if (arr.isCStyle) {
+                    try self.write(out, "typedef {s} {s}[{d}];\n", .{
+                        childName,
+                        name,
+                        arr.len
+                    });
+                    continue;
+                }
 
                 const data = std.fmt.allocPrint(self.allocator, "data[{d}]", .{
                     arr.len,
@@ -1108,9 +1117,14 @@ fn literal(self: *JIR, out: *Writer, ptr: Constant.Ptr) Error!void {
             try self.write(out, "}}", .{});
         },
         .Array => |arr| {
-            try self.write(out, "({s}){{", .{
-                try self.getCName(arr.type, null, true, false),
-            });
+            if (self.types.get(arr.type).Array.isCStyle) {
+                try self.write(out, "{{", .{ });
+            }
+            else {
+                try self.write(out, "({s}){{", .{
+                    try self.getCName(arr.type, null, true, false),
+                });
+            }
             for (arr.data.start..arr.data.end) |idx| {
                 try self.literal(out, @intCast(idx));
                 if (idx != arr.data.end - 1) {
@@ -1323,7 +1337,7 @@ fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool
 
         .Array => |arr| {
             name = std.fmt.allocPrint(self.allocator, "{s}Array_{s}_{d}{s}", .{
-                "",
+                if (arr.isCStyle) "C_" else "",
                 // if (arr.mutable) "" else "const_",
                 try self.getCName(arr.child, _name, true, true),
                 arr.len,

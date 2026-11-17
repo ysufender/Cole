@@ -153,5 +153,6 @@ pub const CompilerError = error {
     MissngMetadata,
     TooMuchIndirection,
     SizeOfOpaqueType,
+    FieldAccessOnOpaqueType,
     Terminate,
 };

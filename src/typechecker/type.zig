@@ -242,6 +242,7 @@ fn hashTypeInfo(
             hashValue(hasher, arr.mutable);
             hashValue(hasher, arr.len);
             hashChild(arr.child, typeTable, hasher, depth + 1, budget);
+            hashValue(hasher, arr.isCStyle);
         },
 
         .Function => |func| {
@@ -530,6 +531,7 @@ pub const Pointer = struct {
 };
 
 pub const Array = struct {
+    isCStyle: bool,
     mutable: bool,
     child: TypeID,
     len: u32,
