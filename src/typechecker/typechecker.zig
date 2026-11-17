@@ -3101,7 +3101,7 @@ pub fn typecheckUnary(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpe
                         });
                         return Error.NegationOfUnsigned;
                     }
-                    else if (self.sizeOf(rhsType) == 0) {
+                    else if (try self.sizeOf(rhsType) == 0) {
                         self.report("Pointless negation of zero-sized integer type '{s}'.", .{
                             try self.typeName(self.arena.allocator(), rhsType),
                         });
@@ -3596,7 +3596,7 @@ pub fn assertCastable(self: *Typechecker, from: TypeID, to: TypeID, unsafe: bool
         .CChar, .CUChar, .CUInt, .CInt, .CLong, .CShort, .CUShort, .CULong, .CSize => switch (toType) {
             .Integer => |toInt| try functional.throwIf(
                 if (unsafe) !self.isInt(to) and !self.isCPtr(to)
-                else toInt.size < self.sizeOf(to),
+                else toInt.size < try self.sizeOf(to),
                 Error.SizeMismatch
             ),
             else => try functional.throwIf(
@@ -3646,9 +3646,9 @@ pub fn castable(self: *Typechecker, from: TypeID, to: TypeID, unsafe: bool) bool
     return true;
 }
 
-pub fn assertCastablePtr(self: *const Typechecker, this: Types.Pointer, that: Types.Pointer, unsafe: bool) Error!void {
+pub fn assertCastablePtr(self: *Typechecker, this: Types.Pointer, that: Types.Pointer, unsafe: bool) Error!void {
     switch (this.size) {
-        .Slice => try functional.throwIf(!unsafe and that.size == .Slice and self.sizeOf(this.child) != self.sizeOf(that.child), Error.MismatchingSliceChildType),
+        .Slice => try functional.throwIf(!unsafe and that.size == .Slice and try self.sizeOf(this.child) != try self.sizeOf(that.child), Error.MismatchingSliceChildType),
         .Single => try functional.throwIf(!unsafe and that.size == .Slice, Error.PointerSizeMismatch),
         .C => try functional.throwIf(!unsafe and that.size == .Slice, Error.PointerSizeMismatch),
     }
@@ -4155,7 +4155,7 @@ pub fn sliceOf(self: *Typechecker, of: TypeID) Error!u32 {
 }
 
 /// In bits
-pub fn sizeOf(self: *const Typechecker, of: TypeID) u32 {
+pub fn sizeOf(self: *Typechecker, of: TypeID) Error!u32 {
     return ret: switch (self.typeTable.get(of)) {
         .CSize => @bitSizeOf(usize),
         .CUShort, .CShort => @bitSizeOf(c_ushort),
@@ -4173,13 +4173,20 @@ pub fn sizeOf(self: *const Typechecker, of: TypeID) u32 {
         .Integer => |int| int.size,
         .Bool => @bitSizeOf(c_char),
         .Void, .Noreturn, .EnumLiteral, .Type, .Any => 0,
-        .Array => |arr| arr.len * self.sizeOf(arr.child),
+        .Array => |arr| arr.len * try self.sizeOf(arr.child),
         .ComptimeInt => @bitSizeOf(i64),
         .Struct => |str| {
+            if (self.hasMetadata(str.expr, "@opaque")) {
+                self.report("Attempt to get the size of opaque type '{s}'.", .{
+                    self.builder.getInternedString(str.name),
+                });
+                return Error.SizeOfOpaqueType;
+            }
+
             var size: u32 = 0;
             var max_align: u32 = 8;
             for (str.fields) |field| {
-                const fieldSize = self.sizeOf(field.valueType);
+                const fieldSize = try self.sizeOf(field.valueType);
                 const fieldAlign = self.alignOf(field.valueType) * 8;
                 size = (size + fieldAlign - 1) & ~(fieldAlign - 1);
                 size += fieldSize;
@@ -4192,7 +4199,7 @@ pub fn sizeOf(self: *const Typechecker, of: TypeID) u32 {
             var max_size: u32 = 0;
             var max_align: u32 = 8;
             for (uni.fields) |field| {
-                const fieldSize = self.sizeOf(field.valueType);
+                const fieldSize = try self.sizeOf(field.valueType);
                 const fieldAlign = self.alignOf(field.valueType) * 8;
                 max_size = @max(max_size, (fieldSize + fieldAlign - 1) & ~(fieldAlign - 1));
                 max_align = @max(max_align, fieldAlign);

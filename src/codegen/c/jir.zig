@@ -1265,8 +1265,8 @@ fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool
                 else if (typeInfo == .Union) typeInfo.Union.name
                 else typeInfo.Enum.name;
 
-            const isOpaque =
-                if (self.typeToJirMap.get(@intCast(typeID))) |ptr| self.hasMetadata(ptr, "@opaque")
+            const isStruct =
+                if (self.typeToJirMap.get(@intCast(typeID))) |ptr| self.hasMetadata(ptr, "@struct")
                 else false;
 
             name = self.strings[namePtr];
@@ -1279,7 +1279,7 @@ fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool
                 else typeInfo.Enum.mutable;
 
             name = std.fmt.allocPrint(self.allocator, "{s}{s}{s}", .{
-                if (isOpaque)
+                if (isStruct)
                     if (noSymbol) "struct_"
                     else "struct "
                 else "",

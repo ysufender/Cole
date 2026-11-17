@@ -13,7 +13,6 @@ import std;
 
 pub let IFile = struct {
     handle: *mut FILE,
-    dummy: void,
 
     pub let stream = fn (self: IFile) -> Stream::Input {
         return (cast(self.handle), read, readline, readbuffer, exhaust, seek, tell, close);
@@ -22,7 +21,7 @@ pub let IFile = struct {
     pub let open = fn (gpa: Allocator::Allocator, path: mut []u8, readWrite: bool) -> std::Result(IFile, void) {
         switch gpa.allocSentinel(u8)(path.len, '\0') {
             @Ok -> |mem| {
-                std::c::memory::copy(unsafeCast(mem.ptr), unsafeCast(path.ptr), path.len);
+                std::c::memory::copy(u8)(mem, path);
                 path = mem;
             }
             else -> return (@Err, ());
@@ -36,7 +35,7 @@ pub let IFile = struct {
 
         return
             if (res == undefined) (@Err, ())
-            else (@Ok, res, ());
+            else (@Ok, res);
     };
 };
 

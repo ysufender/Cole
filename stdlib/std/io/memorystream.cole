@@ -114,7 +114,7 @@ pub let readline = fn (ctx: *mut void, gpa: Allocator::Allocator) -> Stream::Inp
 
     switch Allocator::Allocator::alloc(u8)(gpa, self.rindex - 1 - start) {
         @Ok -> |mem| {
-            Memory::copy(cast(mem.ptr), cast(self.buffer[start..self.rindex - 1]), mem.len);
+            Memory::copy(u8)(mem, self.buffer[start..self.rindex - 1]);
             return (@Ok, mem);
         }
         @Err -> return (@Err, ());
@@ -142,7 +142,7 @@ pub let exhaust = fn (ctx: *mut void, gpa: Allocator::Allocator) -> Stream::Inpu
 
     switch Allocator::Allocator::alloc(u8)(gpa, self.buffer.len) {
         @Ok -> |mem| {
-            Memory::copy(cast(mem.ptr), cast(self.buffer.ptr), mem.len);
+            Memory::copy(u8)(mem, self.buffer);
             return (@Ok, mem);
         }
         @Err -> return @Err;

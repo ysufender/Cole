@@ -152,5 +152,6 @@ pub const CompilerError = error {
     MetadataOfNonVariable,
     MissngMetadata,
     TooMuchIndirection,
+    SizeOfOpaqueType,
     Terminate,
 };

@@ -2150,12 +2150,12 @@ pub fn evalBitSizeOf(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.
 
     if (self.attemptEval(ast.extra[args.at(0)], t)) |res| blk: {
         return self.appendValue(.{ .Int = switch (self.getValue(res)) {
-            .Type => |typeID| self.typechecker.sizeOf(typeID),
+            .Type => |typeID| try self.typechecker.sizeOf(typeID),
             else => break :blk, 
         }});
     }
 
-    return self.appendValue(.{ .Int = self.typechecker.sizeOf(t) });
+    return self.appendValue(.{ .Int = try self.typechecker.sizeOf(t) });
 }
 
 pub fn evalSizeOf(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {
@@ -2178,12 +2178,12 @@ pub fn evalSizeOf(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Val
 
     if (self.attemptEval(ast.extra[args.at(0)], t)) |res| blk: {
         return self.appendValue(.{ .Int = switch (self.getValue(res)) {
-            .Type => |typeID| self.typechecker.sizeOf(typeID) / @bitSizeOf(c_char),
+            .Type => |typeID| try self.typechecker.sizeOf(typeID) / @bitSizeOf(c_char),
             else => break :blk, 
         }});
     }
 
-    return self.appendValue(.{ .Int = self.typechecker.sizeOf(t) / @bitSizeOf(c_char) });
+    return self.appendValue(.{ .Int = try self.typechecker.sizeOf(t) / @bitSizeOf(c_char) });
 }
 
 pub fn evalNewTuple(self: *Folder, range: defines.Range) Error!Comptime.Value.Ptr {
@@ -3887,6 +3887,7 @@ pub const builtinMetadata = [_][]const u8 {
     "@export",
     "@extern",
     "@variadic",
+    "@struct",
     "@opaque",
     "@inline",
     "@generic",

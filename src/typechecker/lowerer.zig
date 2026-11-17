@@ -76,7 +76,7 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
     const ofType = self.typechecker.typeTable.get(ofTypePtr);
     return self.typechecker.builder.addConstant(switch (value) {
         .Int => |val| switch (ofType) {
-            .Integer, .ComptimeInt, =>switch (self.typechecker.sizeOf(ofTypePtr)) {
+            .Integer, .ComptimeInt, =>switch (try self.typechecker.sizeOf(ofTypePtr)) {
                 64 => .{ .Integer = .{
                     .c_long = @intCast(val),
                 }},
@@ -1734,7 +1734,7 @@ fn bitSizeOf(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!
         return self.typechecker.builder.literal(
             try self.addConstant(
                 try self.typechecker.folder.appendValue(.{ .Int = switch (self.typechecker.folder.getValue(res)) {
-                    .Type => |typeID| self.typechecker.sizeOf(typeID),
+                    .Type => |typeID| try self.typechecker.sizeOf(typeID),
                     else => break :blk,
                 }}),
                 ofType
@@ -1744,7 +1744,7 @@ fn bitSizeOf(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!
 
     return self.typechecker.builder.literal(
         try self.addConstant(
-            try self.typechecker.folder.appendValue(.{ .Int = self.typechecker.sizeOf(t) }),
+            try self.typechecker.folder.appendValue(.{ .Int = try self.typechecker.sizeOf(t) }),
             ofType
         ),
     );
@@ -1764,7 +1764,7 @@ fn sizeOf(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR
         return self.typechecker.builder.literal(
             try self.addConstant(
                 try self.typechecker.folder.appendValue(.{ .Int = switch (self.typechecker.folder.getValue(res)) {
-                    .Type => |typeID| self.typechecker.sizeOf(typeID) / @bitSizeOf(c_char),
+                    .Type => |typeID| try self.typechecker.sizeOf(typeID) / @bitSizeOf(c_char),
                     else => break :blk,
                 }}),
                 ofType
@@ -1774,7 +1774,7 @@ fn sizeOf(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR
 
     return self.typechecker.builder.literal(
         try self.addConstant(
-            try self.typechecker.folder.appendValue(.{ .Int = self.typechecker.sizeOf(t) / @bitSizeOf(c_char) }),
+            try self.typechecker.folder.appendValue(.{ .Int = try self.typechecker.sizeOf(t) / @bitSizeOf(c_char) }),
             ofType
         ),
     );
@@ -1845,8 +1845,8 @@ fn cast(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR.P
                         rtype
                     );
 
-                    const srcElemSize = self.typechecker.sizeOf(rptr.child) / 8;
-                    const dstElemSize = self.typechecker.sizeOf(tptr.child) / 8;
+                    const srcElemSize = try self.typechecker.sizeOf(rptr.child) / 8;
+                    const dstElemSize = try self.typechecker.sizeOf(tptr.child) / 8;
 
                     const newSize = if (srcElemSize == dstElemSize)
                         len

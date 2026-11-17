@@ -59,14 +59,14 @@ let main = fn (args: [][]u8) -> i32 {
 };
 
 let populateBytecode = fn (bytecode: mut []mut u8, path: []u8) -> bool {
-    let _source = File::Input::open(path, C::Allocator, false);
+    let _source = File::Input::open(C::Allocator, path, false);
 
     if _source.tag == @Err {
         std::debug::print("Failed to read file at path: %", ([]u8))((path));
         return false;
     }
 
-    let source = File::Input::stream(_source.Ok);
+    let source = _source.Ok.stream();
 
 
     let idx: mut u32 = 0;
@@ -96,7 +96,7 @@ let populateBytecode = fn (bytecode: mut []mut u8, path: []u8) -> bool {
 };
 
 let countBytecodeSize = fn (path: []u8) -> i32 {
-    let _source = File::Input::open(path, C::Allocator, false);
+    let _source = File::Input::open(C::Allocator, path, false);
 
     if _source.tag == @Err {
         std::debug::print("Failed to read file at path: %", ([]u8))((path));
