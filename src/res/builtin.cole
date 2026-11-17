@@ -37,8 +37,8 @@ pub let ColeInfo: struct {
 } = (
     "Cole",
     "A statically typed, ahead of time compiled language with powerful metaprogramming.",
-    "0.1.7",
-    0, 1, 7,
+    "0.1.8",
+    0, 1, 8,
     (
         "Yusuf Ender Osmanoğlu <yusufenderosmanoglu@gmail.com>",
     )
