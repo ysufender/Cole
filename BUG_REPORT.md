@@ -3,7 +3,7 @@
 When external structs contain fields that are C arrays, the Cole compiler treats them as Cole arrays
 and ends up with TCC type mismatch errors.
 
-### Reproduction
+### Reproduction --
 
 <pre> <code>
 code {
