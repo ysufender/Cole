@@ -1188,11 +1188,16 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
 
             if (decl.topLevel and self.getValue(valuePtr) == .Function) {
                 const func = &self.memory.items[valuePtr].Function;
+                const prevs = self.typechecker.currentFile;
+                self.typechecker.currentFile = func.source;
+                const cond = (self.typechecker.hasMetadata(func.expr, "@extern")
+                        or self.typechecker.hasMetadata(func.expr, "@export"));
+                self.typechecker.currentFile = prevs;
+
                 const cur = self.typechecker.builder.getInternedString(func.name);
                 if (
                     std.mem.startsWith(u8, cur, "$$")
-                    and (self.typechecker.hasMetadata(func.expr, "@extern")
-                        or self.typechecker.hasMetadata(func.expr, "@export"))
+                    and cond
                 ) {
                     const tokens = self.typechecker.context.getTokens(self.typechecker.currentFile);
                     const symName = tokens.get(decl.token).lexeme(
