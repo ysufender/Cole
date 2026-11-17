@@ -1,58 +1,3 @@
-## $open -- External C Array Conversion -- #59 -- @ysufender --
-
-When external structs contain fields that are C arrays, the Cole compiler treats them as Cole arrays
-and ends up with TCC type mismatch errors.
-
-### Reproduction --
-
-<pre> <code>
-code {
-#header_start
-    struct Test {
-        char arr[3];
-    };
-#header_end
-}
-
-let Test = #(@extern, @struct) struct {
-    arr: mut [3]mut c_char,
-};
-
-let main = fn (args: [][]u8) -> i32 {
-    let a = [3]c_char(1, 2, 3);
-    let b = Test(a); 
-
-    return 0;
-};
-</code> </pre>
-
-### Expected --
-
-Successful compilation.
-
-### Received --
-
-Generated C:
-
-<pre> <code>
-int32_t const root__main(Slice_Slice_uint8_t const args)
-{
-$$anon_Block_16049278749992822981: (void)(0);
-    Array_char_const_3 const a = (Array_char_const_3){1, 2, 3};
-    struct Test const b = (struct Test){.arr = (Array_char_const_3){1, 2, 3}};
-    return 0;
-}
-</code> </pre>
-
-With Error:
-
-<pre> <code>
-error: /home/yusuf/proj/Cole/test/build/c/source.c:135: error: cannot convert 'struct Array_char_const_3' to 'char'
-error: BACKEND: Failed to compile source file.
-
-error: Compiler exited with code 226 <BackendError>
-</code> </pre>
-
 ## $open -- Helper Functions for SOA Ease of Use -- #57 -- @ysufender --
 
 The project uses SOA intensively to reduce memory footprint and increase cache hits. For this
@@ -158,3 +103,4 @@ Garbled out parts in the generated C files.
 ## $closed -- "this" Builtin Bugs -- #52 -- @ysufender --
 ## $closed -- Generic Definitions Are Last-Call-Win -- #53 -- @ysufender --
 ## $closed -- Single Field Union Construction Bug -- #58 -- @ysufender --
+## $closed -- External C Array Conversion -- #59 -- @ysufender --

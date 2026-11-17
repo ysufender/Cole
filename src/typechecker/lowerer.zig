@@ -1355,7 +1355,9 @@ fn slicing(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JI
     const sliceableInfo = self.typechecker.typeTable.get(sliceableType);
 
     const data = switch (sliceableInfo) {
-        .Array => try self.typechecker.builder.dot(sliceable, try self.typechecker.builder.internString("data"), sliceableType),
+        .Array => |arr|
+            if (arr.isCStyle) sliceable
+            else try self.typechecker.builder.dot(sliceable, try self.typechecker.builder.internString("data"), sliceableType),
         .Pointer => |ptr| switch (ptr.size) {
             .C => sliceable,
             .Slice => try self.typechecker.builder.dot(sliceable, try self.typechecker.builder.internString("ptr"), sliceableType),

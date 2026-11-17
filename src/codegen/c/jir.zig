@@ -335,7 +335,7 @@ fn forwardDecls(self: *JIR, out: *Writer) Error!void {
 
                 if (arr.isCStyle) {
                     try self.write(out, "typedef {s} {s}[{d}];\n", .{
-                        childName,
+                        try self.getCName(arr.child, null, false, false),
                         name,
                         arr.len
                     });

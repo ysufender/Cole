@@ -2912,7 +2912,12 @@ pub fn typecheckSlicing(self: *Typechecker, extraPtr: defines.OpaquePtr) Error!T
     const maybeSliceableType = try self.typecheckExpression(ast.extra[extraPtr], null);
     const maybeSliceable = self.typeTable.get(maybeSliceableType);
     const resultType = switch (maybeSliceable) {
-        .Array => |arr| try self.registerType(.{
+        .Array => |arr|
+            if (arr.isCStyle) {
+                self.report("Attempt to slice c-style array.", .{});
+                return Error.IllegalSlicing;
+            }
+            else try self.registerType(.{
             .Pointer = .{
                 .size = .Slice,
                 .mutable = arr.mutable,
