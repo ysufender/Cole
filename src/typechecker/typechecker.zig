@@ -400,6 +400,7 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
                         .expr = str.expr,
                         .scope = str.scope,
                         .isTuple = str.isTuple,
+                        .source = str.source,
                     },
                 },
 
@@ -411,6 +412,7 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
                         .fields = enm.fields,
                         .expr = enm.expr,
                         .scope = enm.scope,
+                        .source = enm.source,
                     },
                 },
 
@@ -424,6 +426,7 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
                         .fields = uni.fields,
                         .expr = uni.expr,
                         .scope = uni.scope,
+                        .source = uni.source,
                     },
                 },
 
@@ -1283,6 +1286,7 @@ pub fn typecheckTupleDefinition(self: *Typechecker, exprListPtr: defines.OpaqueP
             .mutable = false,
             .scope = 0,
             .isTuple = true,
+            .source = self.currentFile,
         },
     };
 
@@ -1741,6 +1745,7 @@ pub fn discoverScopeDef(
                     .fields = enm.fields,
                     .expr = enm.expr,
                     .mutable = enm.mutable,
+                    .source = enm.source,
                 },
             });
         },
@@ -1757,6 +1762,7 @@ pub fn discoverScopeDef(
                     .expr = str.expr,
                     .mutable = str.mutable,
                     .isTuple = str.isTuple,
+                    .source = str.source,
                 },
             });
         },
@@ -1774,6 +1780,7 @@ pub fn discoverScopeDef(
                     .fields = uni.fields,
                     .expr = uni.expr,
                     .mutable = uni.mutable,
+                    .source = uni.source,
                 },
             });
         },
@@ -2083,6 +2090,7 @@ pub fn typecheckGetMetadata(self: *Typechecker, extraPtr: defines.OpaquePtr) Err
                 .mutable = false,
                 .scope = 0,
                 .isTuple = true,
+                .source = self.currentFile
             }
         });
     }
@@ -3269,7 +3277,8 @@ fn typecheckSwitchOnUnion(
 
             const field = try self.builder.internString(fieldName);
             const captureType = uni.fields[
-                self.fieldIndex(itemTypeID, field) catch return common.debug.ShouldBeImpossible(self.context.log, @src())
+                self.fieldIndex(itemTypeID, field)
+                    catch return common.debug.ShouldBeImpossible(self.context.log, @src())
             ].valueType;
 
             _ = try self.typecheckDecl(captureDecl, captureType);
@@ -4060,6 +4069,7 @@ pub fn makeMutable(_: *const Typechecker, info: TypeInfo) TypeInfo {
                 .scope = str.scope,
                 .expr = str.expr,
                 .isTuple = str.isTuple,
+                .source = str.source,
             },
         },
         .Union => |uni| .{
@@ -4072,6 +4082,7 @@ pub fn makeMutable(_: *const Typechecker, info: TypeInfo) TypeInfo {
                 .definitions = uni.definitions,
                 .scope = uni.scope,
                 .expr = uni.expr,
+                .source = uni.source,
             },
         },
         .Enum => |enm| .{
@@ -4082,6 +4093,7 @@ pub fn makeMutable(_: *const Typechecker, info: TypeInfo) TypeInfo {
                 .definitions = enm.definitions,
                 .scope = enm.scope,
                 .expr = enm.expr,
+                .source = enm.source,
             },
         },
         .Pointer => |ptr| .{
@@ -4184,11 +4196,17 @@ pub fn sizeOf(self: *Typechecker, of: TypeID) Error!u32 {
         .Array => |arr| arr.len * try self.sizeOf(arr.child),
         .ComptimeInt => @bitSizeOf(i64),
         .Struct => |str| {
-            if (self.hasMetadata(str.expr, "@opaque")) {
-                self.report("Attempt to get the size of opaque type '{s}'.", .{
-                    self.builder.getInternedString(str.name),
-                });
-                return Error.SizeOfOpaqueType;
+            {
+                const prevs = self.currentFile;
+                self.currentFile = str.source;
+                defer self.currentFile = prevs;
+
+                if (!str.isTuple and str.expr != 0 and self.hasMetadata(str.expr, "@opaque")) {
+                    self.report("Attempt to get the size of opaque type '{s}'.", .{
+                        self.builder.getInternedString(str.name),
+                    });
+                    return Error.SizeOfOpaqueType;
+                }
             }
 
             var size: u32 = 0;
@@ -4327,7 +4345,11 @@ pub fn tryGetFieldIndex(self: *Typechecker, from: TypeID, fieldNamePtr: defines.
     const fieldName = self.builder.getInternedString(fieldNamePtr);
     const fields = switch (self.typeTable.get(from)) {
         .Struct => |str| fields: {
-            if (self.hasMetadata(str.expr, "@opaque")) {
+            const prevs = self.currentFile;
+            self.currentFile = str.source;
+            defer self.currentFile = prevs;
+
+            if (!str.isTuple and str.expr != 0 and self.hasMetadata(str.expr, "@opaque")) {
                 self.report("Attempt to access the fields of opaque type '{s}'.", .{
                     self.builder.getInternedString(str.name),
                 });

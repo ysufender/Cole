@@ -203,16 +203,15 @@ pub inline fn typeDef(self: *Builder, typeID: TypeID) Error!JIR.Ptr {
     const res = try self.commonSingle(.TypeDef, typeID);
     try self.addKeyNode(res);
 
-    const _expr: ?*defines.ExpressionPtr = switch (typeInfo) {
-        .Struct => &self.typechecker.typeTable.items(.data)[typeID].Struct.expr,
-        .Union => &self.typechecker.typeTable.items(.data)[typeID].Union.expr,
-        .Enum => &self.typechecker.typeTable.items(.data)[typeID].Enum.expr,
+    const typeExpr: ?defines.ExpressionPtr = switch (typeInfo) {
+        .Struct => |str| str.expr,
+        .Union => |uni| uni.expr,
+        .Enum => |enm| enm.expr,
         else => null,
     };
 
-    if (_expr) |expr| {
-        try self.typechecker.lowerer.addMetadata(res, expr.*);
-        expr.* = res;
+    if (typeExpr) |expr| {
+        try self.typechecker.lowerer.addMetadata(res, expr);
     }
 
     if (!self.typeToJirMap.contains(typeID)) {

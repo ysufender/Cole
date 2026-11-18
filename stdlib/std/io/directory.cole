@@ -33,7 +33,7 @@ pub let Dir = struct {
         finish: mut bool,
 
         let IntermediaryEntry = struct {
-            name: []c_char,
+            name: []mut c_char,
             type: c_uchar,
         };
 
@@ -49,7 +49,7 @@ pub let Dir = struct {
                 return (@None, ());
             }
 
-            let intermediate = IntermediaryEntry(entry.d_name.ptr, entry.d_type);
+            let intermediate = IntermediaryEntry(entry.d_name.ptr[0..256], entry.d_type);
 
             return (@Some, cast(intermediate.name), cast(intermediate.type));
         };
@@ -58,7 +58,7 @@ pub let Dir = struct {
     pub let open = fn (gpa: Allocator, path: mut []u8) -> std::Option(Dir) {
         _ = isWin;
 
-        switch gpa.allocSentinel(u8)(path.len, '\n') {
+        switch gpa.allocSentinel(u8)(path.len, '\0') {
             @Ok -> |mem| {
                 std::c::memory::copy(u8)(mem, path);
                 path = mem;
@@ -81,7 +81,7 @@ pub let Dir = struct {
         _ = closedir(self.handle);
     };
 
-    pub let query = fn (self: Dir, gpa: Allocator) -> Iterator {
+    pub let query = fn (self: Dir, gpa: Allocator) -> mut Iterator {
         return (gpa, self.handle, false);
     };
 };
@@ -94,7 +94,7 @@ let DIR = #(@extern, @opaque) struct { };
 let dirent = #(@extern, @struct, @opaque) struct {
     /* @Beware may have other fields */
     d_type: c_uchar,
-    d_name: [256]c_char,
+    d_name: c_array(256, mut c_char),
 };
 
 let EntryType = enum {

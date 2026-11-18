@@ -2010,10 +2010,12 @@ fn indexing(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     const indexableBaseIdent = try self.expression(exprPtr, typeID);
 
     const indexable = blk: switch (self.typechecker.typeTable.get(typeID)) {
-        .Array => {
+        .Array => |arr| {
             const prev = self.typechecker.setFlag(.LValue, true);
             defer _ = self.typechecker.setFlag(.LValue, prev);
-            break :blk try self.typechecker.builder.dot(indexableBaseIdent, try self.typechecker.builder.internString("data"), typeID);
+            break :blk
+                if (arr.isCStyle) indexableBaseIdent
+                else try self.typechecker.builder.dot(indexableBaseIdent, try self.typechecker.builder.internString("data"), typeID);
         },
         .Pointer => |ptr| switch (ptr.size) {
             .Slice => break :blk try self.typechecker.builder.dot(indexableBaseIdent, try self.typechecker.builder.internString("ptr"), typeID),
@@ -2125,8 +2127,13 @@ fn dot(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     switch (self.typechecker.typeTable.get(exprType)) {
         .Array => |arr|
             if (std.mem.eql(u8, member, "ptr")) {
-                const data = try self.typechecker.builder.internString("data");
-                return try self.typechecker.builder.dot(obj, data, exprType);
+                if (arr.isCStyle) {
+                    return obj;
+                }
+                else {
+                    const data = try self.typechecker.builder.internString("data");
+                    return try self.typechecker.builder.dot(obj, data, exprType);
+                }
             }
             else if (std.mem.eql(u8, member, "len")) return try self.typechecker.builder.literal(
                 try self.typechecker.builder.addConstant(.{ .Integer = .{ .u32 = arr.len } }),

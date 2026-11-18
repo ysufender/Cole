@@ -1,3 +1,54 @@
+## $open -- Type Deduplication Problems -- #60 -- @ysufender --
+
+The type deduplication causes distinctly named types to share the same instance. Which causes
+bugs in the codegen.
+
+### Reproduction --
+
+<pre> <code>
+import std::debug;
+
+let A = struct { };
+let B = struct { };
+
+let main = fn (args: [][]u8) -> i32 {
+&emsp;std::debug::print("A == B := %", (bool))((A == B));
+&emsp;return 0;
+};
+</code> </pre>
+
+### Expected --
+
+<code>A == B := false</code>
+
+### Received --
+
+<pre> <code>
+error: In file included from /home/yusuf/proj/Cole/test/build/c/source.c:20:
+/home/yusuf/proj/Cole/test/build/c/forward_decl.h:144: error: ';' expected (got '*')
+error: BACKEND: Failed to compile source file.
+
+error: Compiler exited with code 226 <BackendError>
+</code> </pre>
+
+With generated code replacing the external <code>FILE</code> struct with <code>root__A</code>:
+
+<pre><code>
+extern root__A* stdout;
+
+std__io__stream__Result const $$anon_Function_6309695915293376712(void* const handle, Slice_uint8_t const buf)
+{
+$$anon_Block_4603247412802363642: (void)(0);
+&emsp;return (fwrite(({
+&emsp;&emsp;uint8_t* const $$anon_ThingToCast_109128734486168115 = buf.ptr;
+&emsp;&emsp;(void const*){$$anon_ThingToCast_109128734486168115};
+&emsp;}), 1, buf.len, ({
+&emsp;&emsp;void* const $$anon_ThingToCast_12254930287143278619 = handle;
+&emsp;&emsp;(root__A*){$$anon_ThingToCast_12254930287143278619};
+&emsp;})) == buf.len) ? (std__io__stream__Result){0} : (std__io__stream__Result){1};
+}
+</code></pre>
+
 ## $open -- Helper Functions for SOA Ease of Use -- #57 -- @ysufender --
 
 The project uses SOA intensively to reduce memory footprint and increase cache hits. For this

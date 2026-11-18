@@ -1154,15 +1154,15 @@ fn literal(self: *JIR, out: *Writer, ptr: Constant.Ptr) Error!void {
     };
 }
 
-fn calculateStringLength(_str: []const u8) u32 {
-    var str = _str;
-    var minus: u32 = 0;
-    while (std.mem.findScalar(u8, str, '\\')) |bsp| {
-        minus += 1;
-        str = str[bsp+1..];
+fn calculateStringLength(str: []const u8) u32 {
+    var len: u32 = 0;
+    var i: usize = 0;
+    while (i < str.len) : (len += 1) {
+        i += if (str[i] == '\\' and i + 1 < str.len)
+            (if (str[i + 1] == 'x') @as(usize, 4) else 2)
+        else 1;
     }
-
-    return @intCast(_str.len - minus);
+    return len;
 }
 
 fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool, noSymbol: bool) Error![]const u8 {

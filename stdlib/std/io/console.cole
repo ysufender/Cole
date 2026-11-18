@@ -1,21 +1,27 @@
-let printf = #(@extern, @variadic) fn (fmt: mut [@c]c_char) -> mut c_int { };
+import std::io as Io;
+import std::io::stream;
+
+let OStream = std::io::stream::Output;
 
 pub let write = fn (msg: []u8) -> void {
-    _ = printf("%s", if (msg.len != 0) msg.ptr else "".ptr);
+    _ = Io::StdOut().writebuffer(msg);
 };
 
 pub let log = fn (msg: []u8) -> void {
-    _ = printf("%s\n", if (msg.len != 0) msg.ptr else "".ptr);
+    _ = Io::StdOut().writeline(msg);
 };
 
 pub let info = fn (msg: []u8) -> void {
-    _ = printf("\e[32minfo:\e[0m %s\n", if (msg.len != 0) msg.ptr else "".ptr);
+    _ = Io::StdOut().writebuffer("\e[32minfo:\e[0m ");
+    _ = Io::StdOut().writeline(msg);
 };
 
 pub let error = fn (msg: []u8) -> void {
-    _ = printf("\e[31merror:\e[0m %s\n", if (msg.len != 0) msg.ptr else "".ptr);
+    _ = Io::StdOut().writebuffer("\e[31minfo:\e[0m ");
+    _ = Io::StdOut().writeline(msg);
 };
 
 pub let warn = fn (msg: []u8) -> void {
-    _ = printf("\e[33mwarning:\e[0m %s\n", if (msg.len != 0) msg.ptr else "".ptr);
+    _ = Io::StdOut().writebuffer("\e[33minfo:\e[0m ");
+    _ = Io::StdOut().writeline(msg);
 };

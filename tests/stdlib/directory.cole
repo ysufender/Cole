@@ -1,0 +1,30 @@
+import std::io::directory;
+import std::io::console;
+import std::c;
+
+let Dir = std::io::directory::Dir;
+let print = std::io::console::log;
+let write = std::io::console::write;
+
+let main = fn (args: [][]u8) -> i32 {
+    switch Dir::open(std::c::Allocator, "./") {
+        @Some -> |dir| {
+            print("Success!");
+            let iter = dir.query(std::c::Allocator);
+
+            while true {
+                switch iter.&.next() {
+                    @Some -> |entry| {
+                        if entry.type == @RegularFile {
+                            print(entry.name);
+                        }
+                    }
+                    @None -> break;
+                }
+            }
+        }
+        @None -> print("Fail.");
+    }
+
+    return 0;
+};
