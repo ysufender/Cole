@@ -3463,17 +3463,15 @@ pub fn registerType(self: *Typechecker, _newType: TypeInfo) Error!TypeID {
     // @Beware trying to cache-esque
     const name = res: switch (newType) {
         .Struct => |str| {
-            newType.Struct.name = 0;
+            // newType.Struct.name = 0;
             break :res str.name;
         },
         .Union => |uni| {
-
-            newType.Union.name = 0;
+            // newType.Union.name = 0;
             break :res uni.name;
         },
         .Enum => |enm| {
-
-            newType.Enum.name = 0;
+            // newType.Enum.name = 0;
             break :res enm.name;
         },
         else => null,

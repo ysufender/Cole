@@ -17,11 +17,11 @@ pub let info = fn (msg: []u8) -> void {
 };
 
 pub let error = fn (msg: []u8) -> void {
-    _ = Io::StdOut().writebuffer("\e[31minfo:\e[0m ");
+    _ = Io::StdOut().writebuffer("\e[31merror:\e[0m ");
     _ = Io::StdOut().writeline(msg);
 };
 
 pub let warn = fn (msg: []u8) -> void {
-    _ = Io::StdOut().writebuffer("\e[33minfo:\e[0m ");
+    _ = Io::StdOut().writebuffer("\e[33mwarning:\e[0m ");
     _ = Io::StdOut().writeline(msg);
 };

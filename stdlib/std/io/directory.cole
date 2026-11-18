@@ -6,6 +6,7 @@ code {
 
 import std::memory::allocator;
 import std::c::memory;
+import std::memory;
 import std;
 
 let Allocator = std::memory::allocator::Allocator;
@@ -49,7 +50,10 @@ pub let Dir = struct {
                 return (@None, ());
             }
 
-            let intermediate = IntermediaryEntry(entry.d_name.ptr[0..256], entry.d_type);
+            let end = std::memory::find(mut c_char)(entry.d_name.ptr[0..256], '\0')
+                .orelse(256);
+
+            let intermediate = IntermediaryEntry(entry.d_name.ptr[0..end], entry.d_type);
 
             return (@Some, cast(intermediate.name), cast(intermediate.type));
         };
@@ -91,7 +95,7 @@ pub let Dir = struct {
  */
 let DIR = #(@extern, @opaque) struct { };
 
-let dirent = #(@extern, @struct, @opaque) struct {
+let dirent = #(@extern, @struct) struct {
     /* @Beware may have other fields */
     d_type: c_uchar,
     d_name: c_array(256, mut c_char),

@@ -64,11 +64,11 @@ pub let print = fn (self: *Watcher, stream: Stream::Output, allocator: Allocator
 /*
  * POSIX
  */
-let timespec = #(@extern, @struct, @opaque) struct {
+let timespec = #(@extern, @struct) struct {
     tv_sec: c_long,
 };
 
-let stat = #(@extern, @struct, @opaque) struct {
+let stat = #(@extern, @struct) struct {
     st_mtim: timespec,  /* Time of last modification */
 
     pub let toFileInfo = fn (self: *stat) -> FileInfo {

@@ -194,6 +194,7 @@ return {
     },
 
     ["stdlib"] = {
+        "directory",
         "fmt",
         "string",
         "math",
