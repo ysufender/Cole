@@ -50,12 +50,19 @@ pub let Dir = struct {
                 return (@None, ());
             }
 
-            let end = std::memory::find(mut c_char)(entry.d_name.ptr[0..256], '\0')
-                .orelse(256);
+            let end = switch std::memory::find(mut c_char)(entry.d_name.ptr[0..256], '\0') {
+                @Some -> |s| s,
+                else -> 256,
+            };
 
             let intermediate = IntermediaryEntry(entry.d_name.ptr[0..end], entry.d_type);
 
             return (@Some, cast(intermediate.name), cast(intermediate.type));
+        };
+
+        pub let reset = fn (self: *mut Iterator) -> void {
+            rewinddir(self.handle);
+            self.finish = false;
         };
     };
 
