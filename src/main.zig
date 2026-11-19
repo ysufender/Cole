@@ -151,12 +151,17 @@ fn innerMain(allocator: std.mem.Allocator, init: std.process.Init) common.Compil
         return;
     }
 
-    // @Note codegen shouldn't depend on anything but the typechecker
-    // output from now on. Also it shouldn't error too. Validation
-    // has ended.
-
-    try loweredIR.codegen(&context, &cOut);
-    try backend.C.compile(cOut, allocator, &context);
+    switch (context.settings.buildInfo.backend) {
+        .C => {
+            try loweredIR.codegen(&context, &cOut);
+            try backend.C.compile(cOut, allocator, &context);
+        },
+        .QBE => {
+            var jairBuilder = try backend.QBE.JAIR.Builder.fromJIR(loweredIR.base(), allocator, &typechecker);
+            const jair = try jairBuilder.build();
+            try jair.codegen(&context, &cOut);
+        }
+    }
 }
 
 const CreateDirError = std.Io.Dir.CreateDirError;
@@ -173,7 +178,12 @@ fn createBuildDir(context: *common.CompilerContext) Error!std.Io.Dir {
     const buildDir = std.Io.Dir.cwd().openDir(context.io, "build", .{})
         catch return Error.IOError;
 
-    buildDir.createDir(context.io, "c/", .default_dir) catch |err| switch (err) {
+    const backendName = @tagName(context.settings.buildInfo.backend);
+    const backendDir = context.arena.allocator().alloc(u8, backendName.len)
+        catch return Error.AllocatorFailure;
+    _ = std.ascii.lowerString(backendDir, backendName);
+
+    buildDir.createDir(context.io, backendDir, .default_dir) catch |err| switch (err) {
         CreateDirError.PathAlreadyExists => { },
         else => {
             common.log.err("Failed to create output directory.", .{});
@@ -181,7 +191,7 @@ fn createBuildDir(context: *common.CompilerContext) Error!std.Io.Dir {
         },
     };
 
-    const cOut = buildDir.openDir(context.io, "c", .{})
+    const cOut = buildDir.openDir(context.io, backendDir, .{})
         catch return Error.IOError;
 
     return cOut;

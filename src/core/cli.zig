@@ -43,7 +43,7 @@ const flags = std.StaticStringMap(Flag).initComptime(&(.{
     .{ "--include", .Include },
     .{ "-I", .Include },
 
-    // .{ "--backend", .Backend },
+    .{ "--backend", .Backend },
     .{ "--optimize", .Optimize },
     .{ "-O", .Optimize },
 

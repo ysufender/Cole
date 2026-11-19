@@ -357,7 +357,7 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
                 else => break :blk,
             };
 
-            if (!std.mem.startsWith(u8, prevName, "$$")) {
+            if (!std.mem.startsWith(u8, prevName, "__")) {
                 break :blk;
             }
 
@@ -501,7 +501,7 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
             const val = try self.folder.eval(decl.node, expected);
             const func = &self.folder.memory.items[val].Function;
             const prevName = self.builder.getInternedString(func.name);
-            if (!std.mem.startsWith(u8, prevName, "$$")) {
+            if (!std.mem.startsWith(u8, prevName, "__")) {
                 break :blk;
             }
 
@@ -1698,7 +1698,7 @@ pub fn discoverScopeDef(
     }
 
     if (
-        member.valueType != (comptime Comptime.Folder.Builtin.Type("$$incomplete"))
+        member.valueType != (comptime Comptime.Folder.Builtin.Type("__incomplete"))
         and self.folder.getFlag(.InComptimeCall)
     ) {
         return member.valueType;
@@ -2421,7 +2421,7 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
     if (isPresent.found_existing) {
         switch (isPresent.value_ptr.status) {
             .Checked => {
-                if (isPresent.value_ptr.result != comptime Comptime.Folder.Builtin.Type("$$incomplete")) {
+                if (isPresent.value_ptr.result != comptime Comptime.Folder.Builtin.Type("__incomplete")) {
                     return isPresent.value_ptr.result;
                 }
             },
@@ -2436,7 +2436,7 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
             .NotChecked => {
                 if (
                     decl.kind == .Capture and determineExpected(maybeExpected) == null
-                    and isPresent.value_ptr.result != comptime Comptime.Folder.Builtin.Type("$$incomplete")
+                    and isPresent.value_ptr.result != comptime Comptime.Folder.Builtin.Type("__incomplete")
                 ) {
                     return isPresent.value_ptr.result;
                 }
@@ -2487,7 +2487,7 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
 
     isPresent.value_ptr.* = .{
         .status = .InProgress,
-        .result = comptime Comptime.Folder.Builtin.Type("$$incomplete"),
+        .result = comptime Comptime.Folder.Builtin.Type("__incomplete"),
     };
     errdefer isPresent.value_ptr.status = .NotChecked;
 
@@ -2574,7 +2574,7 @@ fn nameMemberFunction(self: *Typechecker, decl: *const Resolver.Declaration, nam
         .Struct, .Enum, .Union => {},
         else => return,
     }
-    if (!std.mem.startsWith(u8, self.builder.getInternedString(name), "$$")) return;
+    if (!std.mem.startsWith(u8, self.builder.getInternedString(name), "__")) return;
     if (self.hasMetadata(decl.node, "@extern")) return;
 
     const owner = self.folder.scopeTypes.get(decl.scope) orelse return;
@@ -2584,7 +2584,7 @@ fn nameMemberFunction(self: *Typechecker, decl: *const Resolver.Declaration, nam
         .Union => |uni| uni.name,
         else => return,
     });
-    if (std.mem.startsWith(u8, ownerName, "$$")) return;
+    if (std.mem.startsWith(u8, ownerName, "__")) return;
 
     const tokens = self.context.getTokens(self.currentFile);
     const memberName = tokens.get(decl.token).lexeme(self.context, self.currentFile);
@@ -2891,7 +2891,7 @@ pub fn applyMark(self: *Typechecker, ptr: defines.ExpressionPtr, extraPtr: defin
     for (0..marks.len()) |index| {
         const meta = self.folder.attemptEval(
             ast.extra[marks.at(@intCast(index))],
-            comptime Comptime.Folder.Builtin.Type("$$builtin_metadata")
+            comptime Comptime.Folder.Builtin.Type("__builtin_metadata")
         );
 
         metadata[index] = if (meta) |m| m else try self.folder.eval(ast.extra[marks.at(@intCast(index))], null);
@@ -3478,7 +3478,7 @@ pub fn registerType(self: *Typechecker, _newType: TypeInfo) Error!TypeID {
     };
 
     // @Note Dedup anon types
-    const anonymous = if (name) |n| std.mem.startsWith(u8, self.builder.getInternedString(n), "$$") else false;
+    const anonymous = if (name) |n| std.mem.startsWith(u8, self.builder.getInternedString(n), "__") else false;
     if (anonymous) {
         const expr, const newMut = switch (newType) {
             .Struct => |str| .{ str.expr, str.mutable },
@@ -3501,7 +3501,7 @@ pub fn registerType(self: *Typechecker, _newType: TypeInfo) Error!TypeID {
             if (candidateExpr != expr) {
                 continue;
             }
-            if (!std.mem.startsWith(u8, self.builder.getInternedString(candidateName), "$$")) {
+            if (!std.mem.startsWith(u8, self.builder.getInternedString(candidateName), "__")) {
                 continue;
             }
             if (self.assertStructurallyIdenticalValue(info, newType)) |_| {
@@ -3747,16 +3747,16 @@ pub fn nominallyIdentical(self: *const Typechecker, this: TypeID, that: TypeID) 
 
     return switch (ta) {
         .Struct => |s|
-            if (std.mem.startsWith(u8, self.builder.getInternedString(s.name), "$$")) self.structurallyIdentical(this, that)
-            else if (std.mem.startsWith(u8, self.builder.getInternedString(tb.Struct.name), "$$")) return self.structurallyIdentical(this, that)
+            if (std.mem.startsWith(u8, self.builder.getInternedString(s.name), "__")) self.structurallyIdentical(this, that)
+            else if (std.mem.startsWith(u8, self.builder.getInternedString(tb.Struct.name), "__")) return self.structurallyIdentical(this, that)
             else s.name == tb.Struct.name,
         .Union => |s|
-            if (std.mem.startsWith(u8, self.builder.getInternedString(s.name), "$$")) self.structurallyIdentical(this, that)
-            else if (std.mem.startsWith(u8, self.builder.getInternedString(tb.Union.name), "$$")) return self.structurallyIdentical(this, that)
+            if (std.mem.startsWith(u8, self.builder.getInternedString(s.name), "__")) self.structurallyIdentical(this, that)
+            else if (std.mem.startsWith(u8, self.builder.getInternedString(tb.Union.name), "__")) return self.structurallyIdentical(this, that)
             else s.name == tb.Union.name,
         .Enum => |s|
-            if (std.mem.startsWith(u8, self.builder.getInternedString(s.name), "$$")) self.structurallyIdentical(this, that)
-            else if (std.mem.startsWith(u8, self.builder.getInternedString(tb.Enum.name), "$$")) return self.structurallyIdentical(this, that)
+            if (std.mem.startsWith(u8, self.builder.getInternedString(s.name), "__")) self.structurallyIdentical(this, that)
+            else if (std.mem.startsWith(u8, self.builder.getInternedString(tb.Enum.name), "__")) return self.structurallyIdentical(this, that)
             else s.name == tb.Enum.name,
         .Array => |arr|
             arr.len == tb.Array.len
@@ -4195,15 +4195,23 @@ pub fn sizeOf(self: *Typechecker, of: TypeID) Error!u32 {
         .ComptimeInt => @bitSizeOf(i64),
         .Struct => |str| {
             {
-                const prevs = self.currentFile;
-                self.currentFile = str.source;
-                defer self.currentFile = prevs;
+                if (!str.isTuple and str.expr != 0) {
+                    if (self.metadataIndex(str.expr, "@opaque")) |index| {
+                        const meta = self.getMetadata(str.expr).?;
 
-                if (!str.isTuple and str.expr != 0 and self.hasMetadata(str.expr, "@opaque")) {
-                    self.report("Attempt to get the size of opaque type '{s}'.", .{
-                        self.builder.getInternedString(str.name),
-                    });
-                    return Error.SizeOfOpaqueType;
+                        if (index + 1 >= meta.len) {
+                            self.report("Expected size specifier after '@opaque' mark.", .{});
+                            return Error.MissingAlignment;
+                        }
+
+                        switch (self.folder.getValue(meta[index + 1])) {
+                            .Int => |size| return @intCast(size),
+                            else => {
+                                self.report("Expected an integer value as size.", .{});
+                                return Error.TypeMismatch;
+                            }
+                        }
+                    }
                 }
             }
 
@@ -4211,7 +4219,7 @@ pub fn sizeOf(self: *Typechecker, of: TypeID) Error!u32 {
             var max_align: u32 = 8;
             for (str.fields) |field| {
                 const fieldSize = try self.sizeOf(field.valueType);
-                const fieldAlign = self.alignOf(field.valueType) * 8;
+                const fieldAlign = try self.alignOf(field.valueType) * 8;
                 size = (size + fieldAlign - 1) & ~(fieldAlign - 1);
                 size += fieldSize;
                 max_align = @max(max_align, fieldAlign);
@@ -4224,7 +4232,7 @@ pub fn sizeOf(self: *Typechecker, of: TypeID) Error!u32 {
             var max_align: u32 = 8;
             for (uni.fields) |field| {
                 const fieldSize = try self.sizeOf(field.valueType);
-                const fieldAlign = self.alignOf(field.valueType) * 8;
+                const fieldAlign = try self.alignOf(field.valueType) * 8;
                 max_size = @max(max_size, (fieldSize + fieldAlign - 1) & ~(fieldAlign - 1));
                 max_align = @max(max_align, fieldAlign);
             }
@@ -4242,7 +4250,7 @@ pub fn sizeOf(self: *Typechecker, of: TypeID) Error!u32 {
     };
 }
 
-pub fn alignOf(self: *const Typechecker, of: TypeID) u32 {
+pub fn alignOf(self: *Typechecker, of: TypeID) Error!u32 {
     return switch (self.typeTable.get(of)) {
         .CSize => @alignOf(usize),
         .CUShort, .CShort => @alignOf(c_ushort),
@@ -4257,19 +4265,46 @@ pub fn alignOf(self: *const Typechecker, of: TypeID) u32 {
         .Integer => |int| int.size / 8, // assuming int.size is in bits
         .Bool => @alignOf(bool),
         .Void, .Noreturn, .EnumLiteral, .Type, .Any => 1,
-        .Array => |arr| self.alignOf(arr.child),
+        .Array => |arr| try self.alignOf(arr.child),
         .ComptimeInt => @alignOf(i64),
         .Struct => |str| {
+            const prevs = self.currentFile;
+            self.currentFile = str.source;
+            defer self.currentFile = prevs;
+
+            if (!str.isTuple and str.expr != 0) {
+                if (self.metadataIndex(str.expr, "@align")) |index| {
+                    const meta = self.getMetadata(str.expr).?;
+
+                    if (index + 1 >= meta.len) {
+                        self.report("Expected an alignment after '@align' mark.", .{});
+                        return Error.MissingAlignment;
+                    }
+
+                    switch (self.folder.getValue(meta[index + 1])) {
+                        .Int => |alignment| return @intCast(alignment),
+                        else => {
+                            self.report("Expected an integer value as alignment.", .{});
+                            return Error.TypeMismatch;
+                        }
+                    }
+                }
+                else if (self.hasMetadata(str.expr, "@opaque")) {
+                    self.report("Opaque type definition requires an explicit alignment. Use '@align' to specify the alignment.", .{});
+                    return Error.MissingAlignment;
+                }
+            }
+
             var max_align: u32 = 1;
             for (str.fields) |field| {
-                max_align = @max(max_align, self.alignOf(field.valueType));
+                max_align = @max(max_align, try self.alignOf(field.valueType));
             }
             return max_align;
         },
         .Union => |uni| {
             var max_align: u32 = 1;
             for (uni.fields) |field| {
-                max_align = @max(max_align, self.alignOf(field.valueType));
+                max_align = @max(max_align, try self.alignOf(field.valueType));
             }
             if (uni.isTagged) max_align = @max(max_align, @alignOf(u32));
             return max_align;
@@ -4347,7 +4382,11 @@ pub fn tryGetFieldIndex(self: *Typechecker, from: TypeID, fieldNamePtr: defines.
             self.currentFile = str.source;
             defer self.currentFile = prevs;
 
-            if (!str.isTuple and str.expr != 0 and self.hasMetadata(str.expr, "@opaque")) {
+            if (
+                !str.isTuple
+                and str.expr != 0
+                and self.currentScope != str.scope
+                and self.hasMetadata(str.expr, "@opaque")) {
                 self.report("Attempt to access the fields of opaque type '{s}'.", .{
                     self.builder.getInternedString(str.name),
                 });
@@ -4554,7 +4593,6 @@ fn clearFlags(self: *Typechecker) void {
     self.flags = self.flags.xorWith(complement);
 }
 
-/// Assumes metadata doesn't exist for given element
 pub fn setMetadata(
     self: *Typechecker,
     element: defines.ExpressionPtr,
@@ -4574,6 +4612,43 @@ pub fn getMetadata(
         .file = self.currentFile,
         .expr = value,
     }));
+}
+
+
+pub fn metadataIndex(
+    self: *const Typechecker,
+    _value: defines.ExpressionPtr,
+    _meta: []const u8,
+) ?u32 {
+    const ast = self.context.getAST(self.currentFile);
+
+    const value = blk: {
+        const expr = ast.expressions.get(_value);
+
+        break :blk
+            if (expr.type == .Mark) ast.extra[expr.value + 2]
+            else _value;
+    };
+
+    return
+        if (self.getMetadata(value)) |metadata| blk: {
+            for (metadata, 0..) |meta, i| {
+                const meval = self.folder.getValue(meta);
+
+                switch (meval) {
+                    .Enum => |enm|
+                        if (
+                            enm.Type == (comptime Comptime.Folder.Builtin.Type("__builtin_metadata"))
+                            and enm.Value == Comptime.Folder.Builtin.Metadata(_meta)
+                        ) break :blk @intCast(i),
+
+                    else => { },
+                }
+            }
+
+            break :blk null;
+        }
+        else null;
 }
 
 pub fn hasMetadata(
@@ -4599,7 +4674,7 @@ pub fn hasMetadata(
                 switch (meval) {
                     .Enum => |enm|
                         if (
-                            enm.Type == (comptime Comptime.Folder.Builtin.Type("$$builtin_metadata"))
+                            enm.Type == (comptime Comptime.Folder.Builtin.Type("__builtin_metadata"))
                             and enm.Value == Comptime.Folder.Builtin.Metadata(_meta)
                         ) break :blk true,
 

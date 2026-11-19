@@ -88,7 +88,7 @@ pub fn init(typechecker: *Typechecker, gpa: Allocator) Error!Folder {
 
     var memory = Memory.initCapacity(allocator, 512) catch return Error.AllocatorFailure;
     memory.appendAssumeCapacity(.{ .Type = Builtin.Type("any") });
-    memory.appendAssumeCapacity(.{ .Type = Builtin.Type("$$incomplete") });
+    memory.appendAssumeCapacity(.{ .Type = Builtin.Type("__incomplete") });
     memory.appendAssumeCapacity(.{ .Void = { } });
 
     return .{
@@ -1196,7 +1196,7 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
 
                 const cur = self.typechecker.builder.getInternedString(func.name);
                 if (
-                    std.mem.startsWith(u8, cur, "$$")
+                    std.mem.startsWith(u8, cur, "__")
                     and cond
                 ) {
                     const tokens = self.typechecker.context.getTokens(self.typechecker.currentFile);
@@ -1905,7 +1905,7 @@ fn evalUnionType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Valu
         (@as(u128, self.typechecker.currentFile) << 64) | (@as(u128, expr) << 32) | res,
         .{ .Ok = res },
     ) catch return Error.AllocatorFailure;
-    
+
     return res;
 }
 
@@ -2174,12 +2174,12 @@ pub fn evalAlignOf(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Va
 
     if (self.attemptEval(ast.extra[args.at(0)], t)) |res| blk: {
         return self.appendValue(.{ .Int = switch (self.getValue(res)) {
-            .Type => |typeID| self.typechecker.alignOf(typeID),
+            .Type => |typeID| try self.typechecker.alignOf(typeID),
             else => break :blk, 
         }});
     }
 
-    return self.appendValue(.{ .Int = self.typechecker.alignOf(t) });
+    return self.appendValue(.{ .Int = try self.typechecker.alignOf(t) });
 }
 
 pub fn evalBitSizeOf(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {
@@ -3286,7 +3286,7 @@ pub fn generateRandomName(self: *Folder, comptime mode: @TypeOf(.EnumLiteral)) E
 pub fn generateRandomNameString(self: *Folder, comptime mode: @TypeOf(.EnumLiteral)) Error![]u8 {
     const randint = self.rng.next();
 
-    return std.fmt.allocPrint(self.arena.allocator(), "$$anon_"++@tagName(mode)++"_{d}", .{
+    return std.fmt.allocPrint(self.arena.allocator(), "__anon_"++@tagName(mode)++"_{d}", .{
         randint
     }) catch Error.AllocatorFailure;
 }
@@ -3336,7 +3336,7 @@ fn handleScopeDecls(
         defs.appendAssumeCapacity(.{
             .public = sig.public,
             .name = newName,
-            .valueType = comptime Builtin.Type("$$incomplete"),
+            .valueType = comptime Builtin.Type("__incomplete"),
             .isComptime = false,
         });
     }
@@ -3618,7 +3618,7 @@ pub fn isIncomplete(self: *const Folder, typeID: TypeID) bool {
 }
 
 fn isIncompleteImpl(self: *const Folder, typeID: TypeID, visited: *VisitSet) bool {
-    if (typeID == Builtin.Type("$$incomplete")) return true;
+    if (typeID == Builtin.Type("__incomplete")) return true;
     if (visited.visit(typeID)) return false;
 
     return switch (self.typechecker.typeTable.get(typeID)) {
@@ -3643,7 +3643,7 @@ pub fn resolveIncomplete(self: *Folder, typeID: TypeID, resolvedTo: TypeID) Erro
 }
 
 fn resolveIncompleteImpl(self: *Folder, typeID: TypeID, resolvedTo: TypeID, visited: *VisitSet) Error!TypeID {
-    if (typeID == Builtin.Type("$$incomplete")) return resolvedTo;
+    if (typeID == Builtin.Type("__incomplete")) return resolvedTo;
     if (visited.visit(typeID)) return typeID;
 
     const info = self.typechecker.typeTable.get(typeID);
@@ -3928,10 +3928,10 @@ pub const builtinTypes = [_]struct {
     .{ .name = "mut u32", .info = .{ .Integer = .{ .mutable = true, .size = 32, .signed = false, } } },
     // mut any
     .{ .name = "mut any", .info = .{ .Any = true } },
-    // $$incomplete
-    .{ .name = "$$incomplete", .info = .{ .Struct = .{ .mutable = false, .name = Resolver.BuiltinIndex("any") + 2, .fields = &.{}, .definitions = &.{}, .scope = 0, .isTuple = false, .expr = 0, .source = 0 } } },
-    // $$builtin_metadata
-    .{ .name = "$$builtin_metadata", .info = .{ .Enum = .{ .mutable = false, .name = Resolver.BuiltinIndex("any") + 3, .fields = &.{ types.EnumField{ .name = "$$placeholder", .value = 0, } }, .definitions = &.{}, .scope = 0, .expr = 0, .source = 0 } } },
+    // __incomplete
+    .{ .name = "__incomplete", .info = .{ .Struct = .{ .mutable = false, .name = Resolver.BuiltinIndex("any") + 2, .fields = &.{}, .definitions = &.{}, .scope = 0, .isTuple = false, .expr = 0, .source = 0 } } },
+    // __builtin_metadata
+    .{ .name = "__builtin_metadata", .info = .{ .Enum = .{ .mutable = false, .name = Resolver.BuiltinIndex("any") + 3, .fields = &.{ types.EnumField{ .name = "__placeholder", .value = 0, } }, .definitions = &.{}, .scope = 0, .expr = 0, .source = 0 } } },
     // []u8
     .{ .name = "[]u8", .info = .{ .Pointer = .{ .mutable = false, .child = 2, .size = .Slice, }, } },
 };
@@ -3946,4 +3946,5 @@ pub const builtinMetadata = [_][]const u8 {
     "@opaque",
     "@inline",
     "@generic",
+    "@align",
 };

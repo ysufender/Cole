@@ -693,7 +693,7 @@ fn rangeForLoop(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.
         const safetyCnd = try self.typechecker.builder.lesserEqual(rangeStartIdent, rangeEndIdent);
         const safetyEnd = try self.typechecker.folder.generateRandomName(.ForSafetyEnd);
         const safetyCheck = try self.typechecker.builder.cjump(safetyEnd, safetyCnd);
-        const panic = try self.handler("$$invalid_index", comptime Comptime.Folder.Builtin.Type("void"));
+        const panic = try self.handler("__invalid_index", comptime Comptime.Folder.Builtin.Type("void"));
         const safetyEndLabel = try self.typechecker.builder.label(safetyEnd);
 
         return self.typechecker.builder.scope(
@@ -1690,7 +1690,7 @@ fn builtinCall(
         BI("typeOf") =>
             self.literal(ast.extra[args.at(0)], ofType),
         BI("unreachable") => blk: {
-            break :blk try self.handler("$$unreachable", ofType);
+            break :blk try self.handler("__unreachable", ofType);
         },
         BI("typeName") => self.typechecker.builder.literal(
             try self.typechecker.builder.addConstant(.{
@@ -1797,7 +1797,7 @@ fn alignOf(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JI
         return self.typechecker.builder.literal(
             try self.addConstant(
                 try self.typechecker.folder.appendValue(.{ .Int = switch (self.typechecker.folder.getValue(res)) {
-                    .Type => |typeID| self.typechecker.alignOf(typeID),
+                    .Type => |typeID| try self.typechecker.alignOf(typeID),
                     else => break :blk,
                 }}),
                 ofType
@@ -1807,7 +1807,7 @@ fn alignOf(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JI
 
     return self.typechecker.builder.literal(
         try self.addConstant(
-            try self.typechecker.folder.appendValue(.{ .Int = self.typechecker.alignOf(t) }),
+            try self.typechecker.folder.appendValue(.{ .Int = try self.typechecker.alignOf(t) }),
             ofType
         ),
     );
@@ -2066,7 +2066,7 @@ fn indexing(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
         const cnd = try self.typechecker.builder.lesser(indexIdent, indexableLen);
         const boundsJump = try self.typechecker.builder.cjump(boundsEnd, cnd);
 
-        const segfault = try self.handler("$$invalid_index", comptime Comptime.Folder.Builtin.Type("void"));
+        const segfault = try self.handler("__invalid_index", comptime Comptime.Folder.Builtin.Type("void"));
 
         const boundsEndLabel = try self.typechecker.builder.label(boundsEnd);
 
@@ -2303,7 +2303,7 @@ pub fn handler(self: *Lowerer, comptime name: []const u8, ofType: TypeID) Error!
 
     return self.typechecker.builder.inlineC(
         try self.typechecker.builder.internString(
-            std.fmt.allocPrint(self.typechecker.builder.allocator, "({{{s}$$: {s}((long)&&{s}$$); *({s}*)(NULL);}});", .{tmpName, name, tmpName, typeName})
+            std.fmt.allocPrint(self.typechecker.builder.allocator, "({{{s}__: {s}((long)&&{s}__); *({s}*)(NULL);}});", .{tmpName, name, tmpName, typeName})
                 catch return Error.AllocatorFailure
         )
     );

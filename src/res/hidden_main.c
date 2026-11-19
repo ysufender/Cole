@@ -25,7 +25,7 @@ Slice_Slice_uint8_t _Cole_implicit__commandline_args;
 #ifdef COLE_DEBUG
 StackTrace _Cole_implicit__stack_trace;
 
-static void $$print_stack_trace(void) {{
+static void __print_stack_trace(void) {{
     StackTrace const* node = &_Cole_implicit__stack_trace;
     unsigned depth = 0;
 
@@ -43,10 +43,10 @@ static void $$print_stack_trace(void) {{
 }}
 #endif
 
-void __attribute__((noreturn)) $$panic_handler(int const addr) {{
+void __attribute__((noreturn)) __panic_handler(int const addr) {{
     fprintf(stderr, "General protection handler. %#018lx\n\n", addr);
 #ifdef COLE_DEBUG
-    $$print_stack_trace();
+    __print_stack_trace();
 #else
     fprintf(stderr, "Stack tracing is not available.\n");
 #endif
@@ -56,25 +56,25 @@ void __attribute__((noreturn)) $$panic_handler(int const addr) {{
     __builtin_unreachable();
 }}
 
-void __attribute__((noreturn)) $$unreachable(long const addr) {{
+void __attribute__((noreturn)) __unreachable(long const addr) {{
     fprintf(stderr, "Reached unreachable code at address %#018lx\n", addr);
-    return $$panic_handler(addr);
+    return __panic_handler(addr);
 }}
 
 #ifdef COLE_DEBUG
-void __attribute__((noreturn)) $$invalid_index(long const addr) {{
+void __attribute__((noreturn)) __invalid_index(long const addr) {{
     fprintf(stderr, "Index out of bounds at %#018lx\n", addr);
-    return $$panic_handler(addr);
+    return __panic_handler(addr);
 }}
 
-void __attribute__((noreturn)) $$null_deref(long const addr) {{
+void __attribute__((noreturn)) __null_deref(long const addr) {{
     fprintf(stderr, "Null pointer dereferencing at %#018lx\n", addr);
-    return $$panic_handler(addr);
+    return __panic_handler(addr);
 }}
 
-void __attribute__((noreturn)) $$union_access(long const addr, char const* const access) {{
+void __attribute__((noreturn)) __union_access(long const addr, char const* const access) {{
     fprintf(stderr, "Attempt to access inactive union field '%s' at %#018lx\n", access, addr);
-    return $$panic_handler(addr);
+    return __panic_handler(addr);
 }}
 #endif
 
@@ -111,8 +111,8 @@ int main(int const argc, char const* const* const argv) {{
     }};
     _Cole_implicit__commandline_args = args;
 
-    signal(SIGABRT, $$panic_handler);
-    signal(SIGSEGV, $$panic_handler);
+    signal(SIGABRT, __panic_handler);
+    signal(SIGSEGV, __panic_handler);
 
     int32_t const err = root__main(args);
     free(strings);

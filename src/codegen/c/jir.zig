@@ -13,6 +13,7 @@ const Types = @import("../../typechecker/type.zig");
 const Typechecker = @import("../../typechecker/typechecker.zig");
 const Comptime= @import("../../typechecker/comptime.zig");
 const MultiArrayList = @import("../../util/collections.zig").MultiArrayList;
+const Writer = std.Io.Writer;
 const TypeID = Types.TypeID;
 const Allocator = std.mem.Allocator;
 const Error = common.CompilerError;
@@ -22,13 +23,10 @@ const Context = common.CompilerContext;
 const CreateDirError = std.Io.Dir.CreateDirError;
 const TypeNameMap = @import("../../typechecker/typechecker.zig").TypeNameMap;
 
-const Writer = std.Io.Writer;
+pub const Builder = @import("jir/builder.zig");
 
 pub const InternTable = std.array_hash_map.String(void);
-
 pub const Ptr = defines.Offset;
-
-pub const Builder = @import("jir/builder.zig");
 
 pub const Node = struct {
     pub const List = MultiArrayList(Node);
@@ -141,6 +139,51 @@ pub const Function = struct {
     position: @import("../../lexer/lexer.zig").Position = .{ .line = 1, .column = 1 },
 };
 
+pub const Base = struct {
+    types: Typechecker.TypeTable.Slice,
+    typeNames: TypeNameMap,
+    strings: [][]const u8,
+    constants: Constant.List,
+    functions: Function.List,
+    nodes: Node.List.Slice,
+    keyNodes: []const Ptr,
+    data: []const u32,
+    topLevelAsms: std.ArrayList(defines.StringPtr).Slice,
+    metadata: Builder.MetadataMap,
+    typeToJirMap: collections.HashMap(TypeID, Ptr),
+
+    pub fn hasMetadata(
+        self: *const Base,
+        _value: JIR.Ptr,
+        _meta: []const u8,
+    ) bool {
+        return
+            if (self.getMetadata(_value)) |metadata| blk: {
+                for (metadata) |meta| {
+                    const constant = self.constants.get(meta);
+                    switch (constant) {
+                        .Aggregate => |agg|
+                            if (agg.type == comptime Comptime.Folder.Builtin.Type("__builtin_metadata")) {
+                                const enumValue = self.constants.get(agg.data.start).Integer.u32;
+                                if (enumValue == Comptime.Folder.Builtin.Metadata(_meta)) break :blk true;
+                            },
+                        else => { },
+                    }
+                }
+
+                break :blk false;
+            }
+            else false;
+    }
+
+    pub fn getMetadata(
+        self: *const Base,
+        value: defines.ExpressionPtr,
+    ) ?[]const defines.ExpressionPtr {
+        return self.metadata.get(value);
+    }
+};
+
 const JIR = @This();
 
 cstrings: std.AutoHashMapUnmanaged(TypeID, []const u8) = .empty,
@@ -170,6 +213,22 @@ pub fn dump(self: *const JIR) void {
     while (iterator.next()) |node| {
         common.log.debug("{s}", .{@tagName(node.type)});
     }
+}
+
+pub fn base(self: *const JIR) Base {
+    return .{
+        .types = self.types,
+        .typeNames = self.typeNames,
+        .strings = self.strings,
+        .constants = self.constants,
+        .functions = self.functions,
+        .nodes = self.nodes,
+        .keyNodes = self.keyNodes,
+        .data = self.data,
+        .topLevelAsms = self.topLevelAsms,
+        .metadata = self.metadata,
+        .typeToJirMap = self.typeToJirMap,
+    };
 }
 
 pub fn codegen(self: *JIR, context: *Context, cOut: *std.Io.Dir) Error!void {
@@ -661,7 +720,7 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
                 try self.write(
                     out,
                     \\
-                    \\    StackTrace $$anon_trace_TMP = _Cole_implicit__stack_trace;
+                    \\    StackTrace __anon_trace_TMP = _Cole_implicit__stack_trace;
                     \\    _Cole_implicit__stack_trace = (StackTrace){{
                     \\        .frame = (StackFrame){{
                     \\            .function = (Slice_uint8_t){{(uint8_t*)"{s}", {d}}},
@@ -669,7 +728,7 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
                     \\            .line = {d},
                     \\            .col = {d},
                     \\        }},
-                    \\        .next = &$$anon_trace_TMP
+                    \\        .next = &__anon_trace_TMP
                     \\    }};
                     \\
                     , .{
@@ -687,7 +746,7 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
 
             if (self.context.settings.buildInfo.isDebug) {
                 if (self.context.settings.buildInfo.isDebug) {
-                    try self.writeln(out, "_Cole_implicit__stack_trace = $$anon_trace_TMP;\n" , .{ });
+                    try self.writeln(out, "_Cole_implicit__stack_trace = __anon_trace_TMP;\n" , .{ });
                 }
                 self.indent -= 1;
                 try self.writeln(out, "}}\n", .{});
@@ -810,7 +869,7 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
         },
         .Return => {
             if (self.context.settings.buildInfo.isDebug) {
-                try self.writeln(out, "_Cole_implicit__stack_trace = $$anon_trace_TMP;\n" , .{ });
+                try self.writeln(out, "_Cole_implicit__stack_trace = __anon_trace_TMP;\n" , .{ });
             }
 
             try self.writeln(out, "return ", .{});
@@ -1420,7 +1479,7 @@ pub fn hasMetadata(
                 const constant = self.constants.get(meta);
                 switch (constant) {
                     .Aggregate => |agg|
-                        if (agg.type == comptime Comptime.Folder.Builtin.Type("$$builtin_metadata")) {
+                        if (agg.type == comptime Comptime.Folder.Builtin.Type("__builtin_metadata")) {
                             const enumValue = self.constants.get(agg.data.start).Integer.u32;
                             if (enumValue == Comptime.Folder.Builtin.Metadata(_meta)) break :blk true;
                         },
