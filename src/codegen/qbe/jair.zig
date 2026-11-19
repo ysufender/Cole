@@ -2,6 +2,7 @@ const std = @import("std");
 const defines = @import("../../core/defines.zig");
 const common = @import("../../core/common.zig");
 
+const Typechecker = @import("../../typechecker/typechecker.zig");
 const Context = common.CompilerContext;
 const Error = common.CompilerError;
 const TypeID = @import("../../typechecker/type.zig").TypeID;
@@ -105,6 +106,7 @@ pub const Node = struct {
 const JAIR = @This();
 
 strings: [][]const u8,
+typeNames: Typechecker.TypeNameMap,
 typeTable: Builder.TypeTable.Slice,
 nodes: Node.List.Slice,
 keyNodes: std.ArrayList(JAIR.Ptr).Slice,
@@ -167,7 +169,8 @@ fn typeString(self: *const JAIR, out: *Writer, typeID: TypeID) Error!void {
         .Single => try write(out, "s", .{}),
         .Half => try write(out, "h", .{}),
         .Byte => try write(out, "b", .{}),
-        else => { },
+        .Void => { },
+        else => try write(out, "{s}", .{self.strings[self.typeNames.get(typeID).?]}),
     }
 }
 
