@@ -14,6 +14,7 @@ const JIR = @import("../../backend.zig").C.JIR;
 const JAIR = @import("../jair.zig");
 
 pub const TypeTable = std.MultiArrayList(JAIR.Type);
+pub const Constants = std.MultiArrayList(JAIR.Constant);
 
 const Builder = @This();
 
@@ -23,39 +24,48 @@ nodes: JAIR.Node.List,
 typeTable: TypeTable,
 typeMap: collections.HashMap(TypeID, TypeID),
 keyNodes: std.ArrayList(JAIR.Ptr),
+strings: std.ArrayList([]const u8),
 data: std.ArrayList(u32),
 allocator: Allocator,
 typechecker: *Typechecker,
+constants: Constants,
+temporary: u32 = 0,
 
 pub fn fromJIR(jir: JIR.Base, allocator: Allocator, typechecker: *Typechecker) Error!Builder {
     var typeMap = collections.HashMap(TypeID, TypeID).empty;
     typeMap.ensureTotalCapacity(allocator, @intCast(jir.types.len)) catch return Error.AllocatorFailure;
 
+    var strings = std.ArrayList([]const u8).initCapacity(allocator, jir.strings.len * 2)
+        catch return Error.AllocatorFailure;
+    strings.appendSliceAssumeCapacity(jir.strings);
+
     return .{
         .jir = jir,
         .nodes = try JAIR.Node.List.init(allocator, jir.nodes.len),
-        .keyNodes = std.ArrayList(JAIR.Ptr).initCapacity(allocator, jir.keyNodes.len)
-            catch return Error.AllocatorFailure,
-        .data = std.ArrayList(u32).initCapacity(allocator, jir.data.len)
-            catch return Error.AllocatorFailure,
-        .typeTable = TypeTable.initCapacity(allocator, jir.types.len)
-            catch return Error.AllocatorFailure,
+        .keyNodes = std.ArrayList(JAIR.Ptr).initCapacity(allocator, jir.keyNodes.len) catch return Error.AllocatorFailure,
+        .data = std.ArrayList(u32).initCapacity(allocator, jir.data.len) catch return Error.AllocatorFailure,
+        .typeTable = TypeTable.initCapacity(allocator, jir.types.len) catch return Error.AllocatorFailure,
+        .renamedStringMap = std.bit_set.Dynamic.initEmpty(allocator, jir.strings.len) catch return Error.AllocatorFailure,
+        .constants = Constants.initCapacity(allocator, jir.constants.len) catch return Error.AllocatorFailure,
         .typeMap = typeMap,
-        .renamedStringMap = std.bit_set.Dynamic.initEmpty(allocator, jir.strings.len)
-            catch return Error.AllocatorFailure,
+        .strings = strings,
         .allocator = allocator,
         .typechecker = typechecker,
     };
 }
 
 pub fn build(self: *Builder) Error!JAIR {
-    for (self.jir.strings) |str| {
+    for (self.strings.items) |str| {
         _ = std.mem.replace(u8, str, "::", "__", @constCast(str));
     }
 
     for (0..self.jir.types.len) |id| {
         _ = try self.typeName(@intCast(id));
         _ = try self.convertType(@intCast(id));
+    }
+
+    for (0..self.jir.constants.len) |constPtr| {
+        _ = try self.convertConstant(@intCast(constPtr));
     }
 
     for (self.jir.keyNodes) |nodePtr| {
@@ -75,12 +85,13 @@ pub fn build(self: *Builder) Error!JAIR {
         }
     }
 
-    return JAIR{
+    return .{
         .typeTable = self.typeTable.toOwnedSlice(),
         .data = self.data.items,
-        .strings = self.jir.strings,
+        .strings = self.strings.toOwnedSlice(self.allocator) catch return Error.AllocatorFailure,
         .nodes = self.nodes.toOwnedSlice(),
         .keyNodes = self.keyNodes.toOwnedSlice(self.allocator) catch return Error.AllocatorFailure,
+        .constants = self.constants.toOwnedSlice(),
         .typeNames = typeNames,
     };
 }
@@ -90,10 +101,18 @@ fn createJAIR(self: *Builder, nodePtr: JAIR.Ptr) Error!JAIR.Ptr {
     return switch (node.type) {
         .FunctionDef => self.functionDef(nodePtr),
         .Scope => self.scope(nodePtr),
+        .Exit, .TypeDef => res: {
+            const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
+            self.nodes.set(res, .{
+                .type = .Nop,
+                .value = 0,
+            });
+            break :res res;
+        },
         else => res: {
             const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
             self.nodes.set(res, .{
-                .type = .Code,
+                .type = .Nop,
                 .value = 0,
             });
             break :res res;
@@ -189,23 +208,23 @@ fn typeName(self: *Builder, id: TypeID) Error!defines.StringPtr {
                 else "u8",
             else => return common.debug.ShouldBeImpossible(undefined, @src()),
         },
-        .Enum => |enm| if (enm.mutable) std.fmt.allocPrint(self.allocator, "mut_{s}", .{self.jir.strings[enm.name]}) catch return Error.AllocatorFailure else self.jir.strings[enm.name],
-        .Union => |uni| if (uni.mutable) std.fmt.allocPrint(self.allocator, "mut_{s}", .{self.jir.strings[uni.name]}) catch return Error.AllocatorFailure else self.jir.strings[uni.name],
-        .Struct => |str| if (str.mutable) std.fmt.allocPrint(self.allocator, "mut_{s}", .{self.jir.strings[str.name]}) catch return Error.AllocatorFailure else self.jir.strings[str.name],
-        .Array => |arr| std.fmt.allocPrint(self.allocator, "{s}Array_{d}_{s}", .{if (arr.mutable) "mut_" else "", arr.len, self.jir.strings[try self.typeName(arr.child)]}) catch return Error.AllocatorFailure,
+        .Enum => |enm| if (enm.mutable) std.fmt.allocPrint(self.allocator, "mut_{s}", .{self.strings.items[enm.name]}) catch return Error.AllocatorFailure else self.strings.items[enm.name],
+        .Union => |uni| if (uni.mutable) std.fmt.allocPrint(self.allocator, "mut_{s}", .{self.strings.items[uni.name]}) catch return Error.AllocatorFailure else self.strings.items[uni.name],
+        .Struct => |str| if (str.mutable) std.fmt.allocPrint(self.allocator, "mut_{s}", .{self.strings.items[str.name]}) catch return Error.AllocatorFailure else self.strings.items[str.name],
+        .Array => |arr| std.fmt.allocPrint(self.allocator, "{s}Array_{d}_{s}", .{if (arr.mutable) "mut_" else "", arr.len, self.strings.items[try self.typeName(arr.child)]}) catch return Error.AllocatorFailure,
         .Function => |func| {
             var len: u32 = 7;
             for (func.argTypes) |argt| {
-                len += @intCast(self.jir.strings[try self.typeName(argt)].len + 2);
+                len += @intCast(self.strings.items[try self.typeName(argt)].len + 2);
             }
-            len += @intCast(self.jir.strings[try self.typeName(func.returnType)].len);
+            len += @intCast(self.strings.items[try self.typeName(func.returnType)].len);
 
             const newName = self.allocator.alloc(u8, len) catch return Error.AllocatorFailure;
             std.mem.copyForwards(u8, newName[0..5], "func_");
 
             var index: u32 = 5;
             for (func.argTypes) |argt| {
-                const argName = self.jir.strings[self.jir.typeNames.get(argt).?];
+                const argName = self.strings.items[self.jir.typeNames.get(argt).?];
                 std.mem.copyForwards(u8, newName[index..], argName);
                 index += @intCast(argName.len + 1);
                 newName[index - 1] = '_';
@@ -215,26 +234,90 @@ fn typeName(self: *Builder, id: TypeID) Error!defines.StringPtr {
             newName[index - 2] = '_';
             newName[index - 1] = '_';
 
-            std.mem.copyForwards(u8, newName[index..], self.jir.strings[self.jir.typeNames.get(func.returnType).?]);
+            std.mem.copyForwards(u8, newName[index..], self.strings.items[self.jir.typeNames.get(func.returnType).?]);
 
             break :newName newName;
         },
         .Pointer => |ptr| switch (ptr.size) {
             .Slice => std.fmt.allocPrint(self.allocator, "{s}Slice_{s}", .{
                 if (ptr.mutable) "mut_" else "",
-                self.jir.strings[try self.typeName(ptr.child)],
+                self.strings.items[try self.typeName(ptr.child)],
             }) catch return Error.AllocatorFailure,
             else => |size| std.fmt.allocPrint(self.allocator, "{s}{s}ptr_{s}", .{
                 if (ptr.mutable) "mut_" else "",
                 if (size == .C) "c_" else "",
-                self.jir.strings[try self.typeName(ptr.child)],
+                self.strings.items[try self.typeName(ptr.child)],
             }) catch return Error.AllocatorFailure,
         },
     };
 
-    self.jir.strings[name] = newName;
+    self.strings.items[name] = newName;
     self.renamedStringMap.set(name);
     return name;
+}
+
+fn convertConstant(self: *Builder, constant: JAIR.Constant.Ptr) Error!JAIR.Constant.Ptr {
+    const ptr: u32 = @intCast(self.constants.len);
+    if (constant < ptr) {
+        return constant;
+    }
+
+    self.constants.appendAssumeCapacity(switch (self.jir.constants.get(constant)) {
+        .Integer => |int| switch (int) {
+            .i32 => |integer| .{ .Word = @bitCast(integer) },
+            .u32 => |integer| .{ .Word = @bitCast(integer) },
+            .c_int => |integer| .{ .Word = @bitCast(integer) },
+            .c_uint => |integer| .{ .Word = @bitCast(integer) },
+
+            .i8 => |integer| .{ .Byte = @bitCast(integer) },
+            .u8 => |integer| .{ .Byte = @bitCast(integer) },
+            .c_char => |integer| .{ .Byte = @bitCast(integer) },
+            .c_uchar => |integer| .{ .Byte = @bitCast(integer) },
+
+            .c_long => |integer| .{ .Long = @bitCast(integer) },
+            .c_ulong => |integer| .{ .Long = @bitCast(integer) },
+            .c_size => |integer| .{ .Long = @bitCast(integer) },
+
+            .c_short => |integer| .{ .Half = @bitCast(integer) },
+            .c_ushort => |integer| .{ .Half = @bitCast(integer) },
+        },
+        .Float => |f| switch (f) {
+            .f32 => |v| .{ .Single = v },
+            .f64 => |v| .{ .Double = v },
+        },
+        .String => |str| switch (str.type) {
+            .C => .{ .String = .{ .C = str.str } },
+            .Cole => .{ .String = .{ .Cole = str.str } },
+        },
+        .Function => |func| .{ .Function = func },
+        .Array => |arr| arr: {
+            const init = self.allocator.alloc(JAIR.Constant.Ptr, arr.data.len())
+                catch return Error.AllocatorFailure;
+            for (init, 0..) |*elem, i| {
+                elem.* = try self.convertConstant(arr.data.at(@intCast(i)));
+            }
+
+            break :arr .{
+                .Aggregate = .{
+                    .Type = arr.type,
+                    .Init = .{ .Defined = init },
+                },
+            };
+        },
+
+        .Undefined => |und| .{
+            .Aggregate = .{
+                .Type = und,
+                .Init = .{ .Zero = {} },
+            }
+        },
+
+        .Aggregate,
+        .Type,
+        .Void => .{ .Nop = {} },
+    });
+
+    return ptr;
 }
 
 fn convertType(self: *Builder, id: TypeID) Error!TypeID {
@@ -285,16 +368,27 @@ fn convertType(self: *Builder, id: TypeID) Error!TypeID {
                 }
             },
         },
-        .Union => |uni| .{
-            .Custom = .{
-                .Union = .{
-                    .name = try self.typeName(id),
-                    .alignment = try self.typechecker.alignOf(id),
-                    .size = try self.byteSize(id),
-                    .fields = try self.convertFields(uni.fields),
-                }
+        .Union => |uni|
+            if (uni.isTagged) JAIR.Type{
+                .Custom = .{
+                    .Aggregate = .{
+                        .name = try self.typeName(id),
+                        .alignment = try self.typechecker.alignOf(id),
+                        .size = try self.byteSize(id),
+                        .fields = try self.convertFields(uni.fields),
+                    },
+                },
             }
-        },
+            else .{
+                .Custom = .{
+                    .Union = .{
+                        .name = try self.typeName(id),
+                        .alignment = try self.typechecker.alignOf(id),
+                        .size = try self.byteSize(id),
+                        .fields = try self.convertFields(uni.fields),
+                    }
+                }
+            },
         .Struct => |str| .{
             .Custom = .{
                 .Aggregate = .{

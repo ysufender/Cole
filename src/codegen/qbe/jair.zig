@@ -9,6 +9,7 @@ const TypeID = @import("../../typechecker/type.zig").TypeID;
 const Writer = std.Io.Writer;
 
 pub const Builder = @import("jair/builder.zig");
+const JIR = @import("../c/jir.zig");
 
 const MultiArrayList = @import("../../util/collections.zig").MultiArrayList;
 
@@ -43,13 +44,33 @@ pub const Type = union(enum) {
     },
 };
 
+pub const Constant = union(enum) {
+    pub const Ptr = defines.Offset;
+    pub const List = Builder.Constants.Slice;
+
+    Word: u32,
+    Long: u64,
+    Single: f32,
+    Double: f64,
+    Byte: u8,
+    Half: u16,
+    String: union(enum) {
+        C: defines.StringPtr,
+        Cole: defines.StringPtr,
+    },
+    Function: defines.StringPtr,
+    Aggregate: struct {
+        Type: TypeID,
+        Init: []const Constant.Ptr,
+    },
+    Nop,
+};
+
 pub const Node = struct {
     pub const List = MultiArrayList(Node);
 
     pub const Type = enum {
-        AggregateTypeDef,
-        OpaqueTypeDef,
-        UnionTypeDef,
+        Nop,
         FunctionDef,
         VariableDef,
         Identifier,
@@ -104,10 +125,12 @@ const JAIR = @This();
 strings: [][]const u8,
 typeNames: Typechecker.TypeNameMap,
 typeTable: Builder.TypeTable.Slice,
+constants: Constant.List,
 nodes: Node.List.Slice,
 keyNodes: std.ArrayList(JAIR.Ptr).Slice,
 data: std.ArrayList(u32).Slice,
 indent: u32 = 0,
+temp: u32 = 0,
 terminated: bool = false,
 
 pub fn codegen(self: *JAIR, context: *Context, qbeOut: *std.Io.Dir) Error!void {
@@ -137,6 +160,24 @@ pub fn codegen(self: *JAIR, context: *Context, qbeOut: *std.Io.Dir) Error!void {
                         opaqueType.size,
                     });
                 },
+                .Union => |uni| {
+                    if (uni.size == 0 or uni.fields.len == 0) continue;
+
+                    try self.write(true, out, "type :{s} = align {d} {{", .{
+                        self.strings[uni.name],
+                        uni.alignment,
+                    });
+
+                    for (uni.fields, 0..) |field, idx| {
+                        try self.write(false, out, " {{", .{});
+                        try self.typeString(out, field);
+                        try self.write(false, out, "}}{s}", .{
+                            if (idx != uni.fields.len - 1) "," else ""
+                        });
+                    }
+
+                    try self.write(false, out, " }}\n", .{});
+                },
                 .Aggregate => |aggregate| {
                     if (aggregate.size == 0 or aggregate.fields.len == 0) continue;
 
@@ -155,9 +196,31 @@ pub fn codegen(self: *JAIR, context: *Context, qbeOut: *std.Io.Dir) Error!void {
 
                     try self.write(false, out, " }}\n", .{});
                 },
-                else => { },
             },
             else => {},
+        }
+    }
+
+    try self.write(true, out, "\n", .{});
+    for (0..self.constants.len) |cptr| {
+        switch (self.constants.get(cptr)) {
+            .String => |str| switch (str) {
+                .C => |c| try self.write(true, out, "data $const{d} = {{ b \"{s}\", b 0 }}\n", .{cptr, self.strings[c]}),
+                .Cole => |c| {
+                    try self.write(true, out, "data $str{d} = {{ b \"{s}\" }}\n", .{cptr, self.strings[c]});
+                    try self.write(true, out, "data $const{d} = {{ l $str{d}, w {d} }}\n", .{cptr, cptr, self.strings[c].len});
+                },
+            },
+            .Aggregate => |agg| {
+                try self.write(true, out, "data $const{d} = {{ ", .{cptr});
+                try self.typeString(out, agg.Type);
+                try self.write(false, out, "{{", .{});
+                for (agg.Init) |constant| {
+                    // @TODO Continue
+                }
+                try self.write(false, out, " }}", .{});
+            },
+            else => { },
         }
     }
 
@@ -165,6 +228,10 @@ pub fn codegen(self: *JAIR, context: *Context, qbeOut: *std.Io.Dir) Error!void {
         try self.write(false, out, "\n", .{});
         try self.generate(out, nodePtr);
     }
+}
+
+fn constant(self: *JAIR, out: *Writer, constPtr: Constant.Ptr) Error!void {
+    // @TODO Continue
 }
 
 fn generate(self: *JAIR, out: *Writer, nodePtr: Ptr) Error!void {
@@ -194,16 +261,14 @@ fn generate(self: *JAIR, out: *Writer, nodePtr: Ptr) Error!void {
                 });
             }
             try self.write(false, out, ") {{\n@start\n", .{});
-            self.indent += 1;
             self.terminated = false;
 
-            try self.generateStatements(out, body);
+            try self.generate(out, body);
 
             if (!self.terminated) {
                 const isVoid = self.typeTable.get(returnType) == .Void;
                 try self.write(true, out, "{s}\n", .{if (isVoid) "ret" else "hlt"});
             }
-            self.indent -= 1;
             try self.write(true, out, "}}\n\n", .{});
         },
         .Scope => {
@@ -214,19 +279,16 @@ fn generate(self: *JAIR, out: *Writer, nodePtr: Ptr) Error!void {
             try self.write(false, out, "@{s}\n", .{label});
             self.terminated = false;
 
-            try self.generateStatements(out, nodePtr);
+            self.indent += 1;
+            defer self.indent -= 1;
+
+            const len = self.data[node.value + 1];
+            for (0..len) |idx| {
+                try self.generate(out, self.data[node.value + 2 + idx]);
+            }
         },
+        .Nop => { },
         else => |t| try self.write(true, out, "# TODO {s}\n", .{@tagName(t)}),
-    }
-}
-
-fn generateStatements(self: *JAIR, out: *Writer, scopePtr: Ptr) Error!void {
-    const scope = self.nodes.get(scopePtr);
-    std.debug.assert(scope.type == .Scope);
-
-    const len = self.data[scope.value + 1];
-    for (0..len) |idx| {
-        try self.generate(out, self.data[scope.value + 2 + idx]);
     }
 }
 
@@ -241,6 +303,23 @@ fn typeString(self: *const JAIR, out: *Writer, typeID: TypeID) Error!void {
         .Void => { },
         else => try self.write(false, out, ":{s}", .{self.strings[self.typeNames.get(typeID).?]}),
     }
+}
+
+fn sizeOf(self: *const JAIR, typeID: TypeID) u32 {
+    return switch (self.typeTable.get(typeID)) {
+        .Double => 8,
+        .Single => 4,
+        .Byte => 1,
+        .Half => 2,
+        .Long => 8,
+        .Word => 4,
+        .Void => 0,
+        .Custom => |c| switch (c) {
+            .Opaque => |o| o.size,
+            .Union => |o| o.size,
+            .Aggregate => |o| o.size,
+        },
+    };
 }
 
 fn write(self: *const JAIR, indent: bool, out: *Writer, comptime fmt: []const u8, args: anytype) Error!void {
