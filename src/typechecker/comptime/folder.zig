@@ -3274,6 +3274,27 @@ pub fn constructUndefined(self: *Folder, valueType: TypeID) Error!Comptime.Value
                 },
             });
         },
+        .Struct => |str| {
+            const start: u32 = @intCast(self.memory.items.len);
+            _ = self.memory.addManyAsSlice(self.arena.allocator(), str.fields.len)
+                catch return Error.AllocatorFailure;
+
+            for (start..start + str.fields.len) |ptr| {
+                self.memory.items[ptr] = self.getValue(try self.constructUndefined(str.fields[ptr - start].valueType));
+            }
+
+            break :res self.appendValue(.{
+                .Struct = .{
+                    .Type = valueType,
+                    .Fields = .{
+                        .start = start,
+                        .end = @intCast(start + str.fields.len),
+                    },
+                },
+            });
+        },
+
+        // @TODO Undefined Unions
         else => self.appendValue(.{ .Undefined = valueType }),
     };
 }

@@ -87,7 +87,7 @@ pub fn build(self: *Builder) Error!JAIR {
 
     return .{
         .typeTable = self.typeTable.toOwnedSlice(),
-        .data = self.data.items,
+        .data = self.data.toOwnedSlice(self.allocator) catch return Error.AllocatorFailure,
         .strings = self.strings.toOwnedSlice(self.allocator) catch return Error.AllocatorFailure,
         .nodes = self.nodes.toOwnedSlice(),
         .keyNodes = self.keyNodes.toOwnedSlice(self.allocator) catch return Error.AllocatorFailure,
@@ -101,6 +101,16 @@ fn createJAIR(self: *Builder, nodePtr: JAIR.Ptr) Error!JAIR.Ptr {
     return switch (node.type) {
         .FunctionDef => self.functionDef(nodePtr),
         .Scope => self.scope(nodePtr),
+        .Return => self.@"return"(node.value),
+        .Literal => self.literal(node.value),
+        .Label => self.label(node.value),
+        .Negation => try self.negation(node.value),
+        .Not, .Invert => try self.not(node.value),
+        .Jump => try self.jump(node.value),
+        .JumpIf => try self.cjump(node.value),
+
+        // @TODO Continue
+
         .Exit, .TypeDef => res: {
             const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
             self.nodes.set(res, .{
@@ -109,6 +119,19 @@ fn createJAIR(self: *Builder, nodePtr: JAIR.Ptr) Error!JAIR.Ptr {
             });
             break :res res;
         },
+
+        // @Beware assuming that Call handling will parse the grouping manually
+        .Grouping =>
+            if (self.jir.data[node.value] == 0) res: {
+                const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
+                self.nodes.set(res, .{
+                    .type = .Nop,
+                    .value = 0,
+                });
+                break :res res;
+            }
+            else self.createJAIR(self.jir.data[node.value + 1]),
+
         else => res: {
             const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
             self.nodes.set(res, .{
@@ -118,6 +141,66 @@ fn createJAIR(self: *Builder, nodePtr: JAIR.Ptr) Error!JAIR.Ptr {
             break :res res;
         },
     };
+}
+
+fn cjump(self: *Builder, value: defines.Offset) Error!JAIR.Ptr {
+    const lbl = self.jir.data[value];
+    const cnd = try self.createJAIR(self.jir.data[value + 1]);
+
+    const start: u32 = @intCast(self.data.items.len);
+    self.data.append(self.allocator, lbl) catch return Error.AllocatorFailure;
+    self.data.append(self.allocator, cnd) catch return Error.AllocatorFailure;
+
+    const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
+    self.nodes.set(res, .{ .type = .JumpIf, .value = start });
+    return res;
+}
+
+fn jump(self: *Builder, value: defines.StringPtr) Error!JAIR.Ptr {
+    const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
+    self.nodes.set(res, .{ .type = .Jump, .value = value });
+    return res;
+}
+
+fn not(self: *Builder, value: JIR.Ptr) Error!JAIR.Ptr {
+    const rhs = try self.createJAIR(value);
+
+    const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
+    self.nodes.set(res, .{ .type = .Not, .value = rhs });
+    return res;
+}
+
+fn negation(self: *Builder, value: JIR.Ptr) Error!JAIR.Ptr {
+    const rhs = try self.createJAIR(value);
+
+    const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
+    self.nodes.set(res, .{ .type = .Negation, .value = rhs });
+    return res;
+}
+
+fn label(self: *Builder, value: defines.StringPtr) Error!JAIR.Ptr {
+    const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
+    self.nodes.set(res, .{ .type = .Label, .value = value });
+    return res;
+}
+
+fn literal(self: *Builder, value: JIR.Constant.Ptr) Error!JAIR.Ptr {
+    const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
+    self.nodes.set(res, .{ .type = .Literal, .value = try self.convertConstant(value) });
+    return res;
+}
+
+fn @"return"(self: *Builder, value: defines.Offset) Error!JAIR.Ptr {
+    const withRet = self.jir.data[value];
+    const expr = if (withRet == 1) try self.createJAIR(self.jir.data[value + 1]) else 0;
+
+    const start: u32 = @intCast(self.data.items.len);
+    self.data.append(self.allocator, withRet) catch return Error.AllocatorFailure;
+    self.data.append(self.allocator, expr) catch return Error.AllocatorFailure;
+
+    const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
+    self.nodes.set(res, .{ .type = .Return, .value = start });
+    return res;
 }
 
 fn scope(self: *Builder, nodePtr: defines.Offset) Error!JAIR.Ptr {
@@ -300,19 +383,27 @@ fn convertConstant(self: *Builder, constant: JAIR.Constant.Ptr) Error!JAIR.Const
             break :arr .{
                 .Aggregate = .{
                     .Type = arr.type,
-                    .Init = .{ .Defined = init },
+                    .Init = init,
                 },
             };
         },
 
-        .Undefined => |und| .{
-            .Aggregate = .{
-                .Type = und,
-                .Init = .{ .Zero = {} },
+        .Aggregate => |agg| agg: {
+            const init = self.allocator.alloc(JAIR.Constant.Ptr, agg.data.len())
+                catch return Error.AllocatorFailure;
+            for (init, 0..) |*elem, i| {
+                elem.* = try self.convertConstant(agg.data.at(@intCast(i)));
             }
+
+            break :agg .{
+                .Aggregate = .{
+                    .Type = agg.type,
+                    .Init = init,
+                },
+            };
         },
 
-        .Aggregate,
+        .Undefined,
         .Type,
         .Void => .{ .Nop = {} },
     });

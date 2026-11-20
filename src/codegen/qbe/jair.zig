@@ -214,11 +214,16 @@ pub fn codegen(self: *JAIR, context: *Context, qbeOut: *std.Io.Dir) Error!void {
             .Aggregate => |agg| {
                 try self.write(true, out, "data $const{d} = {{ ", .{cptr});
                 try self.typeString(out, agg.Type);
-                try self.write(false, out, "{{", .{});
-                for (agg.Init) |constant| {
-                    // @TODO Continue
+                try self.write(false, out, " {{", .{});
+                for (agg.Init, 0..) |constptr, i| {
+                    try self.write(false, out, " ", .{});
+                    try self.constant(out, true, constptr);
+                    if (i != agg.Init.len - 1) {
+                        try self.write(false, out, ",", .{});
+                    }
                 }
                 try self.write(false, out, " }}", .{});
+                try self.write(false, out, " }}\n", .{});
             },
             else => { },
         }
@@ -226,19 +231,32 @@ pub fn codegen(self: *JAIR, context: *Context, qbeOut: *std.Io.Dir) Error!void {
 
     for (self.keyNodes) |nodePtr| {
         try self.write(false, out, "\n", .{});
-        try self.generate(out, nodePtr);
+        try self.generateStatement(out, nodePtr);
     }
 }
 
-fn constant(self: *JAIR, out: *Writer, constPtr: Constant.Ptr) Error!void {
-    // @TODO Continue
+fn constant(self: *JAIR, out: *Writer, bare: bool, constPtr: Constant.Ptr) Error!void {
+    switch (self.constants.get(constPtr)) {
+        .Byte => |b| try self.write(false, out, "b {s}{d}", .{if (bare) "" else "copy ", b}),
+        .Double => |d| try self.write(false, out, "d {s}{d}", .{if (bare) "" else "copy ", @as(u64, @bitCast(d))}),
+        .Half => |h| try self.write(false, out, "h {s}{d}", .{if (bare) "" else "copy ", h}),
+        .Long => |l| try self.write(false, out, "l {s}{d}", .{if (bare) "" else "copy ", l}),
+        .Single => |s| try self.write(false, out, "s {s}{d}", .{if (bare) "" else "copy ", @as(u32, @bitCast(s))}),
+        .Word => |w| try self.write(false, out, "w {s}{d}", .{if (bare) "" else "copy ", w}),
+        .Function => |f| try self.write(false, out, "l ${s}", .{self.strings[f]}),
+        .String, .Aggregate => try self.write(false, out, "l $const{d}", .{constPtr}),
+        .Nop => { },
+    }
 }
 
-fn generate(self: *JAIR, out: *Writer, nodePtr: Ptr) Error!void {
+fn generateStatement(self: *JAIR, out: *Writer, nodePtr: Ptr) Error!void {
     const node = self.nodes.get(nodePtr);
 
     switch (node.type) {
         .FunctionDef => {
+            const tmp = self.temp;
+            defer self.temp = tmp;
+
             const isExported = self.data[node.value] == 1;
             const name = self.strings[self.data[node.value + 1]];
             const returnType = self.data[node.value + 2];
@@ -263,7 +281,7 @@ fn generate(self: *JAIR, out: *Writer, nodePtr: Ptr) Error!void {
             try self.write(false, out, ") {{\n@start\n", .{});
             self.terminated = false;
 
-            try self.generate(out, body);
+            try self.generateStatement(out, body);
 
             if (!self.terminated) {
                 const isVoid = self.typeTable.get(returnType) == .Void;
@@ -273,9 +291,6 @@ fn generate(self: *JAIR, out: *Writer, nodePtr: Ptr) Error!void {
         },
         .Scope => {
             const label = self.strings[self.data[node.value]];
-            if (!self.terminated) {
-                try self.write(true, out, "jmp @{s}\n", .{label});
-            }
             try self.write(false, out, "@{s}\n", .{label});
             self.terminated = false;
 
@@ -284,12 +299,40 @@ fn generate(self: *JAIR, out: *Writer, nodePtr: Ptr) Error!void {
 
             const len = self.data[node.value + 1];
             for (0..len) |idx| {
-                try self.generate(out, self.data[node.value + 2 + idx]);
+                try self.generateStatement(out, self.data[node.value + 2 + idx]);
             }
         },
-        .Nop => { },
-        else => |t| try self.write(true, out, "# TODO {s}\n", .{@tagName(t)}),
+        .Return => {
+            self.terminated = true;
+
+            const withRet = self.data[node.value] == 1;
+
+            if (withRet) {
+                const tmp = try self.generateExpr(out, self.data[node.value + 1]);
+                try self.write(true, out, "ret %tmp{d}\n", .{tmp});
+            }
+            else {
+                try self.write(true, out, "ret\n", .{});
+            }
+        },
+        else => |t| try self.write(true, out, "# SHOULDN'T' BE REACHABLE {s}\n", .{@tagName(t)}),
     }
+}
+
+fn generateExpr(self: *JAIR, out: *Writer, ptr: Ptr) Error!u32 {
+    defer self.temp += 1;
+
+    const node = self.nodes.get(ptr);
+    switch (node.type) {
+        .Literal => {
+            try self.write(true, out, "%tmp{d} =", .{self.temp});
+            try self.constant(out, false, node.value);
+            try self.write(false, out, "\n", .{});
+        },
+        else => { },
+    }
+
+    return self.temp;
 }
 
 fn typeString(self: *const JAIR, out: *Writer, typeID: TypeID) Error!void {
