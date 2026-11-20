@@ -158,7 +158,7 @@ fn innerMain(allocator: std.mem.Allocator, init: std.process.Init) common.Compil
         },
         .QBE => {
             var jairBuilder = try backend.QBE.JAIR.Builder.fromJIR(loweredIR.base(), allocator, &typechecker);
-            const jair = try jairBuilder.build();
+            var jair = try jairBuilder.build();
             try jair.codegen(&context, &cOut);
         }
     }

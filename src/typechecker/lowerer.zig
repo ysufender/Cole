@@ -689,47 +689,20 @@ fn rangeForLoop(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.
 
     const body = try self.statement(ast.extra[extraPtr + 4]);
 
-    if (self.typechecker.context.settings.buildInfo.isDebug) {
-        const safetyCnd = try self.typechecker.builder.lesserEqual(rangeStartIdent, rangeEndIdent);
-        const safetyEnd = try self.typechecker.folder.generateRandomName(.ForSafetyEnd);
-        const safetyCheck = try self.typechecker.builder.cjump(safetyEnd, safetyCnd);
-        const panic = try self.handler("__invalid_index", comptime Comptime.Folder.Builtin.Type("void"));
-        const safetyEndLabel = try self.typechecker.builder.label(safetyEnd);
-
-        return self.typechecker.builder.scope(
-            try self.typechecker.folder.generateRandomName(.For), &.{
-                rangeStart,
-                rangeEnd,
-                safetyCheck,
-                panic,
-                safetyEndLabel,
-                capture,
-                forStartLabel,
-                cjump,
-                body,
-                forCheckLabel,
-                increment,
-                sjump,
-                forEndLabel,
-            },
-        );
-    }
-    else {
-        return self.typechecker.builder.scope(
-            try self.typechecker.folder.generateRandomName(.For), &.{
-                rangeStart,
-                rangeEnd,
-                capture,
-                forStartLabel,
-                cjump,
-                body,
-                forCheckLabel,
-                increment,
-                sjump,
-                forEndLabel,
-            },
-        );
-    }
+    return self.typechecker.builder.scope(
+        try self.typechecker.folder.generateRandomName(.For), &.{
+            rangeStart,
+            rangeEnd,
+            capture,
+            forStartLabel,
+            cjump,
+            body,
+            forCheckLabel,
+            increment,
+            sjump,
+            forEndLabel,
+        },
+    );
 }
 
 fn forLoop(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.AST) Error!JIR.Ptr {
@@ -1689,9 +1662,7 @@ fn builtinCall(
             self.expression(ast.extra[args.at(1)], try self.typechecker.expectType(ast.extra[args.at(0)])),
         BI("typeOf") =>
             self.literal(ast.extra[args.at(0)], ofType),
-        BI("unreachable") => blk: {
-            break :blk try self.handler("__unreachable", ofType);
-        },
+        BI("unreachable") => self.typechecker.builder.inlineC(try self.typechecker.builder.internString("")),
         BI("typeName") => self.typechecker.builder.literal(
             try self.typechecker.builder.addConstant(.{
                 .String = .{
@@ -2043,48 +2014,8 @@ fn indexing(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
         },
     });
 
-    if (self.typechecker.context.settings.buildInfo.isDebug and !self.typechecker.isCPtr(typeID)) {
-        const indexableName = try self.typechecker.folder.generateRandomName(.Indexable);
-        const indexableDef = try self.typechecker.builder.variableDef(false, indexedTypeChildPtr, indexableName, false, indexable, null);
-        const indexableIdent = try self.typechecker.builder.identifier(indexableName);
 
-        const indexName = try self.typechecker.folder.generateRandomName(.Index);
-        const indexDef = try self.typechecker.builder.variableDef(false, indexType, indexName, false, index, null);
-        const indexIdent = try self.typechecker.builder.identifier(indexName);
-
-        const indexableLen = switch (self.typechecker.typeTable.get(typeID)) {
-            .Pointer => try self.typechecker.builder.dot(
-                indexableBaseIdent,
-                try self.typechecker.builder.internString("len"),
-                typeID,
-            ),
-            .Array => |arr| try self.typechecker.builder.literal(try self.typechecker.builder.addConstant(.{ .Integer = .{ .u32 = arr.len } })),
-            else => return common.debug.ShouldBeImpossible(undefined, @src()),
-        };
-
-        const boundsEnd = try self.typechecker.folder.generateRandomName(.BoundsEnd);
-        const cnd = try self.typechecker.builder.lesser(indexIdent, indexableLen);
-        const boundsJump = try self.typechecker.builder.cjump(boundsEnd, cnd);
-
-        const segfault = try self.handler("__invalid_index", comptime Comptime.Folder.Builtin.Type("void"));
-
-        const boundsEndLabel = try self.typechecker.builder.label(boundsEnd);
-
-        return self.typechecker.builder.dereference(
-            try self.typechecker.builder.stmtExpr(
-                try self.typechecker.builder.add(indexableIdent, indexIdent),
-                &.{
-                    indexableDef,
-                    indexDef,
-                    boundsJump,
-                    segfault,
-                    boundsEndLabel
-                }
-            ),
-            indexedTypeChildPtr,
-        );
-    }
-    else if (self.typechecker.typeTable.get(typeID) == .Array) {
+    if (self.typechecker.typeTable.get(typeID) == .Array) {
         return self.typechecker.builder.dereference(
             try self.typechecker.builder.add(indexable, index),
             indexedTypeChildPtr,

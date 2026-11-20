@@ -59,10 +59,20 @@ pub fn build(self: *Builder) Error!JAIR {
     }
 
     for (self.jir.keyNodes) |nodePtr| {
-        const node = self.jir.nodes.get(nodePtr);
+        self.keyNodes.append(self.allocator, try self.createJAIR(nodePtr))
+            catch return Error.AllocatorFailure;
+    }
 
-        // @TODO Continue from here.
-        _ = try self.createJAIR(node);
+    var typeNames = Typechecker.TypeNameMap.empty;
+    typeNames.ensureTotalCapacity(self.allocator, @intCast(self.typeTable.len)) catch return Error.AllocatorFailure;
+
+    for (0..self.jir.types.len) |id| {
+        const newType = self.typeMap.get(@intCast(id)).?;
+
+        const res = typeNames.getOrPutAssumeCapacity(newType);
+        if (!res.found_existing) {
+            res.value_ptr.* = try self.typeName(@intCast(id));
+        }
     }
 
     return JAIR{
@@ -71,13 +81,52 @@ pub fn build(self: *Builder) Error!JAIR {
         .strings = self.jir.strings,
         .nodes = self.nodes.toOwnedSlice(),
         .keyNodes = self.keyNodes.toOwnedSlice(self.allocator) catch return Error.AllocatorFailure,
-        .typeNames = self.jir.typeNames,
+        .typeNames = typeNames,
     };
+}
+
+fn createJAIR(self: *Builder, nodePtr: JAIR.Ptr) Error!JAIR.Ptr {
+    const node = self.jir.nodes.get(nodePtr);
+    return switch (node.type) {
+        .FunctionDef => self.functionDef(nodePtr),
+        .Scope => self.scope(nodePtr),
+        else => res: {
+            const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
+            self.nodes.set(res, .{
+                .type = .Code,
+                .value = 0,
+            });
+            break :res res;
+        },
+    };
+}
+
+fn scope(self: *Builder, nodePtr: defines.Offset) Error!JAIR.Ptr {
+    const scopeVal = self.jir.nodes.get(nodePtr).value;
+    const name = self.jir.data[scopeVal];
+    const len = self.jir.data[scopeVal + 1];
+
+    const stmts = self.allocator.alloc(JAIR.Ptr, len) catch return Error.AllocatorFailure;
+    defer self.allocator.free(stmts);
+    for (stmts, 0..) |*s, idx| {
+        s.* = try self.createJAIR(self.jir.data[scopeVal + 2 + idx]);
+    }
+
+    const start: u32 = @intCast(self.data.items.len);
+    self.data.append(self.allocator, name) catch return Error.AllocatorFailure;
+    self.data.append(self.allocator, len) catch return Error.AllocatorFailure;
+    self.data.appendSlice(self.allocator, stmts) catch return Error.AllocatorFailure;
+
+    const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
+    self.nodes.set(res, .{ .type = .Scope, .value = start });
+    return res;
 }
 
 fn functionDef(self: *Builder, fptr: JIR.Ptr) Error!JAIR.Ptr {
     const function = self.jir.functions.get(self.jir.data[self.jir.nodes.get(fptr).value + 1]);
     const signature = self.jir.types.get(function.signature).Function;
+
+    const body = try self.createJAIR(function.body);
 
     const start: u32 = @intCast(self.data.items.len);
     self.data.append(self.allocator, if (self.jir.hasMetadata(fptr, "@export")) 1 else 0) catch return Error.AllocatorFailure;
@@ -88,13 +137,10 @@ fn functionDef(self: *Builder, fptr: JIR.Ptr) Error!JAIR.Ptr {
         self.data.append(self.allocator, try self.convertType(argType)) catch return Error.AllocatorFailure;
         self.data.append(self.allocator, argName) catch return Error.AllocatorFailure;
     }
+    self.data.append(self.allocator, body) catch return Error.AllocatorFailure;
 
     const nodePtr = try self.nodes.addOne(self.allocator);
-    self.nodes.set(nodePtr, .{
-        .type = .FunctionDef,
-        .value = start,
-    });
-    self.keyNodes.append(self.allocator, nodePtr) catch return Error.AllocatorFailure;
+    self.nodes.set(nodePtr, .{ .type = .FunctionDef, .value = start });
     return nodePtr;
 }
 
@@ -209,11 +255,13 @@ fn convertType(self: *Builder, id: TypeID) Error!TypeID {
                 .Custom = .{
                     .Aggregate = .{
                         .name = try self.typeName(id),
-                        .size = try self.typechecker.sizeOf(id),
+                        .size = try self.byteSize(id),
                         .alignment = try self.typechecker.alignOf(id),
-                        .fields = &.{
-                            try self.convertType(ptr.child),
-                            try self.convertType(comptime Comptime.Folder.Builtin.Type("u32")),
+                        .fields = fields: {
+                            const fields = self.allocator.alloc(TypeID, 2) catch return Error.AllocatorFailure;
+                            fields[0] = try self.convertType(comptime Comptime.Folder.Builtin.Type("usize"));
+                            fields[1] = try self.convertType(comptime Comptime.Folder.Builtin.Type("u32"));
+                            break :fields fields;
                         },
                     },
                 },
@@ -228,65 +276,32 @@ fn convertType(self: *Builder, id: TypeID) Error!TypeID {
             8 => .{ .Byte = {} },
             else => unreachable,
         },
-        .Array => |arr| .{
-            .Array = .{
-                .size = arr.len * try self.typechecker.alignOf(arr.child),
-                .alignment = try self.typechecker.alignOf(arr.child),
+        .Array => .{
+            .Custom = .{
+                .Opaque = .{
+                    .name = try self.typeName(id),
+                    .alignment = try self.typechecker.alignOf(id),
+                    .size = try self.byteSize(id),
+                }
             },
         },
         .Union => |uni| .{
             .Custom = .{
                 .Union = .{
-                    .name = try self.typeName(uni.name),
+                    .name = try self.typeName(id),
                     .alignment = try self.typechecker.alignOf(id),
-                    .size = try self.typechecker.sizeOf(id),
-                    .fields = fields: {
-                        var fieldLen: u32 = 0;
-                        for (uni.fields) |field| {
-                            if (try self.typechecker.sizeOf(field.valueType) == 0) {
-                                continue;
-                            }
-
-                            fieldLen += 1;
-                        }
-
-                        const fields = self.allocator.alloc(TypeID, fieldLen)
-                            catch return Error.AllocatorFailure;
-
-                        for (uni.fields, 0..) |field, i| {
-                            fields[i] = try self.convertType(field.valueType);
-                        }
-
-                        break :fields fields;
-                    },
+                    .size = try self.byteSize(id),
+                    .fields = try self.convertFields(uni.fields),
                 }
             }
         },
         .Struct => |str| .{
             .Custom = .{
                 .Aggregate = .{
-                    .name = try self.typeName(str.name),
+                    .name = try self.typeName(id),
                     .alignment = try self.typechecker.alignOf(id),
-                    .size = try self.typechecker.sizeOf(id),
-                    .fields = fields: {
-                        var fieldLen: u32 = 0;
-                        for (str.fields) |field| {
-                            if (try self.typechecker.sizeOf(field.valueType) == 0) {
-                                continue;
-                            }
-
-                            fieldLen += 1;
-                        }
-
-                        const fields = self.allocator.alloc(TypeID, fieldLen)
-                            catch return Error.AllocatorFailure;
-
-                        for (str.fields, 0..) |field, i| {
-                            fields[i] = try self.convertType(field.valueType);
-                        }
-
-                        break :fields fields;
-                    },
+                    .size = try self.byteSize(id),
+                    .fields = try self.convertFields(str.fields),
                 }
             }
         }
@@ -296,4 +311,24 @@ fn convertType(self: *Builder, id: TypeID) Error!TypeID {
     self.typeTable.set(res, converted);
     self.typeMap.putAssumeCapacityNoClobber(id, res);
     return res;
+}
+
+fn byteSize(self: *Builder, id: TypeID) Error!u32 {
+    return (try self.typechecker.sizeOf(id) + 7) / 8;
+}
+
+fn convertFields(self: *Builder, fields: anytype) Error![]const TypeID {
+    var count: usize = 0;
+    for (fields) |field| {
+        if (try self.typechecker.sizeOf(field.valueType) != 0) count += 1;
+    }
+
+    const out = self.allocator.alloc(TypeID, count) catch return Error.AllocatorFailure;
+    var idx: usize = 0;
+    for (fields) |field| {
+        if (try self.typechecker.sizeOf(field.valueType) == 0) continue;
+        out[idx] = try self.convertType(field.valueType);
+        idx += 1;
+    }
+    return out;
 }

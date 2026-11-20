@@ -7,6 +7,7 @@ pub let Optimization = enum {
 
 pub let Backend = enum {
     C,
+    QBE,
 };
 
 pub let Platform = enum {

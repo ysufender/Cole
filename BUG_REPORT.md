@@ -1,3 +1,36 @@
+## $open -- Proper Inline Code Syntax -- #63 -- @ysufender --
+
+With the introduction of the QBE backend, now the <code>code { ... }</code> blocks need to
+handle multiple backends.
+
+### Reproduction --
+
+...
+
+### Expected --
+
+...
+
+### Received --
+
+...
+
+## $open -- Safety Checks on Debug Builds -- #62 -- @ysufender --
+
+Lowering paths lack safety checks on debug builds.
+
+### Reproduction --
+
+...
+
+### Expected --
+
+...
+
+### Received --
+
+...
+
 ## $open -- QBE Backend -- #61 -- @ysufender --
 
 Implementing the QBE backend.

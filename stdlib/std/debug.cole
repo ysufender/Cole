@@ -44,11 +44,16 @@ pub let breakpoint = fn () -> void {
     }
 };
 
+pub let canStackTrace = #(@comptime) fn () -> bool {
+    let bi = buildInfo();
+    return bi.optimization == @Og and bi.backend == @C;
+};
+
 let _Cole_implicit__stack_trace: mut builtin::StackTrace = #(@extern) undefined;
 
 pub let stackTrace = fn () -> builtin::StackTrace {
     return
-        if (buildInfo().optimization == @Og) _Cole_implicit__stack_trace
+        if (canStackTrace()) _Cole_implicit__stack_trace
         else (("unknown", "unknown", 0, 0), undefined);
 };
 
@@ -57,7 +62,7 @@ pub let dumpTrace = fn (
     allocator: Allocator::Allocator,
     stream: Stream::Output
 ) -> void {
-    if buildInfo().optimization == @Og {
+    if canStackTrace() {
         let current: mut any = trace.&;
 
         _ = Stream::Output::writebuffer(stream, "Trace (most recent call first):\n");
