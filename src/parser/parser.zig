@@ -1344,7 +1344,7 @@ fn typeExpression(self: *Parser) ExpressionResult {
                 return expr;
             }
             else {
-                const res = try self.typeExpression();
+                const res = try self.ifExpression();
 
                 const expr = try self.alloc(Expression);
                 self.expressionMap.set(expr, .{
@@ -1355,7 +1355,7 @@ fn typeExpression(self: *Parser) ExpressionResult {
             },
         .LBracket => {
             return if (self.match(&.{.RBracket})) result: {
-                const rest = try self.typeExpression();
+                const rest = try self.ifExpression();
 
                 const expr = try self.alloc(Expression);
                 self.expressionMap.set(expr, .{
@@ -1369,7 +1369,7 @@ fn typeExpression(self: *Parser) ExpressionResult {
                 _ = self.advance();
                 var literal = self.tokens.get(self.previous()).lexeme(self.context, self.file);
                 _ = try self.consume(.RBracket, error.MissingBracket, "Expected enclosing bracket in array type.");
-                const child = try self.typeExpression();
+                const child = try self.ifExpression();
                 const expr = try self.alloc(Expression);
 
                 literal = (literal.ptr - 1)[0..literal.len + 1];
@@ -1390,7 +1390,7 @@ fn typeExpression(self: *Parser) ExpressionResult {
             else result: {
                 const size = try self.ifExpression();
                 _ = try self.consume(.RBracket, error.MissingBracket, "Expected enclosing bracket in array type.");
-                const rest = try self.typeExpression();
+                const rest = try self.ifExpression();
 
                 const start: u32 = @intCast(self.extra.items.len);
                 self.extra.append(self.allocator(), size) catch return error.AllocatorFailure;

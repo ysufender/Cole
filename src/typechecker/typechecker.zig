@@ -3814,7 +3814,7 @@ pub fn assertCanCoerce(self: *Typechecker, this: TypeID, that: TypeID) Error!voi
     return switch (thatType) {
         .Noreturn => { },
         .ComptimeInt => functional.throwIf(!self.isInt(this) and !self.isFloat(this), Error.TypeMismatch),
-        .ComptimeFloat => functional.throwIf(!self.isFloat(this) and !self.isInt(this), Error.TypeMismatch),
+        .ComptimeFloat => functional.throwIf(!self.isFloat(this), Error.TypeMismatch),
         .Float => functional.throwIf(!self.isFloat(this), Error.TypeMismatch),
         .Integer => |itype| switch (thisType) {
             .Integer => |i2type| functional.throwIf(itype.size > i2type.size, Error.TypeMismatch),

@@ -107,10 +107,25 @@ fn createJAIR(self: *Builder, nodePtr: JAIR.Ptr) Error!JAIR.Ptr {
         .Not, .Invert => try self.not(node.value),
         .Jump => try self.jump(node.value),
         .JumpIf => try self.cjump(node.value),
-        .And, .BitwiseAnd => try self.@"and"(node.value),
-        .Or, .BitwiseOr => try self.@"or"(node.value),
+        .And, .BitwiseAnd => try self.commonBinary(.And, node.value),
+        .Or, .BitwiseOr => try self.commonBinary(.Or, node.value),
         .Code => try self.code(node.value),
-        .Add => try self.add(node.value),
+        .Add => try self.commonBinary(.Add, node.value),
+        .Equal => try self.commonBinary(.Equal, node.value),
+        .NotEqual => try self.commonBinary(.NotEqual, node.value),
+        .Lesser => try self.commonBinary(.Lesser, node.value),
+        .LesserEqual => try self.commonBinary(.Lesser, node.value),
+        .Greater => try self.commonBinary(.Lesser, node.value),
+        .GreaterEqual => try self.commonBinary(.Lesser, node.value),
+        .Div => try self.commonBinary(.Div, node.value),
+        .Mod => try self.commonBinary(.Mod, node.value),
+        .LeftShift => try self.commonBinary(.LeftShift, node.value),
+        .RightShift => try self.commonBinary(.RightShift, node.value),
+        .Mul => try self.commonBinary(.Mul, node.value),
+        .Sub => try self.commonBinary(.Sub, node.value),
+        .Xor => try self.commonBinary(.Xor, node.value),
+        .Discard => try self.createJAIR(node.value),
+        .Ternary => try self.phi(node.value),
 
         .Exit, .TypeDef => res: {
             const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
@@ -146,7 +161,26 @@ fn createJAIR(self: *Builder, nodePtr: JAIR.Ptr) Error!JAIR.Ptr {
     };
 }
 
-fn add(self: *Builder, value: JIR.Ptr) Error!JAIR.Ptr {
+fn phi(self: *Builder, value: defines.Offset) Error!JAIR.Ptr {
+    const cnd = try self.createJAIR(self.jir.data[value]);
+    const then = try self.createJAIR(self.jir.data[value + 1]);
+    const otherwise = try self.createJAIR(self.jir.data[value + 2]);
+
+    const start: u32 = @intCast(self.data.items.len);
+    self.data.append(self.allocator, cnd) catch return Error.AllocatorFailure;
+    self.data.append(self.allocator, then) catch return Error.AllocatorFailure;
+    self.data.append(self.allocator, otherwise) catch return Error.AllocatorFailure;
+
+    const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
+    self.nodes.set(res, .{
+        .type = self.nodes.get(then).type,
+        .kind = .Phi,
+        .value = start
+    });
+    return res;
+}
+
+fn commonBinary(self: *Builder, comptime kind: @EnumLiteral(), value: defines.Offset) Error!JAIR.Ptr {
     const lhs = try self.createJAIR(self.jir.data[value]);
     const rhs = try self.createJAIR(self.jir.data[value + 1]);
 
@@ -157,7 +191,7 @@ fn add(self: *Builder, value: JIR.Ptr) Error!JAIR.Ptr {
     const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
     self.nodes.set(res, .{
         .type = self.nodes.get(lhs).type,
-        .kind = .Add,
+        .kind = kind,
         .value = start
     });
     return res;
@@ -169,40 +203,6 @@ fn code(self: *Builder, value: defines.StringPtr) Error!JAIR.Ptr {
         .type = 0,
         .kind = .Code,
         .value = value,
-    });
-    return res;
-}
-
-fn @"or"(self: *Builder, value: JIR.Ptr) Error!JAIR.Ptr {
-    const lhs = try self.createJAIR(self.jir.data[value]);
-    const rhs = try self.createJAIR(self.jir.data[value + 1]);
-
-    const start: u32 = @intCast(self.data.items.len);
-    self.data.append(self.allocator, lhs) catch return Error.AllocatorFailure;
-    self.data.append(self.allocator, rhs) catch return Error.AllocatorFailure;
-
-    const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
-    self.nodes.set(res, .{
-        .type = self.nodes.get(lhs).type,
-        .kind = .Or,
-        .value = start
-    });
-    return res;
-}
-
-fn @"and"(self: *Builder, value: JIR.Ptr) Error!JAIR.Ptr {
-    const lhs = try self.createJAIR(self.jir.data[value]);
-    const rhs = try self.createJAIR(self.jir.data[value + 1]);
-
-    const start: u32 = @intCast(self.data.items.len);
-    self.data.append(self.allocator, lhs) catch return Error.AllocatorFailure;
-    self.data.append(self.allocator, rhs) catch return Error.AllocatorFailure;
-
-    const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
-    self.nodes.set(res, .{
-        .type = self.nodes.get(lhs).type,
-        .kind = .And,
-        .value = start
     });
     return res;
 }
@@ -444,16 +444,24 @@ fn typeName(self: *Builder, id: TypeID) Error!defines.StringPtr {
 
 fn constantType(self: *Builder, constant: JAIR.Constant.Ptr) TypeID {
     return switch (self.constants.get(constant)) {
-        .Byte => self.typeMap.get(comptime Comptime.Folder.Builtin.Type("u8")).?,
+        .Byte => |v|
+            if (v.@"1") self.typeMap.get(comptime Comptime.Folder.Builtin.Type("i8")).?
+            else self.typeMap.get(comptime Comptime.Folder.Builtin.Type("u8")).?,
         .Double => self.typeMap.get(comptime Comptime.Folder.Builtin.Type("c_double")).?,
         .Single => self.typeMap.get(comptime Comptime.Folder.Builtin.Type("float")).?,
         .Function => self.typeMap.get(comptime Comptime.Folder.Builtin.Type("usize")).?,
+        .Word => |v|
+            if (v.@"1") self.typeMap.get(comptime Comptime.Folder.Builtin.Type("i32")).?
+            else self.typeMap.get(comptime Comptime.Folder.Builtin.Type("u32")).?,
         .Nop => self.typeMap.get(comptime Comptime.Folder.Builtin.Type("void")).?,
-        .Half => self.typeMap.get(comptime Comptime.Folder.Builtin.Type("c_short")).?,
-        .Long => self.typeMap.get(comptime Comptime.Folder.Builtin.Type("usize")).?,
+        .Half => |v|
+            if (v.@"1") self.typeMap.get(comptime Comptime.Folder.Builtin.Type("c_short")).?
+            else self.typeMap.get(comptime Comptime.Folder.Builtin.Type("c_ushort")).?,
+        .Long => |v|
+            if (v.@"1") self.typeMap.get(comptime Comptime.Folder.Builtin.Type("isize")).?
+            else self.typeMap.get(comptime Comptime.Folder.Builtin.Type("usize")).?,
         .String => self.typeMap.get(comptime Comptime.Folder.Builtin.Type("[]u8")).?,
         .Aggregate => |agg| agg.Type,
-        .Word => self.typeMap.get(comptime Comptime.Folder.Builtin.Type("u32")).?,
     };
 }
 
@@ -465,22 +473,22 @@ fn convertConstant(self: *Builder, constant: JIR.Constant.Ptr) Error!JAIR.Consta
 
     self.constants.appendAssumeCapacity(switch (self.jir.constants.get(constant)) {
         .Integer => |int| switch (int) {
-            .i32 => |integer| .{ .Word = @bitCast(integer) },
-            .u32 => |integer| .{ .Word = @bitCast(integer) },
-            .c_int => |integer| .{ .Word = @bitCast(integer) },
-            .c_uint => |integer| .{ .Word = @bitCast(integer) },
+            .i32 => |integer| .{ .Word = .{ @bitCast(integer), true } },
+            .u32 => |integer| .{ .Word = .{ @bitCast(integer), false } },
+            .c_int => |integer| .{ .Word = .{ @bitCast(integer), true } },
+            .c_uint => |integer| .{ .Word = .{ @bitCast(integer), false } },
 
-            .i8 => |integer| .{ .Byte = @bitCast(integer) },
-            .u8 => |integer| .{ .Byte = @bitCast(integer) },
-            .c_char => |integer| .{ .Byte = @bitCast(integer) },
-            .c_uchar => |integer| .{ .Byte = @bitCast(integer) },
+            .i8 => |integer| .{ .Byte = .{ @bitCast(integer), true } },
+            .u8 => |integer| .{ .Byte = .{ @bitCast(integer), false } },
+            .c_char => |integer| .{ .Byte = .{ @bitCast(integer), true } },
+            .c_uchar => |integer| .{ .Byte = .{ @bitCast(integer), false } },
 
-            .c_long => |integer| .{ .Long = @bitCast(integer) },
-            .c_ulong => |integer| .{ .Long = @bitCast(integer) },
-            .c_size => |integer| .{ .Long = @bitCast(integer) },
+            .c_long => |integer| .{ .Long = .{ @bitCast(integer), true } },
+            .c_ulong => |integer| .{ .Long = .{ @bitCast(integer), false } },
+            .c_size => |integer| .{ .Long = .{ @bitCast(integer), true } },
 
-            .c_short => |integer| .{ .Half = @bitCast(integer) },
-            .c_ushort => |integer| .{ .Half = @bitCast(integer) },
+            .c_short => |integer| .{ .Half = .{ @bitCast(integer) , true } },
+            .c_ushort => |integer| .{ .Half = .{ @bitCast(integer) , false } },
         },
         .Float => |f| switch (f) {
             .f32 => |v| .{ .Single = v },
@@ -500,7 +508,7 @@ fn convertConstant(self: *Builder, constant: JIR.Constant.Ptr) Error!JAIR.Consta
 
             break :arr .{
                 .Aggregate = .{
-                    .Type = arr.type,
+                    .Type = try self.convertType(arr.type),
                     .Init = init,
                 },
             };
@@ -515,7 +523,7 @@ fn convertConstant(self: *Builder, constant: JIR.Constant.Ptr) Error!JAIR.Consta
 
             break :agg .{
                 .Aggregate = .{
-                    .Type = agg.type,
+                    .Type = try self.convertType(agg.type),
                     .Init = init,
                 },
             };
@@ -537,11 +545,16 @@ fn convertType(self: *Builder, id: TypeID) Error!TypeID {
     const converted: JAIR.Type = switch (self.jir.types.get(id)) {
         .Type, .Any, .EnumLiteral => .{ .Void = {} },
         .Void, .Noreturn => .{ .Void = {} },
-        .Bool, .CChar, .CUChar => .{ .Byte = {} },
+        .Bool, .CUChar => .{ .Byte = false },
+        .CChar, => .{ .Byte = true },
         .ComptimeFloat, .CDouble => .{ .Double = {} },
         .Float => .{ .Single = {} },
-        .Enum, .CInt, .CUInt => .{ .Word = {} },
-        .Function, .CLong, .ComptimeInt, .CSize, .CULong => .{ .Long = {} },
+        .CInt => .{ .Word = true },
+        .Enum, .CUInt => .{ .Word = false },
+        .Function, .CULong => .{ .Long = false },
+        .CLong, .ComptimeInt, .CSize => .{ .Long = true },
+        .CShort => .{ .Half = true },
+        .CUShort => .{ .Half = false },
         .Pointer => |ptr| switch (ptr.size) {
             .Slice => JAIR.Type{
                 .Custom = .{
@@ -558,14 +571,13 @@ fn convertType(self: *Builder, id: TypeID) Error!TypeID {
                     },
                 },
             },
-            else => .{ .Long = {} },
+            else => .{ .Long = false },
         },
-        .CShort, .CUShort => .{ .Half = {} },
         .Integer => |int| switch (int.size) {
-            64 => .{ .Long = {} },
-            32 => .{ .Word = {} },
-            16 => .{ .Half = {} },
-            8 => .{ .Byte = {} },
+            64 => .{ .Long = int.signed },
+            32 => .{ .Word = int.signed },
+            16 => .{ .Half = int.signed },
+            8 => .{ .Byte = int.signed },
             else => unreachable,
         },
         .Array => .{

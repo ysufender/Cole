@@ -13,16 +13,18 @@ const JIR = @import("../c/jir.zig");
 
 const MultiArrayList = @import("../../util/collections.zig").MultiArrayList;
 
+const DataEmitter = struct { offset: u32 = 0, first: bool = true };
+
 pub const Ptr = defines.Offset;
 
 pub const Type = union(enum) {
     Void,
-    Word,
-    Long,
+    Word: bool,
+    Long: bool,
     Single,
     Double,
-    Byte,
-    Half,
+    Byte: bool,
+    Half: bool,
     Custom: union(enum) {
         Opaque: struct {
             name: defines.StringPtr,
@@ -48,12 +50,12 @@ pub const Constant = union(enum) {
     pub const Ptr = defines.Offset;
     pub const List = Builder.Constants.Slice;
 
-    Word: u32,
-    Long: u64,
+    Word: struct { u32, bool },
+    Long: struct { u64, bool },
     Single: f32,
     Double: f64,
-    Byte: u8,
-    Half: u16,
+    Byte: struct { u8, bool },
+    Half: struct { u16, bool },
     String: union(enum) {
         C: defines.StringPtr,
         Cole: defines.StringPtr,
@@ -87,24 +89,15 @@ pub const Node = struct {
         Mul,
         LeftShift,
         RightShift,
-        SignedRightShift,
         And,
         Or,
         Label,
         Jump,
         JumpIf,
         Lesser,
-        SignedLesser,
-        FloatLesser,
         LesserEqual,
-        SignedLesserEqual,
-        FloatLesserEqual,
         Greater,
-        SignedGreater,
-        FloatGreater,
         GreaterEqual,
-        SignedGreaterEqual,
-        FloatGreaterEqual,
         Equal,
         NotEqual,
         Phi,
@@ -113,7 +106,6 @@ pub const Node = struct {
         Negation,
         Code,
         Mod,
-        UnsignedMod,
     };
 
     type: TypeID,
@@ -217,7 +209,7 @@ pub fn codegen(self: *JAIR, context: *Context, qbeOut: *std.Io.Dir) Error!void {
                     try self.write(true, out, ", b 0 }}\n", .{});
                 },
                 .Cole => |c| {
-                    try self.write(true, out, "data $const{d} = {{ ", .{cptr});
+                    try self.write(true, out, "data $str{d} = {{ ", .{cptr});
                     for (self.strings[c], 0..) |ch, i| {
                         try self.write(false, out, "b {d}{s}", .{
                             ch,
@@ -229,17 +221,22 @@ pub fn codegen(self: *JAIR, context: *Context, qbeOut: *std.Io.Dir) Error!void {
                 },
             },
             .Aggregate => |agg| {
-                try self.write(true, out, "data $const{d} = {{ ", .{cptr});
-                try self.typeString(out, agg.Type);
-                try self.write(false, out, " {{", .{});
-                for (agg.Init, 0..) |constptr, i| {
-                    try self.write(false, out, " ", .{});
-                    try self.constant(out, true, constptr);
-                    if (i != agg.Init.len - 1) {
-                        try self.write(false, out, ",", .{});
-                    }
+                if (self.sizeOf(agg.Type) == 0) {
+                    continue;
                 }
-                try self.write(false, out, " }}", .{});
+
+                const al: u32 = switch (self.typeTable.get(agg.Type)) {
+                    .Custom => |cu| @max(1, switch (cu) {
+                        .Opaque => |o| o.alignment,
+                        .Union => |o| o.alignment,
+                        .Aggregate => |o| o.alignment,
+                    }),
+                    else => @max(1, self.sizeOf(agg.Type)),
+                };
+
+                try self.write(true, out, "data $const{d} = align {d} {{ ", .{ cptr, al });
+                var em: DataEmitter = .{};
+                try self.dataItems(out, &em, @intCast(cptr));
                 try self.write(false, out, " }}\n", .{});
             },
             else => { },
@@ -257,14 +254,18 @@ pub fn codegen(self: *JAIR, context: *Context, qbeOut: *std.Io.Dir) Error!void {
 
 fn constant(self: *JAIR, out: *Writer, bare: bool, constPtr: Constant.Ptr) Error!void {
     switch (self.constants.get(constPtr)) {
-        .Byte => |b| try self.write(false, out, "{s} {s}{d}", .{if (bare) "b" else "w", if (bare) "" else "copy ", b}),
-        .Double => |d| try self.write(false, out, "d {s}{d}", .{if (bare) "" else "copy ", @as(u64, @bitCast(d))}),
-        .Half => |h| try self.write(false, out, "{s} {s}{d}", .{if (bare) "h" else "w", if (bare) "" else "copy ", h}),
-        .Long => |l| try self.write(false, out, "l {s}{d}", .{if (bare) "" else "copy ", l}),
-        .Single => |s| try self.write(false, out, "s {s}{d}", .{if (bare) "" else "copy ", @as(u32, @bitCast(s))}),
-        .Word => |w| try self.write(false, out, "w {s}{d}", .{if (bare) "" else "copy ", w}),
+        .Byte => |b| try self.write(false, out, "{s} {s}{d}", .{if (bare) "b" else "w", if (bare) "" else "copy ", b.@"0"}),
+        .Double => |d|
+            if (bare) try self.write(false, out, "l {d}", .{@as(u64, @bitCast(d))})
+            else try self.write(false, out, "d copy d_{d}", .{d}),
+        .Single => |s|
+            if (bare) try self.write(false, out, "w {d}", .{@as(u32, @bitCast(s))})
+            else try self.write(false, out, "s copy s_{d}", .{s}),
+        .Half => |h| try self.write(false, out, "{s} {s}{d}", .{if (bare) "h" else "w", if (bare) "" else "copy ", h.@"0"}),
+        .Long => |l| try self.write(false, out, "l {s}{d}", .{if (bare) "" else "copy ", l.@"0"}),
+        .Word => |w| try self.write(false, out, "w {s}{d}", .{if (bare) "" else "copy ", w.@"0"}),
         .Function => |f| try self.write(false, out, "l ${s}", .{self.strings[f]}),
-        .String, .Aggregate => try self.write(false, out, "l $const{d}", .{constPtr}),
+        .String, .Aggregate => try self.write(false, out, "l {s}$const{d}", .{if (bare) "" else "copy ", constPtr}),
         .Nop => { },
     }
 }
@@ -274,8 +275,8 @@ fn generateStatement(self: *JAIR, out: *Writer, nodePtr: Ptr) Error!void {
 
     switch (node.kind) {
         .FunctionDef => {
-            const tmp = self.temp;
-            defer self.temp = tmp;
+            const __tmp = self.temp;
+            defer self.temp = __tmp;
 
             const isExported = self.data[node.value] == 1;
             const name = self.strings[self.data[node.value + 1]];
@@ -328,7 +329,7 @@ fn generateStatement(self: *JAIR, out: *Writer, nodePtr: Ptr) Error!void {
             const operand = try self.generateExpr(out, self.data[node.value + 1]);
             const lbl = self.strings[self.data[node.value]];
             const otherwise = self.allocTmp();
-            try self.write(true, out, "jmpz %tmp{d}, @__lbl{d}, @{s}\n", .{operand, otherwise, lbl});
+            try self.write(true, out, "jnz %__tmp{d}, @__lbl{d}, @{s}\n", .{operand, otherwise, lbl});
             try self.write(true, out, "@__lbl{d}\n", .{otherwise});
         },
         .Code => try self.write(true, out, "{s}\n", .{self.strings[node.value]}),
@@ -338,14 +339,14 @@ fn generateStatement(self: *JAIR, out: *Writer, nodePtr: Ptr) Error!void {
             const withRet = self.data[node.value] == 1;
 
             if (withRet) {
-                const tmp = try self.generateExpr(out, self.data[node.value + 1]);
-                try self.write(true, out, "ret %tmp{d}\n", .{tmp});
+                const __tmp = try self.generateExpr(out, self.data[node.value + 1]);
+                try self.write(true, out, "ret %__tmp{d}\n", .{__tmp});
             }
             else {
                 try self.write(true, out, "ret\n", .{});
             }
         },
-        else => |t| try self.write(true, out, "# SHOULDN'T' BE REACHABLE {s}\n", .{@tagName(t)}),
+        else => _ = try self.generateExpr(out, nodePtr),
     }
 }
 
@@ -353,8 +354,26 @@ fn generateExpr(self: *JAIR, out: *Writer, ptr: Ptr) Error!u32 {
     const node = self.nodes.get(ptr);
     switch (node.kind) {
         .Literal => {
+            switch (self.constants.get(node.value)) {
+                .Double => |d| if (!std.math.isFinite(d)) {
+                    const bits = self.allocTmp();
+                    const res = self.allocTmp();
+                    try self.write(true, out, "%__tmp{d} =l copy {d}\n", .{bits, @as(u64, @bitCast(d))});
+                    try self.write(true, out, "%__tmp{d} =d cast %__tmp{d}\n", .{res, bits});
+                    return res;
+                },
+                .Single => |s| if (!std.math.isFinite(s)) {
+                    const bits = self.allocTmp();
+                    const res = self.allocTmp();
+                    try self.write(true, out, "%__tmp{d} =w copy {d}\n", .{bits, @as(u32, @bitCast(s))});
+                    try self.write(true, out, "%__tmp{d} =s cast %__tmp{d}\n", .{res, bits});
+                    return res;
+                },
+                else => {},
+            }
+
             const res = self.allocTmp();
-            try self.write(true, out, "%tmp{d} =", .{res});
+            try self.write(true, out, "%__tmp{d} =", .{res});
             try self.constant(out, false, node.value);
             try self.write(false, out, "\n", .{});
 
@@ -364,16 +383,31 @@ fn generateExpr(self: *JAIR, out: *Writer, ptr: Ptr) Error!u32 {
             const operand = try self.generateExpr(out, node.value);
             const res = self.allocTmp();
 
-            try self.write(true, out, "%tmp{d} =", .{res});
+            try self.write(true, out, "%__tmp{d} =", .{res});
             try self.typeString(out, node.type);
-            try self.write(false, out, " neg %tmp{d}\n", .{operand});
+            try self.write(false, out, " neg %__tmp{d}\n", .{operand});
 
             return res;
         },
         .Not => return self.not(out, &node),
-        .Add => return self.commonBinary(out, "add", &node),
         .And => return self.commonBinary(out, "and", &node),
         .Or => return self.commonBinary(out, "or", &node),
+        .Add => return self.commonBinary(out, "add", &node),
+        .Equal => return self.commonComparison(out, "eq", &node),
+        .NotEqual => return self.commonComparison(out, "ne", &node),
+        .Lesser => return self.commonComparison(out, "lt", &node),
+        .LesserEqual => return self.commonComparison(out, "le", &node),
+        .Greater => return self.commonComparison(out, "gt", &node),
+        .GreaterEqual => return self.commonComparison(out, "ge", &node),
+        .Div => return self.commonBinary(out, "div", &node),
+        .Mod => return self.commonBinary(out, "rem", &node),
+        .LeftShift => return self.commonBinary(out, "shl", &node),
+        .RightShift => return self.commonBinary(out, "shr", &node),
+        .Mul => return self.commonBinary(out, "mul", &node),
+        .Sub => return self.commonBinary(out, "sub", &node),
+        .Xor => return self.commonBinary(out, "xor", &node),
+        .Phi => return self.phi(out, &node),
+
         else => |unr| {
             common.log.debug("Unreachable {s}", .{@tagName(unr)});
             return common.debug.ShouldBeImpossible(undefined, @src());
@@ -381,14 +415,72 @@ fn generateExpr(self: *JAIR, out: *Writer, ptr: Ptr) Error!u32 {
     }
 }
 
+fn phi(self: *JAIR, out: *Writer, node: *const Node) Error!u32 {
+    const cnd = try self.generateExpr(out, self.data[node.value]);
+    const thenLabel = self.allocTmp();
+    const otherwiseLabel = self.allocTmp();
+    const finalLabel = self.allocTmp();
+    try self.write(true, out, "jnz %__tmp{d}, @__ternary_then{d}, @__ternary_otherwise{d}\n", .{cnd, thenLabel, otherwiseLabel});
+
+    try self.write(true, out, "@__ternary_then{d}\n", .{thenLabel});
+    const then = try self.generateExpr(out, self.data[node.value + 1]);
+    try self.write(true, out, "jmp @__ternary_final{d}\n", .{finalLabel});
+
+    try self.write(true, out, "@__ternary_otherwise{d}\n", .{otherwiseLabel});
+    const otherwise = try self.generateExpr(out, self.data[node.value + 2]);
+    try self.write(true, out, "jmp @__ternary_final{d}\n", .{finalLabel});
+
+    try self.write(true, out, "@__ternary_final{d}\n", .{finalLabel});
+    const res = self.allocTmp();
+    try self.write(true, out, "%__tmp{d} =", .{res});
+    try self.typeString(out, node.type);
+    try self.write(false, out, " phi @__ternary_then{d} %__tmp{d}, @__ternary_otherwise{d} %__tmp{d}\n", .{
+        thenLabel, then,
+        otherwiseLabel, otherwise,
+    });
+
+    return res;
+}
+
+fn commonComparison(self: *JAIR, out: *Writer, comptime op: []const u8, node: *const Node) Error!u32 {
+    const lhs = try self.generateExpr(out, self.data[node.value]);
+    const rhs = try self.generateExpr(out, self.data[node.value + 1]);
+    const res = self.allocTmp();
+
+    try self.write(true, out, "%__tmp{d} =", .{res});
+    try self.typeString(out, node.type);
+    try self.write(false, out, " c{s}{s}", .{
+        if (self.signed(node.type)) |s|
+            if (node.kind == .Equal or node.kind == .NotEqual) ""
+            else if (s) "s"
+            else "u"
+        else "",
+        op,
+    });
+    try self.typeString(out, node.type);
+    try self.write(false, out, " %__tmp{d}, %__tmp{d}\n", .{lhs, rhs});
+
+    return res;
+}
+
 fn commonBinary(self: *JAIR, out: *Writer, comptime op: []const u8, node: *const Node) Error!u32 {
     const lhs = try self.generateExpr(out, self.data[node.value]);
     const rhs = try self.generateExpr(out, self.data[node.value + 1]);
     const res = self.allocTmp();
 
-    try self.write(true, out, "%tmp{d} =", .{res});
+    try self.write(true, out, "%__tmp{d} =", .{res});
     try self.typeString(out, node.type);
-    try self.write(false, out, " {s} %tmp{d}, %tmp{d}\n", .{op, lhs, rhs});
+    try self.write(false, out, " {s}{s} %__tmp{d}, %__tmp{d}\n", .{
+        if (node.kind == .Div or node.kind == .Mod)
+            if (self.signed(node.type)) |s|
+                if (s) ""
+                else "u"
+            else ""
+        else "",
+        op,
+        lhs,
+        rhs
+    });
 
     return res;
 }
@@ -399,9 +491,9 @@ fn not(self: *JAIR, out: *Writer, node: *const Node) Error!u32 {
             const operand = try self.generateExpr(out, node.value);
             const res = self.allocTmp();
 
-            try self.write(true, out, "%tmp{d} =", .{res});
+            try self.write(true, out, "%__tmp{d} =", .{res});
             try self.typeString(out, node.type);
-            try self.write(false, out, " xor %tmp{d}, -1\n", .{operand});
+            try self.write(false, out, " xor %__tmp{d}, -1\n", .{operand});
 
             return res;
         },
@@ -409,9 +501,9 @@ fn not(self: *JAIR, out: *Writer, node: *const Node) Error!u32 {
             const operand = try self.generateExpr(out, node.value);
             const res = self.allocTmp();
 
-            try self.write(true, out, "%tmp{d} =", .{res});
+            try self.write(true, out, "%__tmp{d} =", .{res});
             try self.typeString(out, node.type);
-            try self.write(false, out, " xor %tmp{d}, 255\n", .{operand});
+            try self.write(false, out, " xor %__tmp{d}, 255\n", .{operand});
 
             return res;
         },
@@ -419,14 +511,24 @@ fn not(self: *JAIR, out: *Writer, node: *const Node) Error!u32 {
             const operand = try self.generateExpr(out, node.value);
             const res = self.allocTmp();
 
-            try self.write(true, out, "%tmp{d} =", .{res});
+            try self.write(true, out, "%__tmp{d} =", .{res});
             try self.typeString(out, node.type);
-            try self.write(false, out, " xor %tmp{d}, 65535\n", .{operand});
+            try self.write(false, out, " xor %__tmp{d}, 65535\n", .{operand});
 
             return res;
         },
         else => return common.debug.ShouldBeImpossible(undefined, @src()),
     }
+}
+
+fn signed(self: *const JAIR, id: TypeID) ?bool {
+    return switch (self.typeTable.get(id)) {
+        .Byte => |b| b,
+        .Half => |b| b,
+        .Word => |b| b,
+        .Long => |b| b,
+        else => null
+    };
 }
 
 fn allocTmp(self: *JAIR) u32 {
@@ -440,8 +542,8 @@ fn typeString(self: *const JAIR, out: *Writer, typeID: TypeID) Error!void {
         .Long => try self.write(false, out, "l", .{}),
         .Double => try self.write(false, out, "d", .{}),
         .Single => try self.write(false, out, "s", .{}),
-        .Half => try self.write(false, out, "h", .{}),
-        .Byte => try self.write(false, out, "b", .{}),
+        .Half => try self.write(false, out, "w", .{}),
+        .Byte => try self.write(false, out, "w", .{}),
         .Void => { },
         else => try self.write(false, out, ":{s}", .{self.strings[self.typeNames.get(typeID).?]}),
     }
@@ -461,6 +563,97 @@ fn sizeOf(self: *const JAIR, typeID: TypeID) u32 {
             .Union => |o| o.size,
             .Aggregate => |o| o.size,
         },
+    };
+}
+
+fn dataItems(self: *JAIR, out: *Writer, em: *DataEmitter, ptr: Constant.Ptr) Error!void {
+    const c = self.constants.get(ptr);
+
+    const al: u32 = switch (c) {
+        .Byte => 1,
+        .Half => 2,
+        .Word, .Single => 4,
+        .Long, .Double, .Function, .String => 8,
+        .Aggregate => |a| switch (self.typeTable.get(a.Type)) {
+            .Custom => |cu| @max(1, switch (cu) {
+                .Opaque => |o| o.alignment,
+                .Union => |o| o.alignment,
+                .Aggregate => |o| o.alignment,
+            }),
+            else => @max(1, self.sizeOf(a.Type)),
+        },
+        .Nop => 1,
+    };
+
+    // pad up to this item's alignment
+    const aligned = std.mem.alignForward(u32, em.offset, al);
+    if (aligned > em.offset) {
+        try self.write(false, out, "{s}z {d}", .{ if (em.first) "" else ", ", aligned - em.offset });
+        em.first = false;
+        em.offset = aligned;
+    }
+
+    switch (c) {
+        .Nop => return,
+        .Aggregate => |agg| {
+            const end = em.offset + self.sizeOf(agg.Type);
+            for (agg.Init) |elem| try self.dataItems(out, em, elem);
+
+            // trailing padding up to the aggregate's full size
+            if (end > em.offset) {
+                try self.write(false, out, "{s}z {d}", .{ if (em.first) "" else ", ", end - em.offset });
+                em.first = false;
+                em.offset = end;
+            }
+            return;
+        },
+        else => {},
+    }
+
+    try self.write(false, out, "{s}", .{if (em.first) "" else ", "});
+    em.first = false;
+
+    em.offset += switch (c) {
+        .Byte => |b| blk: {
+            try self.write(false, out, "b {d}", .{b.@"0"});
+            break :blk 1;
+        },
+        .Half => |h| blk: {
+            try self.write(false, out, "h {d}", .{h.@"0"});
+            break :blk 2;
+        },
+        .Word => |w| blk: {
+            try self.write(false, out, "w {d}", .{w.@"0"});
+            break :blk 4;
+        },
+        .Long => |l| blk: {
+            try self.write(false, out, "l {d}", .{l.@"0"});
+            break :blk 8;
+        },
+        .Single => |s| blk: {
+            try self.write(false, out, "w {d}", .{@as(u32, @bitCast(s))});
+            break :blk 4;
+        },
+        .Double => |d| blk: {
+            try self.write(false, out, "l {d}", .{@as(u64, @bitCast(d))});
+            break :blk 8;
+        },
+        .Function => |f| blk: {
+            try self.write(false, out, "l ${s}", .{self.strings[f]});
+            break :blk 8;
+        },
+        .String => |s| switch (s) {
+            .C => blk: {
+                try self.write(false, out, "l $const{d}", .{ptr});
+                break :blk 8;
+            },
+            .Cole => |str| blk: {
+                // {ptr, len} plus 4 bytes of tail padding to the 8-byte alignment
+                try self.write(false, out, "l $str{d}, w {d}, z 4", .{ ptr, self.strings[str].len });
+                break :blk 16;
+            },
+        },
+        .Nop, .Aggregate => unreachable,
     };
 }
 
