@@ -1,8 +1,8 @@
-code {
+code "
 #header_start
     #include <stdio.h>
 #header_end
-}
+";
 
 import std::memory::allocator as Allocator;
 import std::io::stream as Stream;

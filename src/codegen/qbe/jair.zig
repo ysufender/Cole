@@ -147,6 +147,8 @@ pub fn codegen(self: *JAIR, context: *Context, qbeOut: *std.Io.Dir) Error!void {
                 .Opaque => |opaqueType| {
                     if (opaqueType.size == 0) continue;
 
+                        _ = std.mem.replace(u8, self.strings[opaqueType.name], "::", "__", @constCast(self.strings[opaqueType.name]));
+
                     try self.write(true, out, "type :{s} = align {d} {{ {d} }}\n", .{
                         self.strings[opaqueType.name],
                         opaqueType.alignment,
@@ -155,6 +157,8 @@ pub fn codegen(self: *JAIR, context: *Context, qbeOut: *std.Io.Dir) Error!void {
                 },
                 .Union => |uni| {
                     if (uni.size == 0 or uni.fields.len == 0) continue;
+
+                    _ = std.mem.replace(u8, self.strings[uni.name], "::", "__", @constCast(self.strings[uni.name]));
 
                     try self.write(true, out, "type :{s} = align {d} {{", .{
                         self.strings[uni.name],
@@ -173,6 +177,8 @@ pub fn codegen(self: *JAIR, context: *Context, qbeOut: *std.Io.Dir) Error!void {
                 },
                 .Aggregate => |aggregate| {
                     if (aggregate.size == 0 or aggregate.fields.len == 0) continue;
+
+                    _ = std.mem.replace(u8, self.strings[aggregate.name], "::", "__", @constCast(self.strings[aggregate.name]));
 
                     try self.write(true, out, "type :{s} = align {d} {{", .{
                         self.strings[aggregate.name],
@@ -275,8 +281,8 @@ fn generateStatement(self: *JAIR, out: *Writer, nodePtr: Ptr) Error!void {
 
     switch (node.kind) {
         .FunctionDef => {
-            const __tmp = self.temp;
-            defer self.temp = __tmp;
+            const tmp = self.temp;
+            defer self.temp = tmp;
 
             const isExported = self.data[node.value] == 1;
             const name = self.strings[self.data[node.value + 1]];

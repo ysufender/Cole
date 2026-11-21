@@ -36,7 +36,7 @@ let Signal = enum {
 
 pub let breakpoint = fn () -> void {
     if buildInfo().platform == @Windows {
-        code { __debugbreak(); }
+        code "__debugbreak();";
     }
     else {
         _ = raise(cast(Signal::Trap));

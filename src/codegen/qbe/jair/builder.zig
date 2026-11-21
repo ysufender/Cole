@@ -54,10 +54,6 @@ pub fn fromJIR(jir: JIR.Base, allocator: Allocator, typechecker: *Typechecker) E
 }
 
 pub fn build(self: *Builder) Error!JAIR {
-    for (self.strings.items) |str| {
-        _ = std.mem.replace(u8, str, "::", "__", @constCast(str));
-    }
-
     for (0..self.jir.types.len) |id| {
         _ = try self.typeName(@intCast(id));
         _ = try self.convertType(@intCast(id));
@@ -327,6 +323,8 @@ fn functionDef(self: *Builder, fptr: JIR.Ptr) Error!JAIR.Ptr {
     const function = self.jir.functions.get(self.jir.data[self.jir.nodes.get(fptr).value + 1]);
     const signature = self.jir.types.get(function.signature).Function;
 
+    _ = std.mem.replace(u8, self.strings.items[function.name], "::", "__", @constCast(self.strings.items[function.name]));
+
     const body = try self.createJAIR(function.body);
 
     const start: u32 = @intCast(self.data.items.len);
@@ -401,7 +399,7 @@ fn typeName(self: *Builder, id: TypeID) Error!defines.StringPtr {
         .Function => |func| {
             var len: u32 = 7;
             for (func.argTypes) |argt| {
-                len += @intCast(self.strings.items[try self.typeName(argt)].len + 2);
+                len += @intCast(self.strings.items[try self.typeName(argt)].len + 1);
             }
             len += @intCast(self.strings.items[try self.typeName(func.returnType)].len);
 
