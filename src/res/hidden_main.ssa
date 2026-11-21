@@ -1,0 +1,9 @@
+export function w $main(w %argc, l %argv) {{
+@start
+    %args =l alloc8 16
+    storel 0, %args
+    %tmp0 =l add %args, 8
+    storel 0, %tmp0
+    %r =w call $root__main(:Slice_Slice_u8 %args)
+    ret %r
+}}

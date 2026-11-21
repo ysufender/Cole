@@ -116,7 +116,8 @@ pub const Node = struct {
         UnsignedMod,
     };
 
-    type: Node.Type,
+    type: TypeID,
+    kind: Node.Type,
     value: defines.EitherPtr(Ptr, u32),
 };
 
@@ -205,9 +206,25 @@ pub fn codegen(self: *JAIR, context: *Context, qbeOut: *std.Io.Dir) Error!void {
     for (0..self.constants.len) |cptr| {
         switch (self.constants.get(cptr)) {
             .String => |str| switch (str) {
-                .C => |c| try self.write(true, out, "data $const{d} = {{ b \"{s}\", b 0 }}\n", .{cptr, self.strings[c]}),
+                .C => |c| {
+                    try self.write(true, out, "data $const{d} = {{ ", .{cptr});
+                    for (self.strings[c], 0..) |ch, i| {
+                        try self.write(false, out, "b {d}{s}", .{
+                            ch,
+                            if (i != self.strings[c].len - 1) ", " else "",
+                        });
+                    }
+                    try self.write(true, out, ", b 0 }}\n", .{});
+                },
                 .Cole => |c| {
-                    try self.write(true, out, "data $str{d} = {{ b \"{s}\" }}\n", .{cptr, self.strings[c]});
+                    try self.write(true, out, "data $const{d} = {{ ", .{cptr});
+                    for (self.strings[c], 0..) |ch, i| {
+                        try self.write(false, out, "b {d}{s}", .{
+                            ch,
+                            if (i != self.strings[c].len - 1) ", " else "",
+                        });
+                    }
+                    try self.write(true, out, " }}\n", .{});
                     try self.write(true, out, "data $const{d} = {{ l $str{d}, w {d} }}\n", .{cptr, cptr, self.strings[c].len});
                 },
             },
@@ -228,6 +245,9 @@ pub fn codegen(self: *JAIR, context: *Context, qbeOut: *std.Io.Dir) Error!void {
             else => { },
         }
     }
+
+    const hiddenMain = @embedFile("../../res/hidden_main.ssa");
+    try self.write(false, out, hiddenMain, .{});
 
     for (self.keyNodes) |nodePtr| {
         try self.write(false, out, "\n", .{});
@@ -252,7 +272,7 @@ fn constant(self: *JAIR, out: *Writer, bare: bool, constPtr: Constant.Ptr) Error
 fn generateStatement(self: *JAIR, out: *Writer, nodePtr: Ptr) Error!void {
     const node = self.nodes.get(nodePtr);
 
-    switch (node.type) {
+    switch (node.kind) {
         .FunctionDef => {
             const tmp = self.temp;
             defer self.temp = tmp;
@@ -302,6 +322,7 @@ fn generateStatement(self: *JAIR, out: *Writer, nodePtr: Ptr) Error!void {
                 try self.generateStatement(out, self.data[node.value + 2 + idx]);
             }
         },
+        .Label => try self.write(true, out, "@{s}\n", .{self.strings[node.value]}),
         .Return => {
             self.terminated = true;
 
@@ -320,18 +341,66 @@ fn generateStatement(self: *JAIR, out: *Writer, nodePtr: Ptr) Error!void {
 }
 
 fn generateExpr(self: *JAIR, out: *Writer, ptr: Ptr) Error!u32 {
-    defer self.temp += 1;
-
     const node = self.nodes.get(ptr);
-    switch (node.type) {
+    switch (node.kind) {
         .Literal => {
-            try self.write(true, out, "%tmp{d} =", .{self.temp});
+            const res = self.allocTmp();
+            try self.write(true, out, "%tmp{d} =", .{res});
             try self.constant(out, false, node.value);
             try self.write(false, out, "\n", .{});
-        },
-        else => { },
-    }
 
+            return res;
+        },
+        .Negation => {
+            const operand = try self.generateExpr(out, node.value);
+            const res = self.allocTmp();
+
+            try self.write(true, out, "%tmp{d} =", .{res});
+            try self.typeString(out, node.type);
+            try self.write(false, out, " neg %tmp{d}\n", .{operand});
+
+            return res;
+        },
+        .Not => switch (self.typeTable.get(node.type)) {
+            .Word, .Long, .Double, .Single => {
+                const operand = try self.generateExpr(out, node.value);
+                const res = self.allocTmp();
+
+                try self.write(true, out, "%tmp{d} =", .{res});
+                try self.typeString(out, node.type);
+                try self.write(false, out, " xor %tmp{d}, -1\n", .{operand});
+
+                return res;
+            },
+            .Byte => {
+                const operand = try self.generateExpr(out, node.value);
+                const res = self.allocTmp();
+
+                try self.write(true, out, "%tmp{d} =", .{res});
+                try self.typeString(out, node.type);
+                try self.write(false, out, " xor %tmp{d}, 255\n", .{operand});
+
+                return res;
+            },
+            .Half => {
+                const operand = try self.generateExpr(out, node.value);
+                const res = self.allocTmp();
+
+                try self.write(true, out, "%tmp{d} =", .{res});
+                try self.typeString(out, node.type);
+                try self.write(false, out, " xor %tmp{d}, 65535\n", .{operand});
+
+                return res;
+            },
+            else => return 0,
+        },
+        .Nop => return 0,
+        else => return 0,
+    }
+}
+
+fn allocTmp(self: *JAIR) u32 {
+    defer self.temp += 1;
     return self.temp;
 }
 

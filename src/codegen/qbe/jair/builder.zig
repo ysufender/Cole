@@ -109,23 +109,22 @@ fn createJAIR(self: *Builder, nodePtr: JAIR.Ptr) Error!JAIR.Ptr {
         .Jump => try self.jump(node.value),
         .JumpIf => try self.cjump(node.value),
 
-        // @TODO Continue
-
         .Exit, .TypeDef => res: {
             const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
             self.nodes.set(res, .{
-                .type = .Nop,
+                .type = 0,
+                .kind = .Nop,
                 .value = 0,
             });
             break :res res;
         },
 
-        // @Beware assuming that Call handling will parse the grouping manually
         .Grouping =>
             if (self.jir.data[node.value] == 0) res: {
                 const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
                 self.nodes.set(res, .{
-                    .type = .Nop,
+                    .type = 0,
+                    .kind = .Nop,
                     .value = 0,
                 });
                 break :res res;
@@ -135,7 +134,8 @@ fn createJAIR(self: *Builder, nodePtr: JAIR.Ptr) Error!JAIR.Ptr {
         else => res: {
             const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
             self.nodes.set(res, .{
-                .type = .Nop,
+                .type = 0,
+                .kind = .Nop,
                 .value = 0,
             });
             break :res res;
@@ -152,21 +152,34 @@ fn cjump(self: *Builder, value: defines.Offset) Error!JAIR.Ptr {
     self.data.append(self.allocator, cnd) catch return Error.AllocatorFailure;
 
     const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
-    self.nodes.set(res, .{ .type = .JumpIf, .value = start });
+    self.nodes.set(res, .{
+        .type = 0,
+        .kind = .JumpIf,
+        .value = start
+    });
     return res;
 }
 
 fn jump(self: *Builder, value: defines.StringPtr) Error!JAIR.Ptr {
     const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
-    self.nodes.set(res, .{ .type = .Jump, .value = value });
+    self.nodes.set(res, .{
+        .type = 0,
+        .kind = .Jump,
+        .value = value
+    });
     return res;
 }
 
 fn not(self: *Builder, value: JIR.Ptr) Error!JAIR.Ptr {
+    // @Beware booleans are not 1 or 0, they are 255 or 0 so inverting them is the same as not-ing them.
     const rhs = try self.createJAIR(value);
 
     const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
-    self.nodes.set(res, .{ .type = .Not, .value = rhs });
+    self.nodes.set(res, .{
+        .type = self.nodes.items(.type)[rhs],
+        .kind = .Not,
+        .value = rhs
+    });
     return res;
 }
 
@@ -174,19 +187,33 @@ fn negation(self: *Builder, value: JIR.Ptr) Error!JAIR.Ptr {
     const rhs = try self.createJAIR(value);
 
     const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
-    self.nodes.set(res, .{ .type = .Negation, .value = rhs });
+    self.nodes.set(res, .{
+        .type = self.nodes.items(.type)[rhs],
+        .kind = .Negation,
+        .value = rhs
+    });
     return res;
 }
 
 fn label(self: *Builder, value: defines.StringPtr) Error!JAIR.Ptr {
     const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
-    self.nodes.set(res, .{ .type = .Label, .value = value });
+    self.nodes.set(res, .{
+        .type = 0,
+        .kind = .Label,
+        .value = value
+    });
     return res;
 }
 
 fn literal(self: *Builder, value: JIR.Constant.Ptr) Error!JAIR.Ptr {
+    const constant = try self.convertConstant(value);
+
     const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
-    self.nodes.set(res, .{ .type = .Literal, .value = try self.convertConstant(value) });
+    self.nodes.set(res, .{
+        .type = self.constantType(constant),
+        .kind = .Literal,
+        .value = constant,
+    });
     return res;
 }
 
@@ -199,7 +226,11 @@ fn @"return"(self: *Builder, value: defines.Offset) Error!JAIR.Ptr {
     self.data.append(self.allocator, expr) catch return Error.AllocatorFailure;
 
     const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
-    self.nodes.set(res, .{ .type = .Return, .value = start });
+    self.nodes.set(res, .{
+        .type = 0,
+        .kind = .Return,
+        .value = start
+    });
     return res;
 }
 
@@ -220,7 +251,11 @@ fn scope(self: *Builder, nodePtr: defines.Offset) Error!JAIR.Ptr {
     self.data.appendSlice(self.allocator, stmts) catch return Error.AllocatorFailure;
 
     const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
-    self.nodes.set(res, .{ .type = .Scope, .value = start });
+    self.nodes.set(res, .{
+        .type = 0,
+        .kind = .Scope,
+        .value = start
+    });
     return res;
 }
 
@@ -242,7 +277,11 @@ fn functionDef(self: *Builder, fptr: JIR.Ptr) Error!JAIR.Ptr {
     self.data.append(self.allocator, body) catch return Error.AllocatorFailure;
 
     const nodePtr = try self.nodes.addOne(self.allocator);
-    self.nodes.set(nodePtr, .{ .type = .FunctionDef, .value = start });
+    self.nodes.set(nodePtr, .{
+        .type = self.typeMap.get(function.signature).?,
+        .kind = .FunctionDef,
+        .value = start
+    });
     return nodePtr;
 }
 
@@ -339,7 +378,22 @@ fn typeName(self: *Builder, id: TypeID) Error!defines.StringPtr {
     return name;
 }
 
-fn convertConstant(self: *Builder, constant: JAIR.Constant.Ptr) Error!JAIR.Constant.Ptr {
+fn constantType(self: *Builder, constant: JAIR.Constant.Ptr) TypeID {
+    return switch (self.constants.get(constant)) {
+        .Byte => self.typeMap.get(comptime Comptime.Folder.Builtin.Type("u8")).?,
+        .Double => self.typeMap.get(comptime Comptime.Folder.Builtin.Type("c_double")).?,
+        .Single => self.typeMap.get(comptime Comptime.Folder.Builtin.Type("float")).?,
+        .Function => self.typeMap.get(comptime Comptime.Folder.Builtin.Type("usize")).?,
+        .Nop => self.typeMap.get(comptime Comptime.Folder.Builtin.Type("void")).?,
+        .Half => self.typeMap.get(comptime Comptime.Folder.Builtin.Type("c_short")).?,
+        .Long => self.typeMap.get(comptime Comptime.Folder.Builtin.Type("usize")).?,
+        .String => self.typeMap.get(comptime Comptime.Folder.Builtin.Type("[]u8")).?,
+        .Aggregate => |agg| agg.Type,
+        .Word => self.typeMap.get(comptime Comptime.Folder.Builtin.Type("u32")).?,
+    };
+}
+
+fn convertConstant(self: *Builder, constant: JIR.Constant.Ptr) Error!JAIR.Constant.Ptr {
     const ptr: u32 = @intCast(self.constants.len);
     if (constant < ptr) {
         return constant;
