@@ -632,7 +632,7 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
                     break;
                 }
             },
-            .InlineC, .Import => {
+            .InlineCode, .Import => {
                 self.report("'{s}' statements are not allowed in comptime scopes.", .{@tagName(statement.type)});
                 return Error.ComptimeNotPossible;
             },

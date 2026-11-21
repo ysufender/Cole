@@ -257,9 +257,9 @@ pub fn codegen(self: *JAIR, context: *Context, qbeOut: *std.Io.Dir) Error!void {
 
 fn constant(self: *JAIR, out: *Writer, bare: bool, constPtr: Constant.Ptr) Error!void {
     switch (self.constants.get(constPtr)) {
-        .Byte => |b| try self.write(false, out, "b {s}{d}", .{if (bare) "" else "copy ", b}),
+        .Byte => |b| try self.write(false, out, "{s} {s}{d}", .{if (bare) "b" else "w", if (bare) "" else "copy ", b}),
         .Double => |d| try self.write(false, out, "d {s}{d}", .{if (bare) "" else "copy ", @as(u64, @bitCast(d))}),
-        .Half => |h| try self.write(false, out, "h {s}{d}", .{if (bare) "" else "copy ", h}),
+        .Half => |h| try self.write(false, out, "{s} {s}{d}", .{if (bare) "h" else "w", if (bare) "" else "copy ", h}),
         .Long => |l| try self.write(false, out, "l {s}{d}", .{if (bare) "" else "copy ", l}),
         .Single => |s| try self.write(false, out, "s {s}{d}", .{if (bare) "" else "copy ", @as(u32, @bitCast(s))}),
         .Word => |w| try self.write(false, out, "w {s}{d}", .{if (bare) "" else "copy ", w}),
@@ -323,6 +323,15 @@ fn generateStatement(self: *JAIR, out: *Writer, nodePtr: Ptr) Error!void {
             }
         },
         .Label => try self.write(true, out, "@{s}\n", .{self.strings[node.value]}),
+        .Jump => try self.write(true, out, "jmp @{s}\n", .{self.strings[node.value]}),
+        .JumpIf => {
+            const operand = try self.generateExpr(out, self.data[node.value + 1]);
+            const lbl = self.strings[self.data[node.value]];
+            const otherwise = self.allocTmp();
+            try self.write(true, out, "jmpz %tmp{d}, @__lbl{d}, @{s}\n", .{operand, otherwise, lbl});
+            try self.write(true, out, "@__lbl{d}\n", .{otherwise});
+        },
+        .Code => try self.write(true, out, "{s}\n", .{self.strings[node.value]}),
         .Return => {
             self.terminated = true;
 
@@ -361,41 +370,62 @@ fn generateExpr(self: *JAIR, out: *Writer, ptr: Ptr) Error!u32 {
 
             return res;
         },
-        .Not => switch (self.typeTable.get(node.type)) {
-            .Word, .Long, .Double, .Single => {
-                const operand = try self.generateExpr(out, node.value);
-                const res = self.allocTmp();
-
-                try self.write(true, out, "%tmp{d} =", .{res});
-                try self.typeString(out, node.type);
-                try self.write(false, out, " xor %tmp{d}, -1\n", .{operand});
-
-                return res;
-            },
-            .Byte => {
-                const operand = try self.generateExpr(out, node.value);
-                const res = self.allocTmp();
-
-                try self.write(true, out, "%tmp{d} =", .{res});
-                try self.typeString(out, node.type);
-                try self.write(false, out, " xor %tmp{d}, 255\n", .{operand});
-
-                return res;
-            },
-            .Half => {
-                const operand = try self.generateExpr(out, node.value);
-                const res = self.allocTmp();
-
-                try self.write(true, out, "%tmp{d} =", .{res});
-                try self.typeString(out, node.type);
-                try self.write(false, out, " xor %tmp{d}, 65535\n", .{operand});
-
-                return res;
-            },
-            else => return 0,
+        .Not => return self.not(out, &node),
+        .Add => return self.commonBinary(out, "add", &node),
+        .And => return self.commonBinary(out, "and", &node),
+        .Or => return self.commonBinary(out, "or", &node),
+        else => |unr| {
+            common.log.debug("Unreachable {s}", .{@tagName(unr)});
+            return common.debug.ShouldBeImpossible(undefined, @src());
         },
-        .Nop => return 0,
-        else => return 0,
+    }
+}
+
+fn commonBinary(self: *JAIR, out: *Writer, comptime op: []const u8, node: *const Node) Error!u32 {
+    const lhs = try self.generateExpr(out, self.data[node.value]);
+    const rhs = try self.generateExpr(out, self.data[node.value + 1]);
+    const res = self.allocTmp();
+
+    try self.write(true, out, "%tmp{d} =", .{res});
+    try self.typeString(out, node.type);
+    try self.write(false, out, " {s} %tmp{d}, %tmp{d}\n", .{op, lhs, rhs});
+
+    return res;
+}
+
+fn not(self: *JAIR, out: *Writer, node: *const Node) Error!u32 {
+    switch (self.typeTable.get(node.type)) {
+        .Word, .Long, .Double, .Single => {
+            const operand = try self.generateExpr(out, node.value);
+            const res = self.allocTmp();
+
+            try self.write(true, out, "%tmp{d} =", .{res});
+            try self.typeString(out, node.type);
+            try self.write(false, out, " xor %tmp{d}, -1\n", .{operand});
+
+            return res;
+        },
+        .Byte => {
+            const operand = try self.generateExpr(out, node.value);
+            const res = self.allocTmp();
+
+            try self.write(true, out, "%tmp{d} =", .{res});
+            try self.typeString(out, node.type);
+            try self.write(false, out, " xor %tmp{d}, 255\n", .{operand});
+
+            return res;
+        },
+        .Half => {
+            const operand = try self.generateExpr(out, node.value);
+            const res = self.allocTmp();
+
+            try self.write(true, out, "%tmp{d} =", .{res});
+            try self.typeString(out, node.type);
+            try self.write(false, out, " xor %tmp{d}, 65535\n", .{operand});
+
+            return res;
+        },
+        else => return common.debug.ShouldBeImpossible(undefined, @src()),
     }
 }
 

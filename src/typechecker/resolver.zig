@@ -539,6 +539,8 @@ fn resolveStatement(self: *Resolver, stmt: defines.StatementPtr, topLevel: bool)
         // Single expr statements
         .Return, .Discard, .Expression => try self.resolveExpression(statement.value),
 
+        .InlineCode => try self.resolveExpression(statement.value),
+
         else => {},
     }
 }

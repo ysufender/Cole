@@ -282,7 +282,7 @@ pub fn construct(self: *Builder, typeID: TypeID, args: []const JIR.Ptr) Error!JI
 }
 
 pub fn identifier(self: *Builder, decl: defines.StringPtr) Error!JIR.Ptr { return self.commonSingle(.Identifier, decl); }
-pub fn inlineC(self: *Builder, code: defines.StringPtr) Error!JIR.Ptr { return self.commonSingle(.Code, code); }
+pub fn inlineCode(self: *Builder, code: defines.StringPtr) Error!JIR.Ptr { return self.commonSingle(.Code, code); }
 
 pub fn discard(self: *Builder, expr: JIR.Ptr) Error!JIR.Ptr { return self.commonSingle(.Discard, expr); }
 

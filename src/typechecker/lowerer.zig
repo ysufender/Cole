@@ -312,7 +312,7 @@ pub fn statement(self: *Lowerer, statementPtr: defines.StatementPtr) Error!JIR.P
 
         .For => try self.loop(.For, stmt.value, ast),
 
-        .InlineC => try self.inlineC(stmt.value),
+        .InlineCode => try self.inlineCode(stmt.value),
 
         .Switch => try self.@"switch"(stmt.value),
     };
@@ -489,15 +489,12 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     );
 }
 
-fn inlineC(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
-    const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
-    const src = self.typechecker.context.getFile(ast.tokens);
+fn inlineCode(self: *Lowerer, exprPtr: defines.OpaquePtr) Error!JIR.Ptr {
+    const val = self.typechecker.folder.getValue(try self.typechecker.folder.eval(exprPtr, comptime Comptime.Folder.Builtin.Type("[]u8"))).String;
 
-    const cstart = ast.extra[extraPtr];
-    const cend = ast.extra[extraPtr + 1];
-    const code = try self.typechecker.builder.internString(src[cstart..cend]);
+    const code = try self.typechecker.builder.internString(val.str);
 
-    const res = try self.typechecker.builder.inlineC(code);
+    const res = try self.typechecker.builder.inlineCode(code);
 
     return res;
 }
@@ -1662,7 +1659,7 @@ fn builtinCall(
             self.expression(ast.extra[args.at(1)], try self.typechecker.expectType(ast.extra[args.at(0)])),
         BI("typeOf") =>
             self.literal(ast.extra[args.at(0)], ofType),
-        BI("unreachable") => self.typechecker.builder.inlineC(try self.typechecker.builder.internString("")),
+        BI("unreachable") => self.typechecker.builder.inlineCode(try self.typechecker.builder.internString("")),
         BI("typeName") => self.typechecker.builder.literal(
             try self.typechecker.builder.addConstant(.{
                 .String = .{
@@ -2232,7 +2229,7 @@ pub fn handler(self: *Lowerer, comptime name: []const u8, ofType: TypeID) Error!
         typeName = "void";
     }
 
-    return self.typechecker.builder.inlineC(
+    return self.typechecker.builder.inlineCode(
         try self.typechecker.builder.internString(
             std.fmt.allocPrint(self.typechecker.builder.allocator, "({{{s}__: {s}((long)&&{s}__); *({s}*)(NULL);}});", .{tmpName, name, tmpName, typeName})
                 catch return Error.AllocatorFailure

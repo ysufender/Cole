@@ -60,7 +60,7 @@ pub const Expression = struct {
 pub const Statement = struct {
     pub const Type = enum {
         Block,
-        InlineC,
+        InlineCode,
         Return,
         Conditional,
         Switch,
@@ -278,7 +278,7 @@ fn statement(self: *Parser) StatementResult {
 
     return switch (self.tokens.items(.type)[self.advance()]) {
         .LBrace => self.block(),
-        .Code => self.inlineC(),
+        .Code => self.inlineCode(),
         .Switch => self.commonSwitch(.Statement),
         .If => self.conditional(),
         .While, .For => |loop| self.loopStatement(loop),
@@ -373,31 +373,14 @@ fn block(self: *Parser) StatementResult {
     return result;
 }
 
-fn inlineC(self: *Parser) StatementResult {
-    const cstart = self.tokens.get(try self.consume(.LBrace, error.MissingBrace, "Expected a block after 'asm' statement.")).end;
-    var count: u32 = 1;
-    while (count != 0) {
-        if (self.check(.LBrace)) {
-            count += 1;
-        }
-        else if (self.check(.RBrace)) {
-            count -= 1;
-            if (count == 0) {
-                break;
-            }
-        }
-        _ = self.advance();
-    }
-    const cend = self.tokens.get(try self.consume(.RBrace, error.MissingBrace, "Missing enclosing brace '}' after block.")).start;
-
-    const start: defines.OpaquePtr = @intCast(self.extra.items.len);
-    self.extra.append(self.allocator(), cstart) catch return error.AllocatorFailure;
-    self.extra.append(self.allocator(), cend) catch return error.AllocatorFailure;
+fn inlineCode(self: *Parser) StatementResult {
+    const next = try self.ifExpression();
+    _ = try self.consume(.Semicolon, error.MissingSemicolon, "Expected semicolon after statement.");
 
     const result = try self.alloc(Statement);
     self.statementMap.set(result, .{
-        .type = .InlineC,
-        .value = start,
+        .type = .InlineCode,
+        .value = next,
     });
 
     return result;

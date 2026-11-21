@@ -249,7 +249,7 @@ pub fn typecheck(self: *Typechecker, allocator: Allocator) Error!JIR {
 
             for (ast.statementMask) |_stmt| {
                 const stmt = ast.statements.get(_stmt);
-                if (stmt.type != .InlineC) {
+                if (stmt.type != .InlineCode) {
                     continue;
                 }
 
@@ -311,8 +311,12 @@ pub fn typecheckStatement(self: *Typechecker, statementPtr: defines.StatementPtr
         .Import => common.debug.ShouldBeImpossible(self.context.log, @src()),
         .Defer => self.typecheckDefer(stmt.value),
         .VariableDefinition => try self.typecheckVarDefStatement(stmt.value),
-        .InlineC => { }, // @Note allow direct C code insertion
+        .InlineCode => try self.typecheckInlineCode(stmt.value),
     };
+}
+
+fn typecheckInlineCode(self: *Typechecker, exprPtr: defines.ExpressionPtr) Error!void {
+    _ = try self.folder.eval(exprPtr, comptime Comptime.Folder.Builtin.Type("[]u8"));
 }
 
 fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) Error!TypeID {

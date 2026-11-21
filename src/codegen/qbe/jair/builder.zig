@@ -29,7 +29,6 @@ data: std.ArrayList(u32),
 allocator: Allocator,
 typechecker: *Typechecker,
 constants: Constants,
-temporary: u32 = 0,
 
 pub fn fromJIR(jir: JIR.Base, allocator: Allocator, typechecker: *Typechecker) Error!Builder {
     var typeMap = collections.HashMap(TypeID, TypeID).empty;
@@ -108,6 +107,10 @@ fn createJAIR(self: *Builder, nodePtr: JAIR.Ptr) Error!JAIR.Ptr {
         .Not, .Invert => try self.not(node.value),
         .Jump => try self.jump(node.value),
         .JumpIf => try self.cjump(node.value),
+        .And, .BitwiseAnd => try self.@"and"(node.value),
+        .Or, .BitwiseOr => try self.@"or"(node.value),
+        .Code => try self.code(node.value),
+        .Add => try self.add(node.value),
 
         .Exit, .TypeDef => res: {
             const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
@@ -141,6 +144,67 @@ fn createJAIR(self: *Builder, nodePtr: JAIR.Ptr) Error!JAIR.Ptr {
             break :res res;
         },
     };
+}
+
+fn add(self: *Builder, value: JIR.Ptr) Error!JAIR.Ptr {
+    const lhs = try self.createJAIR(self.jir.data[value]);
+    const rhs = try self.createJAIR(self.jir.data[value + 1]);
+
+    const start: u32 = @intCast(self.data.items.len);
+    self.data.append(self.allocator, lhs) catch return Error.AllocatorFailure;
+    self.data.append(self.allocator, rhs) catch return Error.AllocatorFailure;
+
+    const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
+    self.nodes.set(res, .{
+        .type = self.nodes.get(lhs).type,
+        .kind = .Add,
+        .value = start
+    });
+    return res;
+}
+
+fn code(self: *Builder, value: defines.StringPtr) Error!JAIR.Ptr {
+    const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
+    self.nodes.set(res, .{
+        .type = 0,
+        .kind = .Code,
+        .value = value,
+    });
+    return res;
+}
+
+fn @"or"(self: *Builder, value: JIR.Ptr) Error!JAIR.Ptr {
+    const lhs = try self.createJAIR(self.jir.data[value]);
+    const rhs = try self.createJAIR(self.jir.data[value + 1]);
+
+    const start: u32 = @intCast(self.data.items.len);
+    self.data.append(self.allocator, lhs) catch return Error.AllocatorFailure;
+    self.data.append(self.allocator, rhs) catch return Error.AllocatorFailure;
+
+    const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
+    self.nodes.set(res, .{
+        .type = self.nodes.get(lhs).type,
+        .kind = .Or,
+        .value = start
+    });
+    return res;
+}
+
+fn @"and"(self: *Builder, value: JIR.Ptr) Error!JAIR.Ptr {
+    const lhs = try self.createJAIR(self.jir.data[value]);
+    const rhs = try self.createJAIR(self.jir.data[value + 1]);
+
+    const start: u32 = @intCast(self.data.items.len);
+    self.data.append(self.allocator, lhs) catch return Error.AllocatorFailure;
+    self.data.append(self.allocator, rhs) catch return Error.AllocatorFailure;
+
+    const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
+    self.nodes.set(res, .{
+        .type = self.nodes.get(lhs).type,
+        .kind = .And,
+        .value = start
+    });
+    return res;
 }
 
 fn cjump(self: *Builder, value: defines.Offset) Error!JAIR.Ptr {
