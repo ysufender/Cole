@@ -16,6 +16,16 @@ const JAIR = @import("../jair.zig");
 pub const TypeTable = std.MultiArrayList(JAIR.Type);
 pub const Constants = std.MultiArrayList(JAIR.Constant);
 
+const FlagMap = std.bit_set.Static(8);
+
+const Flags = enum(u8) {
+    LValue = 0,
+
+    pub fn flag(flagToGet: Flags) u8 {
+        return @intFromEnum(flagToGet);
+    }
+};
+
 const Builder = @This();
 
 jir: JIR.Base,
@@ -29,6 +39,7 @@ data: std.ArrayList(u32),
 allocator: Allocator,
 typechecker: *Typechecker,
 constants: Constants,
+flags: FlagMap,
 
 pub fn fromJIR(jir: JIR.Base, allocator: Allocator, typechecker: *Typechecker) Error!Builder {
     var typeMap = collections.HashMap(TypeID, TypeID).empty;
@@ -46,6 +57,7 @@ pub fn fromJIR(jir: JIR.Base, allocator: Allocator, typechecker: *Typechecker) E
         .typeTable = TypeTable.initCapacity(allocator, jir.types.len) catch return Error.AllocatorFailure,
         .renamedStringMap = std.bit_set.Dynamic.initEmpty(allocator, jir.strings.len) catch return Error.AllocatorFailure,
         .constants = Constants.initCapacity(allocator, jir.constants.len) catch return Error.AllocatorFailure,
+        .flags = FlagMap.empty,
         .typeMap = typeMap,
         .strings = strings,
         .allocator = allocator,
@@ -122,12 +134,15 @@ fn createJAIR(self: *Builder, nodePtr: JAIR.Ptr) Error!JAIR.Ptr {
         .Xor => try self.commonBinary(.Xor, node.value),
         .Discard => try self.createJAIR(node.value),
         .Ternary => try self.phi(node.value),
+        .Identifier => try self.identifier(node.value),
+        .Assignment => try self.assignment(node.value),
+        .Call => try self.call(node.value),
 
         .Exit, .TypeDef => res: {
             const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
             self.nodes.set(res, .{
                 .type = 0,
-                .kind = .Nop,
+                .kind = .Exit,
                 .value = 0,
             });
             break :res res;
@@ -155,6 +170,66 @@ fn createJAIR(self: *Builder, nodePtr: JAIR.Ptr) Error!JAIR.Ptr {
             break :res res;
         },
     };
+}
+
+fn call(self: *Builder, value: defines.Offset) Error!JAIR.Ptr {
+    const func = self.jir.data[value + 2];
+    const len = self.jir.data[value + 3];
+
+    const start: u32 = @intCast(self.data.items.len);
+    const data = self.data.addManyAsSlice(self.allocator, len  + 2) catch return Error.AllocatorFailure;
+    data[0] = try self.createJAIR(func);
+    data[1] = len;
+
+    for (0..len) |idx| {
+        data[2 + idx] = try self.createJAIR(self.jir.data[value + 3 + idx]);
+    }
+
+    const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
+    self.nodes.set(res, .{
+        .type = try self.convertType(self.jir.data[value]),
+        .kind = .Call,
+        .value = start
+    });
+    return res;
+}
+
+fn assignment(self: *Builder, value: defines.Offset) Error!JAIR.Ptr {
+    const prev = self.setFlag(.LValue, true);
+    const lhs = try self.createJAIR(self.jir.data[value]);
+    _ = self.setFlag(.LValue, prev);
+    const rhs = try self.createJAIR(self.jir.data[value + 1]);
+
+    const start: u32 = @intCast(self.data.items.len);
+    self.data.append(self.allocator, lhs) catch return Error.AllocatorFailure;
+    self.data.append(self.allocator, rhs) catch return Error.AllocatorFailure;
+
+    const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
+    self.nodes.set(res, .{
+        .type = self.nodes.items(.type)[lhs],
+        .kind = .Store,
+        .value = start
+    });
+    return res;
+}
+
+fn identifier(self: *Builder, value: defines.Offset) Error!JAIR.Ptr {
+    const name = self.jir.data[value];
+    const topLevel = self.jir.data[value + 1];
+    const valueType = try self.convertType(self.jir.data[value + 2]);
+
+    const start: u32 = @intCast(self.data.items.len);
+    self.data.append(self.allocator, name) catch return Error.AllocatorFailure;
+    self.data.append(self.allocator, topLevel) catch return Error.AllocatorFailure;
+    self.data.append(self.allocator, @intFromBool(self.getFlag(.LValue))) catch return Error.AllocatorFailure;
+
+    const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
+    self.nodes.set(res, .{
+        .type = valueType,
+        .kind = .Identifier,
+        .value = start
+    });
+    return res;
 }
 
 fn phi(self: *Builder, value: defines.Offset) Error!JAIR.Ptr {
@@ -299,16 +374,18 @@ fn scope(self: *Builder, nodePtr: defines.Offset) Error!JAIR.Ptr {
     const name = self.jir.data[scopeVal];
     const len = self.jir.data[scopeVal + 1];
 
-    const stmts = self.allocator.alloc(JAIR.Ptr, len) catch return Error.AllocatorFailure;
-    defer self.allocator.free(stmts);
-    for (stmts, 0..) |*s, idx| {
-        s.* = try self.createJAIR(self.jir.data[scopeVal + 2 + idx]);
+    const start: u32 = @intCast(self.data.items.len);
+    const data = self.data.addManyAsSlice(self.allocator, len + 2)
+        catch return Error.AllocatorFailure;
+
+    // const stmts = self.allocator.alloc(JAIR.Ptr, len) catch return Error.AllocatorFailure;
+    // defer self.allocator.free(stmts);
+    for (0..len) |idx| {
+         data[2 + idx] = try self.createJAIR(self.jir.data[scopeVal + 2 + idx]);
     }
 
-    const start: u32 = @intCast(self.data.items.len);
-    self.data.append(self.allocator, name) catch return Error.AllocatorFailure;
-    self.data.append(self.allocator, len) catch return Error.AllocatorFailure;
-    self.data.appendSlice(self.allocator, stmts) catch return Error.AllocatorFailure;
+    data[0] = name;
+    data[1] = len;
 
     const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
     self.nodes.set(res, .{
@@ -644,4 +721,13 @@ fn convertFields(self: *Builder, fields: anytype) Error![]const TypeID {
         idx += 1;
     }
     return out;
+}
+
+pub fn setFlag(self: *Builder, comptime flag: Flags, bit: bool) bool {
+    defer self.flags.setValue(Flags.flag(flag), bit);
+    return self.flags.isSet(Flags.flag(flag));
+}
+
+pub fn getFlag(self: *Builder, comptime flag: Flags) bool {
+    return self.flags.isSet(Flags.flag(flag));
 }

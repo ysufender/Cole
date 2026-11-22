@@ -1,6 +1,7 @@
 const std = @import("std");
 const defines = @import("../../core/defines.zig");
 const common = @import("../../core/common.zig");
+const collections = @import("../../util/collections.zig");
 
 const Typechecker = @import("../../typechecker/typechecker.zig");
 const Context = common.CompilerContext;
@@ -80,7 +81,8 @@ pub const Node = struct {
         Scope,
         Exit,
         Reference,
-        Dereference,
+        Load,
+        Store,
         Call,
         Literal,
         Add,
@@ -339,6 +341,7 @@ fn generateStatement(self: *JAIR, out: *Writer, nodePtr: Ptr) Error!void {
             try self.write(true, out, "@__lbl{d}\n", .{otherwise});
         },
         .Code => try self.write(true, out, "{s}\n", .{self.strings[node.value]}),
+        .Store => try self.store(out, &node),
         .Return => {
             self.terminated = true;
 
@@ -352,6 +355,9 @@ fn generateStatement(self: *JAIR, out: *Writer, nodePtr: Ptr) Error!void {
                 try self.write(true, out, "ret\n", .{});
             }
         },
+
+        .Exit => { },
+
         else => _ = try self.generateExpr(out, nodePtr),
     }
 }
@@ -413,12 +419,88 @@ fn generateExpr(self: *JAIR, out: *Writer, ptr: Ptr) Error!u32 {
         .Sub => return self.commonBinary(out, "sub", &node),
         .Xor => return self.commonBinary(out, "xor", &node),
         .Phi => return self.phi(out, &node),
+        .Identifier => return self.identifier(out, &node),
+        .Call => return self.call(out, &node),
+
+        .Code, .FunctionDef, .VariableDef, .Exit, .JumpIf, .Jump, .Label, .Return, .Scope => return Error.ShouldBeImpossible,
 
         else => |unr| {
             common.log.debug("Unreachable {s}", .{@tagName(unr)});
             return common.debug.ShouldBeImpossible(undefined, @src());
         },
     }
+}
+
+fn call(self: *JAIR, out: *Writer, node: *const Node) Error!u32 {
+    // @Beware allow 512 parameters for now, hardcoded.
+    const Param = struct {
+        id: u32,
+        type: TypeID,
+    };
+    var params = collections.StaticStack(Param, 512){};
+    params.revert(0);
+
+    const func = try self.generateExpr(out, self.data[node.value]);
+    const len = self.data[node.value + 1];
+
+    for (0..len) |idx| {
+        try params.push(.{
+            .id = try self.generateExpr(out, self.data[node.value + 1 + len - idx]),
+            .type = self.nodes.items(.type)[self.data[node.value + 1 + len - idx]],
+        });
+    }
+
+    const res = self.allocTmp();
+    try self.write(true, out, "%__tmp{d} =", .{res});
+    try self.typeString(out, node.type);
+    try self.write(false, out, " call %__tmp{d}(", .{func});
+    while (params.pop()) |param| {
+        try self.typeString(out, param.type);
+        try self.write(false, out, " %__tmp{d}{s}", .{
+            param.id,
+            if (params.empty()) "" else ", ",
+        });
+    }
+    try self.write(false, out, ")\n", .{});
+
+    return res;
+}
+
+fn store(self: *JAIR, out: *Writer, node: *const Node) Error!void {
+    const lhs = self.data[node.value];
+    const rhs = self.data[node.value + 1];
+
+    // @Beware lhs has LValue flag active, result must be an address.
+    const lhsTmp = try self.generateExpr(out, lhs);
+    const rhsTmp = try self.generateExpr(out, rhs);
+
+    try self.write(true, out, "store", .{});
+    try self.typeString(out, node.type);
+    try self.write(false, out, " %__tmp{d}, %__tmp{d}\n", .{rhsTmp, lhsTmp});
+}
+
+fn identifier(self: *JAIR, out: *Writer, node: *const Node) Error!u32 {
+    const name = self.strings[self.data[node.value]];
+    const topLevel = self.data[node.value + 1] == 1;
+    const valueType = node.type;
+    const lvalue = self.data[node.value + 2] == 1;
+
+    // @TODO This doesn't distinguish between locals and parameters.
+
+    const res = self.allocTmp();
+
+    try self.write(true, out, "%__tmp{d} =", .{res});
+    if (lvalue) {
+        try self.write(false, out, "l copy",. {});
+    }
+    else {
+        try self.typeString(out, valueType);
+        try self.write(false, out, " load",. {});
+        try self.typeString(out, valueType);
+    }
+    try self.write(false, out, " {s}{s}\n",. {if (topLevel) "$" else "%", name});
+
+    return res;
 }
 
 fn phi(self: *JAIR, out: *Writer, node: *const Node) Error!u32 {

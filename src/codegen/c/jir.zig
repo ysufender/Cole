@@ -804,7 +804,7 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
             }
         },
         .Identifier => {
-            const str = @constCast(self.strings[node.value]);
+            const str = @constCast(self.strings[self.data[node.value]]);
             _ = std.mem.replace(u8, str, "::", "__", str);
             try self.write(out, "{s}", .{str});
         },
@@ -917,24 +917,24 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
             try self.write(out, ")", .{});
         },
         .Call => {
-            const func = self.data[node.value + 1];
-            const len = self.data[node.value + 2];
+            const func = self.data[node.value + 2];
+            const len = self.data[node.value + 3];
 
-            if (self.data[node.value] == 1) {
+            if (self.data[node.value + 1] == 1) {
                 try self.indentf(out);
             }
 
             try self.operation(out, func);
             try self.write(out, "(", .{});
             for (0..len) |idx| {
-                try self.operation(out, self.data[@intCast(node.value + 3 + idx)]);
+                try self.operation(out, self.data[@intCast(node.value + 4 + idx)]);
                 if (idx == len - 1) {
                     continue;
                 }
                 try self.write(out, ", ", .{});
             }
             try self.write(out, "){s}", .{
-                if (self.data[node.value] == 1) ";\n"
+                if (self.data[node.value + 1] == 1) ";\n"
                 else ""
             });
         },
