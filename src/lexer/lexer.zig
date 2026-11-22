@@ -897,7 +897,7 @@ test "TC_12: [toString]" {
     defer source.deinit(testing.allocator);
     
     const filePtr = try env.context.openSource(source.items, "test.cole");
-    const tok1 = Token{ .type = .Let, .start = 9999, .end = 10003 };
+    const tok1 = Token{ .type = .Let, .start = 9999, .end = 10002 };
     const ret1 = tok1.toString(env.arena.allocator(), &env.context, filePtr);
     try std.testing.expectEqualStrings("<Let: let at (10000:1)>", ret1);
 }
