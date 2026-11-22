@@ -1,8 +1,8 @@
-code {
+code "
 #header_start
 #   include <dirent.h>
 #header_end
-}
+";
 
 import std::memory::allocator;
 import std::c::memory;

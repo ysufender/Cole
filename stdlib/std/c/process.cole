@@ -1,10 +1,10 @@
-code {
+code "
 #header_start
     #include <stdlib.h>
     #include <unistd.h>
     #include <errno.h>
 #header_end
-}
+";
 
 import std::c::memory as Memory;
 import std::memory::allocator as Allocator;
@@ -17,11 +17,11 @@ pub let SpawnError = enum {
 };
 
 pub let exit = fn (exc: i32) -> noreturn {
-    code { exit(exc); }
+    code "exit(exc);";
 };
 
 pub let spawn = fn (path: []u8, argv: [][]u8) -> SpawnError {
-    code {
+    code "
         pid_t pid = fork();
         if (pid == 0) {
             char** _argv = (char**)calloc(argv.len, sizeof(char const*));
@@ -40,7 +40,7 @@ pub let spawn = fn (path: []u8, argv: [][]u8) -> SpawnError {
         else if (pid == -1) {
             return std__c__process__SpawnError_Fork;
         }
-    }
+    ";
     return @Ok;
 };
 

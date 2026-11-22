@@ -12,16 +12,16 @@ pub let log = fn (msg: []u8) -> void {
 };
 
 pub let info = fn (msg: []u8) -> void {
-    _ = Io::StdOut().writebuffer("\e[32minfo:\e[0m ");
+    _ = Io::StdOut().writebuffer("\x1b[32minfo:\x1b[0m ");
     _ = Io::StdOut().writeline(msg);
 };
 
 pub let error = fn (msg: []u8) -> void {
-    _ = Io::StdOut().writebuffer("\e[31merror:\e[0m ");
+    _ = Io::StdOut().writebuffer("\x1b[31merror:\x1b[0m ");
     _ = Io::StdOut().writeline(msg);
 };
 
 pub let warn = fn (msg: []u8) -> void {
-    _ = Io::StdOut().writebuffer("\e[33mwarning:\e[0m ");
+    _ = Io::StdOut().writebuffer("\x1b[33mwarning:\x1b[0m ");
     _ = Io::StdOut().writeline(msg);
 };

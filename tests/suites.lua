@@ -18,6 +18,7 @@ return {
         "early_return",
         "main_args_len",
         "string_escapes",
+        "string_escape_length",
         "char_literals",
     },
 
@@ -194,7 +195,6 @@ return {
     },
 
     ["stdlib"] = {
-        "directory",
         "fmt",
         "string",
         "math",

@@ -1,20 +1,3 @@
-## $open -- Proper Inline Code Syntax -- #63 -- @ysufender --
-
-With the introduction of the QBE backend, now the <code>code { ... }</code> blocks need to
-handle multiple backends.
-
-### Reproduction --
-
-...
-
-### Expected --
-
-...
-
-### Received --
-
-...
-
 ## $open -- Safety Checks on Debug Builds -- #62 -- @ysufender --
 
 Lowering paths lack safety checks on debug builds.
@@ -155,3 +138,4 @@ Garbled out parts in the generated C files.
 ## $closed -- Single Field Union Construction Bug -- #58 -- @ysufender --
 ## $closed -- External C Array Conversion -- #59 -- @ysufender --
 ## $closed -- Type Deduplication Problems -- #60 -- @ysufender --
+## $closed -- Proper Inline Code Syntax -- #63 -- @ysufender --

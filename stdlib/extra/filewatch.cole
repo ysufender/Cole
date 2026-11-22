@@ -3,7 +3,7 @@
  * For directories, the modification notification includes child files and directories (non-recursive).
  */
 
-code {
+code "
 #header_start
 #   include <stdio.h>
 #   include <time.h>
@@ -13,7 +13,7 @@ code {
 #       include <windows.h>
 #   endif
 #header_end
-}
+";
 
 import std::io::stream as Stream;
 import std::string as String;

@@ -403,11 +403,24 @@ fn scanToken(self: *Lexer) common.CompilerError!void {
             try self.addToken(.Integer);
         },
         '"' => {
-            const index =
-                if (std.mem.findScalarPos(u8, self.source, self.current, '"'))
-                    |idx| idx
-                else
-                    self.end;
+            const index = index: {
+                while (true) {
+                    const idx =
+                        if (std.mem.findScalarPos(u8, self.source, self.current, '"'))
+                            |idx| idx
+                        else
+                            self.end;
+
+                    if (self.source[idx - 1] == '\\') {
+                        self.current = @intCast(idx + 1);
+                        continue;
+                    }
+
+                    break :index idx;
+                }
+
+                unreachable;
+            };
 
             self.current = @intCast(index);
 

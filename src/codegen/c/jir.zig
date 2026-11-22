@@ -1033,10 +1033,9 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
         },
 
         .Code => {
-            const str = self.strings[node.value];
-            try self.write(out, "/* Inserted Code */\n{s}\n", .{
-                str,
-            });
+            try self.write(out, "/* Inserted Code */\n", .{});
+            try self.writeInlineCode(out, self.strings[node.value]);
+            try self.write(out, "\n", .{});
         },
 
         .Discard => {
@@ -1194,34 +1193,82 @@ fn literal(self: *JIR, out: *Writer, ptr: Constant.Ptr) Error!void {
         },
         .String => |str| switch (str.type) {
             .C => {
-                const rstr = self.strings[str.str];
-                try self.write(out, "((char const*)\"{s}\")", .{
-                    rstr,
-                });
+                try self.write(out, "((char const*)\"", .{});
+                try self.writeEscaped(out, self.strings[str.str]);
+                try self.write(out, "\")", .{});
             },
             .Cole => {
                 const rstr = self.strings[str.str];
-                const len = calculateStringLength(rstr);
 
-                try self.write(out, "({s}){{(uint8_t*)\"{s}\", {d}}}", .{
+                try self.write(out, "({s}){{(uint8_t*)\"", .{
                     try self.getCName(comptime Comptime.Folder.Builtin.Type("[]u8"), null, true, false),
-                    rstr,
-                    len,
                 });
+                try self.writeEscaped(out, rstr);
+                try self.write(out, "\", {d}}}", .{ rstr.len });
             }
         },
     };
 }
 
-fn calculateStringLength(str: []const u8) u32 {
-    var len: u32 = 0;
+fn writeInlineCode(self: *JIR, out: *Writer, code: []const u8) Error!void {
+    const State = enum { Code, DoubleQuote, SingleQuote, LineComment, BlockComment };
+
+    var state: State = .Code;
     var i: usize = 0;
-    while (i < str.len) : (len += 1) {
-        i += if (str[i] == '\\' and i + 1 < str.len)
-            (if (str[i + 1] == 'x') @as(usize, 4) else 2)
-        else 1;
+    while (i < code.len) : (i += 1) {
+        const c = code[i];
+        const next: u8 = if (i + 1 < code.len) code[i + 1] else 0;
+
+        switch (state) {
+            .Code => {
+                if (c == '"') state = .DoubleQuote
+                else if (c == '\'') state = .SingleQuote
+                else if (c == '/' and next == '/') state = .LineComment
+                else if (c == '/' and next == '*') state = .BlockComment;
+                try self.write(out, "{c}", .{c});
+            },
+            .LineComment => {
+                if (c == '\n') state = .Code;
+                try self.write(out, "{c}", .{c});
+            },
+            .BlockComment => {
+                if (c == '*' and next == '/') {
+                    try self.write(out, "*/", .{});
+                    i += 1;
+                    state = .Code;
+                }
+                else try self.write(out, "{c}", .{c});
+            },
+            .DoubleQuote, .SingleQuote => {
+                const quote: u8 = if (state == .DoubleQuote) '"' else '\'';
+
+                if (c == '\\' and i + 1 < code.len) {
+                    try self.write(out, "{c}{c}", .{ c, next });
+                    i += 1;
+                }
+                else if (c == quote) {
+                    state = .Code;
+                    try self.write(out, "{c}", .{c});
+                }
+                else switch (c) {
+                    '\n' => try self.write(out, "\\n", .{}),
+                    '\r' => try self.write(out, "\\r", .{}),
+                    '\t' => try self.write(out, "\\t", .{}),
+                    0...8, 11, 12, 14...31, 127 => try self.write(out, "\\{o:0>3}", .{c}),
+                    else => try self.write(out, "{c}", .{c}),
+                }
+            },
+        }
     }
-    return len;
+}
+
+fn writeEscaped(self: *JIR, out: *Writer, str: []const u8) Error!void {
+    for (str) |c| switch (c) {
+        '"' => try self.write(out, "\\\"", .{}),
+        '\\' => try self.write(out, "\\\\", .{}),
+        0x20...0x21, 0x23...0x5b, 0x5d...0x7e => try self.write(out, "{c}", .{c}),
+        else => try self.write(out, "\\{o:0>3}", .{c}),
+    };
 }
 
 fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool, noSymbol: bool) Error![]const u8 {

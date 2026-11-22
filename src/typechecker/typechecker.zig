@@ -253,9 +253,9 @@ pub fn typecheck(self: *Typechecker, allocator: Allocator) Error!JIR {
                     continue;
                 }
 
-                const cstart = ast.extra[stmt.value];
-                const cend = ast.extra[stmt.value + 1];
-                const scode = self.context.getFile(ast.tokens)[cstart..cend];
+                self.currentFile = module.dataIndex;
+
+                const scode = self.folder.getValue(try self.folder.eval(stmt.value, comptime Comptime.Folder.Builtin.Type("[]u8"))).String.str;
                 const code = try self.builder.internString(scode);
                 self.builder.topLevelAsms.append(self.builder.allocator, code)
                     catch return Error.AllocatorFailure;

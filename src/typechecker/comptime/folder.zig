@@ -4,6 +4,7 @@ const std = @import("std");
 const common = @import("../../core/common.zig");
 const defines = @import("../../core/defines.zig");
 const collections = @import("../../util/collections.zig");
+const escape = @import("../../util/escape.zig");
 const types = @import("../type.zig");
 const backend = @import("../../codegen/backend.zig");
 
@@ -1098,6 +1099,12 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
     defer self.typechecker.currentScope = prevScope;
     defer self.typechecker.currentScope = prevScope;
 
+    const prevInstance = self.currentInstantiation;
+    if (prevInstance == null and decl.kind != .Builtin and self.scopeTypes.contains(decl.scope)) {
+        self.currentInstantiation = decl.scope;
+    }
+    defer self.currentInstantiation = prevInstance;
+
     const sharedFunction =
         decl.kind == .Variable
         and decl.topLevel
@@ -1371,7 +1378,7 @@ fn evalLiteral(self: *Folder, tokenPtr: defines.TokenPtr, maybeExpected: ?TypeID
                         if (self.typechecker.isCStr(expected)) .C
                         else .Cole
                     else .Cole,
-                .str = lexeme,
+                .str = try self.unescape(lexeme),
             },
         },
 
@@ -1426,6 +1433,20 @@ fn evalLiteral(self: *Folder, tokenPtr: defines.TokenPtr, maybeExpected: ?TypeID
 
     self.typechecker.assertCanCoerce(rest, maybeExpected orelse rest) catch return res;
     return self.castValue(res, maybeExpected orelse rest, false);
+}
+
+pub fn unescape(self: *Folder, raw: []const u8) Error![]const u8 {
+    return escape.unescape(self.arena.allocator(), raw) catch |err| switch (err) {
+        error.OutOfMemory => Error.AllocatorFailure,
+        error.UnknownEscape => {
+            self.report("Unknown escape sequence in string literal.", .{});
+            return Error.InvalidToken;
+        },
+        error.InvalidHexEscape => {
+            self.report("Expected two hex digits in '\\x' escape.", .{});
+            return Error.InvalidToken;
+        },
+    };
 }
 
 fn evalPtrType(
