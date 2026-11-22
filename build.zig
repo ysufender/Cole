@@ -138,6 +138,10 @@ fn addTargets(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
                         .name = "tcc",
                         .module = tccHeaders(b, target, optimize),
                     },
+                    .{
+                        .name = "qbe",
+                        .module = qbeHeaders(b, target, optimize),
+                    }
                 }
             }),
         });
@@ -145,6 +149,7 @@ fn addTargets(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
         exe.root_module.addEmbedPath(b.path(resourcePath));
         exe.root_module.addOptions("config", opts);
 
+        // TCC
         const libPath = config.library_path orelse
             if (target.result.os.tag == .linux) "/usr/local/lib"
             else "C:/Program Files";
@@ -171,6 +176,11 @@ fn addTargets(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
             _ = vendorCopy.addCopyFileToSource(.{ .cwd_relative = srcPath }, destPath.src_path.sub_path);
         }
         exe.step.dependOn(&vendorCopy.step);
+
+        // QBE
+        exe.root_module.addLibraryPath(b.path("src/res/"));
+        exe.root_module.addSystemIncludePath(b.path("src/res/"));
+        exe.root_module.linkSystemLibrary(print(b.allocator, "qbe-{s}", .{@tagName(target.result.os.tag)}) catch unreachable, .{ .preferred_link_mode = .static });
 
         const install = b.addInstallArtifact(exe, .{
             .dest_dir = .{ .override = .{ .custom = "" } }
@@ -208,6 +218,10 @@ fn addDebugTarget(b: *std.Build) void {
                 .{
                     .name = "tcc",
                     .module = tccHeaders(b, config.native, .debug),
+                },
+                .{
+                    .name = "qbe",
+                    .module = qbeHeaders(b, config.native, .debug),
                 }
             }
         }),
@@ -216,6 +230,7 @@ fn addDebugTarget(b: *std.Build) void {
     exe.root_module.addEmbedPath(b.path(resourcePath));
     exe.root_module.addOptions("config", opts);
 
+    // TCC
     const libPath = config.library_path orelse
         if (config.native.result.os.tag == .linux) "/usr/local/lib"
         else "C:/Program Files";
@@ -243,11 +258,28 @@ fn addDebugTarget(b: *std.Build) void {
     }
     exe.step.dependOn(&vendorCopy.step);
 
+    // QBE
+    exe.root_module.addLibraryPath(b.path("src/res/"));
+    exe.root_module.addSystemIncludePath(b.path("src/res/"));
+    exe.root_module.linkSystemLibrary(std.fmt.allocPrint(b.allocator, "qbe-{s}", .{@tagName(config.native.result.os.tag)}) catch unreachable, .{ .preferred_link_mode = .static });
+
     const install = b.addInstallArtifact(exe, .{});
 
     const step = b.step(targetName, "Build for debug on native platform");
     step.dependOn(&install.step);
     step.dependOn(b.getInstallStep());
+}
+
+fn qbeHeaders(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Module {
+    const CTranslator = @import("translate_c").Translator;
+    const translate_c = b.dependency("translate_c", .{});
+
+    const ctranslator = CTranslator.init(translate_c, .{
+        .c_source_file = b.path("src/res/qbe.h"),
+        .target = target,
+        .optimize = optimize,
+    });
+    return ctranslator.mod;
 }
 
 fn tccHeaders(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Module {
