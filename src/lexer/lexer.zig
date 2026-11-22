@@ -7,6 +7,7 @@ const assert = std.debug.assert;
 
 pub const TokenList = collections.MultiArrayList(Token);
 const Error = common.CompilerError;
+const testing = std.testing;
 
 pub const TokenType = enum(u8) {
     LParen, RParen,
@@ -655,3 +656,248 @@ fn report(self: *Lexer, comptime fmt: []const u8, args: anytype) void {
     errToken.printLocation(self.allocator(), self.context, self.file, pos, true);
 }
 
+//============================
+// Test
+//============================
+
+fn create_test_context(testing_allocator: std.mem.Allocator, testing_io: std.Io, args: []const [*:0]const u8, arena: *std.heap.ArenaAllocator, env_map: *std.process.Environ.Map) !common.CompilerContext {
+    const _mock_init: std.process.Init = .{
+        .minimal = .{
+            .args = .{ .vector = args },
+            .environ = undefined,
+        },
+        .gpa = testing_allocator,
+        .arena = arena,
+        .io = testing_io,
+        .environ_map = env_map,
+        .preopens = undefined,
+    };
+    return common.CompilerContext.init(testing.allocator, _mock_init);
+}
+
+const TestEnv = struct {
+    arena: std.heap.ArenaAllocator,
+    env_map: std.process.Environ.Map,
+    context: common.CompilerContext,
+
+    const fake_args: []const [*:0]const u8 = &.{ "cole", "test.cole" };
+
+    fn init(self: *TestEnv) !void {
+        self.arena = std.heap.ArenaAllocator.init(testing.allocator);
+        errdefer self.arena.deinit();
+        self.env_map = std.process.Environ.Map.init(testing.allocator);
+        errdefer self.env_map.deinit();
+        self.context = try create_test_context(testing.allocator, testing.io, fake_args, &self.arena, &self.env_map);
+    }
+
+    fn deinit(self: *TestEnv) void {
+        self.arena.deinit();
+        self.env_map.deinit();
+        self.context.deinit();
+    }
+};
+
+
+test "TC_01: [Lexeme]" {
+    var env: TestEnv = undefined;
+    try env.init();
+    defer env.deinit();
+
+    const ptrr = try env.context.openSource("let a = 43;", "test.cole");
+    const let_token = Token{ .type = .Let, .start = 0, .end = 3 };
+    const a_token = Token{ .type = .Identifier, .start = 4, .end = 5 };
+    const eq_token = Token{ .type = .Identifier, .start = 6, .end = 7 };
+    const int_token = Token{ .type = .Integer, .start = 8, .end = 10 };
+    const semicolon_token = Token{ .type = .Semicolon, .start = 10, .end = 11 };
+    try testing.expectEqualStrings("let", let_token.lexeme(&env.context, ptrr));
+    try testing.expectEqualStrings("a", a_token.lexeme(&env.context, ptrr));
+    try testing.expectEqualStrings("=", eq_token.lexeme(&env.context, ptrr));
+    try testing.expectEqualStrings("43", int_token.lexeme(&env.context, ptrr));
+    try testing.expectEqualStrings(";", semicolon_token.lexeme(&env.context, ptrr));
+}
+
+
+test "TC_02: [Lexeme]" {
+    var env: TestEnv = undefined;
+    try env.init();
+    defer env.deinit();
+    const ptrr = try env.context.openSource("let a = 32;", "test.cole");
+    // env.context.tokenMap
+    const let_token = Token{ .type = .Let, .start = 0, .end = 3 };
+    const a_token = Token{ .type = .Identifier, .start = 4, .end = 5 };
+    const eq_token = Token{ .type = .Identifier, .start = 6, .end = 7 };
+    const int_token = Token{ .type = .Integer, .start = 8, .end = 10 };
+    const semicolon_token = Token{ .type = .Semicolon, .start = 10, .end = 11 };
+    try testing.expectEqualStrings("let", let_token.lexeme(&env.context, ptrr));
+    try testing.expectEqualStrings("a", a_token.lexeme(&env.context, ptrr));
+    try testing.expectEqualStrings("=", eq_token.lexeme(&env.context, ptrr));
+    try testing.expectEqualStrings("32", int_token.lexeme(&env.context, ptrr));
+    try testing.expectEqualStrings(";", semicolon_token.lexeme(&env.context, ptrr));
+}
+
+
+test "TC_03: [Position]" {
+    // Source with just one line
+    var env: TestEnv = undefined;
+    try env.init();
+    defer env.deinit();
+    const filePtr = try env.context.openSource("let a = 32;", "test.cole");
+    const let_token = Token{ .type = .Let, .start = 0, .end = 3 };
+    const let_pos = let_token.position(&env.context, filePtr);
+
+    try testing.expectEqualStrings("let", let_token.lexeme(&env.context, filePtr));
+    try testing.expectEqual(1, let_pos.line);
+    try testing.expectEqual(1, let_pos.column);
+}
+
+
+test "TC_04: [Position]" {
+    // 2 source line with line break and a space
+    var env: TestEnv = undefined;
+    try env.init();
+    defer env.deinit();
+    const filePtr = try env.context.openSource("let a = 32;\n let b = 33", "test.cole");
+    // expected for first let
+    const let_token = Token{ .type = .Let, .start = 0, .end = 3 };
+    const let_2_token = Token{ .type = .Let, .start = 13, .end = 16 };
+    const let_pos = let_token.position(&env.context, filePtr);
+    const let_2_pos = let_2_token.position(&env.context, filePtr);
+
+    // first let
+    try testing.expectEqualStrings("let", let_token.lexeme(&env.context, filePtr));
+    try testing.expectEqual(1, let_pos.line);
+    try testing.expectEqual(1, let_pos.column);
+
+    // second let
+    try testing.expectEqualStrings("let", let_2_token.lexeme(&env.context, filePtr));
+    try testing.expectEqual(2, let_2_pos.line);
+    try testing.expectEqual(2, let_2_pos.column);
+}
+
+
+test "TC_05: [Position]" {
+    // 2 source line with line break and a space and a tab
+    var env: TestEnv = undefined;
+    try env.init();
+    defer env.deinit();
+    const filePtr = try env.context.openSource("let a = 32;\n \tlet b = 33", "test.cole");
+    // expected for first let
+    const let_token = Token{ .type = .Let, .start = 0, .end = 3 };
+    const let_2_token = Token{ .type = .Let, .start = 14, .end = 17 };
+    const let_pos = let_token.position(&env.context, filePtr);
+    const let_2_pos = let_2_token.position(&env.context, filePtr);
+    // first let
+    try testing.expectEqualStrings("let", let_token.lexeme(&env.context, filePtr));
+    try testing.expectEqual(1, let_pos.line);
+    try testing.expectEqual(1, let_pos.column);
+    // second let
+    try testing.expectEqualStrings("let", let_2_token.lexeme(&env.context, filePtr));
+    try testing.expectEqual(2, let_2_pos.line);
+    try testing.expectEqual(3, let_2_pos.column);
+}
+
+
+test "TC_06: [Position]" {
+    // line with multiple breaks
+    var env: TestEnv = undefined;
+    try env.init();
+    defer env.deinit();
+    const filePtr = try env.context.openSource("\n;\t\n \twhile", "test.cole");
+    const while_token = Token{ .type = .While, .start = 6, .end = 11 };
+    const while_pos = while_token.position(&env.context, filePtr);
+
+    try testing.expectEqualStrings("while", while_token.lexeme(&env.context, filePtr));
+    try testing.expectEqual(3, while_pos.line);
+    try testing.expectEqual(3, while_pos.column);
+}
+
+
+test "TC_07: [Position]" {
+    // checking for UTF-8 byte comment
+    var env: TestEnv = undefined;
+    try env.init();
+    defer env.deinit();
+
+    // 😀 is 4 bytes each
+    const filePtr = try env.context.openSource("/*(😀😀)*/ \nlet", "test.cole");
+    const _token = Token{ .type = .Let, .start = 16, .end = 19 };
+    const _pos = _token.position(&env.context, filePtr);
+
+    try testing.expectEqualStrings("let", _token.lexeme(&env.context, filePtr));
+    try testing.expectEqual(2, _pos.line);
+    try testing.expectEqual(1, _pos.column);
+}
+
+
+test "TC_08: [errIdentifier]" {
+    // Depends on the location of token
+    // in this token from 0 to 6 on very first \n
+    var env: TestEnv = undefined;
+    try env.init();
+    defer env.deinit();
+    const filePtr = try env.context.openSource("hello\nworld", "test.cole");
+    const _token = Token{ .type = .Mark, .start = 0, .end = 6 };
+    try testing.expectEqualStrings("hello", _token.errIdentifier(&env.context, filePtr));
+}
+
+
+test "TC_09: [errIdentifier]" {
+    // random  token from 25 to 27 on 2nd \n
+    var env: TestEnv = undefined;
+    try env.init();
+    defer env.deinit();
+    const filePtr = try env.context.openSource("let a: any = i32(999);\n let b:any = i32(992); \n", "test.cole");
+    // just a random token
+    const _token = Token{ .type = .Let, .start = 24, .end = 27 };
+    try testing.expectEqualStrings(" let b:any = i32(992); ", _token.errIdentifier(&env.context, filePtr));
+}
+
+
+test "TC_10: [errIdentifier]" {
+    // Last line of source with no newline (\n)
+    // fixed a bug in errIdentifier for the last line
+    var env: TestEnv = undefined;
+    try env.init();
+    defer env.deinit();
+    const filePtr = try env.context.openSource("let a: any = i32(999);\n let b:any = i32(992); ", "test.cole");
+    // just a random token
+    const _token = Token{ .type = .Let, .start = 24, .end = 27 };
+    try testing.expectEqualStrings(" let b:any = i32(992); ", _token.errIdentifier(&env.context, filePtr));
+}
+
+
+test "TC_11: [toString]" {
+    var env: TestEnv = undefined;
+    try env.init();
+    defer env.deinit();
+    
+
+    const filePtr = try env.context.openSource("let a = i32(999);\nlet b = i32(992);", "test.cole");
+    const tok1 = Token{ .type = .Let, .start = 0, .end = 3 };
+    const ret1 = tok1.toString(env.arena.allocator(), &env.context, filePtr);
+    try std.testing.expectEqualStrings("<Let: let at (1:1)>", ret1);
+
+    const tok2 = Token{ .type = .Identifier, .start = 22, .end = 23 };
+    const ret2 = tok2.toString(env.arena.allocator(), &env.context, filePtr);
+    try std.testing.expectEqualStrings("<Identifier: b at (2:5)>", ret2);
+}
+
+
+test "TC_12: [toString]" {
+    // what if char is at 10000th line
+    // trying to overflow the buffer as it has a fixed length
+    // BUFFER no space left 
+    var env: TestEnv = undefined;
+    try env.init();
+    defer env.deinit();
+    // Build a string with 1000 lines
+    var source = try std.ArrayList(u8).initCapacity(testing.allocator, 10000);
+    try source.appendNTimes(testing.allocator, '\n', 9999);
+    try source.appendSlice(testing.allocator,"let x = 42;");
+    defer source.deinit(testing.allocator);
+    
+    const filePtr = try env.context.openSource(source.items, "test.cole");
+    const tok1 = Token{ .type = .Let, .start = 9999, .end = 10003 };
+    const ret1 = tok1.toString(env.arena.allocator(), &env.context, filePtr);
+    try std.testing.expectEqualStrings("<Let: let at (10000:1)>", ret1);
+}
