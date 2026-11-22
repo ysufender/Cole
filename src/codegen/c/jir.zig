@@ -887,7 +887,11 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
         },
 
         .Reference => try self.commonSingle(out, node.value, "&"),
-        .Dereference => try self.commonSingle(out, node.value, "*"),
+        .Dereference => {
+            try self.write(out, "(*(", .{});
+            try self.operation(out, self.data[node.value]);
+            try self.write(out, "))", .{});
+        },
         .Invert => try self.commonSingle(out, node.value, "~"),
         .Not => try self.commonSingle(out, node.value, "!"),
         .Negation => try self.commonSingle(out, node.value, "-"),

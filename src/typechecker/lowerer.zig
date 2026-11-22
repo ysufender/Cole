@@ -336,7 +336,7 @@ fn @"switch"(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     if (maybeComptimeEnumOrUnion == null) {
         const name = try self.typechecker.folder.generateRandomName(.SwitchValue);
         cachedDef = try self.typechecker.builder.variableDef(false, enumOrUnionType, name, false, enumOrUnionExpr, null);
-        enumOrUnion = try self.typechecker.builder.identifier(name, false, enumOrUnionType);
+        enumOrUnion = try self.typechecker.builder.identifier(name, 0, enumOrUnionType);
     }
 
     const typeInfo = self.typechecker.typeTable.get(enumOrUnionType);
@@ -618,7 +618,7 @@ fn rangeForLoop(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.
         range.start,
         null
     );
-    const rangeStartIdent = try self.typechecker.builder.identifier(rangeStartName, false, rangeStartType);
+    const rangeStartIdent = try self.typechecker.builder.identifier(rangeStartName, 0, rangeStartType);
 
     const captureDeclPtr = self.typechecker.symbols.findDecl(.{
         .file = self.typechecker.currentFile,
@@ -634,7 +634,7 @@ fn rangeForLoop(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.
         rangeStartIdent,
         null,
     );
-    const captureIdent = try self.typechecker.builder.identifier(name, false, (comptime Comptime.Folder.Builtin.Type("mut u32")));
+    const captureIdent = try self.typechecker.builder.identifier(name, 0, (comptime Comptime.Folder.Builtin.Type("mut u32")));
 
     const rangeEndType = try self.typechecker.typecheckExpression(ast.extra[extraPtr + 2], null);
     const rangeEnd = try self.typechecker.builder.variableDef(
@@ -645,7 +645,7 @@ fn rangeForLoop(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.
         range.end,
         null
     );
-    const rangeEndIdent = try self.typechecker.builder.identifier(rangeEndName, false, rangeEndType);
+    const rangeEndIdent = try self.typechecker.builder.identifier(rangeEndName, 0, rangeEndType);
 
     const loopBase = try self.typechecker.folder.generateRandomNameString(.For);
     const lloop = self.lastLoop;
@@ -729,7 +729,7 @@ fn forLoop(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.AST) 
         try self.expression(expr, rangeType),
         null
     );
-    const rangeIdent = try self.typechecker.builder.identifier(rangeName, false, rangeType);
+    const rangeIdent = try self.typechecker.builder.identifier(rangeName, 0, rangeType);
 
     const rangePtr = try self.typechecker.builder.dot(
         rangeIdent,
@@ -763,7 +763,7 @@ fn forLoop(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.AST) 
         ),
         null,
     );
-    const idxIdent = try self.typechecker.builder.identifier(idxName, false, (comptime Comptime.Folder.Builtin.Type("mut u32")));
+    const idxIdent = try self.typechecker.builder.identifier(idxName, 0, (comptime Comptime.Folder.Builtin.Type("mut u32")));
 
     const loopBase = try self.typechecker.folder.generateRandomNameString(.For);
     const lloop = self.lastLoop;
@@ -1317,7 +1317,7 @@ fn scoping(self: *Lowerer, _extraPtr: defines.OpaquePtr, exprPtr: defines.Expres
 
     const id = try self.typechecker.builder.internString(qualified);
 
-    return self.typechecker.builder.identifier(id, true, resultType);
+    return self.typechecker.builder.identifier(id, 2, resultType);
 }
 
 fn slicing(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR.Ptr {
@@ -1383,7 +1383,7 @@ fn switchExpr(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error
     if (maybeComptimeEnumOrUnion == null) {
         const name = try typechecker.folder.generateRandomName(.SwitchValue);
         cachedDef = try typechecker.builder.variableDef(false, enumOrUnionType, name, false, enumOrUnionExpr, null);
-        enumOrUnion = try typechecker.builder.identifier(name, false, enumOrUnionType);
+        enumOrUnion = try typechecker.builder.identifier(name, 0, enumOrUnionType);
     }
 
     const typeInfo = typechecker.typeTable.get(enumOrUnionType);
@@ -1406,7 +1406,7 @@ fn switchExpr(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error
     var ptrs = ops[@min(2, ops.len)..];
 
     const resName = try typechecker.folder.generateRandomName(.SwitchResult);
-    const resIdent = try typechecker.builder.identifier(resName, false, ofType);
+    const resIdent = try typechecker.builder.identifier(resName, 0, ofType);
 
     if (maybeComptimeEnumOrUnion == null) {
         const ti = typechecker.typeTable.get(ofType);
@@ -1802,7 +1802,7 @@ fn cast(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR.P
 
     const rName = try self.typechecker.folder.generateRandomName(.ThingToCast);
     const rDef = try self.typechecker.builder.variableDef(false, rtype, rName, false, rexpr, null);
-    const rIdent = try self.typechecker.builder.identifier(rName, false, rtype);
+    const rIdent = try self.typechecker.builder.identifier(rName, 0, rtype);
 
     return res: switch (targetInfo) {
         .Pointer => |tptr| switch (rtypeInfo) {
@@ -2189,7 +2189,12 @@ fn identifier(self: *Lowerer, id: defines.ExpressionPtr) Error!JIR.Ptr {
     );
     const decl = self.typechecker.symbols.getDecl(declPtr);
 
-    return self.typechecker.builder.identifier(decl.name, decl.topLevel, try self.typechecker.typecheckDecl(declPtr, null));
+    return self.typechecker.builder.identifier(
+        decl.name,
+        @as(u8, if (decl.topLevel) 2 else 0) 
+        | @as(u8, if (decl.kind == .Parameter) 1 else 0),
+        try self.typechecker.typecheckDecl(declPtr, null)
+    );
 }
 
 fn mark(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR.Ptr {

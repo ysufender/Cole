@@ -272,7 +272,7 @@ fn constant(self: *JAIR, out: *Writer, bare: bool, constPtr: Constant.Ptr) Error
         .Half => |h| try self.write(false, out, "{s} {s}{d}", .{if (bare) "h" else "w", if (bare) "" else "copy ", h.@"0"}),
         .Long => |l| try self.write(false, out, "l {s}{d}", .{if (bare) "" else "copy ", l.@"0"}),
         .Word => |w| try self.write(false, out, "w {s}{d}", .{if (bare) "" else "copy ", w.@"0"}),
-        .Function => |f| try self.write(false, out, "l ${s}", .{self.strings[f]}),
+        .Function => |f| try self.write(false, out, "l {s}${s}", .{if (bare) "" else "copy ", self.strings[f]}),
         .String, .Aggregate => try self.write(false, out, "l {s}$const{d}", .{if (bare) "" else "copy ", constPtr}),
         .Nop => { },
     }
@@ -308,6 +308,23 @@ fn generateStatement(self: *JAIR, out: *Writer, nodePtr: Ptr) Error!void {
                 });
             }
             try self.write(false, out, ") {{\n@start\n", .{});
+            for (0..argLen) |idx| {
+                const offset = node.value + 4 + idx * 2;
+                const argType = self.data[offset];
+                const argName = self.data[offset + 1];
+
+                if (self.isScalar(argType)) {
+                    try self.write(true, out, "%__param_{s} =l alloc{d} {d}\n", .{self.strings[argName], self.alignOf(argType), self.sizeOf(argType)});
+                    try self.write(true, out, "store", .{});
+                    try self.typeString(out, argType);
+                    try self.write(false, out, " %{s}, %__param_{s}\n", .{self.strings[argName], self.strings[argName]});
+                }
+                else {
+                    try self.write(true, out, "%__param_{s} =l copy %{s}\n", .{self.strings[argName], self.strings[argName]});
+                }
+            }
+            try self.write(false, out, "\n", .{});
+
             self.terminated = false;
 
             try self.generateStatement(out, body);
@@ -348,8 +365,15 @@ fn generateStatement(self: *JAIR, out: *Writer, nodePtr: Ptr) Error!void {
             const withRet = self.data[node.value] == 1;
 
             if (withRet) {
-                const __tmp = try self.generateExpr(out, self.data[node.value + 1]);
-                try self.write(true, out, "ret %__tmp{d}\n", .{__tmp});
+                const retType = self.nodes.items(.type)[self.data[node.value + 1]];
+                const tmp = try self.generateExpr(out, self.data[node.value + 1]);
+
+                if (self.sizeOf(retType) == 0) {
+                    try self.write(true, out, "ret\n", .{});
+                }
+                else {
+                    try self.write(true, out, "ret %__tmp{d}\n", .{tmp});
+                }
             }
             else {
                 try self.write(true, out, "ret\n", .{});
@@ -421,14 +445,36 @@ fn generateExpr(self: *JAIR, out: *Writer, ptr: Ptr) Error!u32 {
         .Phi => return self.phi(out, &node),
         .Identifier => return self.identifier(out, &node),
         .Call => return self.call(out, &node),
+        .Load => return self.load(out, &node),
 
-        .Code, .FunctionDef, .VariableDef, .Exit, .JumpIf, .Jump, .Label, .Return, .Scope => return Error.ShouldBeImpossible,
+        .Store, .Code, .FunctionDef, .VariableDef, .Exit, .JumpIf, .Jump, .Label, .Return, .Scope => return Error.ShouldBeImpossible,
 
         else => |unr| {
             common.log.debug("Unreachable {s}", .{@tagName(unr)});
             return common.debug.ShouldBeImpossible(undefined, @src());
         },
     }
+}
+
+fn load(self: *JAIR, out: *Writer, node: *const Node) Error!u32 {
+    const lvalue = self.data[node.value] == 1;
+    const expr = self.data[node.value + 1];
+
+    const ptr = try self.generateExpr(out, expr);
+
+    if (lvalue) {
+        return ptr;
+    }
+
+    const res = self.allocTmp();
+
+    try self.write(true, out, "%__tmp{d} =", .{res});
+    try self.typeString(out, node.type);
+    try self.write(false, out, " load", .{});
+    try self.typeString(out, node.type);
+    try self.write(false, out, " %__tmp{d}\n", .{ptr});
+
+    return res;
 }
 
 fn call(self: *JAIR, out: *Writer, node: *const Node) Error!u32 {
@@ -440,20 +486,24 @@ fn call(self: *JAIR, out: *Writer, node: *const Node) Error!u32 {
     var params = collections.StaticStack(Param, 512){};
     params.revert(0);
 
-    const func = try self.generateExpr(out, self.data[node.value]);
-    const len = self.data[node.value + 1];
+    const returnType = self.data[node.value];
+    const func = try self.generateExpr(out, self.data[node.value + 1]);
+    const len = self.data[node.value + 2];
 
     for (0..len) |idx| {
         try params.push(.{
-            .id = try self.generateExpr(out, self.data[node.value + 1 + len - idx]),
-            .type = self.nodes.items(.type)[self.data[node.value + 1 + len - idx]],
+            .id = try self.generateExpr(out, self.data[node.value + 2 + len - idx]),
+            .type = self.nodes.items(.type)[self.data[node.value + 2 + len - idx]],
         });
     }
 
     const res = self.allocTmp();
-    try self.write(true, out, "%__tmp{d} =", .{res});
-    try self.typeString(out, node.type);
-    try self.write(false, out, " call %__tmp{d}(", .{func});
+    if (self.sizeOf(returnType) != 0) {
+        try self.write(true, out, "%__tmp{d} =", .{res});
+        try self.typeString(out, node.type);
+        try self.write(false, out, " ", .{});
+    }
+    try self.write(self.sizeOf(returnType) == 0, out, "call %__tmp{d}(", .{func});
     while (params.pop()) |param| {
         try self.typeString(out, param.type);
         try self.write(false, out, " %__tmp{d}{s}", .{
@@ -481,11 +531,10 @@ fn store(self: *JAIR, out: *Writer, node: *const Node) Error!void {
 
 fn identifier(self: *JAIR, out: *Writer, node: *const Node) Error!u32 {
     const name = self.strings[self.data[node.value]];
-    const topLevel = self.data[node.value + 1] == 1;
+    const topLevel = (self.data[node.value + 1] & 2) != 0;
+    const isParam = (self.data[node.value + 1] & 1) != 0;
     const valueType = node.type;
     const lvalue = self.data[node.value + 2] == 1;
-
-    // @TODO This doesn't distinguish between locals and parameters.
 
     const res = self.allocTmp();
 
@@ -498,7 +547,11 @@ fn identifier(self: *JAIR, out: *Writer, node: *const Node) Error!u32 {
         try self.write(false, out, " load",. {});
         try self.typeString(out, valueType);
     }
-    try self.write(false, out, " {s}{s}\n",. {if (topLevel) "$" else "%", name});
+    try self.write(false, out, " {s}{s}{s}\n", .{
+        if (topLevel) "$" else "%",
+        if (isParam) "__param_" else "",
+        name
+    });
 
     return res;
 }
@@ -635,6 +688,30 @@ fn typeString(self: *const JAIR, out: *Writer, typeID: TypeID) Error!void {
         .Void => { },
         else => try self.write(false, out, ":{s}", .{self.strings[self.typeNames.get(typeID).?]}),
     }
+}
+
+fn isScalar(self: *const JAIR, typeID: TypeID) bool {
+    return switch (self.typeTable.get(typeID)) {
+        .Double, .Single, .Byte, .Half, .Long, .Word, .Void => true,
+        .Custom => false,
+    };
+}
+
+fn alignOf(self: *const JAIR, typeID: TypeID) u32 {
+    return switch (self.typeTable.get(typeID)) {
+        .Double => 8,
+        .Single => 4,
+        .Byte => 1,
+        .Half => 2,
+        .Long => 8,
+        .Word => 4,
+        .Void => 1,
+        .Custom => |c| switch (c) {
+            .Opaque => |o| o.alignment,
+            .Union => |o| o.alignment,
+            .Aggregate => |o| o.alignment,
+        },
+    };
 }
 
 fn sizeOf(self: *const JAIR, typeID: TypeID) u32 {

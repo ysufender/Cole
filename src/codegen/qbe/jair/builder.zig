@@ -122,9 +122,9 @@ fn createJAIR(self: *Builder, nodePtr: JAIR.Ptr) Error!JAIR.Ptr {
         .Equal => try self.commonBinary(.Equal, node.value),
         .NotEqual => try self.commonBinary(.NotEqual, node.value),
         .Lesser => try self.commonBinary(.Lesser, node.value),
-        .LesserEqual => try self.commonBinary(.Lesser, node.value),
-        .Greater => try self.commonBinary(.Lesser, node.value),
-        .GreaterEqual => try self.commonBinary(.Lesser, node.value),
+        .LesserEqual => try self.commonBinary(.LesserEqual, node.value),
+        .Greater => try self.commonBinary(.Greater, node.value),
+        .GreaterEqual => try self.commonBinary(.GreaterEqual, node.value),
         .Div => try self.commonBinary(.Div, node.value),
         .Mod => try self.commonBinary(.Mod, node.value),
         .LeftShift => try self.commonBinary(.LeftShift, node.value),
@@ -137,6 +137,7 @@ fn createJAIR(self: *Builder, nodePtr: JAIR.Ptr) Error!JAIR.Ptr {
         .Identifier => try self.identifier(node.value),
         .Assignment => try self.assignment(node.value),
         .Call => try self.call(node.value),
+        .Dereference => try self.dereference(node.value),
 
         .Exit, .TypeDef => res: {
             const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
@@ -172,17 +173,45 @@ fn createJAIR(self: *Builder, nodePtr: JAIR.Ptr) Error!JAIR.Ptr {
     };
 }
 
+fn dereference(self: *Builder, value: defines.Offset) Error!JAIR.Ptr {
+    const lvalue = @intFromBool(self.getFlag(.LValue));
+
+    const expr = expr: {
+        const prev = self.setFlag(.LValue, false);
+        defer _ = self.setFlag(.LValue, prev);
+        break :expr try self.createJAIR(self.jir.data[value]);
+    };
+    const typeID = try self.convertType(self.jir.types.get(self.jir.data[value + 1]).Pointer.child);
+
+    const start: u32 = @intCast(self.data.items.len);
+    self.data.append(self.allocator, lvalue) catch return Error.AllocatorFailure;
+    self.data.append(self.allocator, expr) catch return Error.AllocatorFailure;
+
+    const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
+    self.nodes.set(res, .{
+        .type = typeID,
+        .kind = .Load,
+        .value = start,
+    });
+    return res;
+}
+
 fn call(self: *Builder, value: defines.Offset) Error!JAIR.Ptr {
     const func = self.jir.data[value + 2];
     const len = self.jir.data[value + 3];
 
     const start: u32 = @intCast(self.data.items.len);
-    const data = self.data.addManyAsSlice(self.allocator, len  + 2) catch return Error.AllocatorFailure;
-    data[0] = try self.createJAIR(func);
-    data[1] = len;
+    _ = self.data.addManyAsSlice(self.allocator, len  + 3) catch return Error.AllocatorFailure;
+    self.data.items[start] = try self.convertType(self.jir.data[value]);
+    self.data.items[start + 1] = try self.createJAIR(func);
+    self.data.items[start + 2] = len;
 
     for (0..len) |idx| {
-        data[2 + idx] = try self.createJAIR(self.jir.data[value + 3 + idx]);
+        const arg = try self.createJAIR(
+            self.jir.data[value + 4 + idx]
+        );
+
+        self.data.items[start + 3 + idx] = arg;
     }
 
     const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
@@ -195,9 +224,11 @@ fn call(self: *Builder, value: defines.Offset) Error!JAIR.Ptr {
 }
 
 fn assignment(self: *Builder, value: defines.Offset) Error!JAIR.Ptr {
-    const prev = self.setFlag(.LValue, true);
-    const lhs = try self.createJAIR(self.jir.data[value]);
-    _ = self.setFlag(.LValue, prev);
+    const lhs = lhs: {
+        const prev = self.setFlag(.LValue, true);
+        defer _ =self.setFlag(.LValue, prev);
+        break :lhs try self.createJAIR(self.jir.data[value]);
+    };
     const rhs = try self.createJAIR(self.jir.data[value + 1]);
 
     const start: u32 = @intCast(self.data.items.len);
@@ -375,17 +406,21 @@ fn scope(self: *Builder, nodePtr: defines.Offset) Error!JAIR.Ptr {
     const len = self.jir.data[scopeVal + 1];
 
     const start: u32 = @intCast(self.data.items.len);
-    const data = self.data.addManyAsSlice(self.allocator, len + 2)
+    _ = self.data.addManyAsSlice(self.allocator, len + 2)
         catch return Error.AllocatorFailure;
 
     // const stmts = self.allocator.alloc(JAIR.Ptr, len) catch return Error.AllocatorFailure;
     // defer self.allocator.free(stmts);
     for (0..len) |idx| {
-         data[2 + idx] = try self.createJAIR(self.jir.data[scopeVal + 2 + idx]);
+        const child = try self.createJAIR(
+            self.jir.data[scopeVal + 2 + idx]
+        );
+
+        self.data.items[start + 2 + idx] = child;
     }
 
-    data[0] = name;
-    data[1] = len;
+    self.data.items[start] = name;
+    self.data.items[start + 1] = len;
 
     const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
     self.nodes.set(res, .{
@@ -604,7 +639,11 @@ fn convertConstant(self: *Builder, constant: JIR.Constant.Ptr) Error!JAIR.Consta
             };
         },
 
-        .Undefined,
+        .Undefined => |t| switch (self.jir.types.get(t)) {
+            .Pointer => .{ .Long = .{ 0, false } },
+            else => .{ .Nop = {} },
+        },
+
         .Type,
         .Void => .{ .Nop = {} },
     });

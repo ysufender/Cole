@@ -281,7 +281,7 @@ pub fn construct(self: *Builder, typeID: TypeID, args: []const JIR.Ptr) Error!JI
     return res;
 }
 
-pub fn identifier(self: *Builder, decl: defines.StringPtr, topLevel: bool, valueType: TypeID) Error!JIR.Ptr { return self.commonTernary(.Identifier, decl, @intFromBool(topLevel), valueType); }
+pub fn identifier(self: *Builder, decl: defines.StringPtr, topLevelAndIsParam: u8, valueType: TypeID) Error!JIR.Ptr { return self.commonTernary(.Identifier, decl, topLevelAndIsParam, valueType); }
 pub fn inlineCode(self: *Builder, code: defines.StringPtr) Error!JIR.Ptr { return self.commonSingle(.Code, code); }
 
 pub fn discard(self: *Builder, expr: JIR.Ptr) Error!JIR.Ptr { return self.commonSingle(.Discard, expr); }
@@ -329,10 +329,10 @@ pub fn dot(self: *Builder, object: JIR.Ptr, field: StringPtr, objType: TypeID) E
     const objDef = try self.variableDef(false, objType, objName, false, object, null);
     const objIdent = try switch (self.typechecker.typeTable.get(objType)) {
         .Pointer => |ptr| switch (ptr.size) {
-            .Slice => self.identifier(objName, false, objType),
-            else => self.dereference(try self.identifier(objName, false, objType), objType)
+            .Slice => self.identifier(objName, 0, objType),
+            else => self.dereference(try self.identifier(objName, 0, objType), objType)
         },
-        else => self.identifier(objName, false, objType),
+        else => self.identifier(objName, 0, objType),
     };
 
     const access = try self.commonBinary(.Dot, objIdent, field);
@@ -343,8 +343,8 @@ pub fn dot(self: *Builder, object: JIR.Ptr, field: StringPtr, objType: TypeID) E
     };
 }
 
-pub fn dereference(self: *Builder, expr: JIR.Ptr, _: TypeID) Error!JIR.Ptr {
-    return self.commonSingle(.Dereference, expr);
+pub fn dereference(self: *Builder, expr: JIR.Ptr, typeID: TypeID) Error!JIR.Ptr {
+    return self.commonBinary(.Dereference, expr, typeID);
 }
 
 pub fn grouping(self: *Builder, args: []const JIR.Ptr) Error!JIR.Ptr {
