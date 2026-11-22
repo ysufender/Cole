@@ -446,6 +446,7 @@ fn generateExpr(self: *JAIR, out: *Writer, ptr: Ptr) Error!u32 {
         .Identifier => return self.identifier(out, &node),
         .Call => return self.call(out, &node),
         .Load => return self.load(out, &node),
+        .Reference => return self.reference(out, &node),
 
         .Store, .Code, .FunctionDef, .VariableDef, .Exit, .JumpIf, .Jump, .Label, .Return, .Scope => return Error.ShouldBeImpossible,
 
@@ -454,6 +455,15 @@ fn generateExpr(self: *JAIR, out: *Writer, ptr: Ptr) Error!u32 {
             return common.debug.ShouldBeImpossible(undefined, @src());
         },
     }
+}
+
+fn reference(self: *JAIR, out: *Writer, node: *const Node) Error!u32 {
+    const ptr = try self.generateExpr(out, node.value);
+
+    const res = self.allocTmp();
+    try self.write(true, out, "%__tmp{d} =l copy %__tmp{d}\n", .{res, ptr});
+
+    return res;
 }
 
 fn load(self: *JAIR, out: *Writer, node: *const Node) Error!u32 {

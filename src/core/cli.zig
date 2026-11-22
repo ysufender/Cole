@@ -253,7 +253,9 @@ pub fn parseCLI(allocator: std.mem.Allocator, _args: std.process.Args, io: std.I
                 allocator
             ),
             .buildInfo = .{
-                .backend = targetBackend,
+                .backend =
+                    if (cliFlags.contains("--debug")) .C
+                    else targetBackend,
                 .isDebug = cliFlags.contains("--debug"),
                 .optimization = @enumFromInt(
                     if (cliFlags.contains("--debug")) 0

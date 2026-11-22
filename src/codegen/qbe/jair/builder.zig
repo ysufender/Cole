@@ -67,7 +67,6 @@ pub fn fromJIR(jir: JIR.Base, allocator: Allocator, typechecker: *Typechecker) E
 
 pub fn build(self: *Builder) Error!JAIR {
     for (0..self.jir.types.len) |id| {
-        _ = try self.typeName(@intCast(id));
         _ = try self.convertType(@intCast(id));
     }
 
@@ -84,11 +83,16 @@ pub fn build(self: *Builder) Error!JAIR {
     typeNames.ensureTotalCapacity(self.allocator, @intCast(self.typeTable.len)) catch return Error.AllocatorFailure;
 
     for (0..self.jir.types.len) |id| {
-        const newType = self.typeMap.get(@intCast(id)).?;
+        const newType = self.typeMap.get(@intCast(id)) orelse return Error.ShouldBeImpossible;
 
-        const res = typeNames.getOrPutAssumeCapacity(newType);
-        if (!res.found_existing) {
-            res.value_ptr.* = try self.typeName(@intCast(id));
+        switch (self.typeTable.get(newType)) {
+            .Custom => {
+                const res = typeNames.getOrPutAssumeCapacity(newType);
+                if (!res.found_existing) {
+                    res.value_ptr.* = try self.typeName(@intCast(id));
+                }
+            },
+            else => {},
         }
     }
 
@@ -138,6 +142,7 @@ fn createJAIR(self: *Builder, nodePtr: JAIR.Ptr) Error!JAIR.Ptr {
         .Assignment => try self.assignment(node.value),
         .Call => try self.call(node.value),
         .Dereference => try self.dereference(node.value),
+        .Reference => try self.reference(node.value),
 
         .Exit, .TypeDef => res: {
             const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
@@ -158,8 +163,7 @@ fn createJAIR(self: *Builder, nodePtr: JAIR.Ptr) Error!JAIR.Ptr {
                     .value = 0,
                 });
                 break :res res;
-            }
-            else self.createJAIR(self.jir.data[node.value + 1]),
+            } else self.createJAIR(self.jir.data[node.value + 1]),
 
         else => res: {
             const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
@@ -171,6 +175,21 @@ fn createJAIR(self: *Builder, nodePtr: JAIR.Ptr) Error!JAIR.Ptr {
             break :res res;
         },
     };
+}
+
+fn reference(self: *Builder, ptr: JIR.Ptr) Error!JAIR.Ptr {
+    const previous = self.setFlag(.LValue, true);
+    defer _ = self.setFlag(.LValue, previous);
+
+    const operand = try self.createJAIR(ptr);
+
+    const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
+    self.nodes.set(res, .{
+        .type = try self.convertType(comptime Comptime.Folder.Builtin.Type("usize")),
+        .kind = .Reference,
+        .value = operand,
+    });
+    return res;
 }
 
 fn dereference(self: *Builder, value: defines.Offset) Error!JAIR.Ptr {
@@ -201,16 +220,13 @@ fn call(self: *Builder, value: defines.Offset) Error!JAIR.Ptr {
     const len = self.jir.data[value + 3];
 
     const start: u32 = @intCast(self.data.items.len);
-    _ = self.data.addManyAsSlice(self.allocator, len  + 3) catch return Error.AllocatorFailure;
+    _ = self.data.addManyAsSlice(self.allocator, len + 3) catch return Error.AllocatorFailure;
     self.data.items[start] = try self.convertType(self.jir.data[value]);
     self.data.items[start + 1] = try self.createJAIR(func);
     self.data.items[start + 2] = len;
 
     for (0..len) |idx| {
-        const arg = try self.createJAIR(
-            self.jir.data[value + 4 + idx]
-        );
-
+        const arg = try self.createJAIR(self.jir.data[value + 4 + idx]);
         self.data.items[start + 3 + idx] = arg;
     }
 
@@ -218,7 +234,7 @@ fn call(self: *Builder, value: defines.Offset) Error!JAIR.Ptr {
     self.nodes.set(res, .{
         .type = try self.convertType(self.jir.data[value]),
         .kind = .Call,
-        .value = start
+        .value = start,
     });
     return res;
 }
@@ -226,7 +242,7 @@ fn call(self: *Builder, value: defines.Offset) Error!JAIR.Ptr {
 fn assignment(self: *Builder, value: defines.Offset) Error!JAIR.Ptr {
     const lhs = lhs: {
         const prev = self.setFlag(.LValue, true);
-        defer _ =self.setFlag(.LValue, prev);
+        defer _ = self.setFlag(.LValue, prev);
         break :lhs try self.createJAIR(self.jir.data[value]);
     };
     const rhs = try self.createJAIR(self.jir.data[value + 1]);
@@ -239,7 +255,7 @@ fn assignment(self: *Builder, value: defines.Offset) Error!JAIR.Ptr {
     self.nodes.set(res, .{
         .type = self.nodes.items(.type)[lhs],
         .kind = .Store,
-        .value = start
+        .value = start,
     });
     return res;
 }
@@ -258,7 +274,7 @@ fn identifier(self: *Builder, value: defines.Offset) Error!JAIR.Ptr {
     self.nodes.set(res, .{
         .type = valueType,
         .kind = .Identifier,
-        .value = start
+        .value = start,
     });
     return res;
 }
@@ -277,7 +293,7 @@ fn phi(self: *Builder, value: defines.Offset) Error!JAIR.Ptr {
     self.nodes.set(res, .{
         .type = self.nodes.get(then).type,
         .kind = .Phi,
-        .value = start
+        .value = start,
     });
     return res;
 }
@@ -294,7 +310,7 @@ fn commonBinary(self: *Builder, comptime kind: @EnumLiteral(), value: defines.Of
     self.nodes.set(res, .{
         .type = self.nodes.get(lhs).type,
         .kind = kind,
-        .value = start
+        .value = start,
     });
     return res;
 }
@@ -321,7 +337,7 @@ fn cjump(self: *Builder, value: defines.Offset) Error!JAIR.Ptr {
     self.nodes.set(res, .{
         .type = 0,
         .kind = .JumpIf,
-        .value = start
+        .value = start,
     });
     return res;
 }
@@ -331,20 +347,20 @@ fn jump(self: *Builder, value: defines.StringPtr) Error!JAIR.Ptr {
     self.nodes.set(res, .{
         .type = 0,
         .kind = .Jump,
-        .value = value
+        .value = value,
     });
     return res;
 }
 
 fn not(self: *Builder, value: JIR.Ptr) Error!JAIR.Ptr {
-    // @Beware booleans are not 1 or 0, they are 255 or 0 so inverting them is the same as not-ing them.
+    // Booleans are represented as 255 or 0, so bitwise inversion is logical not.
     const rhs = try self.createJAIR(value);
 
     const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
     self.nodes.set(res, .{
         .type = self.nodes.items(.type)[rhs],
         .kind = .Not,
-        .value = rhs
+        .value = rhs,
     });
     return res;
 }
@@ -356,7 +372,7 @@ fn negation(self: *Builder, value: JIR.Ptr) Error!JAIR.Ptr {
     self.nodes.set(res, .{
         .type = self.nodes.items(.type)[rhs],
         .kind = .Negation,
-        .value = rhs
+        .value = rhs,
     });
     return res;
 }
@@ -366,7 +382,7 @@ fn label(self: *Builder, value: defines.StringPtr) Error!JAIR.Ptr {
     self.nodes.set(res, .{
         .type = 0,
         .kind = .Label,
-        .value = value
+        .value = value,
     });
     return res;
 }
@@ -395,7 +411,7 @@ fn @"return"(self: *Builder, value: defines.Offset) Error!JAIR.Ptr {
     self.nodes.set(res, .{
         .type = 0,
         .kind = .Return,
-        .value = start
+        .value = start,
     });
     return res;
 }
@@ -409,13 +425,8 @@ fn scope(self: *Builder, nodePtr: defines.Offset) Error!JAIR.Ptr {
     _ = self.data.addManyAsSlice(self.allocator, len + 2)
         catch return Error.AllocatorFailure;
 
-    // const stmts = self.allocator.alloc(JAIR.Ptr, len) catch return Error.AllocatorFailure;
-    // defer self.allocator.free(stmts);
     for (0..len) |idx| {
-        const child = try self.createJAIR(
-            self.jir.data[scopeVal + 2 + idx]
-        );
-
+        const child = try self.createJAIR(self.jir.data[scopeVal + 2 + idx]);
         self.data.items[start + 2 + idx] = child;
     }
 
@@ -426,7 +437,7 @@ fn scope(self: *Builder, nodePtr: defines.Offset) Error!JAIR.Ptr {
     self.nodes.set(res, .{
         .type = 0,
         .kind = .Scope,
-        .value = start
+        .value = start,
     });
     return res;
 }
@@ -454,19 +465,26 @@ fn functionDef(self: *Builder, fptr: JIR.Ptr) Error!JAIR.Ptr {
     self.nodes.set(nodePtr, .{
         .type = self.typeMap.get(function.signature).?,
         .kind = .FunctionDef,
-        .value = start
+        .value = start,
     });
     return nodePtr;
 }
 
 fn typeName(self: *Builder, id: TypeID) Error!defines.StringPtr {
-    const name = self.jir.typeNames.get(id).?;
+    const typeInfo = self.jir.types.get(id);
+    const name = self.typechecker.typenameMap.get(id) orelse {
+        common.log.err("Missing type name for type ID {d} ({s})", .{
+            id,
+            @tagName(std.meta.activeTag(typeInfo)),
+        });
+        return Error.ShouldBeImpossible;
+    };
 
     if (self.renamedStringMap.isSet(name)) {
         return name;
     }
 
-    const newName = newName: switch (self.jir.types.get(id)) {
+    const newName = newName: switch (typeInfo) {
         .Noreturn, .Any, .Type, .EnumLiteral, .ComptimeInt, .ComptimeFloat => "",
         .Void => |mut| if (mut) "mut_void" else "void",
         .Bool => |mut| if (mut) "mut_bool" else "bool",
@@ -482,32 +500,29 @@ fn typeName(self: *Builder, id: TypeID) Error!defines.StringPtr {
         .CUShort => |mut| if (mut) "mut_c_ushort" else "c_ushort",
         .Float => |mut| if (mut) "mut_float" else "float",
         .Integer => |int| switch (int.size) {
-            64 =>
-                if (int.signed and int.mutable) "mut_isize"
-                else if (int.signed) "isize"
-                else if (int.mutable) "mut_usize"
-                else "usize",
-            32 =>
-                if (int.signed and int.mutable) "mut_i32"
-                else if (int.signed) "i32"
-                else if (int.mutable) "mut_u32"
-                else "u32",
-            16 =>
-                if (int.signed and int.mutable) "mut_i16"
-                else if (int.signed) "i16"
-                else if (int.mutable) "mut_u16"
-                else "u16",
-            8 =>
-                if (int.signed and int.mutable) "mut_i8"
-                else if (int.signed) "i8"
-                else if (int.mutable) "mut_u8"
-                else "u8",
+            64 => if (int.signed and int.mutable) "mut_isize" else if (int.signed) "isize" else if (int.mutable) "mut_usize" else "usize",
+            32 => if (int.signed and int.mutable) "mut_i32" else if (int.signed) "i32" else if (int.mutable) "mut_u32" else "u32",
+            16 => if (int.signed and int.mutable) "mut_i16" else if (int.signed) "i16" else if (int.mutable) "mut_u16" else "u16",
+            8 => if (int.signed and int.mutable) "mut_i8" else if (int.signed) "i8" else if (int.mutable) "mut_u8" else "u8",
             else => return common.debug.ShouldBeImpossible(undefined, @src()),
         },
-        .Enum => |enm| if (enm.mutable) std.fmt.allocPrint(self.allocator, "mut_{s}", .{self.strings.items[enm.name]}) catch return Error.AllocatorFailure else self.strings.items[enm.name],
-        .Union => |uni| if (uni.mutable) std.fmt.allocPrint(self.allocator, "mut_{s}", .{self.strings.items[uni.name]}) catch return Error.AllocatorFailure else self.strings.items[uni.name],
-        .Struct => |str| if (str.mutable) std.fmt.allocPrint(self.allocator, "mut_{s}", .{self.strings.items[str.name]}) catch return Error.AllocatorFailure else self.strings.items[str.name],
-        .Array => |arr| std.fmt.allocPrint(self.allocator, "{s}Array_{d}_{s}", .{if (arr.mutable) "mut_" else "", arr.len, self.strings.items[try self.typeName(arr.child)]}) catch return Error.AllocatorFailure,
+        .Enum => |enm| if (enm.mutable)
+            std.fmt.allocPrint(self.allocator, "mut_{s}", .{self.strings.items[enm.name]}) catch return Error.AllocatorFailure
+        else
+            self.strings.items[enm.name],
+        .Union => |uni| if (uni.mutable)
+            std.fmt.allocPrint(self.allocator, "mut_{s}", .{self.strings.items[uni.name]}) catch return Error.AllocatorFailure
+        else
+            self.strings.items[uni.name],
+        .Struct => |str| if (str.mutable)
+            std.fmt.allocPrint(self.allocator, "mut_{s}", .{self.strings.items[str.name]}) catch return Error.AllocatorFailure
+        else
+            self.strings.items[str.name],
+        .Array => |arr| std.fmt.allocPrint(self.allocator, "{s}Array_{d}_{s}", .{
+            if (arr.mutable) "mut_" else "",
+            arr.len,
+            self.strings.items[try self.typeName(arr.child)],
+        }) catch return Error.AllocatorFailure,
         .Function => |func| {
             var len: u32 = 7;
             for (func.argTypes) |argt| {
@@ -515,24 +530,23 @@ fn typeName(self: *Builder, id: TypeID) Error!defines.StringPtr {
             }
             len += @intCast(self.strings.items[try self.typeName(func.returnType)].len);
 
-            const newName = self.allocator.alloc(u8, len) catch return Error.AllocatorFailure;
-            std.mem.copyForwards(u8, newName[0..5], "func_");
+            const generatedName = self.allocator.alloc(u8, len) catch return Error.AllocatorFailure;
+            std.mem.copyForwards(u8, generatedName[0..5], "func_");
 
             var index: u32 = 5;
             for (func.argTypes) |argt| {
                 const argName = self.strings.items[self.jir.typeNames.get(argt).?];
-                std.mem.copyForwards(u8, newName[index..], argName);
+                std.mem.copyForwards(u8, generatedName[index..], argName);
                 index += @intCast(argName.len + 1);
-                newName[index - 1] = '_';
+                generatedName[index - 1] = '_';
             }
 
             index += 2;
-            newName[index - 2] = '_';
-            newName[index - 1] = '_';
+            generatedName[index - 2] = '_';
+            generatedName[index - 1] = '_';
 
-            std.mem.copyForwards(u8, newName[index..], self.strings.items[self.jir.typeNames.get(func.returnType).?]);
-
-            break :newName newName;
+            std.mem.copyForwards(u8, generatedName[index..], self.strings.items[self.jir.typeNames.get(func.returnType).?]);
+            break :newName generatedName;
         },
         .Pointer => |ptr| switch (ptr.size) {
             .Slice => std.fmt.allocPrint(self.allocator, "{s}Slice_{s}", .{
@@ -554,22 +568,14 @@ fn typeName(self: *Builder, id: TypeID) Error!defines.StringPtr {
 
 fn constantType(self: *Builder, constant: JAIR.Constant.Ptr) TypeID {
     return switch (self.constants.get(constant)) {
-        .Byte => |v|
-            if (v.@"1") self.typeMap.get(comptime Comptime.Folder.Builtin.Type("i8")).?
-            else self.typeMap.get(comptime Comptime.Folder.Builtin.Type("u8")).?,
+        .Byte => |v| if (v.@"1") self.typeMap.get(comptime Comptime.Folder.Builtin.Type("i8")).? else self.typeMap.get(comptime Comptime.Folder.Builtin.Type("u8")).?,
         .Double => self.typeMap.get(comptime Comptime.Folder.Builtin.Type("c_double")).?,
         .Single => self.typeMap.get(comptime Comptime.Folder.Builtin.Type("float")).?,
         .Function => self.typeMap.get(comptime Comptime.Folder.Builtin.Type("usize")).?,
-        .Word => |v|
-            if (v.@"1") self.typeMap.get(comptime Comptime.Folder.Builtin.Type("i32")).?
-            else self.typeMap.get(comptime Comptime.Folder.Builtin.Type("u32")).?,
+        .Word => |v| if (v.@"1") self.typeMap.get(comptime Comptime.Folder.Builtin.Type("i32")).? else self.typeMap.get(comptime Comptime.Folder.Builtin.Type("u32")).?,
         .Nop => self.typeMap.get(comptime Comptime.Folder.Builtin.Type("void")).?,
-        .Half => |v|
-            if (v.@"1") self.typeMap.get(comptime Comptime.Folder.Builtin.Type("c_short")).?
-            else self.typeMap.get(comptime Comptime.Folder.Builtin.Type("c_ushort")).?,
-        .Long => |v|
-            if (v.@"1") self.typeMap.get(comptime Comptime.Folder.Builtin.Type("isize")).?
-            else self.typeMap.get(comptime Comptime.Folder.Builtin.Type("usize")).?,
+        .Half => |v| if (v.@"1") self.typeMap.get(comptime Comptime.Folder.Builtin.Type("c_short")).? else self.typeMap.get(comptime Comptime.Folder.Builtin.Type("c_ushort")).?,
+        .Long => |v| if (v.@"1") self.typeMap.get(comptime Comptime.Folder.Builtin.Type("isize")).? else self.typeMap.get(comptime Comptime.Folder.Builtin.Type("usize")).?,
         .String => self.typeMap.get(comptime Comptime.Folder.Builtin.Type("[]u8")).?,
         .Aggregate => |agg| agg.Type,
     };
@@ -587,18 +593,15 @@ fn convertConstant(self: *Builder, constant: JIR.Constant.Ptr) Error!JAIR.Consta
             .u32 => |integer| .{ .Word = .{ @bitCast(integer), false } },
             .c_int => |integer| .{ .Word = .{ @bitCast(integer), true } },
             .c_uint => |integer| .{ .Word = .{ @bitCast(integer), false } },
-
             .i8 => |integer| .{ .Byte = .{ @bitCast(integer), true } },
             .u8 => |integer| .{ .Byte = .{ @bitCast(integer), false } },
             .c_char => |integer| .{ .Byte = .{ @bitCast(integer), true } },
             .c_uchar => |integer| .{ .Byte = .{ @bitCast(integer), false } },
-
             .c_long => |integer| .{ .Long = .{ @bitCast(integer), true } },
             .c_ulong => |integer| .{ .Long = .{ @bitCast(integer), false } },
             .c_size => |integer| .{ .Long = .{ @bitCast(integer), true } },
-
-            .c_short => |integer| .{ .Half = .{ @bitCast(integer) , true } },
-            .c_ushort => |integer| .{ .Half = .{ @bitCast(integer) , false } },
+            .c_short => |integer| .{ .Half = .{ @bitCast(integer), true } },
+            .c_ushort => |integer| .{ .Half = .{ @bitCast(integer), false } },
         },
         .Float => |f| switch (f) {
             .f32 => |v| .{ .Single = v },
@@ -615,7 +618,6 @@ fn convertConstant(self: *Builder, constant: JIR.Constant.Ptr) Error!JAIR.Consta
             for (init, 0..) |*elem, i| {
                 elem.* = try self.convertConstant(arr.data.at(@intCast(i)));
             }
-
             break :arr .{
                 .Aggregate = .{
                     .Type = try self.convertType(arr.type),
@@ -623,14 +625,12 @@ fn convertConstant(self: *Builder, constant: JIR.Constant.Ptr) Error!JAIR.Consta
                 },
             };
         },
-
         .Aggregate => |agg| agg: {
             const init = self.allocator.alloc(JAIR.Constant.Ptr, agg.data.len())
                 catch return Error.AllocatorFailure;
             for (init, 0..) |*elem, i| {
                 elem.* = try self.convertConstant(agg.data.at(@intCast(i)));
             }
-
             break :agg .{
                 .Aggregate = .{
                     .Type = try self.convertType(agg.type),
@@ -638,14 +638,11 @@ fn convertConstant(self: *Builder, constant: JIR.Constant.Ptr) Error!JAIR.Consta
                 },
             };
         },
-
         .Undefined => |t| switch (self.jir.types.get(t)) {
             .Pointer => .{ .Long = .{ 0, false } },
             else => .{ .Nop = {} },
         },
-
-        .Type,
-        .Void => .{ .Nop = {} },
+        .Type, .Void => .{ .Nop = {} },
     });
 
     return ptr;
@@ -660,8 +657,8 @@ fn convertType(self: *Builder, id: TypeID) Error!TypeID {
         .Type, .Any, .EnumLiteral => .{ .Void = {} },
         .Void, .Noreturn => .{ .Void = {} },
         .Bool, .CUChar => .{ .Byte = false },
-        .CChar, => .{ .Byte = true },
-        .ComptimeFloat, .CDouble => .{ .Double = {} },
+        .CChar => .{ .Byte = true },
+        .CDouble, .ComptimeFloat => .{ .Double = {} },
         .Float => .{ .Single = {} },
         .CInt => .{ .Word = true },
         .Enum, .CUInt => .{ .Word = false },
@@ -670,21 +667,17 @@ fn convertType(self: *Builder, id: TypeID) Error!TypeID {
         .CShort => .{ .Half = true },
         .CUShort => .{ .Half = false },
         .Pointer => |ptr| switch (ptr.size) {
-            .Slice => JAIR.Type{
-                .Custom = .{
-                    .Aggregate = .{
-                        .name = try self.typeName(id),
-                        .size = try self.byteSize(id),
-                        .alignment = try self.typechecker.alignOf(id),
-                        .fields = fields: {
-                            const fields = self.allocator.alloc(TypeID, 2) catch return Error.AllocatorFailure;
-                            fields[0] = try self.convertType(comptime Comptime.Folder.Builtin.Type("usize"));
-                            fields[1] = try self.convertType(comptime Comptime.Folder.Builtin.Type("u32"));
-                            break :fields fields;
-                        },
-                    },
+            .Slice => JAIR.Type{ .Custom = .{ .Aggregate = .{
+                .name = try self.typeName(id),
+                .size = try self.byteSize(id),
+                .alignment = try self.typechecker.alignOf(id),
+                .fields = fields: {
+                    const fields = self.allocator.alloc(TypeID, 2) catch return Error.AllocatorFailure;
+                    fields[0] = try self.convertType(comptime Comptime.Folder.Builtin.Type("usize"));
+                    fields[1] = try self.convertType(comptime Comptime.Folder.Builtin.Type("u32"));
+                    break :fields fields;
                 },
-            },
+            } } },
             else => .{ .Long = false },
         },
         .Integer => |int| switch (int.size) {
@@ -694,46 +687,31 @@ fn convertType(self: *Builder, id: TypeID) Error!TypeID {
             8 => .{ .Byte = int.signed },
             else => unreachable,
         },
-        .Array => .{
-            .Custom = .{
-                .Opaque = .{
-                    .name = try self.typeName(id),
-                    .alignment = try self.typechecker.alignOf(id),
-                    .size = try self.byteSize(id),
-                }
-            },
-        },
-        .Union => |uni|
-            if (uni.isTagged) JAIR.Type{
-                .Custom = .{
-                    .Aggregate = .{
-                        .name = try self.typeName(id),
-                        .alignment = try self.typechecker.alignOf(id),
-                        .size = try self.byteSize(id),
-                        .fields = try self.convertFields(uni.fields),
-                    },
-                },
-            }
-            else .{
-                .Custom = .{
-                    .Union = .{
-                        .name = try self.typeName(id),
-                        .alignment = try self.typechecker.alignOf(id),
-                        .size = try self.byteSize(id),
-                        .fields = try self.convertFields(uni.fields),
-                    }
-                }
-            },
-        .Struct => |str| .{
-            .Custom = .{
-                .Aggregate = .{
-                    .name = try self.typeName(id),
-                    .alignment = try self.typechecker.alignOf(id),
-                    .size = try self.byteSize(id),
-                    .fields = try self.convertFields(str.fields),
-                }
-            }
-        }
+        .Array => .{ .Custom = .{ .Opaque = .{
+            .name = try self.typeName(id),
+            .alignment = try self.typechecker.alignOf(id),
+            .size = try self.byteSize(id),
+        } } },
+        .Union => |uni| if (uni.isTagged)
+            JAIR.Type{ .Custom = .{ .Aggregate = .{
+                .name = try self.typeName(id),
+                .alignment = try self.typechecker.alignOf(id),
+                .size = try self.byteSize(id),
+                .fields = try self.convertFields(uni.fields),
+            } } }
+        else
+            .{ .Custom = .{ .Union = .{
+                .name = try self.typeName(id),
+                .alignment = try self.typechecker.alignOf(id),
+                .size = try self.byteSize(id),
+                .fields = try self.convertFields(uni.fields),
+            } } },
+        .Struct => |str| .{ .Custom = .{ .Aggregate = .{
+            .name = try self.typeName(id),
+            .alignment = try self.typechecker.alignOf(id),
+            .size = try self.byteSize(id),
+            .fields = try self.convertFields(str.fields),
+        } } },
     };
 
     const res: u32 = @intCast(self.typeTable.addOneAssumeCapacity());
