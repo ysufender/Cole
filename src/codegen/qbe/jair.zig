@@ -286,17 +286,22 @@ fn generateStatement(self: *JAIR, out: *Writer, nodePtr: Ptr) Error!void {
             const tmp = self.temp;
             defer self.temp = tmp;
 
-            const isExported = self.data[node.value] == 1;
-            const name = self.strings[self.data[node.value + 1]];
-            const returnType = self.data[node.value + 2];
-            const argLen = self.data[node.value + 3];
-            const body = self.data[node.value + 4 + argLen * 2];
+            const isExtern = self.data[node.value] == 1;
+            if (isExtern) {
+                return;
+            }
+
+            const isExported = self.data[node.value + 1] == 1;
+            const name = self.strings[self.data[node.value + 2]];
+            const returnType = self.data[node.value + 3];
+            const argLen = self.data[node.value + 4];
+            const body = self.data[node.value + 5 + argLen * 2];
 
             try self.write(true, out, "{s}function ", .{if (isExported) "export " else ""});
             try self.typeString(out, returnType);
             try self.write(false, out, " ${s}(", .{name});
             for (0..argLen) |idx| {
-                const offset = node.value + 4 + idx * 2;
+                const offset = node.value + 5 + idx * 2;
                 const argType = self.data[offset];
                 const argName = self.data[offset + 1];
 
@@ -309,7 +314,7 @@ fn generateStatement(self: *JAIR, out: *Writer, nodePtr: Ptr) Error!void {
             }
             try self.write(false, out, ") {{\n@start\n", .{});
             for (0..argLen) |idx| {
-                const offset = node.value + 4 + idx * 2;
+                const offset = node.value + 5 + idx * 2;
                 const argType = self.data[offset];
                 const argName = self.data[offset + 1];
 
@@ -450,9 +455,12 @@ fn generateExpr(self: *JAIR, out: *Writer, ptr: Ptr) Error!u32 {
 
         .Store, .Code, .FunctionDef, .VariableDef, .Exit, .JumpIf, .Jump, .Label, .Return, .Scope => return Error.ShouldBeImpossible,
 
-        else => |unr| {
-            common.log.debug("Unreachable {s}", .{@tagName(unr)});
-            return common.debug.ShouldBeImpossible(undefined, @src());
+        else => |kind| {
+            common.log.err(
+                "Unsupported JAIR expression: {s}, type ID: {d}",
+                .{ @tagName(kind), node.type },
+            );
+            return Error.ShouldBeImpossible;
         },
     }
 }

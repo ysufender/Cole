@@ -165,14 +165,12 @@ fn createJAIR(self: *Builder, nodePtr: JAIR.Ptr) Error!JAIR.Ptr {
                 break :res res;
             } else self.createJAIR(self.jir.data[node.value + 1]),
 
-        else => res: {
-            const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
-            self.nodes.set(res, .{
-                .type = 0,
-                .kind = .Nop,
-                .value = 0,
-            });
-            break :res res;
+        else => {
+            common.log.err(
+                "Unsupported JIR node: {s}",
+                .{@tagName(node.type)},
+            );
+            return Error.ShouldBeImpossible;
         },
     };
 }
@@ -451,6 +449,7 @@ fn functionDef(self: *Builder, fptr: JIR.Ptr) Error!JAIR.Ptr {
     const body = try self.createJAIR(function.body);
 
     const start: u32 = @intCast(self.data.items.len);
+    self.data.append(self.allocator, if (self.jir.hasMetadata(fptr, "@extern")) 1 else 0) catch return Error.AllocatorFailure;
     self.data.append(self.allocator, if (self.jir.hasMetadata(fptr, "@export")) 1 else 0) catch return Error.AllocatorFailure;
     self.data.append(self.allocator, function.name) catch return Error.AllocatorFailure;
     self.data.append(self.allocator, try self.convertType(signature.returnType)) catch return Error.AllocatorFailure;

@@ -4199,6 +4199,10 @@ pub fn sizeOf(self: *Typechecker, of: TypeID) Error!u32 {
         .ComptimeInt => @bitSizeOf(i64),
         .Struct => |str| {
             {
+                const prevs = self.currentFile;
+                self.currentFile = str.source;
+                defer self.currentFile = prevs;
+
                 if (!str.isTuple and str.expr != 0) {
                     if (self.metadataIndex(str.expr, "@opaque")) |index| {
                         const meta = self.getMetadata(str.expr).?;
