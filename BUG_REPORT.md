@@ -58,15 +58,18 @@ otherwise the Testy tests must be improved.
 
 ### Reproduction --
 
-...
+- **TC_10** — Call `Token.errIdentifier` on a token in the final line of a file without a trailing newline.
+- **TC_12** — Call `Token.toString` on the `let` keyword at line 10000, column 1.
 
 ### Expected --
 
-...
+- **TC_10** — The full final line.
+- **TC_12** — `<Let: let at (10000:1)>`.
 
 ### Received --
 
-...
+- **TC_10** — An empty string.
+- **TC_12** — Token formatting panics because the buffer is too small.
 
 ## $open -- README and Other Documentation Files -- #55 -- @ysufender --
 
