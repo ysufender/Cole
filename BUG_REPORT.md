@@ -67,7 +67,7 @@ otherwise the Testy tests must be improved.
 
 <ul>
     <li>TC_10 — The full final line.</li>
-    <li>TC_12 — `<Let: let at (10000:1)>`.</li>
+    <li>TC_12 — <code>\<Let: let at (10000:1)\></code>.</li>
 </ul>
 
 ### Received --
