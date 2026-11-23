@@ -208,3 +208,12 @@ fn panicHandler(msg: []const u8, stack: ?usize) noreturn {
     common.debug.stackTrace(stack, &stderr);
     std.process.exit(1);
 }
+
+
+//===========
+// Test
+//===========
+
+test {
+    _ = @import("lexer/lexer.zig");
+}

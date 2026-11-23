@@ -19,7 +19,11 @@ var targets = [_]std.Target.Query{
     .{ .os_tag = .windows, .cpu_arch = .x86_64, .abi = .gnu },
     .{ .os_tag = .linux,   .cpu_arch = .x86_64, .abi = .gnu },
 };
-
+const Config = enum {
+    debug,
+    fast,
+    safe,
+};
 const version = std.SemanticVersion{
     .major = 0,
     .minor = 1,
@@ -42,19 +46,40 @@ pub fn build(b: *std.Build) void {
 
 fn addTestStep(b: *std.Build) void {
     const opts = b.addOptions();
+    const efile_config = b.option(Config, "config", "Add config to the efile test") orelse  .debug;
     opts.addOption(bool, "isDebug", true);
     opts.addOption([]const u8, "version", "test");
+    opts.addOption([]const u8, "config", @tagName(efile_config));
 
     opts.addOption(bool, "record", false);
 
     const runTests = b.addSystemCommand(&.{
         "efile",
+        @tagName(efile_config),
         if (b.option(bool, "record", "Run Testy in record mode") orelse false) "record" else "run",
     });
+    for (runTests.argv.items, 0..) |arg, i| {
+    switch (arg) {
+        .bytes => |bytes| std.debug.print("arg[{d}]: {s}\n", .{ i, bytes }),
+        else => std.debug.print("arg[{d}]: <generated file/lazy path>\n", .{i}),
+    }
+}
     runTests.setCwd(.{ .cwd_relative = "tests/" });
+
+    const unit_test = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main.zig"),
+            .target = b.graph.host,
+            .optimize = .debug,
+        }),
+    });
+    unit_test.root_module.addOptions("config", opts);
+
+    const run_unit_tests = b.addRunArtifact(unit_test);
 
     const step = b.step("test", "Run unit tests reachable from src/main.zig");
     step.dependOn(&runTests.step);
+    step.dependOn(&run_unit_tests.step);
 }
 
 fn buildCompiler(b: *std.Build) void {
