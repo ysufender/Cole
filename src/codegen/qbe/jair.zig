@@ -111,6 +111,7 @@ pub const Node = struct {
         Negation,
         Code,
         Mod,
+        StatementExpr,
     };
 
     type: TypeID,
@@ -395,13 +396,13 @@ fn generateStatement(self: *JAIR, out: *Writer, nodePtr: Ptr) Error!void {
 
                 if (self.sizeOf(argType) == 0) continue;
 
-                try self.write(true, out, "%__param_{s} =l alloc{d} {d}\n", .{
-                    self.strings[argName],
-                    self.allocAlignment(argType),
-                    self.sizeOf(argType),
-                });
-
                 if (self.isScalar(argType)) {
+                    try self.write(true, out, "%__param_{s} =l alloc{d} {d}\n", .{
+                        self.strings[argName],
+                        self.allocAlignment(argType),
+                        self.sizeOf(argType),
+                    });
+
                     try self.write(true, out, "store", .{});
                     try self.storeTypeString(out, argType);
                     try self.write(false, out, " %{s}, %__param_{s}\n", .{
@@ -410,11 +411,7 @@ fn generateStatement(self: *JAIR, out: *Writer, nodePtr: Ptr) Error!void {
                     });
                 }
                 else {
-                    try self.write(true, out, "blit %{s}, %__param_{s}, {d}\n", .{
-                        self.strings[argName],
-                        self.strings[argName],
-                        self.sizeOf(argType),
-                    });
+                    try self.write(true, out, "%__param_{s} =l copy %{s}\n", .{self.strings[argName], self.strings[argName]});
                 }
             }
 
@@ -591,6 +588,7 @@ fn generateExpr(self: *JAIR, out: *Writer, ptr: Ptr) Error!u32 {
         .Call => return self.call(out, &node),
         .Load => return self.load(out, &node),
         .Reference => return self.reference(out, &node),
+        .StatementExpr => return self.stmtExpr(out, &node),
 
         .Store,
         .Code,
@@ -614,6 +612,17 @@ fn generateExpr(self: *JAIR, out: *Writer, ptr: Ptr) Error!u32 {
     }
 }
 
+fn stmtExpr(self: *JAIR, out: *Writer, node: *const Node) Error!u32 {
+    const final = self.data[node.value];
+    const len = self.data[node.value + 1];
+
+    for (0..len) |idx| {
+        try self.generateStatement(out, self.data[node.value + 2 + idx]);
+    }
+
+    return try self.generateExpr(out, final);
+}
+
 fn reference(self: *JAIR, out: *Writer, node: *const Node) Error!u32 {
     return self.generateExpr(out, node.value);
 }
@@ -624,7 +633,7 @@ fn load(self: *JAIR, out: *Writer, node: *const Node) Error!u32 {
 
     const ptr = try self.generateExpr(out, expr);
 
-    if (lvalue) return ptr;
+    if (lvalue or !self.isScalar(node.type)) return ptr;
 
     const res = self.allocTmp();
 
@@ -653,7 +662,7 @@ fn call(self: *JAIR, out: *Writer, node: *const Node) Error!u32 {
     const argStart = node.value + 3;
 
     for (0..len) |idx| {
-        const arg = self.data[argStart + idx];
+        const arg = self.data[argStart + len - 1 - idx];
 
         try params.push(.{
             .id = try self.generateExpr(out, arg),
@@ -733,7 +742,7 @@ fn identifier(self: *JAIR, out: *Writer, node: *const Node) Error!u32 {
             name,
         });
 
-        if (!lvalue) {
+        if (!lvalue and self.isScalar(valueType)) {
             const loaded = self.allocTmp();
 
             try self.write(true, out, "%__tmp{d} =", .{loaded});
@@ -753,7 +762,7 @@ fn identifier(self: *JAIR, out: *Writer, node: *const Node) Error!u32 {
     else
         name;
 
-    if (lvalue) {
+    if (lvalue or !self.isScalar(valueType)) {
         try self.write(true, out, "%__tmp{d} =l copy %{s}\n", .{
             res,
             symbol,

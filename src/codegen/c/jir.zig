@@ -903,9 +903,9 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
             try self.write(out, ";\n", .{});
         },
         .Dot => {
-            try self.operation(out, self.data[node.value]);
+            try self.operation(out, self.data[node.value + 1]);
             try self.write(out, ".{s}", .{
-                self.strings[self.data[node.value + 1]],
+                self.strings[self.data[node.value + 2]],
             });
         },
         .Grouping => {

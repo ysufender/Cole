@@ -16,6 +16,11 @@ const JAIR = @import("../jair.zig");
 pub const TypeTable = std.MultiArrayList(JAIR.Type);
 pub const Constants = std.MultiArrayList(JAIR.Constant);
 
+const FieldLayout = struct {
+    offset: u32,
+    type: TypeID
+};
+
 const FlagMap = std.bit_set.Static(8);
 
 const Flags = enum(u8) {
@@ -39,6 +44,7 @@ data: std.ArrayList(u32),
 allocator: Allocator,
 typechecker: *Typechecker,
 constants: Constants,
+constMap: collections.HashMap(JIR.Constant.Ptr, JAIR.Constant.Ptr),
 flags: FlagMap,
 
 pub fn fromJIR(jir: JIR.Base, allocator: Allocator, typechecker: *Typechecker) Error!Builder {
@@ -49,6 +55,9 @@ pub fn fromJIR(jir: JIR.Base, allocator: Allocator, typechecker: *Typechecker) E
         catch return Error.AllocatorFailure;
     strings.appendSliceAssumeCapacity(jir.strings);
 
+    var constMap = collections.HashMap(JIR.Constant.Ptr, JAIR.Constant.Ptr).empty;
+    constMap.ensureTotalCapacity(allocator, @intCast(jir.constants.len)) catch return Error.AllocatorFailure;
+
     return .{
         .jir = jir,
         .nodes = try JAIR.Node.List.init(allocator, jir.nodes.len),
@@ -57,6 +66,7 @@ pub fn fromJIR(jir: JIR.Base, allocator: Allocator, typechecker: *Typechecker) E
         .typeTable = TypeTable.initCapacity(allocator, jir.types.len) catch return Error.AllocatorFailure,
         .renamedStringMap = std.bit_set.Dynamic.initEmpty(allocator, jir.strings.len) catch return Error.AllocatorFailure,
         .constants = Constants.initCapacity(allocator, jir.constants.len) catch return Error.AllocatorFailure,
+        .constMap = constMap,
         .flags = FlagMap.empty,
         .typeMap = typeMap,
         .strings = strings,
@@ -143,6 +153,8 @@ fn createJAIR(self: *Builder, nodePtr: JAIR.Ptr) Error!JAIR.Ptr {
         .Call => try self.call(node.value),
         .Dereference => try self.dereference(node.value),
         .Reference => try self.reference(node.value),
+        .Dot => try self.dot(node.value),
+        .StatementExpr => try self.stmtExpr(node.value),
 
         .Exit, .TypeDef => res: {
             const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
@@ -173,6 +185,90 @@ fn createJAIR(self: *Builder, nodePtr: JAIR.Ptr) Error!JAIR.Ptr {
             return Error.ShouldBeImpossible;
         },
     };
+}
+
+fn stmtExpr(self: *Builder, value: defines.Offset) Error!JAIR.Ptr {
+    const final = self.jir.data[value];
+    const stmtsLen = self.jir.data[value + 1];
+
+    const start: u32 = @intCast(self.data.items.len);
+    _ = self.data.addManyAsSlice(self.allocator, stmtsLen + 2) catch return Error.AllocatorFailure;
+    self.data.items[start] = try self.createJAIR(final);
+    self.data.items[start + 1] = stmtsLen;
+    for (0..stmtsLen) |idx| {
+        self.data.items[start + 2 + idx] = try self.createJAIR(self.jir.data[value + 2 + idx]);
+    }
+
+    const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
+    self.nodes.set(res, .{
+        .type = self.nodes.items(.type)[self.data.items[start]],
+        .kind = .StatementExpr,
+        .value = start,
+    });
+    return res;
+}
+
+fn dot(self: *Builder, value: defines.Offset) Error!JAIR.Ptr {
+    const objType = self.jir.data[value];
+    const fieldName = self.jir.data[value + 2];
+    const wantAddress = self.getFlag(.LValue);
+
+    var recvType = objType;
+    var derefReceiver = false;
+    switch (self.jir.types.get(objType)) {
+        .Pointer => |ptr| if (ptr.size != .Slice) {
+            recvType = ptr.child;
+            derefReceiver = true;
+        },
+        else => {},
+    }
+
+    const obj = blk: {
+        const prev = self.setFlag(.LValue, !derefReceiver);
+        defer _ = self.setFlag(.LValue, prev);
+        break :blk try self.createJAIR(self.jir.data[value + 1]);
+    };
+
+    const field: FieldLayout = switch (self.jir.types.get(recvType)) {
+        .Pointer => |ptr| blk: {
+            if (ptr.size != .Slice) {
+                common.log.err("Field access on non-slice pointer child", .{});
+                return Error.ShouldBeImpossible;
+            }
+            const isLen = std.mem.eql(u8, self.jir.strings[fieldName], "len");
+            break :blk FieldLayout{
+                .offset = if (isLen) 8 else 0,
+                .type = if (isLen)
+                    comptime Comptime.Folder.Builtin.Type("u32")
+                else
+                    comptime Comptime.Folder.Builtin.Type("usize"),
+            };
+        },
+        .Struct => |str| try self.fieldLayout(str.fields, fieldName, true),
+        .Union => |uni| blk: {
+            if (uni.isTagged) {
+                common.log.err("Field access on tagged unions is not implemented", .{});
+                return Error.ShouldBeImpossible;
+            }
+            break :blk try self.fieldLayout(uni.fields, fieldName, false);
+        },
+        else => return common.debug.ShouldBeImpossible(undefined, @src()),
+    };
+
+    const addr = try self.offsetPtr(obj, field.offset);
+    const fieldType = try self.convertType(field.type);
+
+    const asAddress = wantAddress or
+        self.typeTable.get(fieldType) == .Custom or
+        (try self.byteSize(field.type)) == 0;
+
+    const start: u32 = @intCast(self.data.items.len);
+    self.data.append(self.allocator, @intFromBool(asAddress)) catch return Error.AllocatorFailure;
+    self.data.append(self.allocator, addr) catch return Error.AllocatorFailure;
+
+    const res: u32 = @intCast(self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure);
+    self.nodes.set(res, .{ .type = fieldType, .kind = .Load, .value = start });
+    return res;
 }
 
 fn reference(self: *Builder, ptr: JIR.Ptr) Error!JAIR.Ptr {
@@ -590,17 +686,20 @@ fn constantType(self: *Builder, constant: JAIR.Constant.Ptr) TypeID {
         .Nop => self.typeMap.get(comptime Comptime.Folder.Builtin.Type("void")).?,
         .Half => |v| if (v.@"1") self.typeMap.get(comptime Comptime.Folder.Builtin.Type("c_short")).? else self.typeMap.get(comptime Comptime.Folder.Builtin.Type("c_ushort")).?,
         .Long => |v| if (v.@"1") self.typeMap.get(comptime Comptime.Folder.Builtin.Type("isize")).? else self.typeMap.get(comptime Comptime.Folder.Builtin.Type("usize")).?,
-        .String => self.typeMap.get(comptime Comptime.Folder.Builtin.Type("[]u8")).?,
+        .String => |s| switch (s) {
+            .C => self.typeMap.get(comptime Comptime.Folder.Builtin.Type("usize")).?,
+            .Cole => self.typeMap.get(comptime Comptime.Folder.Builtin.Type("[]u8")).?,
+        },
         .Aggregate => |agg| agg.Type,
     };
 }
 
 fn convertConstant(self: *Builder, constant: JIR.Constant.Ptr) Error!JAIR.Constant.Ptr {
-    const ptr: u32 = @intCast(self.constants.len);
-    if (constant < ptr) {
-        return constant;
+    if (self.constMap.get(constant)) |c| {
+        return c;
     }
 
+    const ptr: u32 = @intCast(self.constants.len);
     self.constants.appendAssumeCapacity(switch (self.jir.constants.get(constant)) {
         .Integer => |int| switch (int) {
             .i32 => |integer| .{ .Word = .{ @bitCast(integer), true } },
@@ -658,6 +757,9 @@ fn convertConstant(self: *Builder, constant: JIR.Constant.Ptr) Error!JAIR.Consta
         },
         .Type, .Void => .{ .Nop = {} },
     });
+
+    self.constMap.put(self.allocator, constant, ptr)
+        catch return Error.AllocatorFailure;
 
     return ptr;
 }
@@ -752,6 +854,48 @@ fn convertFields(self: *Builder, fields: anytype) Error![]const TypeID {
         idx += 1;
     }
     return out;
+}
+
+fn fieldLayout(self: *Builder, fields: anytype, fieldName: defines.StringPtr, sequential: bool) Error!FieldLayout {
+    var offset: u32 = 0;
+    for (fields) |field| {
+        const size = try self.byteSize(field.valueType);
+        const isTarget = std.mem.eql(u8, self.jir.strings[field.name], self.jir.strings[fieldName]);
+
+        if (size == 0) {
+            if (isTarget) return .{ .offset = offset, .type = field.valueType };
+            continue;
+        }
+
+        const a: u32 = @max(1, @as(u32, @intCast(try self.typechecker.alignOf(field.valueType))));
+        const at: u32 = if (sequential) std.mem.alignForward(u32, offset, a) else 0;
+
+        if (isTarget) return .{ .offset = at, .type = field.valueType };
+        if (sequential) offset = at + size;
+    }
+
+    common.log.err("No field '{s}' found while lowering field access", .{self.jir.strings[fieldName]});
+    return Error.ShouldBeImpossible;
+}
+
+fn offsetPtr(self: *Builder, base: JAIR.Ptr, offset: u32) Error!JAIR.Ptr {
+    if (offset == 0) return base;
+
+    const usizeType = try self.convertType(comptime Comptime.Folder.Builtin.Type("usize"));
+
+    const constant: u32 = @intCast(self.constants.addOne(self.allocator) catch return Error.AllocatorFailure);
+    self.constants.set(constant, .{ .Long = .{ offset, false } });
+
+    const offLit: u32 = @intCast(self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure);
+    self.nodes.set(offLit, .{ .kind = .Literal, .type = usizeType, .value = constant });
+
+    const start: u32 = @intCast(self.data.items.len);
+    self.data.append(self.allocator, base) catch return Error.AllocatorFailure;
+    self.data.append(self.allocator, offLit) catch return Error.AllocatorFailure;
+
+    const res: u32 = @intCast(self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure);
+    self.nodes.set(res, .{ .type = usizeType, .kind = .Add, .value = start });
+    return res;
 }
 
 pub fn setFlag(self: *Builder, comptime flag: Flags, bit: bool) bool {

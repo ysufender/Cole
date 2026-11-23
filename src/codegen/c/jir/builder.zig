@@ -313,7 +313,8 @@ pub fn negate(self: *Builder, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonSi
 
 pub fn dot(self: *Builder, object: JIR.Ptr, field: StringPtr, objType: TypeID) Error!JIR.Ptr {
     if (self.typechecker.getFlag(.LValue) or self.nodes.get(object).type == .Identifier) {
-        return self.commonBinary(.Dot,
+        return self.commonTernary(.Dot,
+            objType,
             switch (self.typechecker.typeTable.get(objType)) {
                 .Pointer => |ptr| switch (ptr.size) {
                     .Slice => object,
@@ -335,7 +336,7 @@ pub fn dot(self: *Builder, object: JIR.Ptr, field: StringPtr, objType: TypeID) E
         else => self.identifier(objName, 0, objType),
     };
 
-    const access = try self.commonBinary(.Dot, objIdent, field);
+    const access = try self.commonTernary(.Dot, objType, objIdent, field);
 
     return switch (self.typechecker.typeTable.get(objType)) {
         .Union => self.stmtExpr(access, &.{objDef}),

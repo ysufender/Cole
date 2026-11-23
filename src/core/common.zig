@@ -156,5 +156,6 @@ pub const CompilerError = error {
     FieldAccessOnOpaqueType,
     AlignOfOpaqueType,
     MissingAlignment,
+    InvalidAlignment,
     Terminate,
 };

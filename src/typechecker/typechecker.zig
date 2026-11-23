@@ -4290,7 +4290,16 @@ pub fn alignOf(self: *Typechecker, of: TypeID) Error!u32 {
                     }
 
                     switch (self.folder.getValue(meta[index + 1])) {
-                        .Int => |alignment| return @intCast(alignment),
+                        .Int => |alignment| {
+                            const logalign = @log2(@as(f32, @floatFromInt(alignment)));
+
+                            if (logalign - @as(@TypeOf(logalign), @floatFromInt(@as(u32, @intFromFloat(logalign)))) != 0) {
+                                self.report("Alignment must be a power of two.", .{});
+                                return Error.InvalidAlignment;
+                            }
+
+                            return @intCast(alignment);
+                        },
                         else => {
                             self.report("Expected an integer value as alignment.", .{});
                             return Error.TypeMismatch;
