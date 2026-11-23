@@ -1,7 +1,6 @@
 const std = @import("std");
 const defines = @import("../../core/defines.zig");
 const common = @import("../../core/common.zig");
-const collections = @import("../../util/collections.zig");
 
 const Typechecker = @import("../../typechecker/typechecker.zig");
 const Context = common.CompilerContext;
