@@ -198,6 +198,7 @@ fn dereference(self: *Builder, value: defines.Offset) Error!JAIR.Ptr {
         defer _ = self.setFlag(.LValue, prev);
         break :expr try self.createJAIR(self.jir.data[value]);
     };
+
     const typeID = try self.convertType(self.jir.types.get(self.jir.data[value + 1]).Pointer.child);
 
     const start: u32 = @intCast(self.data.items.len);
@@ -243,6 +244,7 @@ fn assignment(self: *Builder, value: defines.Offset) Error!JAIR.Ptr {
         defer _ = self.setFlag(.LValue, prev);
         break :lhs try self.createJAIR(self.jir.data[value]);
     };
+
     const rhs = try self.createJAIR(self.jir.data[value + 1]);
 
     const start: u32 = @intCast(self.data.items.len);
@@ -296,9 +298,21 @@ fn phi(self: *Builder, value: defines.Offset) Error!JAIR.Ptr {
     return res;
 }
 
+fn isComparison(comptime kind: anytype) bool {
+    return switch (kind) {
+        .Equal, .NotEqual, .Lesser, .LesserEqual, .Greater, .GreaterEqual => true,
+        else => false,
+    };
+}
+
 fn commonBinary(self: *Builder, comptime kind: @EnumLiteral(), value: defines.Offset) Error!JAIR.Ptr {
     const lhs = try self.createJAIR(self.jir.data[value]);
     const rhs = try self.createJAIR(self.jir.data[value + 1]);
+
+    const resultType = if (isComparison(kind))
+        try self.convertType(comptime Comptime.Folder.Builtin.Type("bool"))
+    else
+        self.nodes.get(lhs).type;
 
     const start: u32 = @intCast(self.data.items.len);
     self.data.append(self.allocator, lhs) catch return Error.AllocatorFailure;
@@ -306,7 +320,7 @@ fn commonBinary(self: *Builder, comptime kind: @EnumLiteral(), value: defines.Of
 
     const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
     self.nodes.set(res, .{
-        .type = self.nodes.get(lhs).type,
+        .type = resultType,
         .kind = kind,
         .value = start,
     });
@@ -351,7 +365,6 @@ fn jump(self: *Builder, value: defines.StringPtr) Error!JAIR.Ptr {
 }
 
 fn not(self: *Builder, value: JIR.Ptr) Error!JAIR.Ptr {
-    // Booleans are represented as 255 or 0, so bitwise inversion is logical not.
     const rhs = try self.createJAIR(value);
 
     const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
@@ -454,10 +467,12 @@ fn functionDef(self: *Builder, fptr: JIR.Ptr) Error!JAIR.Ptr {
     self.data.append(self.allocator, function.name) catch return Error.AllocatorFailure;
     self.data.append(self.allocator, try self.convertType(signature.returnType)) catch return Error.AllocatorFailure;
     self.data.append(self.allocator, @intCast(signature.argTypes.len)) catch return Error.AllocatorFailure;
+
     for (signature.argTypes, function.args) |argType, argName| {
         self.data.append(self.allocator, try self.convertType(argType)) catch return Error.AllocatorFailure;
         self.data.append(self.allocator, argName) catch return Error.AllocatorFailure;
     }
+
     self.data.append(self.allocator, body) catch return Error.AllocatorFailure;
 
     const nodePtr = try self.nodes.addOne(self.allocator);
