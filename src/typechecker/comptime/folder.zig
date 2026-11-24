@@ -438,6 +438,9 @@ pub fn determineComptimeReturnType(
     args: []const defines.ExpressionPtr,
     argTypes: []const TypeID,
 ) Error!TypeID {
+    const prev = self.setFlag(.ComptimeBanned, false);
+    defer _ = self.setFlag(.ComptimeBanned, prev);
+
     const func = self.getValue(try self.eval(functionExpr, null)).Function;
 
     try self.typechecker.executer.stack.push(.{
