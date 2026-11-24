@@ -85,6 +85,12 @@ pub fn build(self: *Builder) Error!JAIR {
     }
 
     for (self.jir.keyNodes) |nodePtr| {
+        const n = self.jir.nodes.get(nodePtr);
+        switch (n.type) {
+            .FunctionDef => {},
+            .VariableDef => if (self.jir.data[n.value] != 1) continue,
+            else => continue,
+        }
         self.keyNodes.append(self.allocator, try self.createJAIR(nodePtr))
             catch return Error.AllocatorFailure;
     }
@@ -126,7 +132,8 @@ fn createJAIR(self: *Builder, nodePtr: JAIR.Ptr) Error!JAIR.Ptr {
         .Literal => self.literal(node.value),
         .Label => self.label(node.value),
         .Negation => try self.negation(node.value),
-        .Not, .Invert => try self.not(node.value),
+        .Not => try self.not(node.value),
+        .Invert => try self.invert(node.value),
         .Jump => try self.jump(node.value),
         .JumpIf => try self.cjump(node.value),
         .And, .BitwiseAnd => try self.commonBinary(.And, node.value),
@@ -155,6 +162,8 @@ fn createJAIR(self: *Builder, nodePtr: JAIR.Ptr) Error!JAIR.Ptr {
         .Reference => try self.reference(node.value),
         .Dot => try self.dot(node.value),
         .StatementExpr => try self.stmtExpr(node.value),
+        .Construction => try self.construct(node.value),
+        .VariableDef => try self.variableDef(nodePtr),
 
         .Exit, .TypeDef => res: {
             const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
@@ -176,15 +185,48 @@ fn createJAIR(self: *Builder, nodePtr: JAIR.Ptr) Error!JAIR.Ptr {
                 });
                 break :res res;
             } else self.createJAIR(self.jir.data[node.value + 1]),
-
-        else => {
-            common.log.err(
-                "Unsupported JIR node: {s}",
-                .{@tagName(node.type)},
-            );
-            return Error.ShouldBeImpossible;
-        },
     };
+}
+
+fn variableDef(self: *Builder, nodePtr: JIR.Ptr) Error!JAIR.Ptr {
+    const value = self.jir.nodes.get(nodePtr).value;
+    const typeID = try self.convertType(self.jir.data[value + 1]);
+    const isUndef = self.jir.data[value + 3] == 1;
+    const init = if (isUndef) 0 else try self.createJAIR(self.jir.data[value + 4]);
+
+    const start: u32 = @intCast(self.data.items.len);
+    self.data.appendSlice(self.allocator, &.{
+        self.jir.data[value],
+        typeID,
+        self.jir.data[value + 2],
+        @intFromBool(!isUndef),
+        @intFromBool(self.jir.hasMetadata(nodePtr, "@extern")),
+        init,
+    }) catch return Error.AllocatorFailure;
+
+    const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
+    self.nodes.set(res, .{ .type = typeID, .kind = .VariableDef, .value = start });
+    return res;
+}
+
+fn construct(self: *Builder, value: defines.Offset) Error!JAIR.Ptr {
+    const typeID = try self.convertType(self.jir.data[value]);
+    const argsLen = self.jir.data[value + 1];
+
+    const start: u32 = @intCast(self.data.items.len);
+    _ = self.data.addManyAsSlice(self.allocator, argsLen + 1) catch return Error.AllocatorFailure;
+    self.data.items[start] = argsLen;
+    for (0..argsLen) |idx| {
+        self.data.items[start + 1 + idx] = try self.createJAIR(self.jir.data[value + 2 + idx]);
+    }
+
+    const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
+    self.nodes.set(res, .{
+        .type = typeID,
+        .kind = .Construct,
+        .value = start,
+    });
+    return res;
 }
 
 fn stmtExpr(self: *Builder, value: defines.Offset) Error!JAIR.Ptr {
@@ -467,6 +509,18 @@ fn not(self: *Builder, value: JIR.Ptr) Error!JAIR.Ptr {
     self.nodes.set(res, .{
         .type = self.nodes.items(.type)[rhs],
         .kind = .Not,
+        .value = rhs,
+    });
+    return res;
+}
+
+fn invert(self: *Builder, value: JIR.Ptr) Error!JAIR.Ptr {
+    const rhs = try self.createJAIR(value);
+
+    const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
+    self.nodes.set(res, .{
+        .type = self.nodes.items(.type)[rhs],
+        .kind = .Invert,
         .value = rhs,
     });
     return res;

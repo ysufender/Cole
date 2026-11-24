@@ -234,7 +234,7 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
             return Error.ExistentialDilemma;
         },
 
-        .Bool => |boolValue| .{ .Integer = .{ .u8 = if (boolValue) 255 else 0, }, },
+        .Bool => |boolValue| .{ .Integer = .{ .u8 = if (boolValue) 1 else 0 }, },
         .Void => if (false) {
             self.report(
                 "I don't even know what happened, but somehow you tried to "

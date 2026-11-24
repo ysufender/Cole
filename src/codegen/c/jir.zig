@@ -1008,6 +1008,7 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
                         try self.operation(out, @intCast(self.data[node.value + 3]));
                     }
                 },
+
                 .Struct => |str| {
                     var fieldIdx: usize = 0;
                     var dataIdx: usize = 0;
@@ -1025,6 +1026,7 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
                         fieldIdx += 1;
                     }
                 },
+
                 else => {
                     for (0..len) |idx| {
                         if (idx != 0) try self.write(out, ", ", .{});

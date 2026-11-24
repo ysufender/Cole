@@ -7,11 +7,15 @@ local cole_build = arg[1] or
     -- "safe"
     -- "fast"
 
+local cole_backend = arg[2] or
+    "QBE"
+    -- "C"
+
 local cole_version = "v0.1.8"
 
 local exe_path = string.format("../zig-out/cole-%s-%s-linux-x86_64", cole_version, cole_build)
 
-local cflags = " -I ../stdlib --supress-warnings "
+local cflags = " -I ../stdlib --supress-warnings --backend "..cole_backend.." "
 
 local function suite(name, files)
         local steps = { }
@@ -67,4 +71,4 @@ project
         :action("rm -rf build")
         :action("rm -rf .testy/.cache"))
 
-print(project:build(arg[2] or "build") or "Success")
+print(project:build(arg[3] or "build") or "Success")
