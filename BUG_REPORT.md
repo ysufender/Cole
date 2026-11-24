@@ -24,11 +24,15 @@ Implementing the QBE backend.
 
 ### Expected --
 
-...
+Seamless transition between C and QBE backends. Code should work the same.
 
 ### Received --
 
-...
+Missing:<br/>
+<ul>
+    <li>Aggregate type construction,</li>
+    <li>Local variable definitions.</li>
+</ul>
 
 
 ## $open -- Helper Functions for SOA Ease of Use -- #57 -- @ysufender --

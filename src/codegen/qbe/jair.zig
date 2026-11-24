@@ -590,17 +590,9 @@ fn generateExpr(self: *JAIR, out: *Writer, ptr: Ptr) Error!u32 {
         .Reference => return self.reference(out, &node),
         .StatementExpr => return self.stmtExpr(out, &node),
 
-        .Store,
-        .Code,
-        .FunctionDef,
-        .VariableDef,
-        .Exit,
-        .JumpIf,
-        .Jump,
-        .Label,
-        .Return,
-        .Scope,
-        => return Error.ShouldBeImpossible,
+        .Store, .Code, .FunctionDef,
+        .VariableDef, .Exit, .JumpIf,
+        .Jump, .Label, .Return, .Scope, => return Error.ShouldBeImpossible,
 
         else => |kind| {
             common.log.err(
