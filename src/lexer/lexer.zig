@@ -57,8 +57,8 @@ pub const Token = struct {
 
     pub fn toString(token: *const Token, gpa: std.mem.Allocator, context: *const common.CompilerContext, file: defines.FilePtr) []const u8 {
         const string = token.lexeme(context, file);
-        const length =  @tagName(token.type).len + string.len + 16;
         const pos = token.position(context, file);
+        const length =  @tagName(token.type).len + string.len +  std.fmt.count("{d}", .{pos.column}) + std.fmt.count("{d}", .{pos.line})+11;
         const buffer = gpa.alloc(u8, length) catch return @errorName(Error.AllocatorFailure);
         return std.fmt.bufPrint(buffer, "<{s}: {s} at ({d}:{d})>", .{
             @tagName(token.type),
@@ -103,7 +103,7 @@ pub const Token = struct {
 
             source = source[(newLine + 1)..];
             line += 1;
-        } else 0;
+        } else if(line == pos.line)  source.len else 0;
 
         return source[0..end];
     }
