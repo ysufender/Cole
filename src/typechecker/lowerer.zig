@@ -797,13 +797,25 @@ fn forLoop(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.AST) 
 
     const captureType = try self.typechecker.typecheckDecl(captureDeclPtr, null);
 
+    const rangePtrType = try self.typechecker.typecheckFieldAccess(
+        rangeType,
+        "ptr",
+        null,
+        expr,
+    );
+
     const capture = try self.typechecker.builder.variableDef(
         false,
         captureType,
         name,
         false,
-        if (ast.extra[extraPtr + 5] == 1) try self.typechecker.builder.add(rangePtr, idxIdent)
-        else try self.typechecker.builder.dereference(try self.typechecker.builder.add(rangePtr, idxIdent), captureType),
+        if (ast.extra[extraPtr + 5] == 1)
+            try self.typechecker.builder.add(rangePtr, idxIdent)
+        else
+            try self.typechecker.builder.dereference(
+                try self.typechecker.builder.add(rangePtr, idxIdent),
+                rangePtrType,
+            ),
         null,
     );
 
@@ -2247,3 +2259,4 @@ pub fn handler(self: *Lowerer, comptime name: []const u8, ofType: TypeID) Error!
         )
     );
 }
+

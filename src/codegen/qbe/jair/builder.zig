@@ -51,8 +51,20 @@ pub fn fromJIR(jir: JIR.Base, allocator: Allocator, typechecker: *Typechecker) E
     var typeMap = collections.HashMap(TypeID, TypeID).empty;
     typeMap.ensureTotalCapacity(allocator, @intCast(jir.types.len)) catch return Error.AllocatorFailure;
 
-    var strings = std.ArrayList([]const u8).initCapacity(allocator, jir.strings.len * 2)
-        catch return Error.AllocatorFailure;
+    var taggedUnionCount: usize = 0;
+    for (0..jir.types.len) |id| {
+        switch (jir.types.get(@intCast(id))) {
+            .Union => |uni| if (uni.isTagged) {
+                taggedUnionCount += 1;
+            },
+            else => {},
+        }
+    }
+
+    var strings = std.ArrayList([]const u8).initCapacity(
+        allocator,
+        jir.strings.len + taggedUnionCount,
+    ) catch return Error.AllocatorFailure;
     strings.appendSliceAssumeCapacity(jir.strings);
 
     var constMap = collections.HashMap(JIR.Constant.Ptr, JAIR.Constant.Ptr).empty;
@@ -63,7 +75,11 @@ pub fn fromJIR(jir: JIR.Base, allocator: Allocator, typechecker: *Typechecker) E
         .nodes = try JAIR.Node.List.init(allocator, jir.nodes.len),
         .keyNodes = std.ArrayList(JAIR.Ptr).initCapacity(allocator, jir.keyNodes.len) catch return Error.AllocatorFailure,
         .data = std.ArrayList(u32).initCapacity(allocator, jir.data.len) catch return Error.AllocatorFailure,
-        .typeTable = TypeTable.initCapacity(allocator, jir.types.len) catch return Error.AllocatorFailure,
+        // One extra JAIR type may be synthesized for each tagged union's payload.
+        .typeTable = TypeTable.initCapacity(
+            allocator,
+            jir.types.len + taggedUnionCount,
+        ) catch return Error.AllocatorFailure,
         .renamedStringMap = std.bit_set.Dynamic.initEmpty(allocator, jir.strings.len) catch return Error.AllocatorFailure,
         .constants = Constants.initCapacity(allocator, jir.constants.len) catch return Error.AllocatorFailure,
         .constMap = constMap,
@@ -110,6 +126,20 @@ pub fn build(self: *Builder) Error!JAIR {
             },
             else => {},
         }
+    }
+
+    for (0..self.typeTable.len) |newType| {
+        const name = switch (self.typeTable.get(@intCast(newType))) {
+            .Custom => |custom| switch (custom) {
+                .Opaque => |opaqueType| opaqueType.name,
+                .Aggregate => |aggregate| aggregate.name,
+                .Union => |unionType| unionType.name,
+            },
+            else => continue,
+        };
+
+        const res = typeNames.getOrPutAssumeCapacity(@intCast(newType));
+        if (!res.found_existing) res.value_ptr.* = name;
     }
 
     return .{
@@ -217,7 +247,8 @@ fn construct(self: *Builder, value: defines.Offset) Error!JAIR.Ptr {
     _ = self.data.addManyAsSlice(self.allocator, argsLen + 1) catch return Error.AllocatorFailure;
     self.data.items[start] = argsLen;
     for (0..argsLen) |idx| {
-        self.data.items[start + 1 + idx] = try self.createJAIR(self.jir.data[value + 2 + idx]);
+        const res = try self.createJAIR(self.jir.data[value + 2 + idx]);
+        self.data.items[start + 1 + idx] = res;
     }
 
     const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
@@ -235,10 +266,12 @@ fn stmtExpr(self: *Builder, value: defines.Offset) Error!JAIR.Ptr {
 
     const start: u32 = @intCast(self.data.items.len);
     _ = self.data.addManyAsSlice(self.allocator, stmtsLen + 2) catch return Error.AllocatorFailure;
-    self.data.items[start] = try self.createJAIR(final);
+    const finalExpr = try self.createJAIR(final);
+    self.data.items[start] = finalExpr;
     self.data.items[start + 1] = stmtsLen;
     for (0..stmtsLen) |idx| {
-        self.data.items[start + 2 + idx] = try self.createJAIR(self.jir.data[value + 2 + idx]);
+        const res = try self.createJAIR(self.jir.data[value + 2 + idx]);
+        self.data.items[start + 2 + idx] = res;
     }
 
     const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
@@ -288,11 +321,36 @@ fn dot(self: *Builder, value: defines.Offset) Error!JAIR.Ptr {
         },
         .Struct => |str| try self.fieldLayout(str.fields, fieldName, true),
         .Union => |uni| blk: {
-            if (uni.isTagged) {
-                common.log.err("Field access on tagged unions is not implemented", .{});
-                return Error.ShouldBeImpossible;
+            if (!uni.isTagged) {
+                break :blk try self.fieldLayout(uni.fields, fieldName, false);
             }
-            break :blk try self.fieldLayout(uni.fields, fieldName, false);
+
+            if (uni.fields.len == 0) return Error.ShouldBeImpossible;
+
+            const tag = uni.fields[0];
+            if (std.mem.eql(
+                u8,
+                self.jir.strings[tag.name],
+                self.jir.strings[fieldName],
+            )) {
+                break :blk .{
+                    .offset = 0,
+                    .type = tag.valueType,
+                };
+            }
+
+            const payloadAlignment = try self.typechecker.alignOf(recvType);
+            const payloadOffset = std.mem.alignForward(
+                u32,
+                try self.byteSize(tag.valueType),
+                payloadAlignment,
+            );
+            const payload = try self.fieldLayout(uni.fields[1..], fieldName, false);
+
+            break :blk .{
+                .offset = payloadOffset,
+                .type = payload.type,
+            };
         },
         else => return common.debug.ShouldBeImpossible(undefined, @src()),
     };
@@ -359,7 +417,8 @@ fn call(self: *Builder, value: defines.Offset) Error!JAIR.Ptr {
     const start: u32 = @intCast(self.data.items.len);
     _ = self.data.addManyAsSlice(self.allocator, len + 3) catch return Error.AllocatorFailure;
     self.data.items[start] = try self.convertType(self.jir.data[value]);
-    self.data.items[start + 1] = try self.createJAIR(func);
+    const funcExpr = try self.createJAIR(func);
+    self.data.items[start + 1] = funcExpr;
     self.data.items[start + 2] = len;
 
     for (0..len) |idx| {
@@ -636,7 +695,7 @@ fn functionDef(self: *Builder, fptr: JIR.Ptr) Error!JAIR.Ptr {
 
 fn typeName(self: *Builder, id: TypeID) Error!defines.StringPtr {
     const typeInfo = self.jir.types.get(id);
-    const name = self.typechecker.typenameMap.get(id) orelse {
+    const name = self.jir.typeNames.get(id) orelse {
         common.log.err("Missing type name for type ID {d} ({s})", .{
             id,
             @tagName(std.meta.activeTag(typeInfo)),
@@ -754,6 +813,7 @@ fn convertConstant(self: *Builder, constant: JIR.Constant.Ptr) Error!JAIR.Consta
     }
 
     const ptr: u32 = @intCast(self.constants.len);
+
     self.constants.appendAssumeCapacity(switch (self.jir.constants.get(constant)) {
         .Integer => |int| switch (int) {
             .i32 => |integer| .{ .Word = .{ @bitCast(integer), true } },
@@ -867,7 +927,7 @@ fn convertType(self: *Builder, id: TypeID) Error!TypeID {
                 .name = try self.typeName(id),
                 .alignment = try self.typechecker.alignOf(id),
                 .size = try self.byteSize(id),
-                .fields = try self.convertFields(uni.fields),
+                .fields = try self.convertTaggedUnionFields(id, uni.fields),
             } } }
         else
             .{ .Custom = .{ .Union = .{
@@ -892,6 +952,72 @@ fn convertType(self: *Builder, id: TypeID) Error!TypeID {
 
 fn byteSize(self: *Builder, id: TypeID) Error!u32 {
     return (try self.typechecker.sizeOf(id) + 7) / 8;
+}
+
+fn convertTaggedUnionFields(
+    self: *Builder,
+    parentType: TypeID,
+    fields: anytype,
+) Error![]const TypeID {
+    if (fields.len == 0) return Error.ShouldBeImpossible;
+
+    const tagType = try self.convertType(fields[0].valueType);
+    const payloadFields = fields[1..];
+    const payloadTypes = try self.convertFields(payloadFields);
+
+    const out = self.allocator.alloc(
+        TypeID,
+        1 + @as(usize, @intFromBool(payloadTypes.len != 0)),
+    ) catch return Error.AllocatorFailure;
+    out[0] = tagType;
+
+    if (payloadTypes.len != 0) {
+        const layout = try self.unionPayloadLayout(payloadFields);
+        const name = std.fmt.allocPrint(
+            self.allocator,
+            "__cole_internal_tagged_union_payload_{d}",
+            .{parentType},
+        ) catch return Error.AllocatorFailure;
+        const namePtr: defines.StringPtr = @intCast(self.strings.items.len);
+        self.strings.append(self.allocator, name) catch return Error.AllocatorFailure;
+
+        const payloadType: TypeID = @intCast(self.typeTable.addOneAssumeCapacity());
+        self.typeTable.set(payloadType, .{ .Custom = .{ .Union = .{
+            .name = namePtr,
+            .size = layout.size,
+            .alignment = layout.alignment,
+            .fields = payloadTypes,
+        } } });
+
+        out[1] = payloadType;
+    }
+
+    return out;
+}
+
+fn unionPayloadLayout(self: *Builder, fields: anytype) Error!struct {
+    size: u32,
+    alignment: u32,
+} {
+    var size: u32 = 0;
+    var alignment: u32 = 1;
+
+    for (fields) |field| {
+        const fieldSize = try self.byteSize(field.valueType);
+        if (fieldSize == 0) continue;
+
+        const fieldAlignment = @max(
+            1,
+            try self.typechecker.alignOf(field.valueType),
+        );
+        size = @max(size, fieldSize);
+        alignment = @max(alignment, fieldAlignment);
+    }
+
+    return .{
+        .size = std.mem.alignForward(u32, size, alignment),
+        .alignment = alignment,
+    };
 }
 
 fn convertFields(self: *Builder, fields: anytype) Error![]const TypeID {
@@ -960,3 +1086,4 @@ pub fn setFlag(self: *Builder, comptime flag: Flags, bit: bool) bool {
 pub fn getFlag(self: *Builder, comptime flag: Flags) bool {
     return self.flags.isSet(Flags.flag(flag));
 }
+

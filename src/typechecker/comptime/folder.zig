@@ -394,6 +394,9 @@ pub fn determineComptimeReturnTypeDirect(
     func: JIR.Function,
     args: []const Comptime.Value.Ptr,
 ) Error!TypeID {
+    const prev = self.setFlag(.ComptimeBanned, false);
+    defer _ = self.setFlag(.ComptimeBanned, prev);
+
     try self.typechecker.executer.stack.push(.{
         .body = &.{},
         .data = .{ .block = {} },
@@ -3318,8 +3321,31 @@ pub fn constructUndefined(self: *Folder, valueType: TypeID) Error!Comptime.Value
             });
         },
 
-        // @TODO Undefined Unions
-        else => self.appendValue(.{ .Undefined = valueType }),
+        .Union => |uni| {
+            const payloadIndex: usize = @intFromBool(uni.isTagged);
+
+            if (uni.fields.len <= payloadIndex) {
+                self.report("Cannot construct undefined value of empty union '{s}'.", .{
+                    self.typechecker.builder.getInternedString(uni.name),
+                });
+                return Error.IllegalSyntax;
+            }
+
+            const payloadType = uni.fields[payloadIndex].valueType;
+
+            const payload: Comptime.Value.Ptr = switch (self.typechecker.typeTable.get(payloadType)) {
+                .Void => @intFromEnum(Comptime.Value.Implicit.Void),
+                else => try self.constructUndefined(payloadType),
+            };
+
+            break :res self.appendValue(.{
+                .Union = .{
+                    .Type = valueType,
+                    .Tag = 0,
+                    .Value = payload,
+                },
+            });
+        },
     };
 }
 

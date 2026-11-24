@@ -133,6 +133,7 @@ data: std.ArrayList(u32).Slice,
 indent: u32 = 0,
 temp: u32 = 0,
 terminated: bool = false,
+currentBlock: []const u8 = "start",
 allocator: std.mem.Allocator = undefined,
 locals: *Writer = undefined,
 
@@ -187,12 +188,10 @@ pub fn codegen(self: *JAIR, context: *Context, qbeOut: *std.Io.Dir, allocator: s
                         uni.alignment,
                     });
 
-                    for (uni.fields, 0..) |field, idx| {
+                    for (uni.fields) |field| {
                         try self.write(false, out, " {{", .{});
-                        try self.typeString(out, false, field);
-                        try self.write(false, out, "}}{s}", .{
-                            if (idx != uni.fields.len - 1) "," else "",
-                        });
+                        try self.aggregateTypeString(out, field);
+                        try self.write(false, out, " }}", .{});
                     }
 
                     try self.write(false, out, " }}\n", .{});
@@ -215,7 +214,7 @@ pub fn codegen(self: *JAIR, context: *Context, qbeOut: *std.Io.Dir, allocator: s
 
                     for (aggregate.fields, 0..) |field, idx| {
                         try self.write(false, out, " ", .{});
-                        try self.typeString(out, false, field);
+                        try self.aggregateTypeString(out, field);
                         try self.write(false, out, "{s}", .{
                             if (idx != aggregate.fields.len - 1) "," else "",
                         });
@@ -402,6 +401,7 @@ fn generateStatement(self: *JAIR, out: *Writer, nodePtr: Ptr) Error!void {
             }
 
             try self.write(false, out, ") {{\n@start\n", .{});
+            self.currentBlock = "start";
 
             for (0..argLen) |idx| {
                 const offset = node.value + 5 + idx * 2;
@@ -453,6 +453,7 @@ fn generateStatement(self: *JAIR, out: *Writer, nodePtr: Ptr) Error!void {
             const label = self.strings[self.data[node.value]];
 
             try self.write(false, out, "@{s}\n", .{label});
+            self.currentBlock = label;
 
             self.terminated = false;
             self.indent += 1;
@@ -466,7 +467,9 @@ fn generateStatement(self: *JAIR, out: *Writer, nodePtr: Ptr) Error!void {
         },
         .Label => {
             self.terminated = false;
-            try self.write(true, out, "@{s}\n", .{self.strings[node.value]});
+            const label = self.strings[node.value];
+            try self.write(true, out, "@{s}\n", .{label});
+            self.currentBlock = label;
         },
         .Jump => {
             self.terminated = true;
@@ -485,6 +488,11 @@ fn generateStatement(self: *JAIR, out: *Writer, nodePtr: Ptr) Error!void {
 
             try self.write(true, out, "@__lbl{d}\n", .{otherwise});
             self.terminated = false;
+            self.currentBlock = std.fmt.allocPrint(
+                self.allocator,
+                "__lbl{d}",
+                .{otherwise},
+            ) catch return Error.AllocatorFailure;
         },
         .Code => try self.write(true, out, "{s}\n", .{self.strings[node.value]}),
         .Store => try self.store(out, &node),
@@ -534,6 +542,8 @@ fn variableDef(self: *JAIR, out: *Writer, node: *const Node) Error!void {
     const isExtern = self.data[node.value + 4] == 1;
     const init = self.data[node.value + 5];
     const size = self.sizeOf(ty);
+
+    _ = std.mem.replace(u8, name, "::", "__", @constCast(name));
 
     if (top) {
         if (isExtern) return;
@@ -859,10 +869,17 @@ fn store(self: *JAIR, out: *Writer, node: *const Node) Error!void {
     const rhsTmp = try self.generateExpr(out, rhs);
 
     if (self.isScalar(rhsType)) {
+        const generatedType = self.expressionType(rhs);
+
+        const value = if (generatedType != rhsType)
+            try self.convert(out, rhsTmp, generatedType, rhsType)
+        else
+            rhsTmp;
+
         try self.write(true, out, "store", .{});
         try self.storeTypeString(out, rhsType);
         try self.write(false, out, " %__tmp{d}, %__tmp{d}\n", .{
-            rhsTmp,
+            value,
             lhsTmp,
         });
     }
@@ -942,31 +959,61 @@ fn phi(self: *JAIR, out: *Writer, node: *const Node) Error!u32 {
     const otherwiseLabel = self.allocTmp();
     const finalLabel = self.allocTmp();
 
-    try self.write(true, out, "jnz %__tmp{d}, @__ternary_then{d}, @__ternary_otherwise{d}\n", .{
+    const thenBlock = std.fmt.allocPrint(
+        self.allocator,
+        "__ternary_then{d}",
+        .{thenLabel},
+    ) catch return Error.AllocatorFailure;
+    const otherwiseBlock = std.fmt.allocPrint(
+        self.allocator,
+        "__ternary_otherwise{d}",
+        .{otherwiseLabel},
+    ) catch return Error.AllocatorFailure;
+    const finalBlock = std.fmt.allocPrint(
+        self.allocator,
+        "__ternary_final{d}",
+        .{finalLabel},
+    ) catch return Error.AllocatorFailure;
+
+    try self.write(true, out, "jnz %__tmp{d}, @{s}, @{s}\n", .{
         cnd,
-        thenLabel,
-        otherwiseLabel,
+        thenBlock,
+        otherwiseBlock,
     });
 
-    try self.write(true, out, "@__ternary_then{d}\n", .{thenLabel});
-    const then = try self.generateExpr(out, self.data[node.value + 1]);
-    try self.write(true, out, "jmp @__ternary_final{d}\n", .{finalLabel});
+    try self.write(true, out, "@{s}\n", .{thenBlock});
+    self.currentBlock = thenBlock;
+    const thenType = self.expressionType(self.data[node.value + 1]);
+    var then = try self.generateExpr(out, self.data[node.value + 1]);
+    if (self.isScalar(thenType) and self.isScalar(node.type) and thenType != node.type) {
+        then = try self.convert(out, then, thenType, node.type);
+    }
+    const thenPredecessor = self.currentBlock;
+    try self.write(true, out, "jmp @{s}\n", .{finalBlock});
 
-    try self.write(true, out, "@__ternary_otherwise{d}\n", .{otherwiseLabel});
-    const otherwise = try self.generateExpr(out, self.data[node.value + 2]);
-    try self.write(true, out, "jmp @__ternary_final{d}\n", .{finalLabel});
+    try self.write(true, out, "@{s}\n", .{otherwiseBlock});
+    self.currentBlock = otherwiseBlock;
+    const otherwiseType = self.expressionType(self.data[node.value + 2]);
+    var otherwise = try self.generateExpr(out, self.data[node.value + 2]);
+    if (self.isScalar(otherwiseType) and self.isScalar(node.type) and otherwiseType != node.type) {
+        otherwise = try self.convert(out, otherwise, otherwiseType, node.type);
+    }
+    const otherwisePredecessor = self.currentBlock;
+    try self.write(true, out, "jmp @{s}\n", .{finalBlock});
 
-    try self.write(true, out, "@__ternary_final{d}\n", .{finalLabel});
+    try self.write(true, out, "@{s}\n", .{finalBlock});
+    self.currentBlock = finalBlock;
+    self.terminated = false;
 
     const res = self.allocTmp();
 
     try self.write(true, out, "%__tmp{d} =", .{res});
     try self.typeString(out, true, node.type);
 
-    try self.write(false, out, " phi @__ternary_then{d} %__tmp{d}, @__ternary_otherwise{d} %__tmp{d}\n", .{
-        thenLabel,
+    try self.write(false, out, " phi @{s} %__tmp{d}, @{s} %__tmp{d}\n", .{
+        thenPredecessor,
         then,
-        otherwiseLabel,
+        otherwisePredecessor,
         otherwise,
     });
 
@@ -1106,6 +1153,14 @@ fn typeString(self: *const JAIR, out: *Writer, isTmp: bool, typeID: TypeID) Erro
             else try self.write(false, out, ":{s}", .{
                 self.strings[self.typeNames.get(typeID).?],
             }),
+    }
+}
+
+fn aggregateTypeString(self: *const JAIR, out: *Writer, typeID: TypeID) Error!void {
+    switch (self.typeTable.get(typeID)) {
+        .Byte => try self.write(false, out, "b", .{}),
+        .Half => try self.write(false, out, "h", .{}),
+        else => try self.typeString(out, false, typeID),
     }
 }
 
@@ -1300,14 +1355,24 @@ fn storeTo(self: *JAIR, out: *Writer, dst: u32, srcNode: Ptr, dstType: ?TypeID) 
     if (self.sizeOf(srcType) == 0) return;
 
     const ty = dstType orelse srcType;
-    if (self.isScalar(ty) and self.isScalar(srcType)) {
-        const same = self.sizeOf(srcType) == self.sizeOf(ty) and self.signed(srcType) == self.signed(ty);
-        if (!same) src = try self.convert(out, src, srcType, ty);
+
+    const isUnionStorage = switch (self.typeTable.get(ty)) {
+        .Custom => |custom| switch (custom) {
+            .Union => true,
+            .Opaque, .Aggregate => false,
+        },
+        else => false,
+    };
+
+    if (self.isScalar(srcType) and (self.isScalar(ty) or isUnionStorage)) {
+        const storeType = if (self.isScalar(ty)) ty else srcType;
+        const same = self.sizeOf(srcType) == self.sizeOf(storeType) and
+            self.signed(srcType) == self.signed(storeType);
+        if (!same) src = try self.convert(out, src, srcType, storeType);
         try self.write(true, out, "store", .{});
-        try self.storeTypeString(out, ty);
+        try self.storeTypeString(out, storeType);
         try self.write(false, out, " %__tmp{d}, %__tmp{d}\n", .{ src, dst });
-    }
-    else {
+    } else {
         try self.write(true, out, "blit %__tmp{d}, %__tmp{d}, {d}\n", .{
             src, dst, @min(self.sizeOf(srcType), self.sizeOf(ty)),
         });
@@ -1419,11 +1484,24 @@ fn isFloat(self: *const JAIR, id: TypeID) bool {
 }
 
 fn wider(self: *const JAIR, a: TypeID, b: TypeID) TypeID {
-    if (self.typeTable.get(b) == .Long and self.typeTable.get(a) != .Long) return b;
+    const aType = self.typeTable.get(a);
+    const bType = self.typeTable.get(b);
+
+    if (aType == .Double) return a;
+    if (bType == .Double) return b;
+    if (aType == .Single) return a;
+    if (bType == .Single) return b;
+
+    if (bType == .Long and aType != .Long) return b;
     return a;
 }
 
 fn widenTo(self: *JAIR, out: *Writer, tmp: u32, from: TypeID, to: TypeID) Error!u32 {
+    if (self.isFloat(to)) {
+        if (!self.isScalar(from) or self.sizeOf(from) == 0) return tmp;
+        return self.convert(out, tmp, from, to);
+    }
+
     if (self.typeTable.get(to) != .Long) return tmp;
     if (self.typeTable.get(from) == .Long) return tmp;
     if (self.isFloat(from) or !self.isScalar(from)) return tmp;
@@ -1436,6 +1514,24 @@ fn widenTo(self: *JAIR, out: *Writer, tmp: u32, from: TypeID, to: TypeID) Error!
         cur,
     });
     return res;
+}
+
+fn expressionType(self: *const JAIR, ptr: Ptr) TypeID {
+    const node = self.nodes.get(ptr);
+
+    return switch (node.kind) {
+        .Add, .Sub, .Div, .Mod, .Mul, .And, .Or, .Xor => self.wider(
+            self.nodes.items(.type)[self.data[node.value]],
+            self.nodes.items(.type)[self.data[node.value + 1]],
+        ),
+
+        .LeftShift, .RightShift =>
+            self.nodes.items(.type)[self.data[node.value]],
+
+        .StatementExpr => self.expressionType(self.data[node.value]),
+
+        else => node.type,
+    };
 }
 
 fn write(
@@ -1453,3 +1549,4 @@ fn write(
 
     out.print(fmt, args) catch return Error.IOError;
 }
+

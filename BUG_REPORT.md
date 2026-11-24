@@ -14,52 +14,6 @@ Lowering paths lack safety checks on debug builds.
 
 ...
 
-## $open -- QBE Backend -- #61 -- @ysufender --
-
-Type name conversion causes errors.
-
-### Reproduction --
-
-<pre><code>
-import std::memory::allocator;
-import std::c;
-
-let f = fn (a: std::memory::allocator::Allocator) -> i32 { let x = a.alloc(u8)(4).Ok; return 0; };
-
-let main = fn (args: [][]u8) -> i32 {
-&emsp;let a: mut any = f(std::c::Allocator);
-&emsp;return 0;
-};
-</code></pre>
-
-### Expected --
-
-Successful compilation.
-
-### Received --
-
-<pre><code>
-error: Missing type name for type ID 32 (Void)
-error: This is a compiler bug, a part of impossible branch has been reached. Please inform the authors about it.
-/home/yusuf/proj/Cole/src/codegen/qbe/jair/builder.zig:644:9: 0x1291fe7 in typeName (cole-debug)
-&emsp;emsp;eturn Error.ShouldBeImpossible;
-&emsp;   ^
-/home/yusuf/proj/Cole/src/codegen/qbe/jair/builder.zig:718:36: 0x1294365 in typeName (cole-debug)
-&emsp;&emsp;&emsp; self.strings.items[try self.typeName(ptr.child)],
-&emsp;&emsp;&emsp;&emsp;&emsp;&emsp;&emsp;^
-/home/yusuf/proj/Cole/src/codegen/qbe/jair/builder.zig:841:25: 0x12bff5d in convertType (cole-debug)
-&emsp;&emsp;&emsp; .name = try self.typeName(id),
-&emsp;&emsp;&emsp;&emsp&emsp;;
-/home/yusuf/proj/Cole/src/codegen/qbe/jair/builder.zig:80:13: 0x1289698 in build (cole-debug)
-&emsp;   _ = try self.convertType(@intCast(id));
-&emsp;&emsp;  ^
-/home/yusuf/proj/Cole/src/main.zig:161:24: 0x123eac3 in innerMain (cole-debug)
-&emsp;&emsp;  var jair = try jairBuilder.build();
-&emsp;&emsp;&emsp;&emsp;   ^
-error: Compiler exited with code 228 <ShouldBeImpossible>
-</code></pre>
-
-
 ## $open -- Helper Functions for SOA Ease of Use -- #57 -- @ysufender --
 
 The project uses SOA intensively to reduce memory footprint and increase cache hits. For this
@@ -176,5 +130,6 @@ Garbled out parts in the generated C files.
 ## $closed -- Single Field Union Construction Bug -- #58 -- @ysufender --
 ## $closed -- External C Array Conversion -- #59 -- @ysufender --
 ## $closed -- Type Deduplication Problems -- #60 -- @ysufender --
+## $closed -- QBE Backend -- #61 -- @ysufender --
 ## $closed -- Proper Inline Code Syntax -- #63 -- @ysufender --
 ## $closed -- Comptime Bugs Again -- #64 -- @ysufender --
