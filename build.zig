@@ -166,6 +166,10 @@ fn addTargets(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
                     .{
                         .name = "qbe",
                         .module = qbeHeaders(b, target, optimize),
+                    },
+                    .{
+                        .name = "minias",
+                        .module = miniasHeaders(b, config.native, .debug),
                     }
                 }
             }),
@@ -173,6 +177,9 @@ fn addTargets(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
 
         exe.root_module.addEmbedPath(b.path(resourcePath));
         exe.root_module.addOptions("config", opts);
+
+        exe.root_module.addLibraryPath(b.path("src/res/"));
+        exe.root_module.addSystemIncludePath(b.path("src/res/"));
 
         // TCC
         const libPath = config.library_path orelse
@@ -203,9 +210,10 @@ fn addTargets(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
         exe.step.dependOn(&vendorCopy.step);
 
         // QBE
-        exe.root_module.addLibraryPath(b.path("src/res/"));
-        exe.root_module.addSystemIncludePath(b.path("src/res/"));
         exe.root_module.linkSystemLibrary(print(b.allocator, "qbe-{s}", .{@tagName(target.result.os.tag)}) catch unreachable, .{ .preferred_link_mode = .static });
+
+        // Minias
+        exe.root_module.linkSystemLibrary(print(b.allocator, "minias-{s}", .{@tagName(target.result.os.tag)}) catch unreachable, .{ .preferred_link_mode = .static });
 
         const install = b.addInstallArtifact(exe, .{
             .dest_dir = .{ .override = .{ .custom = "" } }
@@ -247,6 +255,10 @@ fn addDebugTarget(b: *std.Build) void {
                 .{
                     .name = "qbe",
                     .module = qbeHeaders(b, config.native, .debug),
+                },
+                .{
+                    .name = "minias",
+                    .module = miniasHeaders(b, config.native, .debug),
                 }
             }
         }),
@@ -254,6 +266,9 @@ fn addDebugTarget(b: *std.Build) void {
     });
     exe.root_module.addEmbedPath(b.path(resourcePath));
     exe.root_module.addOptions("config", opts);
+
+    exe.root_module.addLibraryPath(b.path("src/res/"));
+    exe.root_module.addSystemIncludePath(b.path("src/res/"));
 
     // TCC
     const libPath = config.library_path orelse
@@ -284,15 +299,28 @@ fn addDebugTarget(b: *std.Build) void {
     exe.step.dependOn(&vendorCopy.step);
 
     // QBE
-    exe.root_module.addLibraryPath(b.path("src/res/"));
-    exe.root_module.addSystemIncludePath(b.path("src/res/"));
     exe.root_module.linkSystemLibrary(std.fmt.allocPrint(b.allocator, "qbe-{s}", .{@tagName(config.native.result.os.tag)}) catch unreachable, .{ .preferred_link_mode = .static });
+
+    // Minias
+    exe.root_module.linkSystemLibrary(std.fmt.allocPrint(b.allocator, "minias-{s}", .{@tagName(config.native.result.os.tag)}) catch unreachable, .{ .preferred_link_mode = .static });
 
     const install = b.addInstallArtifact(exe, .{});
 
     const step = b.step(targetName, "Build for debug on native platform");
     step.dependOn(&install.step);
     step.dependOn(b.getInstallStep());
+}
+
+fn miniasHeaders(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Module {
+    const CTranslator = @import("translate_c").Translator;
+    const translate_c = b.dependency("translate_c", .{});
+
+    const ctranslator = CTranslator.init(translate_c, .{
+        .c_source_file = b.path("src/res/minias.h"),
+        .target = target,
+        .optimize = optimize,
+    });
+    return ctranslator.mod;
 }
 
 fn qbeHeaders(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Module {

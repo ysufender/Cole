@@ -9,6 +9,7 @@ pub const JAIR = @import("jair.zig");
 
 const qbe = @import("qbe");
 const tcc = @import("tcc");
+const minias = @import("minias");
 
 const QBE = @This();
 
@@ -23,14 +24,28 @@ pub fn compile(outDir: Dir, allocator: std.mem.Allocator, context: *common.Compi
     try createStdIncludes(outDir, context.io);
 
     const target: c_int = if (context.settings.buildInfo.platform == .Windows) 0 else 1;
-    const inPath = outDir.realPathFileAlloc(context.io, "source.ssa", allocator) catch return Error.AllocatorFailure;
-    const _outPath = std.fmt.allocPrint(allocator, "{s}.s", .{context.settings.outputFile}) catch return Error.AllocatorFailure;
-    const file = outDir.createFile(context.io, _outPath, .{ }) catch return Error.IOError;
-    file.close(context.io);
-    const outPath = outDir.realPathFileAlloc(context.io, _outPath, allocator) catch return Error.AllocatorFailure;
+    const ssaPath = outDir.realPathFileAlloc(context.io, "source.ssa", allocator) catch return Error.AllocatorFailure;
+    const _asmPath = std.fmt.allocPrint(allocator, "{s}.s", .{context.settings.outputFile}) catch return Error.AllocatorFailure;
+    {
+        const file = outDir.createFile(context.io, _asmPath, .{ }) catch return Error.IOError;
+        file.close(context.io);
+    }
+    const asmPath = outDir.realPathFileAlloc(context.io, _asmPath, allocator) catch return Error.AllocatorFailure;
 
-    if (qbe.qbe_compile(target, inPath.ptr, outPath.ptr) == 1) {
+    if (qbe.qbe_compile(target, ssaPath.ptr, asmPath.ptr) == 1) {
         report("Failed to generate assembly output.");
+        return Error.BackendError;
+    }
+
+    const _objPath = std.fmt.allocPrint(allocator, "{s}.o", .{context.settings.outputFile}) catch return Error.AllocatorFailure;
+    {
+        const file = outDir.createFile(context.io, _objPath, .{ }) catch return Error.IOError;
+        file.close(context.io);
+    }
+    const objPath = outDir.realPathFileAlloc(context.io, _objPath, allocator) catch return Error.AllocatorFailure;
+
+    if (minias.minias_assemble(asmPath.ptr, objPath.ptr) == 1) {
+        report("Failed to assemble output.");
         return Error.BackendError;
     }
 
@@ -69,7 +84,7 @@ pub fn compile(outDir: Dir, allocator: std.mem.Allocator, context: *common.Compi
     }
 
     // Add source file
-    const input = outPath;
+    const input = objPath;
     if (tcc.tcc_add_file(state, input) == -1) {
         report("Failed to compile source file.");
         return Error.BackendError;
