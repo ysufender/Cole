@@ -16,23 +16,47 @@ Lowering paths lack safety checks on debug builds.
 
 ## $open -- QBE Backend -- #61 -- @ysufender --
 
-Implementing the QBE backend.
+Type name conversion causes errors.
 
 ### Reproduction --
 
-...
+<pre><code>
+import std::memory::allocator;
+import std::c;
+
+let f = fn (a: std::memory::allocator::Allocator) -> i32 { let x = a.alloc(u8)(4).Ok; return 0; };
+
+let main = fn (args: [][]u8) -> i32 {
+&emsp;return f(std::c::Allocator);
+};
+</code></pre>
 
 ### Expected --
 
-Seamless transition between C and QBE backends. Code should work the same.
+Successful compilation.
 
 ### Received --
 
-Missing:<br/>
-<ul>
-    <li>Aggregate type construction,</li>
-    <li>Local variable definitions.</li>
-</ul>
+<pre><code>
+error: Missing type name for type ID 32 (Void)
+error: This is a compiler bug, a part of impossible branch has been reached. Please inform the authors about it.
+/home/yusuf/proj/Cole/src/codegen/qbe/jair/builder.zig:644:9: 0x1291fe7 in typeName (cole-debug)
+        return Error.ShouldBeImpossible;
+        ^
+/home/yusuf/proj/Cole/src/codegen/qbe/jair/builder.zig:718:36: 0x1294365 in typeName (cole-debug)
+                self.strings.items[try self.typeName(ptr.child)],
+                                   ^
+/home/yusuf/proj/Cole/src/codegen/qbe/jair/builder.zig:841:25: 0x12bff5d in convertType (cole-debug)
+                .name = try self.typeName(id),
+                        ^
+/home/yusuf/proj/Cole/src/codegen/qbe/jair/builder.zig:80:13: 0x1289698 in build (cole-debug)
+        _ = try self.convertType(@intCast(id));
+            ^
+/home/yusuf/proj/Cole/src/main.zig:161:24: 0x123eac3 in innerMain (cole-debug)
+            var jair = try jairBuilder.build();
+                       ^
+error: Compiler exited with code 228 <ShouldBeImpossible>
+</code></pre>
 
 
 ## $open -- Helper Functions for SOA Ease of Use -- #57 -- @ysufender --
