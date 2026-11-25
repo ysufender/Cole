@@ -31,6 +31,8 @@ let Ball = struct {
 }; 
 
 let main = fn (args: [][]u8) -> i32 {
+    Console::log("Starting game...");
+
     let _ini: mut any = INI::loadFile(C::Allocator, "demo/raylib/settings.ini");
     if _ini.tag != @Ok {
         Console::error("Failed to load settings.");

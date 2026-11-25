@@ -4,9 +4,15 @@ Cole is a statically typed, ahead of time compiled programming language that tra
 into a lowered version of C. Cole supports types as values and compile time code execution,
 and handles generics through comptime function execution.
 
-Although it is usable as is right now, Cole far from being a completely finished project.
-There are a couple bugs with compile time execution, typechecking, and C interop. But I'm
-working steadily to fix and implement them as soon as I can.
+Cole currently has two backends: TCC and QBE. The TCC backend is the default backend for debug builds,
+due to its non-optimizing code generation process. QBE is the default backend for normal compilations,
+and it does quite a few optimizations. Take a look at the [QBE Website](https://c9x.me/compile/) for more
+information about the backend.
+
+On the QBE backend, the Source to IR generation is handled by the Cole compiler, IR to Assembly is handled
+by the QBE, Assembling is handled by the modificated embedded [Minias](https://github.com/andrewchambers/minias)
+and linking is done by the [TCC](https://bellard.org/tcc/). Together, they form a unified, self-contained compiler
+architecture for your various needs.
 
 For more information about the language and installation, see the [Cole website](https://cole.yusufenderosmanoglu.tech)
 

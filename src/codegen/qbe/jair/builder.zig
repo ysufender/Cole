@@ -305,6 +305,15 @@ fn dot(self: *Builder, value: defines.Offset) Error!JAIR.Ptr {
     };
 
     const field: FieldLayout = switch (self.jir.types.get(recvType)) {
+        .Array => |arr| blk: {
+            const isLen = std.mem.eql(u8, self.jir.strings[fieldName], "len");
+            std.debug.assert(!isLen);
+
+            break :blk FieldLayout{
+                .offset = 0,
+                .type = arr.child,
+            };
+        },
         .Pointer => |ptr| blk: {
             if (ptr.size != .Slice) {
                 common.log.err("Field access on non-slice pointer child", .{});
@@ -812,9 +821,7 @@ fn convertConstant(self: *Builder, constant: JIR.Constant.Ptr) Error!JAIR.Consta
         return c;
     }
 
-    const ptr: u32 = @intCast(self.constants.len);
-
-    self.constants.appendAssumeCapacity(switch (self.jir.constants.get(constant)) {
+    const converted: JAIR.Constant = switch (self.jir.constants.get(constant)) {
         .Integer => |int| switch (int) {
             .i32 => |integer| .{ .Word = .{ @bitCast(integer), true } },
             .u32 => |integer| .{ .Word = .{ @bitCast(integer), false } },
@@ -866,12 +873,17 @@ fn convertConstant(self: *Builder, constant: JIR.Constant.Ptr) Error!JAIR.Consta
             };
         },
         .Undefined => |t| switch (self.jir.types.get(t)) {
-            .Pointer => .{ .Long = .{ 0, false } },
+            .Pointer => |p| if (p.size == .Slice) .{ .Aggregate = .{
+                .Type = try self.convertType(t),
+                .Init = &.{},
+            } } else .{ .Long = .{ 0, false } },
             else => .{ .Nop = {} },
         },
         .Type, .Void => .{ .Nop = {} },
-    });
+    };
 
+    const ptr: u32 = @intCast(self.constants.len);
+    self.constants.appendAssumeCapacity(converted);
     self.constMap.put(self.allocator, constant, ptr)
         catch return Error.AllocatorFailure;
 

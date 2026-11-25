@@ -1,8 +1,8 @@
-code "
+code if (buildInfo().backend == @C) "
 #header_start
     #include <stdio.h>
 #header_end
-";
+" else "";
 
 import std::memory::allocator as Allocator;
 import std::io::stream as Stream;

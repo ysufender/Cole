@@ -65,11 +65,28 @@ pub let print = fn (self: *Watcher, stream: Stream::Output, allocator: Allocator
  * POSIX
  */
 let timespec = #(@extern, @struct) struct {
-    tv_sec: c_long,
+    tv_sec:  c_long,
+    tv_nsec: c_long,
 };
 
 let stat = #(@extern, @struct) struct {
-    st_mtim: timespec,  /* Time of last modification */
+    st_dev:     c_ulong,
+    st_ino:     c_ulong,
+    st_nlink:   c_ulong,
+    st_mode:    c_uint,
+    st_uid:     c_uint,
+    st_gid:     c_uint,
+    _pad0:     c_int,
+    st_rdev:    c_ulong,
+    st_size:    c_long,
+    st_blksize: c_long,
+    st_blocks:  c_long,
+    st_atim:    timespec,
+    st_mtim:    timespec,  /* Time of last modification */
+    st_ctim:    timespec,
+    _unused0:  c_long,
+    _unused1:  c_long,
+    _unused2:  c_long,
 
     pub let toFileInfo = fn (self: *stat) -> FileInfo {
         return (self.st_mtim.tv_sec);

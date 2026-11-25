@@ -59,12 +59,12 @@ project
     :step(Efile.Step
         .init("record", { always_run = true })
         :dependOnStep("build")
-        :action("testy record"))
+        :action("testy "..cole_backend.." record"))
 
     :step(Efile.Step
         .init("run", { always_run = true })
         :dependOnStep("build")
-        :action("testy run"))
+        :action("testy "..cole_backend.." run"))
 
     :step(Efile.Step
         .init("clean")

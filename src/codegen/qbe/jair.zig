@@ -19,6 +19,11 @@ const DataEmitter = struct {
     first: bool = true,
 };
 
+const Local = struct {
+    name: []const u8,
+    unique: []const u8,
+};
+
 pub const Ptr = defines.Offset;
 
 pub const Type = union(enum) {
@@ -135,6 +140,8 @@ temp: u32 = 0,
 terminated: bool = false,
 currentBlock: []const u8 = "start",
 allocator: std.mem.Allocator = undefined,
+localStack: std.ArrayList(Local) = .empty,
+localCount: u32 = 0,
 locals: *Writer = undefined,
 
 pub fn codegen(self: *JAIR, context: *Context, qbeOut: *std.Io.Dir, allocator: std.mem.Allocator) Error!void {
@@ -233,7 +240,7 @@ pub fn codegen(self: *JAIR, context: *Context, qbeOut: *std.Io.Dir, allocator: s
         switch (self.constants.get(cptr)) {
             .String => |str| switch (str) {
                 .C => |c| {
-                    try self.write(true, out, "data $const{d} = {{ ", .{cptr});
+                    try self.write(true, out, "data $__const{d} = {{ ", .{cptr});
 
                     for (self.strings[c], 0..) |ch, i| {
                         try self.write(false, out, "b {d}{s}", .{
@@ -245,7 +252,7 @@ pub fn codegen(self: *JAIR, context: *Context, qbeOut: *std.Io.Dir, allocator: s
                     try self.write(false, out, ", b 0 }}\n", .{});
                 },
                 .Cole => |c| {
-                    try self.write(true, out, "data $str{d} = {{ ", .{cptr});
+                    try self.write(true, out, "data $__str{d} = {{ ", .{cptr});
 
                     for (self.strings[c], 0..) |ch, i| {
                         try self.write(false, out, "b {d}{s}", .{
@@ -254,8 +261,8 @@ pub fn codegen(self: *JAIR, context: *Context, qbeOut: *std.Io.Dir, allocator: s
                         });
                     }
 
-                    try self.write(true, out, " }}\n", .{});
-                    try self.write(true, out, "data $const{d} = {{ l $str{d}, w {d} }}\n", .{
+                    try self.write(true, out, "{s}b 0 }}\n", .{if (self.strings[c].len == 0) " " else ", "});
+                    try self.write(true, out, "data $__const{d} = {{ l $__str{d}, w {d}, z 4 }}\n", .{
                         cptr,
                         cptr,
                         self.strings[c].len,
@@ -265,16 +272,9 @@ pub fn codegen(self: *JAIR, context: *Context, qbeOut: *std.Io.Dir, allocator: s
             .Aggregate => |agg| {
                 if (self.sizeOf(agg.Type) == 0) continue;
 
-                const al: u32 = switch (self.typeTable.get(agg.Type)) {
-                    .Custom => |cu| @max(1, switch (cu) {
-                        .Opaque => |o| o.alignment,
-                        .Union => |o| o.alignment,
-                        .Aggregate => |o| o.alignment,
-                    }),
-                    else => @max(1, self.sizeOf(agg.Type)),
-                };
+                const al = self.alignOf(agg.Type);
 
-                try self.write(true, out, "data $const{d} = align {d} {{ ", .{ cptr, al });
+                try self.write(true, out, "data $__const{d} = align {d} {{ ", .{ cptr, al });
 
                 var em: DataEmitter = .{};
                 try self.dataItems(out, &em, @intCast(cptr));
@@ -289,6 +289,9 @@ pub fn codegen(self: *JAIR, context: *Context, qbeOut: *std.Io.Dir, allocator: s
     try self.write(false, out, hiddenMain, .{});
 
     self.allocator = allocator;
+
+    self.localStack = std.ArrayList(Local).initCapacity(self.allocator, self.keyNodes.len)
+        catch return Error.AllocatorFailure;
 
     for (self.keyNodes) |nodePtr| {
         self.terminated = false;
@@ -348,7 +351,7 @@ fn constant(self: *JAIR, out: *Writer, bare: bool, constPtr: Constant.Ptr) Error
             });
         },
         .String, .Aggregate => {
-            try self.write(false, out, "l {s}$const{d}", .{
+            try self.write(false, out, "l {s}$__const{d}", .{
                 if (bare) "" else "copy ",
                 constPtr,
             });
@@ -437,6 +440,7 @@ fn generateStatement(self: *JAIR, out: *Writer, nodePtr: Ptr) Error!void {
             defer allocBuf.deinit();
             self.locals = &allocBuf.writer;
 
+            self.localStack.clearRetainingCapacity();
             self.terminated = false;
             try self.generateStatement(&bodyBuf.writer, body);
             if (!self.terminated) {
@@ -452,6 +456,9 @@ fn generateStatement(self: *JAIR, out: *Writer, nodePtr: Ptr) Error!void {
         .Scope => {
             const label = self.strings[self.data[node.value]];
 
+            const localStackLen = self.localStack.items.len;
+            defer self.localStack.items = self.localStack.items[0..localStackLen];
+
             try self.write(false, out, "@{s}\n", .{label});
             self.currentBlock = label;
 
@@ -464,8 +471,7 @@ fn generateStatement(self: *JAIR, out: *Writer, nodePtr: Ptr) Error!void {
             for (0..len) |idx| {
                 try self.generateStatement(out, self.data[node.value + 2 + idx]);
             }
-        },
-        .Label => {
+        },        .Label => {
             self.terminated = false;
             const label = self.strings[node.value];
             try self.write(true, out, "@{s}\n", .{label});
@@ -564,10 +570,17 @@ fn variableDef(self: *JAIR, out: *Writer, node: *const Node) Error!void {
         return;
     }
 
-    self.locals.print("    %{s} =l alloc{d} {d}\n", .{ name, self.allocAlignment(ty), size })
+    const unique = std.fmt.allocPrint(self.allocator, "{s}__{d}", .{ name, self.localCount })
+        catch return Error.AllocatorFailure;
+    self.localCount += 1;
+    self.localStack.append(self.allocator, .{ .name = name, .unique = unique })
+        catch return Error.AllocatorFailure;
+
+    self.locals.print("    %{s} =l alloc{d} {d}\n", .{ unique, self.allocAlignment(ty), size })
         catch return Error.IOError;
     const slot = self.allocTmp();
-    try self.write(true, out, "%__tmp{d} =l copy %{s}\n", .{ slot, name });
+    try self.write(true, out, "%__tmp{d} =l copy %{s}\n", .{ slot, unique });
+
     if (hasInit) try self.storeTo(out, slot, init, ty) else try self.zeroFill(out, slot, size);
 }
 
@@ -833,7 +846,7 @@ fn call(self: *JAIR, out: *Writer, node: *const Node) Error!u32 {
 
     if (hasReturn) {
         try self.write(true, out, "%__tmp{d} =", .{res});
-        try self.typeString(out, false, node.type);   // was: true
+        try self.typeString(out, false, returnType);
         try self.write(false, out, " ", .{});
     }
 
@@ -851,7 +864,9 @@ fn call(self: *JAIR, out: *Writer, node: *const Node) Error!u32 {
 
     try self.write(false, out, ")\n", .{});
 
-    return res;
+    if (!hasReturn) return 0;
+
+    return self.normalize(out, res, returnType);
 }
 
 fn store(self: *JAIR, out: *Writer, node: *const Node) Error!void {
@@ -922,10 +937,9 @@ fn identifier(self: *JAIR, out: *Writer, node: *const Node) Error!u32 {
         return res;
     }
 
-    const symbol = if (isParam)
-        try std.fmt.allocPrint(std.heap.page_allocator, "__param_{s}", .{name})
-    else
-        name;
+    const symbol =
+        if (isParam) try std.fmt.allocPrint(self.allocator, "__param_{s}", .{name})
+        else self.lookupLocal(name);
 
     if (lvalue or !self.isScalar(valueType)) {
         try self.write(true, out, "%__tmp{d} =l copy %{s}\n", .{
@@ -1250,14 +1264,7 @@ fn dataItems(self: *JAIR, out: *Writer, em: *DataEmitter, ptr: Constant.Ptr) Err
         .Half => 2,
         .Word, .Single => 4,
         .Long, .Double, .Function, .String => 8,
-        .Aggregate => |a| switch (self.typeTable.get(a.Type)) {
-            .Custom => |cu| @max(1, switch (cu) {
-                .Opaque => |o| o.alignment,
-                .Union => |o| o.alignment,
-                .Aggregate => |o| o.alignment,
-            }),
-            else => @max(1, self.sizeOf(a.Type)),
-        },
+        .Aggregate => |a| self.alignOf(a.Type),
         .Nop => 1,
     };
 
@@ -1334,11 +1341,11 @@ fn dataItems(self: *JAIR, out: *Writer, em: *DataEmitter, ptr: Constant.Ptr) Err
         },
         .String => |s| switch (s) {
             .C => blk: {
-                try self.write(false, out, "l $const{d}", .{ptr});
+                try self.write(false, out, "l $__const{d}", .{ptr});
                 break :blk 8;
             },
             .Cole => |str| blk: {
-                try self.write(false, out, "l $str{d}, w {d}, z 4", .{
+                try self.write(false, out, "l $__str{d}, w {d}, z 4", .{
                     ptr,
                     self.strings[str].len,
                 });
@@ -1532,6 +1539,16 @@ fn expressionType(self: *const JAIR, ptr: Ptr) TypeID {
 
         else => node.type,
     };
+}
+
+fn lookupLocal(self: *const JAIR, name: []const u8) []const u8 {
+    var i = self.localStack.items.len;
+    while (i > 0) {
+        i -= 1;
+        if (std.mem.eql(u8, self.localStack.items[i].name, name))
+            return self.localStack.items[i].unique;
+    }
+    return name;
 }
 
 fn write(

@@ -2011,8 +2011,6 @@ fn indexing(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
     const indexPtr = ast.extra[extraPtr + 1];
     const indexType = try self.typechecker.typecheckExpression(indexPtr, null);
 
-    const index = try self.expression(indexPtr, indexType);
-
     const indexedTypeChild = switch (self.typechecker.typeTable.get(typeID)) {
         .Array => |arr| arr.child,
         .Pointer => |ptr| ptr.child,
@@ -2026,6 +2024,21 @@ fn indexing(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
             .size = .C,
         },
     });
+
+    const index = index: {
+        const rawIndex = try self.expression(indexPtr, indexType);
+
+        if (self.typechecker.context.settings.buildInfo.backend == .C) {
+            break :index rawIndex;
+        }
+
+        const sizeMultiplier = try self.typechecker.builder.addConstant(.{
+            .Integer = .{ .u32 = @divFloor(try self.typechecker.sizeOf(indexedTypeChild), @bitSizeOf(u8)) },
+        });
+        const sizeMulLit = try self.typechecker.builder.literal(sizeMultiplier);
+
+        break :index try self.typechecker.builder.mul(rawIndex, sizeMulLit);
+    };
 
 
     if (self.typechecker.typeTable.get(typeID) == .Array) {

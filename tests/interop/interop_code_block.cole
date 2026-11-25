@@ -1,7 +1,9 @@
 import std::io::console as Console;
 
 let main = fn (args: [][]u8) -> i32 {
-    code " printf(\"raw c block %d\n\", 7); ";
+    code
+        if (buildInfo().backend == @C) "printf(\"raw c block %d\n\", 7); "
+        else "call $printf(b \"raw qbe block %d\n\", w 7)";
     Console::log("after");
     return 0;
 };
