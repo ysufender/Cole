@@ -34,7 +34,7 @@ const Flags = enum(u8) {
 const Builder = @This();
 
 jir: JIR.Base,
-renamedStringMap: std.bit_set.Dynamic,
+typeNameMap: collections.HashMap(TypeID, defines.StringPtr),
 nodes: JAIR.Node.List,
 typeTable: TypeTable,
 typeMap: collections.HashMap(TypeID, TypeID),
@@ -70,21 +70,23 @@ pub fn fromJIR(jir: JIR.Base, allocator: Allocator, typechecker: *Typechecker) E
     var constMap = collections.HashMap(JIR.Constant.Ptr, JAIR.Constant.Ptr).empty;
     constMap.ensureTotalCapacity(allocator, @intCast(jir.constants.len)) catch return Error.AllocatorFailure;
 
+    var typeNameMap = collections.HashMap(TypeID, defines.StringPtr).empty;
+    typeNameMap.ensureTotalCapacity(allocator, @intCast(jir.types.len)) catch return Error.AllocatorFailure;
+
     return .{
         .jir = jir,
         .nodes = try JAIR.Node.List.init(allocator, jir.nodes.len),
         .keyNodes = std.ArrayList(JAIR.Ptr).initCapacity(allocator, jir.keyNodes.len) catch return Error.AllocatorFailure,
         .data = std.ArrayList(u32).initCapacity(allocator, jir.data.len) catch return Error.AllocatorFailure,
-        // One extra JAIR type may be synthesized for each tagged union's payload.
         .typeTable = TypeTable.initCapacity(
             allocator,
             jir.types.len + taggedUnionCount,
         ) catch return Error.AllocatorFailure,
-        .renamedStringMap = std.bit_set.Dynamic.initEmpty(allocator, jir.strings.len) catch return Error.AllocatorFailure,
         .constants = Constants.initCapacity(allocator, jir.constants.len) catch return Error.AllocatorFailure,
         .constMap = constMap,
         .flags = FlagMap.empty,
         .typeMap = typeMap,
+        .typeNameMap = typeNameMap,
         .strings = strings,
         .allocator = allocator,
         .typechecker = typechecker,
@@ -112,34 +114,42 @@ pub fn build(self: *Builder) Error!JAIR {
     }
 
     var typeNames = Typechecker.TypeNameMap.empty;
-    typeNames.ensureTotalCapacity(self.allocator, @intCast(self.typeTable.len)) catch return Error.AllocatorFailure;
+    typeNames.ensureTotalCapacity(
+        self.allocator,
+        @intCast(self.typeTable.len),
+    ) catch return Error.AllocatorFailure;
 
     for (0..self.jir.types.len) |id| {
-        const newType = self.typeMap.get(@intCast(id)) orelse return Error.ShouldBeImpossible;
+        const sourceType: TypeID = @intCast(id);
+        const newType = self.typeMap.get(sourceType) orelse
+            return Error.ShouldBeImpossible;
 
         switch (self.typeTable.get(newType)) {
             .Custom => {
                 const res = typeNames.getOrPutAssumeCapacity(newType);
+
                 if (!res.found_existing) {
-                    res.value_ptr.* = try self.typeName(@intCast(id));
+                    res.value_ptr.* = try self.typeName(sourceType);
                 }
             },
             else => {},
         }
     }
 
-    for (0..self.typeTable.len) |newType| {
-        const name = switch (self.typeTable.get(@intCast(newType))) {
+    for (0..self.typeTable.len) |id| {
+        const name: defines.StringPtr = switch (self.typeTable.get(@intCast(id))) {
             .Custom => |custom| switch (custom) {
-                .Opaque => |opaqueType| opaqueType.name,
-                .Aggregate => |aggregate| aggregate.name,
-                .Union => |unionType| unionType.name,
+                .Opaque => |v| v.name,
+                .Aggregate => |v| v.name,
+                .Union => |v| v.name,
             },
             else => continue,
         };
 
-        const res = typeNames.getOrPutAssumeCapacity(@intCast(newType));
-        if (!res.found_existing) res.value_ptr.* = name;
+        const res = typeNames.getOrPutAssumeCapacity(@intCast(id));
+        if (!res.found_existing) {
+            res.value_ptr.* = name;
+        }
     }
 
     return .{
@@ -703,19 +713,11 @@ fn functionDef(self: *Builder, fptr: JIR.Ptr) Error!JAIR.Ptr {
 }
 
 fn typeName(self: *Builder, id: TypeID) Error!defines.StringPtr {
-    const typeInfo = self.jir.types.get(id);
-    const name = self.jir.typeNames.get(id) orelse {
-        common.log.err("Missing type name for type ID {d} ({s})", .{
-            id,
-            @tagName(std.meta.activeTag(typeInfo)),
-        });
-        return Error.ShouldBeImpossible;
-    };
-
-    if (self.renamedStringMap.isSet(name)) {
+    if (self.typeNameMap.get(id)) |name| {
         return name;
     }
 
+    const typeInfo = self.jir.types.get(id);
     const newName = newName: switch (typeInfo) {
         .Noreturn, .Any, .Type, .EnumLiteral, .ComptimeInt, .ComptimeFloat => "",
         .Void => |mut| if (mut) "mut_void" else "void",
@@ -760,14 +762,15 @@ fn typeName(self: *Builder, id: TypeID) Error!defines.StringPtr {
             for (func.argTypes) |argt| {
                 len += @intCast(self.strings.items[try self.typeName(argt)].len + 1);
             }
-            len += @intCast(self.strings.items[try self.typeName(func.returnType)].len);
+            const retStr = self.strings.items[try self.typeName(func.returnType)];
+            len += @intCast(retStr.len);
 
             const generatedName = self.allocator.alloc(u8, len) catch return Error.AllocatorFailure;
             std.mem.copyForwards(u8, generatedName[0..5], "func_");
 
             var index: u32 = 5;
             for (func.argTypes) |argt| {
-                const argName = self.strings.items[self.jir.typeNames.get(argt).?];
+                const argName = self.strings.items[try self.typeName(argt)];
                 std.mem.copyForwards(u8, generatedName[index..], argName);
                 index += @intCast(argName.len + 1);
                 generatedName[index - 1] = '_';
@@ -777,7 +780,7 @@ fn typeName(self: *Builder, id: TypeID) Error!defines.StringPtr {
             generatedName[index - 2] = '_';
             generatedName[index - 1] = '_';
 
-            std.mem.copyForwards(u8, generatedName[index..], self.strings.items[self.jir.typeNames.get(func.returnType).?]);
+            std.mem.copyForwards(u8, generatedName[index..], retStr);
             break :newName generatedName;
         },
         .Pointer => |ptr| switch (ptr.size) {
@@ -795,8 +798,10 @@ fn typeName(self: *Builder, id: TypeID) Error!defines.StringPtr {
 
     // self.strings.items[name] = newName;
     // self.renamedStringMap.set(name);
-    _ = newName;
-    return name;
+    const newString: u32 = @intCast(self.strings.items.len);
+    self.strings.append(self.allocator, newName) catch return Error.AllocatorFailure;
+    self.typeNameMap.putAssumeCapacityNoClobber(id, newString);
+    return newString;
 }
 
 fn constantType(self: *Builder, constant: JAIR.Constant.Ptr) TypeID {

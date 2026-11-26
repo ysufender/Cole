@@ -500,7 +500,7 @@ fn generateStatement(self: *JAIR, out: *Writer, nodePtr: Ptr) Error!void {
                 .{otherwise},
             ) catch return Error.AllocatorFailure;
         },
-        .Code => try self.write(true, out, "{s}\n", .{self.strings[node.value]}),
+        .Code => try self.write(true, out, "\n{s}\n", .{self.strings[node.value]}),
         .Store => try self.store(out, &node),
         .VariableDef => try self.variableDef(out, &node),
         .Return => {
