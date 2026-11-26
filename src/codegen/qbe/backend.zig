@@ -58,6 +58,14 @@ pub fn compile(outDir: Dir, allocator: std.mem.Allocator, context: *common.Compi
         catch return Error.IOError;
     tcc.tcc_set_lib_path(state, cpath[0..size].ptr);
 
+    // Set debug
+    if (context.settings.hasFlag("--debug")) {
+        if (tcc.tcc_set_options(state, "-gdwarf -bt128 -rdynamic") == -1) {
+            report("Failed to set backend settings.");
+            return Error.BackendError;
+        }
+    }
+
     // Set error callback
     tcc.tcc_set_error_func(state, null, tccErrCallback);
 

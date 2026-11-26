@@ -60,12 +60,7 @@ fn addTestStep(b: *std.Build) void {
         @tagName(backend_config),
         if (b.option(bool, "record", "Run Testy in record mode") orelse false) "record" else "run",
     });
-    for (runTests.argv.items, 0..) |arg, i| {
-    switch (arg) {
-        .bytes => |bytes| std.debug.print("arg[{d}]: {s}\n", .{ i, bytes }),
-        else => std.debug.print("arg[{d}]: <generated file/lazy path>\n", .{i}),
-    }
-}
+
     runTests.setCwd(.{ .cwd_relative = "tests/" });
 
     const unit_test = b.addTest(.{

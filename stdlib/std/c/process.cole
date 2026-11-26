@@ -1,13 +1,17 @@
-code "
+code  if (isC) "
 #header_start
     #include <stdlib.h>
     #include <unistd.h>
     #include <errno.h>
 #header_end
-";
+" else "";
 
 import std::c::memory as Memory;
-import std::memory::allocator as Allocator;
+import std::memory::allocator;
+
+let Allocator = std::memory::allocator::Allocator;
+
+let isC = buildInfo().backend == @C;
 
 pub let SpawnError = enum {
     Ok,
@@ -17,30 +21,36 @@ pub let SpawnError = enum {
 };
 
 pub let exit = fn (exc: i32) -> noreturn {
-    code "exit(exc);";
+    code
+        if(isC) "exit(exc);"
+        else "call $exit(w %__param_exc)";
 };
 
-pub let spawn = fn (path: []u8, argv: [][]u8) -> SpawnError {
-    code "
-        pid_t pid = fork();
-        if (pid == 0) {
-            char** _argv = (char**)calloc(argv.len, sizeof(char const*));
-            if (_argv == NULL) {
-                return std__c__process__SpawnError_Alloc;
-            }
+pub let spawn = fn (path: []u8, argv: [][]u8, gpa: Allocator) -> SpawnError {
+    if buildInfo().backend != @C {
+        compileError("process spawn is only available in the C backend.");
+    }
 
-            for (uint32_t i = 0; i < argv.len; i++) {
-                _argv[i] = (argv.ptr[i]).ptr;
-            }
+    let pid = fork();
+    if pid == 0 {
+        let _argv: mut [][@c]c_char = undefined;
+        switch gpa.alloc([@c]c_char)(argv.len) {
+            @Ok -> |mem| _argv = mem;
+            else -> return @Alloc;
+        }
 
-            if (execv(path.ptr, _argv) == -1) {
-                return std__c__process__SpawnError_Execv;
-            }
+        for 0..argv.len, |i| {
+            _argv[i] = argv[i].ptr;
         }
-        else if (pid == -1) {
-            return std__c__process__SpawnError_Fork;
+
+        if execv(path.ptr, _argv) == -1 {
+            return @Execv;
         }
-    ";
+    }
+    else if pid == -1 {
+        return @Fork;
+    }
+
     return @Ok;
 };
 
@@ -53,3 +63,7 @@ pub let Self = fn () -> struct {
 
 let _Cole_implicit__executable_path: mut []u8 = #(@extern) undefined;
 let _Cole_implicit__commandline_args: mut [][]u8   = #(@extern) undefined;
+
+let pid_t = c_int;
+let fork = #(@extern) fn () -> mut pid_t { };
+let execv = #(@extern) fn (path: mut [@c]c_char, argv: mut [@c][@c]c_char) -> mut c_int { };

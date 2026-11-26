@@ -231,6 +231,10 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
     defer self.typechecker.currentFile = psrc;
     self.typechecker.currentFile = func.source;
 
+    const prevt = self.typechecker.lastToken;
+    self.typechecker.lastToken = 1;
+    defer self.typechecker.lastToken = prevt;
+
     const ast = self.typechecker.context.getAST(func.source);
     const tokens = self.typechecker.context.getTokens(ast.tokens);
 

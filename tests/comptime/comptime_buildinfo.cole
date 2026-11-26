@@ -8,6 +8,5 @@ let pb = fn (b: bool) -> void {
 let main = fn (args: [][]u8) -> i32 {
     pb(buildInfo().platform == @Unix);
     pb(buildInfo().platform == @Windows);
-    pb(buildInfo().backend == @C);
     return 0;
 };

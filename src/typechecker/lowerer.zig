@@ -110,8 +110,11 @@ pub fn addConstant(self: *Lowerer, valuePtr: Comptime.Value.Ptr, ofTypePtr: Type
             .CSize => .{ .Integer = .{ .c_size = @intCast(val) } },
 
             .CDouble => .{ .Float = .{ .f64 = @floatFromInt(val) } },
-            .Float, .ComptimeFloat => .{
+            .Float => .{
                 .Float = .{ .f32 = @floatFromInt(value.Int) },
+            },
+            .ComptimeFloat => .{
+                .Float = .{ .f64 = @floatFromInt(value.Int) },
             },
 
             .Bool => .{
@@ -1203,7 +1206,7 @@ pub fn expression(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID
     const inner = try switch (expr.type) {
         .Literal => self.literal(exprPtr, ofType),
         .Mark => self.mark(expr.value, ofType),
-        .Identifier => self.identifier(exprPtr),
+        .Identifier => self.identifier(exprPtr, ofType),
 
         .Scoping => self.scoping(expr.value, exprPtr),
 
@@ -2208,18 +2211,37 @@ fn binary(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR
     };
 }
 
-fn identifier(self: *Lowerer, id: defines.ExpressionPtr) Error!JIR.Ptr {
+fn identifier(self: *Lowerer, id: defines.ExpressionPtr, ofType: TypeID) Error!JIR.Ptr {
     const declPtr = self.typechecker.instanceDecl(
         self.typechecker.symbols.findDecl(.{ .file = self.typechecker.currentFile, .expr = id })
     );
     const decl = self.typechecker.symbols.getDecl(declPtr);
 
-    return self.typechecker.builder.identifier(
+    if (decl.kind == .Builtin) {
+        return self.addConstant(try self.typechecker.folder.evalDecl(declPtr, ofType), ofType);
+    }
+
+    const valueType = try self.typechecker.typecheckDecl(declPtr, ofType);
+    const ident = try self.typechecker.builder.identifier(
         decl.name,
-        @as(u8, if (decl.topLevel) 2 else 0) 
+        @as(u8, if (decl.topLevel) 2 else 0)
         | @as(u8, if (decl.kind == .Parameter) 1 else 0),
-        try self.typechecker.typecheckDecl(declPtr, null)
+        valueType,
     );
+
+    const valueIsNumeric = self.typechecker.isInt(valueType) or self.typechecker.isFloat(valueType);
+    const targetIsNumeric = self.typechecker.isInt(ofType) or self.typechecker.isFloat(ofType);
+
+    if (
+        valueType != ofType
+        and valueIsNumeric
+        and targetIsNumeric
+        and self.typechecker.suitable(ofType, valueType)
+    ) {
+        return self.typechecker.builder.construct(ofType, &.{ident});
+    }
+
+    return ident;
 }
 
 fn mark(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR.Ptr {

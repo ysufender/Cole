@@ -793,8 +793,9 @@ fn typeName(self: *Builder, id: TypeID) Error!defines.StringPtr {
         },
     };
 
-    self.strings.items[name] = newName;
-    self.renamedStringMap.set(name);
+    // self.strings.items[name] = newName;
+    // self.renamedStringMap.set(name);
+    _ = newName;
     return name;
 }
 

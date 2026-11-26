@@ -254,6 +254,7 @@ pub fn typecheck(self: *Typechecker, allocator: Allocator) Error!JIR {
                 }
 
                 self.currentFile = module.dataIndex;
+                self.lastToken = 1;
 
                 const scode = self.folder.getValue(try self.folder.eval(stmt.value, comptime Comptime.Folder.Builtin.Type("[]u8"))).String.str;
                 const code = try self.builder.internString(scode);
@@ -526,6 +527,7 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
                     const prevFile = self.currentFile;
                     self.currentFile = func.source;
                     defer self.currentFile = prevFile;
+
                     break :keep
                         self.hasMetadata(func.expr, "@export")
                         or self.hasMetadata(func.expr, "@extern")
@@ -1175,6 +1177,7 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
             const inLoop = self.getFlag(.InLoop);
             const inDefer = self.getFlag(.InDefer);
             const lvalue = self.getFlag(.LValue);
+            const covered = self.getFlag(.CoveredAllPaths);
 
             self.flags = tuple.@"1";
 
@@ -1182,6 +1185,7 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
             _ = self.setFlag(.InLoop, inLoop);
             _ = self.setFlag(.InDefer, inDefer);
             _ = self.setFlag(.LValue, lvalue);
+            _ = self.setFlag(.CoveredAllPaths, covered);
 
             return tuple.@"0";
         }
@@ -2329,6 +2333,10 @@ pub fn lowerFunction(self: *Typechecker, function: JIR.Function, token: ?defines
     self.currentFile = func.source;
     defer self.currentFile = prevs;
 
+    const prevt = self.lastToken;
+    self.lastToken = 1;
+    defer self.lastToken = prevt;
+
     const prevInst = self.folder.currentInstantiation;
     if (self.folder.captures.contains(func.scope))
         self.folder.currentInstantiation = func.scope;
@@ -2739,6 +2747,10 @@ pub fn isGenericMember(self: *Typechecker, declPtr: defines.DeclPtr) bool {
     const prevFile = self.currentFile;
     self.currentFile = self.modules.modules.items(.dataIndex)[self.symbols.scopes.items(.module)[decl.scope]];
     defer self.currentFile = prevFile;
+
+    const prevt = self.lastToken;
+    self.lastToken = 1;
+    defer self.lastToken = prevt;
 
     return self.hasMetadata(decl.node, "@generic");
 }
@@ -3549,6 +3561,7 @@ pub fn report(self: *Typechecker, comptime fmt: []const u8, args: anytype) void 
     }
 
     common.log.err(fmt, args);
+
     const token = self.context.getTokens(self.currentFile).get(self.lastToken);
     const position = token.position(self.context, self.currentFile);
 
@@ -4188,7 +4201,8 @@ pub fn sizeOf(self: *Typechecker, of: TypeID) Error!u32 {
         },
         .Function => @bitSizeOf(@TypeOf(&sizeOf)),
         .Enum => @bitSizeOf(u32),
-        .Float, .ComptimeFloat => @bitSizeOf(f32),
+        .Float => @bitSizeOf(f32),
+        .ComptimeFloat => @bitSizeOf(f64),
         .Integer => |int| int.size,
         .Bool => @bitSizeOf(c_char),
         .Void, .Noreturn, .EnumLiteral, .Type, .Any => 0,
@@ -4200,6 +4214,10 @@ pub fn sizeOf(self: *Typechecker, of: TypeID) Error!u32 {
                 self.currentFile = str.source;
                 defer self.currentFile = prevs;
 
+                const prevt = self.lastToken;
+                self.lastToken = 1;
+                defer self.lastToken = prevt;
+
                 if (!str.isTuple and str.expr != 0) {
                     if (self.metadataIndex(str.expr, "@opaque")) |index| {
                         const meta = self.getMetadata(str.expr).?;
@@ -4210,7 +4228,7 @@ pub fn sizeOf(self: *Typechecker, of: TypeID) Error!u32 {
                         }
 
                         switch (self.folder.getValue(meta[index + 1])) {
-                            .Int => |size| return @intCast(size),
+                            .Int => |size| return @intCast(size * @bitSizeOf(u8)),
                             else => {
                                 self.report("Expected an integer value as size.", .{});
                                 return Error.TypeMismatch;
@@ -4268,7 +4286,8 @@ pub fn alignOf(self: *Typechecker, of: TypeID) Error!u32 {
         .Pointer => @alignOf(*void),
         .Function => @alignOf(@TypeOf(&alignOf)),
         .Enum => @alignOf(u32),
-        .Float, .ComptimeFloat => @alignOf(f32),
+        .Float => @alignOf(f32),
+        .ComptimeFloat => @alignOf(f64),
         .Integer => |int| int.size / 8, // assuming int.size is in bits
         .Bool => @alignOf(bool),
         .Void, .Noreturn, .EnumLiteral, .Type, .Any => 1,
@@ -4278,6 +4297,10 @@ pub fn alignOf(self: *Typechecker, of: TypeID) Error!u32 {
             const prevs = self.currentFile;
             self.currentFile = str.source;
             defer self.currentFile = prevs;
+
+            const prevt = self.lastToken;
+            self.lastToken = 1;
+            defer self.lastToken = prevt;
 
             if (!str.isTuple and str.expr != 0) {
                 if (self.metadataIndex(str.expr, "@align")) |index| {
@@ -4398,16 +4421,21 @@ pub fn tryGetFieldIndex(self: *Typechecker, from: TypeID, fieldNamePtr: defines.
             self.currentFile = str.source;
             defer self.currentFile = prevs;
 
-            if (
-                !str.isTuple
-                and str.expr != 0
-                and self.currentScope != str.scope
-                and self.hasMetadata(str.expr, "@opaque")) {
-                self.report("Attempt to access the fields of opaque type '{s}'.", .{
-                    self.builder.getInternedString(str.name),
-                });
-                return Error.FieldAccessOnOpaqueType;
-            }
+            const prevt = self.lastToken;
+            self.lastToken = 1;
+            defer self.lastToken = prevt;
+
+            // @TODO Think about a better design
+            //if (
+            //    !str.isTuple
+            //    and str.expr != 0
+            //    and self.currentScope != str.scope
+            //    and self.hasMetadata(str.expr, "@opaque")) {
+            //    self.report("Attempt to access the fields of opaque type '{s}'.", .{
+            //        self.builder.getInternedString(str.name),
+            //    });
+            //    return Error.FieldAccessOnOpaqueType;
+            //}
 
             break :fields str.fields;
         },

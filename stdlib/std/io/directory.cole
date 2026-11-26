@@ -100,7 +100,8 @@ pub let Dir = struct {
 /*
  * POSIX
  */
-let DIR = #(@extern, @opaque) struct { };
+let DIR = #(@extern, @opaque, 0, @align, 1) struct { };
+
 
 let dirent = #(@extern, @struct) struct {
     /* @Beware may have other fields */

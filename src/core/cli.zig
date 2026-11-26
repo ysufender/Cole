@@ -94,7 +94,7 @@ pub fn parseCLI(allocator: std.mem.Allocator, _args: std.process.Args, io: std.I
     var libraries = NMap.empty;
     var linkDirs = NMap.empty;
     var maxErr: u32 = 5;
-    var targetBackend = Backend.C;
+    var targetBackend = Backend.QBE;
     var optimize: ?[]const u8 = null;
     var cliFlags = common.CompilerSettings.FlagSet.empty;
 

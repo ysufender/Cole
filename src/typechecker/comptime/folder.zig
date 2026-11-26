@@ -421,6 +421,10 @@ pub fn determineComptimeReturnTypeDirect(
     self.typechecker.currentFile = func.source;
     defer self.typechecker.currentFile = prevs;
 
+    const prevt = self.typechecker.lastToken;
+    self.typechecker.lastToken = 1;
+    defer self.typechecker.lastToken = prevt;
+
     const prevsc = self.typechecker.currentScope;
     self.typechecker.currentScope = func.scope;
     defer self.typechecker.currentScope = prevsc;
@@ -470,6 +474,10 @@ pub fn determineComptimeReturnType(
     const prevs = self.typechecker.currentFile;
     self.typechecker.currentFile = func.source;
     defer self.typechecker.currentFile = prevs;
+
+    const prevt = self.typechecker.lastToken;
+    self.typechecker.lastToken = 1;
+    defer self.typechecker.lastToken = prevt;
 
     const prevsc = self.typechecker.currentScope;
     self.typechecker.currentScope = func.scope;
@@ -1206,6 +1214,10 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
                 const cond = (self.typechecker.hasMetadata(func.expr, "@extern")
                         or self.typechecker.hasMetadata(func.expr, "@export"));
                 self.typechecker.currentFile = prevs;
+
+                const prevt = self.typechecker.lastToken;
+                self.typechecker.lastToken = decl.token;
+                defer self.typechecker.lastToken = prevt;
 
                 const cur = self.typechecker.builder.getInternedString(func.name);
                 if (
@@ -3012,6 +3024,9 @@ pub fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Type
     const prevs = self.typechecker.currentFile;
     self.typechecker.currentFile = function.source;
 
+    const prevt = self.typechecker.lastToken;
+    self.typechecker.lastToken = 1;
+
     if (self.typechecker.hasMetadata(function.expr, "@extern")) {
         self.typechecker.currentFile = prevs;
         self.report("Attempt to comptime execute external function '{s}'", .{
@@ -3021,6 +3036,7 @@ pub fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Type
     }
 
     self.typechecker.currentFile = prevs;
+    self.typechecker.lastToken = prevt;
 
     const signature = self.typechecker.typeTable.get(function.signature).Function;
 
@@ -3262,12 +3278,14 @@ fn expectDefined(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?
 
 pub fn constructUndefined(self: *Folder, valueType: TypeID) Error!Comptime.Value.Ptr {
     return res: switch (self.typechecker.typeTable.get(valueType)) {
-        .Enum, .Void, .Function, .Type, .Any, .Noreturn, .EnumLiteral => {
+        .Void, .Type, .Any, .Noreturn, .EnumLiteral => {
             self.report("Given type '{s}' can't be undefined.", .{
                 try self.typechecker.typeName(self.arena.allocator(), valueType)
             });
             return Error.IllegalSyntax;
         },
+        .Function => self.appendValue(.{ .Undefined = valueType }),
+        .Enum => self.appendValue(.{ .Enum = .{ .Type = valueType, .Value = self.typechecker.typeTable.get(valueType).Enum.fields[0].value } }),
         .Bool => self.appendValue(.{ .Bool = false }),
         .CUInt, .CUChar, .CChar, .CLong, .CInt, .CShort, .CSize,
         .CULong, .CUShort, .Integer, .ComptimeInt  => self.appendValue(.{ .Int = 0 }),
