@@ -9,7 +9,7 @@ import std::io::file::ofile as OutputFile;
 import std::io::file::ifile as InputFile;
 import std::memory::allocator as Allocator;
 
-let FILE = #(@extern, @opaque, 0, @align 1) struct { };
+let FILE = #(@extern, @opaque, 1, @align 1) struct { };
 
 let stdout: mut *mut FILE = #(@extern) undefined;
 let stdin: mut *mut FILE = #(@extern) undefined;

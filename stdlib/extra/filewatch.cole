@@ -98,13 +98,13 @@ let fileno = #(@extern) fn (file: mut *mut FILE) -> mut c_int { };
 let fopen = #(@extern) fn (pathname: mut [@c]c_char,  mode: mut [@c]c_char) -> mut *mut FILE { };
 let fclose = #(@extern) fn (file: mut *mut FILE) -> mut c_int { };
 
-let FILE = #(@extern) struct { };
+let FILE = #(@extern, @opaque, 1, @align, 1) struct { };
 
 /*
  * WIN32
  */
 
-let HANDLE = #(@extern) struct { };
+let HANDLE = #(@extern, @align, 1, @opaque, 1) struct { };
 let DWORD  = c_ulong;
 let BOOL   = c_int;
 

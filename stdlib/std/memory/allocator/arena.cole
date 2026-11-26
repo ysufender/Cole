@@ -188,7 +188,6 @@ pub let Arena = struct {
         }
 
         unreachable();
-        return undefined;
     };
 
     pub let allocator = fn (self: *mut Arena) -> Allocator {

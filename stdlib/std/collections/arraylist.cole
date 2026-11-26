@@ -73,7 +73,6 @@ pub let ArrayList = fn (T: type) -> type {
             }
 
             unreachable();
-            return (@Err, @Undefined);
         };
 
         pub let addOne = fn (self: *mut Self, allocator: Allocator) -> Res(u32, Error) {

@@ -80,7 +80,7 @@ pub let flush = fn (handle: *mut void) -> Stream::Result {
         else @Err;
 };
 
-let FILE = #(@extern) struct { };
+let FILE = #(@extern, @align, 1, @opaque, 1) struct { };
 
 let fwrite = #(@extern) fn (
     src  : mut [@c]void,

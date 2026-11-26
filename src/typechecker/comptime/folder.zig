@@ -277,6 +277,13 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
             isComptime = true;
         }
 
+        if (self.typechecker.typeTable.get(argType).isZeroBit() and !isComptime) {
+            self.report("Zero bit-sized parameter '{s}' is not allowed.", .{
+                name
+            });
+            return Error.OperationOnZeroBitSize;
+        }
+
         const declPtr = self.typechecker.symbols.lookup.get(.{
             .name = name,
             .scope = oldScope,
@@ -304,13 +311,6 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
             .scope = scope,
             .name = name
         }, newDecl) catch return Error.AllocatorFailure;
-
-        if (self.typechecker.typeTable.get(argType).isZeroBit() and !isComptime) {
-            self.report("Zero bit-sized parameter '{s}' is not allowed.", .{
-                name
-            });
-            return Error.OperationOnZeroBitSize;
-        }
     }
 
     const returnType =
@@ -1498,10 +1498,10 @@ fn evalFuncType(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
     for (range.start..range.end) |index| {
         const argType = self.getValue(try self.expectType(ast.extra[@intCast(index)])).Type;
 
-        if (self.typechecker.typeTable.get(argType).isZeroBit()) {
-            self.report("Zero bit sized function parameter '{s}' is not allowed.", .{
-                try self.typechecker.typeName(self.arena.allocator(), argType),
+        if (self.typechecker.typeTable.get(argType).isZeroBit() and !isComptime) {
+            self.report("Zero bit-sized parameters are not allowed.", .{
             });
+            return Error.OperationOnZeroBitSize;
         }
 
         argTypes[realIndex] = argType;

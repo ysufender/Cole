@@ -1734,7 +1734,7 @@ pub fn discoverScopeDef(
 
     const memberIndex = try self.definitionIndex(from, member.name, false);
 
-    assert(self.symbols.getDecl(decl).public);
+    assert(self.symbols.getDecl(decl).public or self.currentScope == self.symbols.getDecl(decl).scope);
 
     switch (self.typeTable.get(from)) {
         .Enum => |enm| {
@@ -1818,7 +1818,7 @@ pub fn typecheckCall(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpec
     const maybeFunction = self.typeTable.get(lhsType);
     const func = switch (maybeFunction) {
         .Type => {
-            const typeToInit = self.folder.getValue(try self.folder.eval(ast.extra[extraPtr], null)).Type;
+            const typeToInit = try self.expectType(ast.extra[extraPtr]);
 
             return self.typecheckExpressionList(
                 ast.expressions.items(.value)[ast.extra[extraPtr + 1]],
@@ -1991,7 +1991,10 @@ pub fn typecheckBuiltinCall(self: *Typechecker, extraPtr: defines.ExpressionPtr,
         BI("typeName") => return comptime Comptime.Folder.Builtin.Type("[]u8"),
         BI("compileBreak") => return comptime Comptime.Folder.Builtin.Type("void"),
         BI("compileLog") => return comptime Comptime.Folder.Builtin.Type("void"),
-        BI("unreachable") => comptime Comptime.Folder.Builtin.Type("noreturn"),
+        BI("unreachable") => {
+            _ = self.setFlag(.CoveredAllPaths, true);
+            return comptime Comptime.Folder.Builtin.Type("noreturn");
+        },
         BI("this") => comptime Comptime.Folder.Builtin.Type("type"),
         BI("isComptime") => comptime Comptime.Folder.Builtin.Type("bool"),
         BI("field") => self.typecheckFieldBuiltin(extraPtr,  expr),
@@ -2389,7 +2392,10 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
                     else => break :blk expected,
                 }
             },
-            BuiltinIndex("unreachable") => return comptime Comptime.Folder.Builtin.Type("noreturn"),
+            BuiltinIndex("unreachable") => {
+                _ = self.setFlag(.CoveredAllPaths, true);
+                return comptime Comptime.Folder.Builtin.Type("noreturn");
+            },
             else => {
                 self.report("Builtin '{s}' is not implemented.", .{Resolver.builtins[decl.type]});
                 return Error.NotImplemented;
@@ -3466,18 +3472,9 @@ pub fn registerType(self: *Typechecker, _newType: TypeInfo) Error!TypeID {
 
     // @Beware trying to cache-esque
     const name = res: switch (newType) {
-        .Struct => |str| {
-            // newType.Struct.name = 0;
-            break :res str.name;
-        },
-        .Union => |uni| {
-            // newType.Union.name = 0;
-            break :res uni.name;
-        },
-        .Enum => |enm| {
-            // newType.Enum.name = 0;
-            break :res enm.name;
-        },
+        .Struct => |str| break :res str.name,
+        .Union => |uni| break :res uni.name,
+        .Enum => |enm| break :res enm.name,
         else => null,
     };
 

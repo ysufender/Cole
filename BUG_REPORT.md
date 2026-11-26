@@ -1,3 +1,34 @@
+## $open -- Undefined Aggregate Construction Bug -- #65 -- @ysufender --
+
+When constructing undefined values of aggregate types, the compiler complains about
+not being able to infer the type of the undefined value.
+
+### Reproduction --
+
+<pre><code>
+import std::memory::allocator::arena as Arena;
+
+let main = fn (args: [][]u8) -> i32 {
+&emsp;let a: Arena::Arena = undefined;
+&emsp;return 1;
+};
+</code></pre>
+
+### Expected --
+
+Successful compilation.
+
+### Received --
+
+<pre><code>
+error: Unable to resolve the type of undefined value.
+error: .... In /home/yusuf/proj/Cole/test/main.cole 5:12
+error: &emsp;return 1;
+error:&emsp;&emsp;   ^
+Cannot print stack trace: stack tracing is disabled
+error: Compiler exited with code 129 <MissingTypeSpecifier>
+</code></pre>
+
 ## $open -- Safety Checks on Debug Builds -- #62 -- @ysufender --
 
 Lowering paths lack safety checks on debug builds.

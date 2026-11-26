@@ -213,6 +213,7 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
 
     self.cache.put(self.arena.allocator(), key, .{ .InProgress = {} })
         catch return Error.AllocatorFailure;
+    errdefer self.cache.putAssumeCapacity(key, .{ .NotEvaluated = {} });
 
     const sign = self.typechecker.typeTable.get(func.signature).Function;
 
