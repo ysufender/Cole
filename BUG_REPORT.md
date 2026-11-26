@@ -87,8 +87,8 @@ otherwise the Testy tests must be improved.
 ### Received --
 
 <ul>
-    <li>TC_10 — An empty string.</li>
-    <li>TC_12 — Token formatting panics because the buffer is too small.</li>
+    <li>TC_10 — An empty string. FIXED</li>
+    <li>TC_12 — Token formatting panics because the buffer is too small. FIXED</li>
 </ul>
 
 ## $open -- README and Other Documentation Files -- #55 -- @ysufender --

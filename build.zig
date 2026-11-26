@@ -1,5 +1,5 @@
 const std = @import("std");
-
+const Backend = @import("src/codegen/backend.zig").Backend;
 const resourcePath = "res/";
 
 const files = [_][]const u8{
@@ -47,6 +47,7 @@ pub fn build(b: *std.Build) void {
 fn addTestStep(b: *std.Build) void {
     const opts = b.addOptions();
     const efile_config = b.option(Config, "config", "Add config to the efile test") orelse  .debug;
+    const backend_config = b.option(Backend, "backend", "Select compiler backend") orelse .QBE;
     opts.addOption(bool, "isDebug", true);
     opts.addOption([]const u8, "version", "test");
     opts.addOption([]const u8, "config", @tagName(efile_config));
@@ -56,6 +57,7 @@ fn addTestStep(b: *std.Build) void {
     const runTests = b.addSystemCommand(&.{
         "efile",
         @tagName(efile_config),
+        @tagName(backend_config),
         if (b.option(bool, "record", "Run Testy in record mode") orelse false) "record" else "run",
     });
     for (runTests.argv.items, 0..) |arg, i| {
