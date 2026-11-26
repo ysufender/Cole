@@ -70,26 +70,22 @@ The compiler is currently tested using the Testy framework, which is a custom st
 written in Lua. Some of the parts of the compiler (mainly the Lexer) can still be unit tested,
 otherwise the Testy tests must be improved.
 
+<ul>
+    <li>TC_10 Fixed</li>
+    <li>TC_12 Fixed</li>
+</ul>
+
 ### Reproduction --
 
-<ul>
-    <li>TC_10 — Call `Token.errIdentifier` on a token in the final line of a file without a trailing newline.</li>
-    <li>TC_12 — Call `Token.toString` on the `let` keyword at line 10000, column 1.</li>
-</ul>
+...
 
 ### Expected --
 
-<ul>
-    <li>TC_10 — The full final line.</li>
-    <li>TC_12 — <code>\<Let: let at (10000:1)\></code>.</li>
-</ul>
+...
 
 ### Received --
 
-<ul>
-    <li>TC_10 — An empty string. FIXED</li>
-    <li>TC_12 — Token formatting panics because the buffer is too small. FIXED</li>
-</ul>
+...
 
 ## $open -- README and Other Documentation Files -- #55 -- @ysufender --
 
