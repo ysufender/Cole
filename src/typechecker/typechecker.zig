@@ -1,11 +1,3 @@
-// @Note Lowering to C IR is requested by the typechecker,typechecker
-// but it is done by the lowerer.zig, which makes calls to
-// JIR.Builder since JIR.Builder itself doesn't know about
-// untyped AST.
-//
-// @Note Defer statements are properly handled in codegen.
-// typechecker only typechecks.
-
 const std = @import("std");
 const common = @import("../core/common.zig");
 const defines = @import("../core/defines.zig");
@@ -2838,8 +2830,6 @@ pub fn typecheckMemberAccess(self: *Typechecker, on: TypeID, member: defines.Str
 }
 
 pub fn typecheckDot(self: *Typechecker, extraPtr: defines.OpaquePtr, expr: defines.ExpressionPtr) Error!TypeID {
-    // @Important TODO: This doesn't allow member function calls yet! Add them!
-
     const ast = self.context.getAST(self.currentFile);
     const tokens = self.context.getTokens(ast.tokens);
 
@@ -2848,10 +2838,13 @@ pub fn typecheckDot(self: *Typechecker, extraPtr: defines.OpaquePtr, expr: defin
 
     const memberToken = tokens.get(memberPtr);
 
-    const objectTypeID = try self.typecheckExpression(objectExprPtr, null);
-
     switch (memberToken.type) {
         .Ampersand => {
+            const prevBan = self.folder.setFlag(.ComptimeBanned, ast.expressions.get(objectExprPtr).type == .Identifier);
+            defer _ = self.folder.setFlag(.ComptimeBanned, prevBan);
+
+            const objectTypeID = try self.typecheckExpression(objectExprPtr, null);
+
             if (!self.getFlag(.ConcreteValue)) {
                 self.report("Attempt to take the address of non-concrete value.", .{ });
                 return Error.AddressOfTemporaryValue;
@@ -2868,6 +2861,8 @@ pub fn typecheckDot(self: *Typechecker, extraPtr: defines.OpaquePtr, expr: defin
             });
         },
         .Star => {
+            const objectTypeID = try self.typecheckExpression(objectExprPtr, null);
+
             switch (self.typeTable.get(objectTypeID)) {
                 .Pointer => |ptr| switch (ptr.size) {
                     .Single, .C => return ptr.child,
@@ -2888,6 +2883,8 @@ pub fn typecheckDot(self: *Typechecker, extraPtr: defines.OpaquePtr, expr: defin
         },
         else => { },
     }
+
+    const objectTypeID = try self.typecheckExpression(objectExprPtr, null);
 
     const memberName = memberToken.lexeme(self.context, ast.tokens);
 
