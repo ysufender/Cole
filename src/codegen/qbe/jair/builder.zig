@@ -442,11 +442,10 @@ fn dereference(self: *Builder, value: defines.Offset) Error!JAIR.Ptr {
     const start: u32 = @intCast(self.data.items.len);
     self.data.append(self.allocator, lvalue) catch return Error.AllocatorFailure;
     self.data.append(self.allocator, expr) catch return Error.AllocatorFailure;
-    self.data.append(self.allocator, typeID) catch return Error.AllocatorFailure;
 
     const res = self.nodes.addOne(self.allocator) catch return Error.AllocatorFailure;
     self.nodes.set(res, .{
-        .type = try self.convertType(comptime Comptime.Folder.Builtin.Type("usize")),
+        .type = typeID,
         .kind = .Load,
         .value = start,
     });

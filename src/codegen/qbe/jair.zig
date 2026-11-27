@@ -796,18 +796,17 @@ fn reference(self: *JAIR, out: *Writer, node: *const Node) Error!u32 {
 fn load(self: *JAIR, out: *Writer, node: *const Node) Error!u32 {
     const lvalue = self.data[node.value] == 1;
     const expr = self.data[node.value + 1];
-    const childType = self.data[node.value + 2];
 
     const ptr = try self.generateExpr(out, expr);
 
-    if (lvalue or !self.isScalar(childType)) return ptr;
+    if (lvalue or !self.isScalar(node.type)) return ptr;
 
     const res = self.allocTmp();
 
     try self.write(true, out, "%__tmp{d} =", .{res});
-    try self.typeString(out, true, childType);
+    try self.typeString(out, true, node.type);
     try self.write(false, out, " load", .{});
-    try self.loadTypeString(out, childType);
+    try self.loadTypeString(out, node.type);
     try self.write(false, out, " %__tmp{d}\n", .{ptr});
 
     return res;
