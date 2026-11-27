@@ -26,8 +26,8 @@ const Config = enum {
 };
 const version = std.SemanticVersion{
     .major = 0,
-    .minor = 1,
-    .patch = 8,
+    .minor = 2,
+    .patch = 0,
 };
 
 var config: struct {

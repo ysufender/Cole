@@ -1,35 +1,3 @@
-## $open -- QBE Dereferencing Issue -- #66 -- @ysufender --
-
-Dereferencing on QBE generates wrong class strings.
-
-### Reproduction --
-
-<pre><code>
-import std::io::console as Console;
-import std::string as String;
-import std::c as C;
-
-let pi = fn (n: c_long) -> void {
-    Console::log(String::intToStr(n, C::Allocator));
-};
-
-let main = fn (args: [][]u8) -> i32 {
-    let x: i32 = 9;
-    let p = x.&;
-    let pp = p.&;
-    pi(pp.*.*);
-    return 0;
-};
-</code></pre>
-
-### Expected --
-
-<code>9</code>
-
-### Received --
-
-<code>Segmentation fault (core dumped)</code>
-
 ## $open -- Safety Checks on Debug Builds -- #62 -- @ysufender --
 
 Lowering paths lack safety checks on debug builds.
@@ -162,3 +130,4 @@ Garbled out parts in the generated C files.
 ## $closed -- Proper Inline Code Syntax -- #63 -- @ysufender --
 ## $closed -- Comptime Bugs Again -- #64 -- @ysufender --
 ## $closed -- Undefined Aggregate Construction Bug -- #65 -- @ysufender --
+## $closed -- QBE Dereferencing Issue -- #66 -- @ysufender --

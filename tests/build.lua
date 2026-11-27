@@ -11,7 +11,7 @@ local cole_backend = arg[2] or
     "QBE"
     -- "C"
 
-local cole_version = "v0.1.8"
+local cole_version = "v0.2.0"
 
 local exe_path = string.format("../zig-out/cole-%s-%s-linux-x86_64", cole_version, cole_build)
 
