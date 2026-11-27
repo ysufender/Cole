@@ -1,11 +1,3 @@
-// @Note Lowering to C IR is requested by the typechecker,typechecker
-// but it is done by the lowerer.zig, which makes calls to
-// JIR.Builder since JIR.Builder itself doesn't know about
-// untyped AST.
-//
-// @Note Defer statements are properly handled in codegen.
-// typechecker only typechecks.
-
 const std = @import("std");
 const common = @import("../core/common.zig");
 const defines = @import("../core/defines.zig");
@@ -249,13 +241,14 @@ pub fn typecheck(self: *Typechecker, allocator: Allocator) Error!JIR {
 
             for (ast.statementMask) |_stmt| {
                 const stmt = ast.statements.get(_stmt);
-                if (stmt.type != .InlineC) {
+                if (stmt.type != .InlineCode) {
                     continue;
                 }
 
-                const cstart = ast.extra[stmt.value];
-                const cend = ast.extra[stmt.value + 1];
-                const scode = self.context.getFile(ast.tokens)[cstart..cend];
+                self.currentFile = module.dataIndex;
+                self.lastToken = 1;
+
+                const scode = self.folder.getValue(try self.folder.eval(stmt.value, comptime Comptime.Folder.Builtin.Type("[]u8"))).String.str;
                 const code = try self.builder.internString(scode);
                 self.builder.topLevelAsms.append(self.builder.allocator, code)
                     catch return Error.AllocatorFailure;
@@ -311,8 +304,12 @@ pub fn typecheckStatement(self: *Typechecker, statementPtr: defines.StatementPtr
         .Import => common.debug.ShouldBeImpossible(self.context.log, @src()),
         .Defer => self.typecheckDefer(stmt.value),
         .VariableDefinition => try self.typecheckVarDefStatement(stmt.value),
-        .InlineC => { }, // @Note allow direct C code insertion
+        .InlineCode => try self.typecheckInlineCode(stmt.value),
     };
+}
+
+fn typecheckInlineCode(self: *Typechecker, exprPtr: defines.ExpressionPtr) Error!void {
+    _ = try self.folder.eval(exprPtr, comptime Comptime.Folder.Builtin.Type("[]u8"));
 }
 
 fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) Error!TypeID {
@@ -357,7 +354,7 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
                 else => break :blk,
             };
 
-            if (!std.mem.startsWith(u8, prevName, "$$")) {
+            if (!std.mem.startsWith(u8, prevName, "__")) {
                 break :blk;
             }
 
@@ -400,6 +397,7 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
                         .expr = str.expr,
                         .scope = str.scope,
                         .isTuple = str.isTuple,
+                        .source = str.source,
                     },
                 },
 
@@ -411,6 +409,7 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
                         .fields = enm.fields,
                         .expr = enm.expr,
                         .scope = enm.scope,
+                        .source = enm.source,
                     },
                 },
 
@@ -424,6 +423,7 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
                         .fields = uni.fields,
                         .expr = uni.expr,
                         .scope = uni.scope,
+                        .source = uni.source,
                     },
                 },
 
@@ -498,7 +498,7 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
             const val = try self.folder.eval(decl.node, expected);
             const func = &self.folder.memory.items[val].Function;
             const prevName = self.builder.getInternedString(func.name);
-            if (!std.mem.startsWith(u8, prevName, "$$")) {
+            if (!std.mem.startsWith(u8, prevName, "__")) {
                 break :blk;
             }
 
@@ -519,6 +519,7 @@ fn typecheckVariableDef(self: *Typechecker, decl: *const Resolver.Declaration) E
                     const prevFile = self.currentFile;
                     self.currentFile = func.source;
                     defer self.currentFile = prevFile;
+
                     break :keep
                         self.hasMetadata(func.expr, "@export")
                         or self.hasMetadata(func.expr, "@extern")
@@ -1168,6 +1169,7 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
             const inLoop = self.getFlag(.InLoop);
             const inDefer = self.getFlag(.InDefer);
             const lvalue = self.getFlag(.LValue);
+            const covered = self.getFlag(.CoveredAllPaths);
 
             self.flags = tuple.@"1";
 
@@ -1175,6 +1177,7 @@ pub fn typecheckExpression(self: *Typechecker, expressionPtr: defines.Expression
             _ = self.setFlag(.InLoop, inLoop);
             _ = self.setFlag(.InDefer, inDefer);
             _ = self.setFlag(.LValue, lvalue);
+            _ = self.setFlag(.CoveredAllPaths, covered);
 
             return tuple.@"0";
         }
@@ -1283,6 +1286,7 @@ pub fn typecheckTupleDefinition(self: *Typechecker, exprListPtr: defines.OpaqueP
             .mutable = false,
             .scope = 0,
             .isTuple = true,
+            .source = self.currentFile,
         },
     };
 
@@ -1307,10 +1311,7 @@ pub fn typecheckIfExpression(self: *Typechecker, extraPtr: defines.OpaquePtr, ma
     const thenBranch = try self.typecheckExpression(conditional.then, maybeExpected);
     const elseBranch = try self.typecheckExpression(conditional.otherwise, maybeExpected);
 
-    if (!(
-        self.suitable(thenBranch, elseBranch)
-        and self.suitable(elseBranch, thenBranch)
-    )) {
+    if (!self.suitable(thenBranch, elseBranch)) {
         self.report("Diverging result types '{s}' and '{s}' in conditional expression.", .{
             try self.typeName(self.arena.allocator(), thenBranch),
             try self.typeName(self.arena.allocator(), elseBranch),
@@ -1694,7 +1695,7 @@ pub fn discoverScopeDef(
     }
 
     if (
-        member.valueType != (comptime Comptime.Folder.Builtin.Type("$$incomplete"))
+        member.valueType != (comptime Comptime.Folder.Builtin.Type("__incomplete"))
         and self.folder.getFlag(.InComptimeCall)
     ) {
         return member.valueType;
@@ -1726,7 +1727,7 @@ pub fn discoverScopeDef(
 
     const memberIndex = try self.definitionIndex(from, member.name, false);
 
-    assert(self.symbols.getDecl(decl).public);
+    assert(self.symbols.getDecl(decl).public or self.currentScope == self.symbols.getDecl(decl).scope);
 
     switch (self.typeTable.get(from)) {
         .Enum => |enm| {
@@ -1741,6 +1742,7 @@ pub fn discoverScopeDef(
                     .fields = enm.fields,
                     .expr = enm.expr,
                     .mutable = enm.mutable,
+                    .source = enm.source,
                 },
             });
         },
@@ -1757,6 +1759,7 @@ pub fn discoverScopeDef(
                     .expr = str.expr,
                     .mutable = str.mutable,
                     .isTuple = str.isTuple,
+                    .source = str.source,
                 },
             });
         },
@@ -1774,6 +1777,7 @@ pub fn discoverScopeDef(
                     .fields = uni.fields,
                     .expr = uni.expr,
                     .mutable = uni.mutable,
+                    .source = uni.source,
                 },
             });
         },
@@ -1807,7 +1811,7 @@ pub fn typecheckCall(self: *Typechecker, extraPtr: defines.OpaquePtr, maybeExpec
     const maybeFunction = self.typeTable.get(lhsType);
     const func = switch (maybeFunction) {
         .Type => {
-            const typeToInit = self.folder.getValue(try self.folder.eval(ast.extra[extraPtr], null)).Type;
+            const typeToInit = try self.expectType(ast.extra[extraPtr]);
 
             return self.typecheckExpressionList(
                 ast.expressions.items(.value)[ast.extra[extraPtr + 1]],
@@ -1980,7 +1984,10 @@ pub fn typecheckBuiltinCall(self: *Typechecker, extraPtr: defines.ExpressionPtr,
         BI("typeName") => return comptime Comptime.Folder.Builtin.Type("[]u8"),
         BI("compileBreak") => return comptime Comptime.Folder.Builtin.Type("void"),
         BI("compileLog") => return comptime Comptime.Folder.Builtin.Type("void"),
-        BI("unreachable") => comptime Comptime.Folder.Builtin.Type("noreturn"),
+        BI("unreachable") => {
+            _ = self.setFlag(.CoveredAllPaths, true);
+            return comptime Comptime.Folder.Builtin.Type("noreturn");
+        },
         BI("this") => comptime Comptime.Folder.Builtin.Type("type"),
         BI("isComptime") => comptime Comptime.Folder.Builtin.Type("bool"),
         BI("field") => self.typecheckFieldBuiltin(extraPtr,  expr),
@@ -2083,6 +2090,7 @@ pub fn typecheckGetMetadata(self: *Typechecker, extraPtr: defines.OpaquePtr) Err
                 .mutable = false,
                 .scope = 0,
                 .isTuple = true,
+                .source = self.currentFile
             }
         });
     }
@@ -2314,6 +2322,10 @@ pub fn lowerFunction(self: *Typechecker, function: JIR.Function, token: ?defines
     self.currentFile = func.source;
     defer self.currentFile = prevs;
 
+    const prevt = self.lastToken;
+    self.lastToken = 1;
+    defer self.lastToken = prevt;
+
     const prevInst = self.folder.currentInstantiation;
     if (self.folder.captures.contains(func.scope))
         self.folder.currentInstantiation = func.scope;
@@ -2377,7 +2389,10 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
                     else => break :blk expected,
                 }
             },
-            BuiltinIndex("unreachable") => return comptime Comptime.Folder.Builtin.Type("noreturn"),
+            BuiltinIndex("unreachable") => {
+                _ = self.setFlag(.CoveredAllPaths, true);
+                return comptime Comptime.Folder.Builtin.Type("noreturn");
+            },
             else => {
                 self.report("Builtin '{s}' is not implemented.", .{Resolver.builtins[decl.type]});
                 return Error.NotImplemented;
@@ -2413,7 +2428,7 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
     if (isPresent.found_existing) {
         switch (isPresent.value_ptr.status) {
             .Checked => {
-                if (isPresent.value_ptr.result != comptime Comptime.Folder.Builtin.Type("$$incomplete")) {
+                if (isPresent.value_ptr.result != comptime Comptime.Folder.Builtin.Type("__incomplete")) {
                     return isPresent.value_ptr.result;
                 }
             },
@@ -2427,8 +2442,8 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
             },
             .NotChecked => {
                 if (
-                    decl.kind == .Capture and determineExpected(maybeExpected) == null
-                    and isPresent.value_ptr.result != comptime Comptime.Folder.Builtin.Type("$$incomplete")
+                    decl.kind == .Capture
+                    and isPresent.value_ptr.result != comptime Comptime.Folder.Builtin.Type("__incomplete")
                 ) {
                     return isPresent.value_ptr.result;
                 }
@@ -2479,7 +2494,7 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
 
     isPresent.value_ptr.* = .{
         .status = .InProgress,
-        .result = comptime Comptime.Folder.Builtin.Type("$$incomplete"),
+        .result = comptime Comptime.Folder.Builtin.Type("__incomplete"),
     };
     errdefer isPresent.value_ptr.status = .NotChecked;
 
@@ -2566,7 +2581,7 @@ fn nameMemberFunction(self: *Typechecker, decl: *const Resolver.Declaration, nam
         .Struct, .Enum, .Union => {},
         else => return,
     }
-    if (!std.mem.startsWith(u8, self.builder.getInternedString(name), "$$")) return;
+    if (!std.mem.startsWith(u8, self.builder.getInternedString(name), "__")) return;
     if (self.hasMetadata(decl.node, "@extern")) return;
 
     const owner = self.folder.scopeTypes.get(decl.scope) orelse return;
@@ -2576,7 +2591,7 @@ fn nameMemberFunction(self: *Typechecker, decl: *const Resolver.Declaration, nam
         .Union => |uni| uni.name,
         else => return,
     });
-    if (std.mem.startsWith(u8, ownerName, "$$")) return;
+    if (std.mem.startsWith(u8, ownerName, "__")) return;
 
     const tokens = self.context.getTokens(self.currentFile);
     const memberName = tokens.get(decl.token).lexeme(self.context, self.currentFile);
@@ -2722,6 +2737,10 @@ pub fn isGenericMember(self: *Typechecker, declPtr: defines.DeclPtr) bool {
     self.currentFile = self.modules.modules.items(.dataIndex)[self.symbols.scopes.items(.module)[decl.scope]];
     defer self.currentFile = prevFile;
 
+    const prevt = self.lastToken;
+    self.lastToken = 1;
+    defer self.lastToken = prevt;
+
     return self.hasMetadata(decl.node, "@generic");
 }
 
@@ -2811,8 +2830,6 @@ pub fn typecheckMemberAccess(self: *Typechecker, on: TypeID, member: defines.Str
 }
 
 pub fn typecheckDot(self: *Typechecker, extraPtr: defines.OpaquePtr, expr: defines.ExpressionPtr) Error!TypeID {
-    // @Important TODO: This doesn't allow member function calls yet! Add them!
-
     const ast = self.context.getAST(self.currentFile);
     const tokens = self.context.getTokens(ast.tokens);
 
@@ -2821,10 +2838,13 @@ pub fn typecheckDot(self: *Typechecker, extraPtr: defines.OpaquePtr, expr: defin
 
     const memberToken = tokens.get(memberPtr);
 
-    const objectTypeID = try self.typecheckExpression(objectExprPtr, null);
-
     switch (memberToken.type) {
         .Ampersand => {
+            const prevBan = self.folder.setFlag(.ComptimeBanned, ast.expressions.get(objectExprPtr).type == .Identifier);
+            defer _ = self.folder.setFlag(.ComptimeBanned, prevBan);
+
+            const objectTypeID = try self.typecheckExpression(objectExprPtr, null);
+
             if (!self.getFlag(.ConcreteValue)) {
                 self.report("Attempt to take the address of non-concrete value.", .{ });
                 return Error.AddressOfTemporaryValue;
@@ -2841,6 +2861,8 @@ pub fn typecheckDot(self: *Typechecker, extraPtr: defines.OpaquePtr, expr: defin
             });
         },
         .Star => {
+            const objectTypeID = try self.typecheckExpression(objectExprPtr, null);
+
             switch (self.typeTable.get(objectTypeID)) {
                 .Pointer => |ptr| switch (ptr.size) {
                     .Single, .C => return ptr.child,
@@ -2861,6 +2883,8 @@ pub fn typecheckDot(self: *Typechecker, extraPtr: defines.OpaquePtr, expr: defin
         },
         else => { },
     }
+
+    const objectTypeID = try self.typecheckExpression(objectExprPtr, null);
 
     const memberName = memberToken.lexeme(self.context, ast.tokens);
 
@@ -2883,7 +2907,7 @@ pub fn applyMark(self: *Typechecker, ptr: defines.ExpressionPtr, extraPtr: defin
     for (0..marks.len()) |index| {
         const meta = self.folder.attemptEval(
             ast.extra[marks.at(@intCast(index))],
-            comptime Comptime.Folder.Builtin.Type("$$builtin_metadata")
+            comptime Comptime.Folder.Builtin.Type("__builtin_metadata")
         );
 
         metadata[index] = if (meta) |m| m else try self.folder.eval(ast.extra[marks.at(@intCast(index))], null);
@@ -3269,7 +3293,8 @@ fn typecheckSwitchOnUnion(
 
             const field = try self.builder.internString(fieldName);
             const captureType = uni.fields[
-                self.fieldIndex(itemTypeID, field) catch return common.debug.ShouldBeImpossible(self.context.log, @src())
+                self.fieldIndex(itemTypeID, field)
+                    catch return common.debug.ShouldBeImpossible(self.context.log, @src())
             ].valueType;
 
             _ = try self.typecheckDecl(captureDecl, captureType);
@@ -3453,25 +3478,14 @@ pub fn registerType(self: *Typechecker, _newType: TypeInfo) Error!TypeID {
 
     // @Beware trying to cache-esque
     const name = res: switch (newType) {
-        .Struct => |str| {
-            newType.Struct.name = 0;
-            break :res str.name;
-        },
-        .Union => |uni| {
-
-            newType.Union.name = 0;
-            break :res uni.name;
-        },
-        .Enum => |enm| {
-
-            newType.Enum.name = 0;
-            break :res enm.name;
-        },
+        .Struct => |str| break :res str.name,
+        .Union => |uni| break :res uni.name,
+        .Enum => |enm| break :res enm.name,
         else => null,
     };
 
     // @Note Dedup anon types
-    const anonymous = if (name) |n| std.mem.startsWith(u8, self.builder.getInternedString(n), "$$") else false;
+    const anonymous = if (name) |n| std.mem.startsWith(u8, self.builder.getInternedString(n), "__") else false;
     if (anonymous) {
         const expr, const newMut = switch (newType) {
             .Struct => |str| .{ str.expr, str.mutable },
@@ -3494,7 +3508,7 @@ pub fn registerType(self: *Typechecker, _newType: TypeInfo) Error!TypeID {
             if (candidateExpr != expr) {
                 continue;
             }
-            if (!std.mem.startsWith(u8, self.builder.getInternedString(candidateName), "$$")) {
+            if (!std.mem.startsWith(u8, self.builder.getInternedString(candidateName), "__")) {
                 continue;
             }
             if (self.assertStructurallyIdenticalValue(info, newType)) |_| {
@@ -3541,6 +3555,7 @@ pub fn report(self: *Typechecker, comptime fmt: []const u8, args: anytype) void 
     }
 
     common.log.err(fmt, args);
+
     const token = self.context.getTokens(self.currentFile).get(self.lastToken);
     const position = token.position(self.context, self.currentFile);
 
@@ -3740,16 +3755,16 @@ pub fn nominallyIdentical(self: *const Typechecker, this: TypeID, that: TypeID) 
 
     return switch (ta) {
         .Struct => |s|
-            if (std.mem.startsWith(u8, self.builder.getInternedString(s.name), "$$")) self.structurallyIdentical(this, that)
-            else if (std.mem.startsWith(u8, self.builder.getInternedString(tb.Struct.name), "$$")) return self.structurallyIdentical(this, that)
+            if (std.mem.startsWith(u8, self.builder.getInternedString(s.name), "__")) self.structurallyIdentical(this, that)
+            else if (std.mem.startsWith(u8, self.builder.getInternedString(tb.Struct.name), "__")) return self.structurallyIdentical(this, that)
             else s.name == tb.Struct.name,
         .Union => |s|
-            if (std.mem.startsWith(u8, self.builder.getInternedString(s.name), "$$")) self.structurallyIdentical(this, that)
-            else if (std.mem.startsWith(u8, self.builder.getInternedString(tb.Union.name), "$$")) return self.structurallyIdentical(this, that)
+            if (std.mem.startsWith(u8, self.builder.getInternedString(s.name), "__")) self.structurallyIdentical(this, that)
+            else if (std.mem.startsWith(u8, self.builder.getInternedString(tb.Union.name), "__")) return self.structurallyIdentical(this, that)
             else s.name == tb.Union.name,
         .Enum => |s|
-            if (std.mem.startsWith(u8, self.builder.getInternedString(s.name), "$$")) self.structurallyIdentical(this, that)
-            else if (std.mem.startsWith(u8, self.builder.getInternedString(tb.Enum.name), "$$")) return self.structurallyIdentical(this, that)
+            if (std.mem.startsWith(u8, self.builder.getInternedString(s.name), "__")) self.structurallyIdentical(this, that)
+            else if (std.mem.startsWith(u8, self.builder.getInternedString(tb.Enum.name), "__")) return self.structurallyIdentical(this, that)
             else s.name == tb.Enum.name,
         .Array => |arr|
             arr.len == tb.Array.len
@@ -3803,7 +3818,7 @@ pub fn assertCanCoerce(self: *Typechecker, this: TypeID, that: TypeID) Error!voi
     return switch (thatType) {
         .Noreturn => { },
         .ComptimeInt => functional.throwIf(!self.isInt(this) and !self.isFloat(this), Error.TypeMismatch),
-        .ComptimeFloat => functional.throwIf(!self.isFloat(this) and !self.isInt(this), Error.TypeMismatch),
+        .ComptimeFloat => functional.throwIf(!self.isFloat(this), Error.TypeMismatch),
         .Float => functional.throwIf(!self.isFloat(this), Error.TypeMismatch),
         .Integer => |itype| switch (thisType) {
             .Integer => |i2type| functional.throwIf(itype.size > i2type.size, Error.TypeMismatch),
@@ -4060,6 +4075,7 @@ pub fn makeMutable(_: *const Typechecker, info: TypeInfo) TypeInfo {
                 .scope = str.scope,
                 .expr = str.expr,
                 .isTuple = str.isTuple,
+                .source = str.source,
             },
         },
         .Union => |uni| .{
@@ -4072,6 +4088,7 @@ pub fn makeMutable(_: *const Typechecker, info: TypeInfo) TypeInfo {
                 .definitions = uni.definitions,
                 .scope = uni.scope,
                 .expr = uni.expr,
+                .source = uni.source,
             },
         },
         .Enum => |enm| .{
@@ -4082,6 +4099,7 @@ pub fn makeMutable(_: *const Typechecker, info: TypeInfo) TypeInfo {
                 .definitions = enm.definitions,
                 .scope = enm.scope,
                 .expr = enm.expr,
+                .source = enm.source,
             },
         },
         .Pointer => |ptr| .{
@@ -4177,25 +4195,48 @@ pub fn sizeOf(self: *Typechecker, of: TypeID) Error!u32 {
         },
         .Function => @bitSizeOf(@TypeOf(&sizeOf)),
         .Enum => @bitSizeOf(u32),
-        .Float, .ComptimeFloat => @bitSizeOf(f32),
+        .Float => @bitSizeOf(f32),
+        .ComptimeFloat => @bitSizeOf(f64),
         .Integer => |int| int.size,
         .Bool => @bitSizeOf(c_char),
         .Void, .Noreturn, .EnumLiteral, .Type, .Any => 0,
         .Array => |arr| arr.len * try self.sizeOf(arr.child),
         .ComptimeInt => @bitSizeOf(i64),
         .Struct => |str| {
-            if (self.hasMetadata(str.expr, "@opaque")) {
-                self.report("Attempt to get the size of opaque type '{s}'.", .{
-                    self.builder.getInternedString(str.name),
-                });
-                return Error.SizeOfOpaqueType;
+            {
+                const prevs = self.currentFile;
+                self.currentFile = str.source;
+                defer self.currentFile = prevs;
+
+                const prevt = self.lastToken;
+                self.lastToken = 1;
+                defer self.lastToken = prevt;
+
+                if (!str.isTuple and str.expr != 0) {
+                    if (self.metadataIndex(str.expr, "@opaque")) |index| {
+                        const meta = self.getMetadata(str.expr).?;
+
+                        if (index + 1 >= meta.len) {
+                            self.report("Expected size specifier after '@opaque' mark.", .{});
+                            return Error.MissingAlignment;
+                        }
+
+                        switch (self.folder.getValue(meta[index + 1])) {
+                            .Int => |size| return @intCast(size * @bitSizeOf(u8)),
+                            else => {
+                                self.report("Expected an integer value as size.", .{});
+                                return Error.TypeMismatch;
+                            }
+                        }
+                    }
+                }
             }
 
             var size: u32 = 0;
             var max_align: u32 = 8;
             for (str.fields) |field| {
                 const fieldSize = try self.sizeOf(field.valueType);
-                const fieldAlign = self.alignOf(field.valueType) * 8;
+                const fieldAlign = try self.alignOf(field.valueType) * 8;
                 size = (size + fieldAlign - 1) & ~(fieldAlign - 1);
                 size += fieldSize;
                 max_align = @max(max_align, fieldAlign);
@@ -4206,9 +4247,11 @@ pub fn sizeOf(self: *Typechecker, of: TypeID) Error!u32 {
         .Union => |uni| {
             var max_size: u32 = 0;
             var max_align: u32 = 8;
-            for (uni.fields) |field| {
+
+            const payloadFields = if (uni.isTagged) uni.fields[1..] else uni.fields;
+            for (payloadFields) |field| {
                 const fieldSize = try self.sizeOf(field.valueType);
-                const fieldAlign = self.alignOf(field.valueType) * 8;
+                const fieldAlign = try self.alignOf(field.valueType) * 8;
                 max_size = @max(max_size, (fieldSize + fieldAlign - 1) & ~(fieldAlign - 1));
                 max_align = @max(max_align, fieldAlign);
             }
@@ -4226,7 +4269,7 @@ pub fn sizeOf(self: *Typechecker, of: TypeID) Error!u32 {
     };
 }
 
-pub fn alignOf(self: *const Typechecker, of: TypeID) u32 {
+pub fn alignOf(self: *Typechecker, of: TypeID) Error!u32 {
     return switch (self.typeTable.get(of)) {
         .CSize => @alignOf(usize),
         .CUShort, .CShort => @alignOf(c_ushort),
@@ -4237,23 +4280,64 @@ pub fn alignOf(self: *const Typechecker, of: TypeID) u32 {
         .Pointer => @alignOf(*void),
         .Function => @alignOf(@TypeOf(&alignOf)),
         .Enum => @alignOf(u32),
-        .Float, .ComptimeFloat => @alignOf(f32),
+        .Float => @alignOf(f32),
+        .ComptimeFloat => @alignOf(f64),
         .Integer => |int| int.size / 8, // assuming int.size is in bits
         .Bool => @alignOf(bool),
         .Void, .Noreturn, .EnumLiteral, .Type, .Any => 1,
-        .Array => |arr| self.alignOf(arr.child),
+        .Array => |arr| try self.alignOf(arr.child),
         .ComptimeInt => @alignOf(i64),
         .Struct => |str| {
+            const prevs = self.currentFile;
+            self.currentFile = str.source;
+            defer self.currentFile = prevs;
+
+            const prevt = self.lastToken;
+            self.lastToken = 1;
+            defer self.lastToken = prevt;
+
+            if (!str.isTuple and str.expr != 0) {
+                if (self.metadataIndex(str.expr, "@align")) |index| {
+                    const meta = self.getMetadata(str.expr).?;
+
+                    if (index + 1 >= meta.len) {
+                        self.report("Expected an alignment after '@align' mark.", .{});
+                        return Error.MissingAlignment;
+                    }
+
+                    switch (self.folder.getValue(meta[index + 1])) {
+                        .Int => |alignment| {
+                            const logalign = @log2(@as(f32, @floatFromInt(alignment)));
+
+                            if (logalign - @as(@TypeOf(logalign), @floatFromInt(@as(u32, @intFromFloat(logalign)))) != 0) {
+                                self.report("Alignment must be a power of two.", .{});
+                                return Error.InvalidAlignment;
+                            }
+
+                            return @intCast(alignment);
+                        },
+                        else => {
+                            self.report("Expected an integer value as alignment.", .{});
+                            return Error.TypeMismatch;
+                        }
+                    }
+                }
+                else if (self.hasMetadata(str.expr, "@opaque")) {
+                    self.report("Opaque type definition requires an explicit alignment. Use '@align' to specify the alignment.", .{});
+                    return Error.MissingAlignment;
+                }
+            }
+
             var max_align: u32 = 1;
             for (str.fields) |field| {
-                max_align = @max(max_align, self.alignOf(field.valueType));
+                max_align = @max(max_align, try self.alignOf(field.valueType));
             }
             return max_align;
         },
         .Union => |uni| {
             var max_align: u32 = 1;
             for (uni.fields) |field| {
-                max_align = @max(max_align, self.alignOf(field.valueType));
+                max_align = @max(max_align, try self.alignOf(field.valueType));
             }
             if (uni.isTagged) max_align = @max(max_align, @alignOf(u32));
             return max_align;
@@ -4327,12 +4411,25 @@ pub fn tryGetFieldIndex(self: *Typechecker, from: TypeID, fieldNamePtr: defines.
     const fieldName = self.builder.getInternedString(fieldNamePtr);
     const fields = switch (self.typeTable.get(from)) {
         .Struct => |str| fields: {
-            if (self.hasMetadata(str.expr, "@opaque")) {
-                self.report("Attempt to access the fields of opaque type '{s}'.", .{
-                    self.builder.getInternedString(str.name),
-                });
-                return Error.FieldAccessOnOpaqueType;
-            }
+            const prevs = self.currentFile;
+            self.currentFile = str.source;
+            defer self.currentFile = prevs;
+
+            const prevt = self.lastToken;
+            self.lastToken = 1;
+            defer self.lastToken = prevt;
+
+            // @TODO Think about a better design
+            //if (
+            //    !str.isTuple
+            //    and str.expr != 0
+            //    and self.currentScope != str.scope
+            //    and self.hasMetadata(str.expr, "@opaque")) {
+            //    self.report("Attempt to access the fields of opaque type '{s}'.", .{
+            //        self.builder.getInternedString(str.name),
+            //    });
+            //    return Error.FieldAccessOnOpaqueType;
+            //}
 
             break :fields str.fields;
         },
@@ -4387,9 +4484,10 @@ pub fn findType(self: *Typechecker, name: []const u8) ?TypeID {
     return null;
 }
 
+
 pub fn typeName(self: *Typechecker, allocator: Allocator, typeID: TypeID) Error![]const u8 {
-    const typename = struct {
-        fn typename(this: *Typechecker, alc: Allocator, tid: TypeID) Error![]const u8 {
+    const aggregateName = struct {
+        fn get(this: *Typechecker, alc: Allocator, tid: TypeID) Error![]const u8 {
             const prefix = if (this.mutable(tid)) "mut " else "";
 
             const name = switch (this.typeTable.get(tid)) {
@@ -4399,114 +4497,123 @@ pub fn typeName(self: *Typechecker, allocator: Allocator, typeID: TypeID) Error!
                 else => unreachable,
             };
 
-            var res = alc.alloc(u8, prefix.len + name.len) catch return Error.AllocatorFailure;
-            res = std.fmt.bufPrint(res, "{s}{s}", .{prefix, name}) catch unreachable;
-            this.typenameMap.putNoClobber(alc, tid, try this.builder.internString(res)) catch unreachable;
-            return res;
+            return std.fmt.allocPrint(alc, "{s}{s}", .{
+                prefix,
+                name,
+            }) catch return Error.AllocatorFailure;
         }
-    }.typename;
+    }.get;
 
     if (self.typenameMap.get(typeID)) |namePtr| {
         return self.builder.getInternedString(namePtr);
     }
-    else {
-        return ret: switch (self.typeTable.get(typeID)) {
-            .CUShort => "c_ushort",
-            .CShort => "c_short",
-            .CULong => "c_ulong",
-            .CLong => "c_long",
-            .CDouble => "c_double",
-            .CUInt => "c_uint",
-            .CInt => "c_int",
-            .CUChar => "c_uchar",
-            .CChar => "c_char",
-            .CSize => "c_size",
-            .Pointer => {
-                const ptr: Types.Pointer = self.typeTable.get(typeID).Pointer;
-                const child = try self.typeName(allocator, ptr.child);
 
-                const mut = if (ptr.mutable) "mut " else "";
-                const prefix = switch (ptr.size) {
-                    .Slice => "[]",
-                    .Single => "*",
-                    .C => "[@c]",
-                };
+    const res: []const u8 = switch (self.typeTable.get(typeID)) {
+        .CUShort => "c_ushort",
+        .CShort => "c_short",
+        .CULong => "c_ulong",
+        .CLong => "c_long",
+        .CDouble => "c_double",
+        .CUInt => "c_uint",
+        .CInt => "c_int",
+        .CUChar => "c_uchar",
+        .CChar => "c_char",
+        .CSize => "c_size",
 
-                var res = allocator.alloc(u8, child.len + prefix.len + mut.len) catch return Error.AllocatorFailure;
-                res = std.fmt.bufPrint(res, "{s}{s}{s}", .{mut, prefix, child}) catch unreachable;
-                self.typenameMap.putNoClobber(allocator, typeID, try self.builder.internString(res)) catch unreachable;
-                break :ret res;
-            },
-            .Array => |arr| {
-                const child = try self.typeName(allocator, arr.child);
+        .Pointer => |ptr| blk: {
+            const child = try self.typeName(allocator, ptr.child);
 
-                const prefix = if (arr.mutable) "mut " else "";
+            const mut = if (ptr.mutable) "mut " else "";
+            const prefix = switch (ptr.size) {
+                .Slice => "[]",
+                .Single => "*",
+                .C => "[@c]",
+            };
 
-                var res: []u8 = undefined;
-                if (arr.isCStyle) {
-                    res = std.fmt.allocPrint(allocator, "{s}c_array({d}, {s})", .{
-                        prefix,
-                        arr.len,
-                        child,
-                    }) catch return Error.AllocatorFailure;
-                }
-                else {
-                    const size = std.fmt.allocPrint(allocator, "[{d}]", .{arr.len})
-                        catch return Error.AllocatorFailure;
-                    res = allocator.alloc(u8, child.len + prefix.len + size.len) catch return Error.AllocatorFailure;
-                    res = std.fmt.bufPrint(res, "{s}{s}{s}", .{prefix, size, child}) catch unreachable;
-                }
+            break :blk std.fmt.allocPrint(allocator, "{s}{s}{s}", .{
+                mut,
+                prefix,
+                child,
+            }) catch return Error.AllocatorFailure;
+        },
 
-                self.typenameMap.putNoClobber(allocator, typeID, try self.builder.internString(res)) catch unreachable;
-                break :ret res;
-            },
-            .Struct, .Union, .Enum => typename(self, allocator, typeID),
-            .Function => |func| {
-                var res: []const u8 = if (func.mutable) "mut *fn (" else "*fn (";
+        .Array => |arr| blk: {
+            const child = try self.typeName(allocator, arr.child);
+            const prefix = if (arr.mutable) "mut " else "";
 
-                for (0..func.argTypes.len) |index| {
-                    res = std.fmt.allocPrint(allocator, "{s}{s}{s}", .{
-                        res,
-                        try self.typeName(allocator, func.argTypes[index]),
-                        if (index == func.argTypes.len - 1) "" else ", ",
-                    }) catch return Error.AllocatorFailure;
-                }
-
-
-                res = std.fmt.allocPrint(allocator, "{s}) -> {s}", .{
-                    res,
-                    if (func.isComptime) "dependent"
-                    else try self.typeName(allocator, func.returnType)
+            if (arr.isCStyle) {
+                break :blk std.fmt.allocPrint(allocator, "{s}c_array({d}, {s})", .{
+                    prefix,
+                    arr.len,
+                    child,
                 }) catch return Error.AllocatorFailure;
-                self.typenameMap.putNoClobber(allocator, typeID, try self.builder.internString(res)) catch unreachable;
-                break :ret res;
-            },
-            .EnumLiteral => "enum_literal",
-            .ComptimeFloat => "comptime_float",
-            .ComptimeInt => "comptime_int",
-            .Type => "type",
-            .Any => "any",
-            .Bool => "bool",
-            .Float => "float",
-            .Noreturn => "noreturn",
-            .Void => "void",
-            .Integer => |int| {
-                const mut = if (int.mutable) "mut " else "";
-                const sign = if (int.signed) "i" else "u"; 
-                const size = std.fmt.allocPrint(
-                    allocator,
-                    "{d}",
-                    .{int.size},
-                ) catch return Error.AllocatorFailure;
+            }
 
-                var res = allocator.alloc(u8, sign.len + size.len + mut.len) catch return Error.AllocatorFailure;
-                res = std.fmt.bufPrint(res, "{s}{s}{s}", .{mut, sign, size}) catch unreachable;
-                self.typenameMap.putNoClobber(allocator, typeID, try self.builder.internString(res)) catch unreachable;
-                break :ret res;
-            },
-        };
-    }
+            break :blk std.fmt.allocPrint(allocator, "{s}[{d}]{s}", .{
+                prefix,
+                arr.len,
+                child,
+            }) catch return Error.AllocatorFailure;
+        },
+
+        .Struct, .Union, .Enum => try aggregateName(self, allocator, typeID),
+
+        .Function => |func| blk: {
+            var name: []const u8 = if (func.mutable) "mut *fn (" else "*fn (";
+
+            for (func.argTypes, 0..) |argType, index| {
+                name = std.fmt.allocPrint(allocator, "{s}{s}{s}", .{
+                    name,
+                    try self.typeName(allocator, argType),
+                    if (index == func.argTypes.len - 1) "" else ", ",
+                }) catch return Error.AllocatorFailure;
+            }
+
+            break :blk std.fmt.allocPrint(allocator, "{s}) -> {s}", .{
+                name,
+                if (func.isComptime)
+                    "dependent"
+                else
+                    try self.typeName(allocator, func.returnType),
+            }) catch return Error.AllocatorFailure;
+        },
+
+        .EnumLiteral => "enum_literal",
+        .ComptimeFloat => "comptime_float",
+        .ComptimeInt => "comptime_int",
+        .Type => "type",
+        .Any => "any",
+        .Bool => "bool",
+        .Float => "float",
+        .Noreturn => "noreturn",
+        .Void => "void",
+
+        .Integer => |int| blk: {
+            const mut = if (int.mutable) "mut " else "";
+            const sign = if (int.signed) "i" else "u";
+            const size = std.fmt.allocPrint(allocator, "{d}", .{
+                int.size,
+            }) catch return Error.AllocatorFailure;
+
+            break :blk std.fmt.allocPrint(allocator, "{s}{s}{s}", .{
+                mut,
+                sign,
+                size,
+            }) catch return Error.AllocatorFailure;
+        },
+    };
+
+    const namePtr = try self.builder.internString(res);
+
+    self.typenameMap.putNoClobber(
+        allocator,
+        typeID,
+        namePtr,
+    ) catch unreachable;
+
+    return res;
 }
+
 
 pub fn determineExpected(maybeExpected: ?TypeID) ?TypeID {
     return
@@ -4534,7 +4641,6 @@ fn clearFlags(self: *Typechecker) void {
     self.flags = self.flags.xorWith(complement);
 }
 
-/// Assumes metadata doesn't exist for given element
 pub fn setMetadata(
     self: *Typechecker,
     element: defines.ExpressionPtr,
@@ -4554,6 +4660,43 @@ pub fn getMetadata(
         .file = self.currentFile,
         .expr = value,
     }));
+}
+
+
+pub fn metadataIndex(
+    self: *const Typechecker,
+    _value: defines.ExpressionPtr,
+    _meta: []const u8,
+) ?u32 {
+    const ast = self.context.getAST(self.currentFile);
+
+    const value = blk: {
+        const expr = ast.expressions.get(_value);
+
+        break :blk
+            if (expr.type == .Mark) ast.extra[expr.value + 2]
+            else _value;
+    };
+
+    return
+        if (self.getMetadata(value)) |metadata| blk: {
+            for (metadata, 0..) |meta, i| {
+                const meval = self.folder.getValue(meta);
+
+                switch (meval) {
+                    .Enum => |enm|
+                        if (
+                            enm.Type == (comptime Comptime.Folder.Builtin.Type("__builtin_metadata"))
+                            and enm.Value == Comptime.Folder.Builtin.Metadata(_meta)
+                        ) break :blk @intCast(i),
+
+                    else => { },
+                }
+            }
+
+            break :blk null;
+        }
+        else null;
 }
 
 pub fn hasMetadata(
@@ -4579,7 +4722,7 @@ pub fn hasMetadata(
                 switch (meval) {
                     .Enum => |enm|
                         if (
-                            enm.Type == (comptime Comptime.Folder.Builtin.Type("$$builtin_metadata"))
+                            enm.Type == (comptime Comptime.Folder.Builtin.Type("__builtin_metadata"))
                             and enm.Value == Comptime.Folder.Builtin.Metadata(_meta)
                         ) break :blk true,
 
@@ -4600,3 +4743,4 @@ fn unwrapMark(self: *Typechecker, exprPtr: defines.ExpressionPtr) defines.Expres
     }
     return e;
 }
+

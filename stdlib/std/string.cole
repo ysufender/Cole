@@ -1,9 +1,11 @@
 import std::memory::allocator as Allocator;
 import std::fmt as Fmt;
 import std::numeric as Numeric;
-import std::io::memorystream as MemStream;
+import std::io::memorystream;
 import std;
 import std::debug as Debug;
+
+let MemStream = std::io::memorystream::MemoryStream;
 
 /*
  * PUBLIC
@@ -46,7 +48,7 @@ pub let toStr = fn (T: type) -> *fn (T, Allocator::Allocator) -> std::Option([]u
         };
     }
 
-    return unreachable();
+    unreachable();
 };
 
 pub let toStrSentinel = fn (T: type) -> *fn (T, u8, Allocator::Allocator) -> std::Option([]u8) {
@@ -72,7 +74,7 @@ pub let toStrSentinel = fn (T: type) -> *fn (T, u8, Allocator::Allocator) -> std
         };
     }
 
-    return unreachable();
+    unreachable();
 };
 
 pub let intToStr =  fn (num: c_long, gpa: Allocator::Allocator) -> []u8 {
@@ -113,7 +115,6 @@ pub let safeIntToStr = fn (num: c_long, end: std::Option(u8), gpa: Allocator::Al
     }
 
     unreachable();
-    return undefined;
 };
 
 pub let safeFloatToStr = fn (num: float, end: std::Option(u8), gpa: Allocator::Allocator) -> std::Option([]u8) {
@@ -180,7 +181,6 @@ pub let safeFloatToStr = fn (num: float, end: std::Option(u8), gpa: Allocator::A
     }
 
     unreachable();
-    return undefined;
 };
 
 pub let boolToStr = fn (b: bool) -> []u8 {

@@ -1,0 +1,54 @@
+
+export function w $main(w %argc, l %argv) {{
+@start
+    %args =l alloc8 16
+    %ip =l alloc8 8
+    %has =w csgtw %argc, 1
+    jnz %has, @convert, @empty
+
+@empty
+    storel 0, %args
+    %elen =l add %args, 8
+    storew 0, %elen
+    jmp @invoke
+
+@convert
+    %n =w sub %argc, 1
+    %nl =l extsw %n
+    %bytes =l mul %nl, 16
+    %arr =l alloc8 %bytes
+    storel 0, %ip
+    jmp @loop
+
+@loop
+    %i =l loadl %ip
+    %done =w cugel %i, %nl
+    jnz %done, @finish, @body
+
+@body
+    %src =l add %i, 1
+    %srcoff =l mul %src, 8
+    %srcptr =l add %argv, %srcoff
+    %str =l loadl %srcptr
+    %slen =l call $strlen(l %str)
+    %slot =l mul %i, 16
+    %elem =l add %arr, %slot
+    storel %str, %elem
+    %elemlen =l add %elem, 8
+    %slen32 =w copy %slen
+    storew %slen32, %elemlen
+    %inext =l add %i, 1
+    storel %inext, %ip
+    jmp @loop
+
+@finish
+    storel %arr, %args
+    %alen =l add %args, 8
+    storew %n, %alen
+    jmp @invoke
+
+@invoke
+    %r =w call $root__main(:Slice_Slice_u8 %args)
+    ret %r
+}}
+

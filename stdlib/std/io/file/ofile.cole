@@ -1,8 +1,8 @@
-code {
+code "
 #header_start
     #include <stdio.h>
 #header_end
-}
+";
 
 import std::memory::allocator as Allocator;
 import std::io::stream as Stream;
@@ -13,7 +13,6 @@ import std;
 
 pub let OFile = struct {
     handle: *mut FILE,
-    dummy: void,
 
     pub let stream = fn (self: OFile) -> Stream::Output {
         return (cast(self.handle), write, writeline, writebuffer, seek, close, flush);
@@ -36,7 +35,7 @@ pub let OFile = struct {
 
         return
             if (res == undefined) (@None, ())
-            else (@Some, res, ());
+            else (@Some, res);
     };
 };
 
@@ -80,7 +79,7 @@ pub let flush = fn (handle: *mut void) -> Stream::Result {
         else @Err;
 };
 
-let FILE = #(@extern) struct { };
+let FILE = #(@extern, @align, 1, @opaque, 1) struct { };
 
 let fwrite = #(@extern) fn (
     src  : mut [@c]void,

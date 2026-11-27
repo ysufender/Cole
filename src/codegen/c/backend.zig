@@ -1,6 +1,7 @@
 const std = @import("std");
 const common = @import("../../core/common.zig");
 const platform = @import("../../core/platform.zig");
+
 pub const JIR = @import("jir.zig");
 
 const Error = @import("../../core/common.zig").CompilerError;
@@ -131,7 +132,7 @@ pub fn compile(outDir: Dir, allocator: std.mem.Allocator, context: *common.Compi
     if (tcc.tcc_set_options(state, res.ptr) == -1) {
             report("Failed to set optimization level.");
             return Error.BackendError;
-    } 
+    }
 
     // Finalize
     const outFile = outDir.createFile(context.io, context.settings.outputFile, .{})

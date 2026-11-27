@@ -5,7 +5,7 @@ local suites = require "suites"
 local function suite(name, tests)
     local s = Testy.Suite.init(name)
     for _, test in ipairs(tests) do
-        local execp = "build/c/"..test..".cole.exec"
+        local execp = "build/"..string.lower(arg[1]).."/"..test..".cole.exec"
         s:test(Testy.Test
             .init(test, execp))
     end
@@ -17,10 +17,10 @@ for name, tests in pairs(suites) do
     test:suite(suite(name, tests))
 end
 
-if arg[1] == "record" then
-    test:record(arg[2] and {table.unpack(arg, 2)} or nil)
-elseif arg[1] == "run" then
-    local res = test:run(arg[2] and {table.unpack(arg, 2)} or nil)
+if arg[2] == "record" then
+    test:record(arg[3] and {table.unpack(arg, 3)} or nil)
+elseif arg[2] == "run" then
+    local res = test:run(arg[3] and {table.unpack(arg, 3)} or nil)
 
     if res then
         if res.fail ~= 0 then

@@ -1,5 +1,7 @@
 pub let Result = fn (Ok: type, Err: type) -> type {
     return union(enum) {
+        let Self = this();
+
         Ok: Ok,
         Err: Err,
     };
@@ -11,13 +13,6 @@ pub let Option = fn (T: type) -> type {
 
         Some: T,
         None: void,
-
-        pub let defined = fn (self: Self) -> bool {
-            return switch self {
-                @Some -> true,
-                else -> false,
-            };
-        };
     };
 };
 

@@ -13,6 +13,7 @@ const Types = @import("../../typechecker/type.zig");
 const Typechecker = @import("../../typechecker/typechecker.zig");
 const Comptime= @import("../../typechecker/comptime.zig");
 const MultiArrayList = @import("../../util/collections.zig").MultiArrayList;
+const Writer = std.Io.Writer;
 const TypeID = Types.TypeID;
 const Allocator = std.mem.Allocator;
 const Error = common.CompilerError;
@@ -22,13 +23,10 @@ const Context = common.CompilerContext;
 const CreateDirError = std.Io.Dir.CreateDirError;
 const TypeNameMap = @import("../../typechecker/typechecker.zig").TypeNameMap;
 
-const Writer = std.Io.Writer;
+pub const Builder = @import("jir/builder.zig");
 
 pub const InternTable = std.array_hash_map.String(void);
-
 pub const Ptr = defines.Offset;
-
-pub const Builder = @import("jir/builder.zig");
 
 pub const Node = struct {
     pub const List = MultiArrayList(Node);
@@ -141,6 +139,51 @@ pub const Function = struct {
     position: @import("../../lexer/lexer.zig").Position = .{ .line = 1, .column = 1 },
 };
 
+pub const Base = struct {
+    types: Typechecker.TypeTable.Slice,
+    typeNames: TypeNameMap,
+    strings: [][]const u8,
+    constants: Constant.List,
+    functions: Function.List,
+    nodes: Node.List.Slice,
+    keyNodes: []const Ptr,
+    data: []const u32,
+    topLevelAsms: std.ArrayList(defines.StringPtr).Slice,
+    metadata: Builder.MetadataMap,
+    typeToJirMap: collections.HashMap(TypeID, Ptr),
+
+    pub fn hasMetadata(
+        self: *const Base,
+        _value: JIR.Ptr,
+        _meta: []const u8,
+    ) bool {
+        return
+            if (self.getMetadata(_value)) |metadata| blk: {
+                for (metadata) |meta| {
+                    const constant = self.constants.get(meta);
+                    switch (constant) {
+                        .Aggregate => |agg|
+                            if (agg.type == comptime Comptime.Folder.Builtin.Type("__builtin_metadata")) {
+                                const enumValue = self.constants.get(agg.data.start).Integer.u32;
+                                if (enumValue == Comptime.Folder.Builtin.Metadata(_meta)) break :blk true;
+                            },
+                        else => { },
+                    }
+                }
+
+                break :blk false;
+            }
+            else false;
+    }
+
+    pub fn getMetadata(
+        self: *const Base,
+        value: defines.ExpressionPtr,
+    ) ?[]const defines.ExpressionPtr {
+        return self.metadata.get(value);
+    }
+};
+
 const JIR = @This();
 
 cstrings: std.AutoHashMapUnmanaged(TypeID, []const u8) = .empty,
@@ -170,6 +213,22 @@ pub fn dump(self: *const JIR) void {
     while (iterator.next()) |node| {
         common.log.debug("{s}", .{@tagName(node.type)});
     }
+}
+
+pub fn base(self: *const JIR) Base {
+    return .{
+        .types = self.types,
+        .typeNames = self.typeNames,
+        .strings = self.strings,
+        .constants = self.constants,
+        .functions = self.functions,
+        .nodes = self.nodes,
+        .keyNodes = self.keyNodes,
+        .data = self.data,
+        .topLevelAsms = self.topLevelAsms,
+        .metadata = self.metadata,
+        .typeToJirMap = self.typeToJirMap,
+    };
 }
 
 pub fn codegen(self: *JIR, context: *Context, cOut: *std.Io.Dir) Error!void {
@@ -661,7 +720,7 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
                 try self.write(
                     out,
                     \\
-                    \\    StackTrace $$anon_trace_TMP = _Cole_implicit__stack_trace;
+                    \\    StackTrace __anon_trace_TMP = _Cole_implicit__stack_trace;
                     \\    _Cole_implicit__stack_trace = (StackTrace){{
                     \\        .frame = (StackFrame){{
                     \\            .function = (Slice_uint8_t){{(uint8_t*)"{s}", {d}}},
@@ -669,7 +728,7 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
                     \\            .line = {d},
                     \\            .col = {d},
                     \\        }},
-                    \\        .next = &$$anon_trace_TMP
+                    \\        .next = &__anon_trace_TMP
                     \\    }};
                     \\
                     , .{
@@ -687,7 +746,7 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
 
             if (self.context.settings.buildInfo.isDebug) {
                 if (self.context.settings.buildInfo.isDebug) {
-                    try self.writeln(out, "_Cole_implicit__stack_trace = $$anon_trace_TMP;\n" , .{ });
+                    try self.writeln(out, "_Cole_implicit__stack_trace = __anon_trace_TMP;\n" , .{ });
                 }
                 self.indent -= 1;
                 try self.writeln(out, "}}\n", .{});
@@ -745,7 +804,7 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
             }
         },
         .Identifier => {
-            const str = @constCast(self.strings[node.value]);
+            const str = @constCast(self.strings[self.data[node.value]]);
             _ = std.mem.replace(u8, str, "::", "__", str);
             try self.write(out, "{s}", .{str});
         },
@@ -810,7 +869,7 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
         },
         .Return => {
             if (self.context.settings.buildInfo.isDebug) {
-                try self.writeln(out, "_Cole_implicit__stack_trace = $$anon_trace_TMP;\n" , .{ });
+                try self.writeln(out, "_Cole_implicit__stack_trace = __anon_trace_TMP;\n" , .{ });
             }
 
             try self.writeln(out, "return ", .{});
@@ -828,7 +887,11 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
         },
 
         .Reference => try self.commonSingle(out, node.value, "&"),
-        .Dereference => try self.commonSingle(out, node.value, "*"),
+        .Dereference => {
+            try self.write(out, "(*(", .{});
+            try self.operation(out, self.data[node.value]);
+            try self.write(out, "))", .{});
+        },
         .Invert => try self.commonSingle(out, node.value, "~"),
         .Not => try self.commonSingle(out, node.value, "!"),
         .Negation => try self.commonSingle(out, node.value, "-"),
@@ -840,9 +903,9 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
             try self.write(out, ";\n", .{});
         },
         .Dot => {
-            try self.operation(out, self.data[node.value]);
+            try self.operation(out, self.data[node.value + 1]);
             try self.write(out, ".{s}", .{
-                self.strings[self.data[node.value + 1]],
+                self.strings[self.data[node.value + 2]],
             });
         },
         .Grouping => {
@@ -858,24 +921,24 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
             try self.write(out, ")", .{});
         },
         .Call => {
-            const func = self.data[node.value + 1];
-            const len = self.data[node.value + 2];
+            const func = self.data[node.value + 2];
+            const len = self.data[node.value + 3];
 
-            if (self.data[node.value] == 1) {
+            if (self.data[node.value + 1] == 1) {
                 try self.indentf(out);
             }
 
             try self.operation(out, func);
             try self.write(out, "(", .{});
             for (0..len) |idx| {
-                try self.operation(out, self.data[@intCast(node.value + 3 + idx)]);
+                try self.operation(out, self.data[@intCast(node.value + 4 + idx)]);
                 if (idx == len - 1) {
                     continue;
                 }
                 try self.write(out, ", ", .{});
             }
             try self.write(out, "){s}", .{
-                if (self.data[node.value] == 1) ";\n"
+                if (self.data[node.value + 1] == 1) ";\n"
                 else ""
             });
         },
@@ -945,6 +1008,7 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
                         try self.operation(out, @intCast(self.data[node.value + 3]));
                     }
                 },
+
                 .Struct => |str| {
                     var fieldIdx: usize = 0;
                     var dataIdx: usize = 0;
@@ -962,6 +1026,7 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
                         fieldIdx += 1;
                     }
                 },
+
                 else => {
                     for (0..len) |idx| {
                         if (idx != 0) try self.write(out, ", ", .{});
@@ -974,10 +1039,9 @@ fn operation(self: *JIR, out: *Writer, nodePtr: Ptr) Error!void {
         },
 
         .Code => {
-            const str = self.strings[node.value];
-            try self.write(out, "/* Inserted Code */\n{s}\n", .{
-                str,
-            });
+            try self.write(out, "/* Inserted Code */\n", .{});
+            try self.writeInlineCode(out, self.strings[node.value]);
+            try self.write(out, "\n", .{});
         },
 
         .Discard => {
@@ -1135,34 +1199,82 @@ fn literal(self: *JIR, out: *Writer, ptr: Constant.Ptr) Error!void {
         },
         .String => |str| switch (str.type) {
             .C => {
-                const rstr = self.strings[str.str];
-                try self.write(out, "((char const*)\"{s}\")", .{
-                    rstr,
-                });
+                try self.write(out, "((char const*)\"", .{});
+                try self.writeEscaped(out, self.strings[str.str]);
+                try self.write(out, "\")", .{});
             },
             .Cole => {
                 const rstr = self.strings[str.str];
-                const len = calculateStringLength(rstr);
 
-                try self.write(out, "({s}){{(uint8_t*)\"{s}\", {d}}}", .{
+                try self.write(out, "({s}){{(uint8_t*)\"", .{
                     try self.getCName(comptime Comptime.Folder.Builtin.Type("[]u8"), null, true, false),
-                    rstr,
-                    len,
                 });
+                try self.writeEscaped(out, rstr);
+                try self.write(out, "\", {d}}}", .{ rstr.len });
             }
         },
     };
 }
 
-fn calculateStringLength(_str: []const u8) u32 {
-    var str = _str;
-    var minus: u32 = 0;
-    while (std.mem.findScalar(u8, str, '\\')) |bsp| {
-        minus += 1;
-        str = str[bsp+1..];
-    }
+fn writeInlineCode(self: *JIR, out: *Writer, code: []const u8) Error!void {
+    const State = enum { Code, DoubleQuote, SingleQuote, LineComment, BlockComment };
 
-    return @intCast(_str.len - minus);
+    var state: State = .Code;
+    var i: usize = 0;
+    while (i < code.len) : (i += 1) {
+        const c = code[i];
+        const next: u8 = if (i + 1 < code.len) code[i + 1] else 0;
+
+        switch (state) {
+            .Code => {
+                if (c == '"') state = .DoubleQuote
+                else if (c == '\'') state = .SingleQuote
+                else if (c == '/' and next == '/') state = .LineComment
+                else if (c == '/' and next == '*') state = .BlockComment;
+                try self.write(out, "{c}", .{c});
+            },
+            .LineComment => {
+                if (c == '\n') state = .Code;
+                try self.write(out, "{c}", .{c});
+            },
+            .BlockComment => {
+                if (c == '*' and next == '/') {
+                    try self.write(out, "*/", .{});
+                    i += 1;
+                    state = .Code;
+                }
+                else try self.write(out, "{c}", .{c});
+            },
+            .DoubleQuote, .SingleQuote => {
+                const quote: u8 = if (state == .DoubleQuote) '"' else '\'';
+
+                if (c == '\\' and i + 1 < code.len) {
+                    try self.write(out, "{c}{c}", .{ c, next });
+                    i += 1;
+                }
+                else if (c == quote) {
+                    state = .Code;
+                    try self.write(out, "{c}", .{c});
+                }
+                else switch (c) {
+                    '\n' => try self.write(out, "\\n", .{}),
+                    '\r' => try self.write(out, "\\r", .{}),
+                    '\t' => try self.write(out, "\\t", .{}),
+                    0...8, 11, 12, 14...31, 127 => try self.write(out, "\\{o:0>3}", .{c}),
+                    else => try self.write(out, "{c}", .{c}),
+                }
+            },
+        }
+    }
+}
+
+fn writeEscaped(self: *JIR, out: *Writer, str: []const u8) Error!void {
+    for (str) |c| switch (c) {
+        '"' => try self.write(out, "\\\"", .{}),
+        '\\' => try self.write(out, "\\\\", .{}),
+        0x20...0x21, 0x23...0x5b, 0x5d...0x7e => try self.write(out, "{c}", .{c}),
+        else => try self.write(out, "\\{o:0>3}", .{c}),
+    };
 }
 
 fn getCName(self: *JIR, typeID: TypeID, _name: ?defines.StringPtr, mutable: bool, noSymbol: bool) Error![]const u8 {
@@ -1420,7 +1532,7 @@ pub fn hasMetadata(
                 const constant = self.constants.get(meta);
                 switch (constant) {
                     .Aggregate => |agg|
-                        if (agg.type == comptime Comptime.Folder.Builtin.Type("$$builtin_metadata")) {
+                        if (agg.type == comptime Comptime.Folder.Builtin.Type("__builtin_metadata")) {
                             const enumValue = self.constants.get(agg.data.start).Integer.u32;
                             if (enumValue == Comptime.Folder.Builtin.Metadata(_meta)) break :blk true;
                         },

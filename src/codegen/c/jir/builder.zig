@@ -138,11 +138,11 @@ pub fn internString(self: *Builder, str: []const u8) Error!defines.StringPtr {
     }
 }
 
-pub inline fn getInternedString(self: *const Builder, index: defines.StringPtr)  []const u8 {
+pub fn getInternedString(self: *const Builder, index: defines.StringPtr)  []const u8 {
     return self.stringList.items[index];
 }
 
-pub inline fn addMetadata(self: *Builder, node: JIR.Ptr, metadata: []const JIR.Constant.Ptr) Error!void {
+pub fn addMetadata(self: *Builder, node: JIR.Ptr, metadata: []const JIR.Constant.Ptr) Error!void {
     return self.metadata.put(self.allocator, node, metadata);
 }
 
@@ -183,7 +183,7 @@ pub fn variableDef(
     return res;
 }
 
-pub inline fn functionDef(self: *Builder, name: defines.StringPtr, function: JIR.Function.Ptr) Error!void {
+pub fn functionDef(self: *Builder, name: defines.StringPtr, function: JIR.Function.Ptr) Error!void {
     if (self.functionDefCache.contains(function)) {
         return;
     }
@@ -197,22 +197,21 @@ pub inline fn functionDef(self: *Builder, name: defines.StringPtr, function: JIR
     return self.addKeyNode(node);
 }
 
-pub inline fn typeDef(self: *Builder, typeID: TypeID) Error!JIR.Ptr {
+pub fn typeDef(self: *Builder, typeID: TypeID) Error!JIR.Ptr {
     const typeInfo = self.typechecker.typeTable.get(typeID);
 
     const res = try self.commonSingle(.TypeDef, typeID);
     try self.addKeyNode(res);
 
-    const _expr: ?*defines.ExpressionPtr = switch (typeInfo) {
-        .Struct => &self.typechecker.typeTable.items(.data)[typeID].Struct.expr,
-        .Union => &self.typechecker.typeTable.items(.data)[typeID].Union.expr,
-        .Enum => &self.typechecker.typeTable.items(.data)[typeID].Enum.expr,
+    const typeExpr: ?defines.ExpressionPtr = switch (typeInfo) {
+        .Struct => |str| str.expr,
+        .Union => |uni| uni.expr,
+        .Enum => |enm| enm.expr,
         else => null,
     };
 
-    if (_expr) |expr| {
-        try self.typechecker.lowerer.addMetadata(res, expr.*);
-        expr.* = res;
+    if (typeExpr) |expr| {
+        try self.typechecker.lowerer.addMetadata(res, expr);
     }
 
     if (!self.typeToJirMap.contains(typeID)) {
@@ -226,21 +225,21 @@ pub inline fn typeDef(self: *Builder, typeID: TypeID) Error!JIR.Ptr {
     return res;
 }
 
-pub inline fn @"return"(self: *Builder, withRet: bool, expr: JIR.Ptr) Error!JIR.Ptr {
+pub fn @"return"(self: *Builder, withRet: bool, expr: JIR.Ptr) Error!JIR.Ptr {
     const res = try self.commonBinary(.Return, @intFromBool(withRet), expr);
     return res;
 }
 
-pub inline fn assignment(self: *Builder, decl: JIR.Ptr, expr: JIR.Ptr) Error!JIR.Ptr {
+pub fn assignment(self: *Builder, decl: JIR.Ptr, expr: JIR.Ptr) Error!JIR.Ptr {
     const res = try self.commonBinary(.Assignment, decl, expr);
     return res;
 }
 
-pub inline fn jump(self: *Builder, lbl: StringPtr) Error!JIR.Ptr { return self.commonSingle(.Jump, lbl); }
-pub inline fn cjump(self: *Builder, lbl: StringPtr, cnd: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.JumpIf, lbl, cnd); }
-pub inline fn exit(self: *Builder) Error!JIR.Ptr { return self.commonSingle(.Exit, 0); }
+pub fn jump(self: *Builder, lbl: StringPtr) Error!JIR.Ptr { return self.commonSingle(.Jump, lbl); }
+pub fn cjump(self: *Builder, lbl: StringPtr, cnd: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.JumpIf, lbl, cnd); }
+pub fn exit(self: *Builder) Error!JIR.Ptr { return self.commonSingle(.Exit, 0); }
 
-pub inline fn stmtExpr(self: *Builder, expr: JIR.Ptr, stmts: []const JIR.Ptr) Error!JIR.Ptr {
+pub fn stmtExpr(self: *Builder, expr: JIR.Ptr, stmts: []const JIR.Ptr) Error!JIR.Ptr {
     const start: u32 = @intCast(self.data.items.len);
     self.data.append(self.allocator, expr) catch return Error.AllocatorFailure;
     self.data.append(self.allocator, @intCast(stmts.len)) catch return Error.AllocatorFailure;
@@ -254,7 +253,7 @@ pub inline fn stmtExpr(self: *Builder, expr: JIR.Ptr, stmts: []const JIR.Ptr) Er
     return res;
 }
 
-pub inline fn scope(self: *Builder, name: defines.StringPtr, args: []const JIR.Ptr) Error!JIR.Ptr {
+pub fn scope(self: *Builder, name: defines.StringPtr, args: []const JIR.Ptr) Error!JIR.Ptr {
     const start: u32 = @intCast(self.data.items.len);
     self.data.append(self.allocator, name) catch return Error.AllocatorFailure;
     self.data.append(self.allocator, @intCast(args.len)) catch return Error.AllocatorFailure;
@@ -268,7 +267,7 @@ pub inline fn scope(self: *Builder, name: defines.StringPtr, args: []const JIR.P
     return res;
 }
 
-pub inline fn construct(self: *Builder, typeID: TypeID, args: []const JIR.Ptr) Error!JIR.Ptr {
+pub fn construct(self: *Builder, typeID: TypeID, args: []const JIR.Ptr) Error!JIR.Ptr {
     const start: u32 = @intCast(self.data.items.len);
     self.data.append(self.allocator, typeID) catch return Error.AllocatorFailure;
     self.data.append(self.allocator, @intCast(args.len)) catch return Error.AllocatorFailure;
@@ -282,39 +281,40 @@ pub inline fn construct(self: *Builder, typeID: TypeID, args: []const JIR.Ptr) E
     return res;
 }
 
-pub inline fn identifier(self: *Builder, decl: defines.StringPtr) Error!JIR.Ptr { return self.commonSingle(.Identifier, decl); }
-pub inline fn inlineC(self: *Builder, code: defines.StringPtr) Error!JIR.Ptr { return self.commonSingle(.Code, code); }
+pub fn identifier(self: *Builder, decl: defines.StringPtr, topLevelAndIsParam: u8, valueType: TypeID) Error!JIR.Ptr { return self.commonTernary(.Identifier, decl, topLevelAndIsParam, valueType); }
+pub fn inlineCode(self: *Builder, code: defines.StringPtr) Error!JIR.Ptr { return self.commonSingle(.Code, code); }
 
-pub inline fn discard(self: *Builder, expr: JIR.Ptr) Error!JIR.Ptr { return self.commonSingle(.Discard, expr); }
+pub fn discard(self: *Builder, expr: JIR.Ptr) Error!JIR.Ptr { return self.commonSingle(.Discard, expr); }
 
-pub inline fn reference(self: *Builder, decl: JIR.Ptr) Error!JIR.Ptr { return self.commonSingle(.Reference, decl); }
-pub inline fn literal(self: *Builder, constant: JIR.Constant.Ptr) Error!JIR.Ptr { return self.commonSingle(.Literal, constant); }
-pub inline fn add(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.Add, lhs, rhs); }
-pub inline fn sub(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.Sub, lhs, rhs); }
-pub inline fn div(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.Div, lhs, rhs); }
-pub inline fn mul(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.Mul, lhs, rhs); }
-pub inline fn mod(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.Mod, lhs, rhs); }
-pub inline fn lshift(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.LeftShift, lhs, rhs); }
-pub inline fn rshift(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.RightShift, lhs, rhs); }
-pub inline fn @"and"(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.And, lhs, rhs); }
-pub inline fn @"or"(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.Or, lhs, rhs); }
-pub inline fn label(self: *Builder, name: StringPtr) Error!JIR.Ptr { return self.commonSingle(.Label, name); }
-pub inline fn lesser(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.Lesser, lhs, rhs); }
-pub inline fn lesserEqual(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.LesserEqual, lhs, rhs); }
-pub inline fn greater(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.Greater, lhs, rhs); }
-pub inline fn greaterEqual(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.GreaterEqual, lhs, rhs); }
-pub inline fn equal(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.Equal, lhs, rhs); }
-pub inline fn notEqual(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.NotEqual, lhs, rhs); }
-pub inline fn invert(self: *Builder, expr: JIR.Ptr) Error!JIR.Ptr { return self.commonSingle(.Invert, expr); }
-pub inline fn xor(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.Xor, lhs, rhs); }
-pub inline fn bitwiseOr(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.BitwiseOr, lhs, rhs); }
-pub inline fn bitwiseAnd(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.BitwiseAnd, lhs, rhs); }
-pub inline fn not(self: *Builder, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonSingle(.Not, rhs); }
-pub inline fn negate(self: *Builder, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonSingle(.Negation, rhs); }
+pub fn reference(self: *Builder, decl: JIR.Ptr) Error!JIR.Ptr { return self.commonSingle(.Reference, decl); }
+pub fn literal(self: *Builder, constant: JIR.Constant.Ptr) Error!JIR.Ptr { return self.commonSingle(.Literal, constant); }
+pub fn add(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.Add, lhs, rhs); }
+pub fn sub(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.Sub, lhs, rhs); }
+pub fn div(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.Div, lhs, rhs); }
+pub fn mul(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.Mul, lhs, rhs); }
+pub fn mod(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.Mod, lhs, rhs); }
+pub fn lshift(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.LeftShift, lhs, rhs); }
+pub fn rshift(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.RightShift, lhs, rhs); }
+pub fn @"and"(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.And, lhs, rhs); }
+pub fn @"or"(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.Or, lhs, rhs); }
+pub fn label(self: *Builder, name: StringPtr) Error!JIR.Ptr { return self.commonSingle(.Label, name); }
+pub fn lesser(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.Lesser, lhs, rhs); }
+pub fn lesserEqual(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.LesserEqual, lhs, rhs); }
+pub fn greater(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.Greater, lhs, rhs); }
+pub fn greaterEqual(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.GreaterEqual, lhs, rhs); }
+pub fn equal(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.Equal, lhs, rhs); }
+pub fn notEqual(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.NotEqual, lhs, rhs); }
+pub fn invert(self: *Builder, expr: JIR.Ptr) Error!JIR.Ptr { return self.commonSingle(.Invert, expr); }
+pub fn xor(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.Xor, lhs, rhs); }
+pub fn bitwiseOr(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.BitwiseOr, lhs, rhs); }
+pub fn bitwiseAnd(self: *Builder, lhs: JIR.Ptr, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonBinary(.BitwiseAnd, lhs, rhs); }
+pub fn not(self: *Builder, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonSingle(.Not, rhs); }
+pub fn negate(self: *Builder, rhs: JIR.Ptr) Error!JIR.Ptr { return self.commonSingle(.Negation, rhs); }
 
 pub fn dot(self: *Builder, object: JIR.Ptr, field: StringPtr, objType: TypeID) Error!JIR.Ptr {
     if (self.typechecker.getFlag(.LValue) or self.nodes.get(object).type == .Identifier) {
-        return self.commonBinary(.Dot,
+        return self.commonTernary(.Dot,
+            objType,
             switch (self.typechecker.typeTable.get(objType)) {
                 .Pointer => |ptr| switch (ptr.size) {
                     .Slice => object,
@@ -330,84 +330,25 @@ pub fn dot(self: *Builder, object: JIR.Ptr, field: StringPtr, objType: TypeID) E
     const objDef = try self.variableDef(false, objType, objName, false, object, null);
     const objIdent = try switch (self.typechecker.typeTable.get(objType)) {
         .Pointer => |ptr| switch (ptr.size) {
-            .Slice => self.identifier(objName),
-            else => self.dereference(try self.identifier(objName), objType)
+            .Slice => self.identifier(objName, 0, objType),
+            else => self.dereference(try self.identifier(objName, 0, objType), objType)
         },
-        else => self.identifier(objName),
+        else => self.identifier(objName, 0, objType),
     };
 
-    const access = try self.commonBinary(.Dot, objIdent, field);
+    const access = try self.commonTernary(.Dot, objType, objIdent, field);
 
     return switch (self.typechecker.typeTable.get(objType)) {
-        .Union => |uni|
-            if (false and self.typechecker.context.settings.buildInfo.isDebug and field != try self.internString("tag")) {
-                const fieldIndex = try self.typechecker.fieldIndex(objType, field);
-                const tagVal = try self.addConstant(.{ .Integer = .{ .u32 = fieldIndex } });
-                const tag = try self.dot(objIdent, try self.internString("tag"), objType);
-                const okLabelName = try self.typechecker.folder.generateRandomName(.UnionSafety);
-                const cnd = try self.notEqual(tag, try self.literal(try self.addConstant(.{
-                    .Aggregate = .{
-                        .type = uni.tag,
-                        .data = .{
-                            .start = tagVal,
-                            .end = tagVal + 1,
-                        },
-                    }
-                })));
-                const safetyCheck = try self.cjump(okLabelName, cnd);
-                const segfault = try self.typechecker.builder.inlineC(
-                    try self.internString(
-                        std.fmt.allocPrint(self.allocator, "$$union_access$$: $$union_access((long)&&$$union_access$$, \"{s}\");", .{
-                            self.getInternedString(uni.fields[fieldIndex].name),
-                        }) catch return Error.AllocatorFailure,
-                    ),
-                );
-                const okLabel = try self.label(okLabelName);
-
-                return self.stmtExpr(access, &.{
-                    objDef,
-                    safetyCheck,
-                    segfault,
-                    okLabel,
-                });
-            }
-            else self.stmtExpr(access, &.{objDef}),
+        .Union => self.stmtExpr(access, &.{objDef}),
         else => self.stmtExpr(access, &.{objDef}),
     };
 }
 
-pub inline fn dereference(self: *Builder, expr: JIR.Ptr, exprType: TypeID) Error!JIR.Ptr {
-    // @Beware disabled for now
-    if (false and self.typechecker.context.settings.buildInfo.isDebug) {
-        const ptrName = try self.typechecker.folder.generateRandomName(.Ptr);
-        const ptrDef = try self.variableDef(false, exprType, ptrName, false, expr, null);
-        const ptrIdent = try self.identifier(ptrName);
-
-        const nullPtr = try self.literal(try self.addConstant(.{ .Undefined = exprType, }));
-
-        const safeLabelName = try self.typechecker.folder.generateRandomName(.Safe);
-        const cnd = try self.notEqual(ptrIdent, nullPtr);
-        const safetyCheck = try self.cjump(safeLabelName, cnd);
-
-        const segfault = try self.typechecker.lowerer.handler("$$null_deref");
-
-        const safeLabel = try self.label(safeLabelName);
-
-        const deref = try self.commonSingle(.Dereference, ptrIdent);
-
-        return self.stmtExpr(deref, &.{
-            ptrDef,
-            safetyCheck,
-            segfault,
-            safeLabel
-        });
-    }
-    else {
-        return self.commonSingle(.Dereference, expr);
-    }
+pub fn dereference(self: *Builder, expr: JIR.Ptr, typeID: TypeID) Error!JIR.Ptr {
+    return self.commonBinary(.Dereference, expr, typeID);
 }
 
-pub inline fn grouping(self: *Builder, args: []const JIR.Ptr) Error!JIR.Ptr {
+pub fn grouping(self: *Builder, args: []const JIR.Ptr) Error!JIR.Ptr {
     std.debug.assert(args.len <= 1);
 
     const start: u32 = @intCast(self.data.items.len);
@@ -422,10 +363,11 @@ pub inline fn grouping(self: *Builder, args: []const JIR.Ptr) Error!JIR.Ptr {
     return res;
 }
 
-pub inline fn ternary(self: *Builder, cnd: JIR.Ptr, then: JIR.Ptr, otherwise: JIR.Ptr) Error!JIR.Ptr { return self.commonTernary(.Ternary, cnd, then, otherwise); }
+pub fn ternary(self: *Builder, cnd: JIR.Ptr, then: JIR.Ptr, otherwise: JIR.Ptr) Error!JIR.Ptr { return self.commonTernary(.Ternary, cnd, then, otherwise); }
 
-pub inline fn call(self: *Builder, stmt: bool, expr: JIR.Ptr, args: []const JIR.Ptr) Error!JIR.Ptr {
+pub fn call(self: *Builder, returnType: TypeID, stmt: bool, expr: JIR.Ptr, args: []const JIR.Ptr) Error!JIR.Ptr {
     const start: u32 = @intCast(self.data.items.len);
+    self.data.append(self.allocator, returnType) catch return Error.AllocatorFailure;
     self.data.append(self.allocator, @intFromBool(stmt)) catch return Error.AllocatorFailure;
     self.data.append(self.allocator, expr) catch return Error.AllocatorFailure;
     self.data.append(self.allocator, @intCast(args.len)) catch return Error.AllocatorFailure;
@@ -439,7 +381,7 @@ pub inline fn call(self: *Builder, stmt: bool, expr: JIR.Ptr, args: []const JIR.
     return res;
 }
 
-inline fn commonTernary(
+fn commonTernary(
     self: *Builder,
     comptime nodeType: JIR.Node.Type,
     first: JIR.Ptr,
@@ -459,7 +401,7 @@ inline fn commonTernary(
     return res;
 }
 
-inline fn commonSingle(
+fn commonSingle(
     self: *Builder,
     comptime nodeType: JIR.Node.Type,
     expr: JIR.Ptr,
@@ -472,7 +414,7 @@ inline fn commonSingle(
     return res;
 }
 
-inline fn commonBinary(
+fn commonBinary(
     self: *Builder,
     comptime nodeType: JIR.Node.Type,
     lhs: JIR.Ptr,

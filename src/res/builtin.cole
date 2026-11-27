@@ -7,6 +7,7 @@ pub let Optimization = enum {
 
 pub let Backend = enum {
     C,
+    QBE,
 };
 
 pub let Platform = enum {
@@ -33,13 +34,14 @@ pub let ColeInfo: struct {
     versionMajor: u8,
     versionMinor: u8,
     versionPatch: u8,
-    contributors: [1][]u8,
+    contributors: [2][]u8,
 } = (
     "Cole",
     "A statically typed, ahead of time compiled language with powerful metaprogramming.",
-    "0.1.8",
-    0, 1, 8,
+    "0.2.0",
+    0, 2, 0,
     (
+        "casimirknight <deep3700@outlook.com>",
         "Yusuf Ender Osmanoğlu <yusufenderosmanoglu@gmail.com>",
     )
 );

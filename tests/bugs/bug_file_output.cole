@@ -5,7 +5,7 @@ import std::io::stream as Stream;
 import std::c as C;
 
 let main = fn (args: [][]u8) -> i32 {
-    let w = File::Output::open(C::Allocator, "build/c/_file_output_test.txt", false, false);
+    let w = File::Output::open(C::Allocator, if (buildInfo().backend == @C) "build/c/_file_output_test.txt" else "build/qbe/_file_output_test.txt", false, false);
     switch w {
         @Some -> |f| {
             _ = Stream::Output::writeline(File::Output::stream(f), "first line");

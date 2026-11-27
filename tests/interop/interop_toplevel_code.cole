@@ -6,11 +6,11 @@ let pi = fn (n: c_long) -> void {
     Console::log(String::intToStr(n, C::Allocator));
 };
 
-code {
+code if (buildInfo().backend == @C) "
 #source_start
     int const twice_c(int const x) { return x * 2; }
 #source_end
-}
+" else compileError("This test is for the C backend, on QBE you can ignore this safely.");
 
 let twice_c = #(@extern) fn (x: c_int) -> c_int { };
 

@@ -1,5 +1,5 @@
 const std = @import("std");
-
+const Backend = @import("src/codegen/backend.zig").Backend;
 const resourcePath = "res/";
 
 const files = [_][]const u8{
@@ -19,11 +19,15 @@ var targets = [_]std.Target.Query{
     .{ .os_tag = .windows, .cpu_arch = .x86_64, .abi = .gnu },
     .{ .os_tag = .linux,   .cpu_arch = .x86_64, .abi = .gnu },
 };
-
+const Config = enum {
+    debug,
+    fast,
+    safe,
+};
 const version = std.SemanticVersion{
     .major = 0,
-    .minor = 1,
-    .patch = 8,
+    .minor = 2,
+    .patch = 0,
 };
 
 var config: struct {
@@ -42,19 +46,37 @@ pub fn build(b: *std.Build) void {
 
 fn addTestStep(b: *std.Build) void {
     const opts = b.addOptions();
+    const efile_config = b.option(Config, "config", "Add config to the efile test") orelse  .debug;
+    const backend_config = b.option(Backend, "backend", "Select compiler backend") orelse .QBE;
     opts.addOption(bool, "isDebug", true);
     opts.addOption([]const u8, "version", "test");
+    opts.addOption([]const u8, "config", @tagName(efile_config));
 
     opts.addOption(bool, "record", false);
 
     const runTests = b.addSystemCommand(&.{
         "efile",
+        @tagName(efile_config),
+        @tagName(backend_config),
         if (b.option(bool, "record", "Run Testy in record mode") orelse false) "record" else "run",
     });
+
     runTests.setCwd(.{ .cwd_relative = "tests/" });
+
+    const unit_test = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main.zig"),
+            .target = b.graph.host,
+            .optimize = .debug,
+        }),
+    });
+    unit_test.root_module.addOptions("config", opts);
+
+    const run_unit_tests = b.addRunArtifact(unit_test);
 
     const step = b.step("test", "Run unit tests reachable from src/main.zig");
     step.dependOn(&runTests.step);
+    step.dependOn(&run_unit_tests.step);
 }
 
 fn buildCompiler(b: *std.Build) void {
@@ -138,6 +160,14 @@ fn addTargets(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
                         .name = "tcc",
                         .module = tccHeaders(b, target, optimize),
                     },
+                    .{
+                        .name = "qbe",
+                        .module = qbeHeaders(b, target, optimize),
+                    },
+                    .{
+                        .name = "minias",
+                        .module = miniasHeaders(b, config.native, .debug),
+                    }
                 }
             }),
         });
@@ -145,6 +175,10 @@ fn addTargets(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
         exe.root_module.addEmbedPath(b.path(resourcePath));
         exe.root_module.addOptions("config", opts);
 
+        exe.root_module.addLibraryPath(b.path("src/res/"));
+        exe.root_module.addSystemIncludePath(b.path("src/res/"));
+
+        // TCC
         const libPath = config.library_path orelse
             if (target.result.os.tag == .linux) "/usr/local/lib"
             else "C:/Program Files";
@@ -171,6 +205,12 @@ fn addTargets(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
             _ = vendorCopy.addCopyFileToSource(.{ .cwd_relative = srcPath }, destPath.src_path.sub_path);
         }
         exe.step.dependOn(&vendorCopy.step);
+
+        // QBE
+        exe.root_module.linkSystemLibrary(print(b.allocator, "qbe-{s}", .{@tagName(target.result.os.tag)}) catch unreachable, .{ .preferred_link_mode = .static });
+
+        // Minias
+        exe.root_module.linkSystemLibrary(print(b.allocator, "minias-{s}", .{@tagName(target.result.os.tag)}) catch unreachable, .{ .preferred_link_mode = .static });
 
         const install = b.addInstallArtifact(exe, .{
             .dest_dir = .{ .override = .{ .custom = "" } }
@@ -208,6 +248,14 @@ fn addDebugTarget(b: *std.Build) void {
                 .{
                     .name = "tcc",
                     .module = tccHeaders(b, config.native, .debug),
+                },
+                .{
+                    .name = "qbe",
+                    .module = qbeHeaders(b, config.native, .debug),
+                },
+                .{
+                    .name = "minias",
+                    .module = miniasHeaders(b, config.native, .debug),
                 }
             }
         }),
@@ -216,6 +264,10 @@ fn addDebugTarget(b: *std.Build) void {
     exe.root_module.addEmbedPath(b.path(resourcePath));
     exe.root_module.addOptions("config", opts);
 
+    exe.root_module.addLibraryPath(b.path("src/res/"));
+    exe.root_module.addSystemIncludePath(b.path("src/res/"));
+
+    // TCC
     const libPath = config.library_path orelse
         if (config.native.result.os.tag == .linux) "/usr/local/lib"
         else "C:/Program Files";
@@ -243,11 +295,41 @@ fn addDebugTarget(b: *std.Build) void {
     }
     exe.step.dependOn(&vendorCopy.step);
 
+    // QBE
+    exe.root_module.linkSystemLibrary(std.fmt.allocPrint(b.allocator, "qbe-{s}", .{@tagName(config.native.result.os.tag)}) catch unreachable, .{ .preferred_link_mode = .static });
+
+    // Minias
+    exe.root_module.linkSystemLibrary(std.fmt.allocPrint(b.allocator, "minias-{s}", .{@tagName(config.native.result.os.tag)}) catch unreachable, .{ .preferred_link_mode = .static });
+
     const install = b.addInstallArtifact(exe, .{});
 
     const step = b.step(targetName, "Build for debug on native platform");
     step.dependOn(&install.step);
     step.dependOn(b.getInstallStep());
+}
+
+fn miniasHeaders(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Module {
+    const CTranslator = @import("translate_c").Translator;
+    const translate_c = b.dependency("translate_c", .{});
+
+    const ctranslator = CTranslator.init(translate_c, .{
+        .c_source_file = b.path("src/res/minias.h"),
+        .target = target,
+        .optimize = optimize,
+    });
+    return ctranslator.mod;
+}
+
+fn qbeHeaders(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Module {
+    const CTranslator = @import("translate_c").Translator;
+    const translate_c = b.dependency("translate_c", .{});
+
+    const ctranslator = CTranslator.init(translate_c, .{
+        .c_source_file = b.path("src/res/qbe.h"),
+        .target = target,
+        .optimize = optimize,
+    });
+    return ctranslator.mod;
 }
 
 fn tccHeaders(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Module {

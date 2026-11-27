@@ -7,181 +7,181 @@ pub let MemoryStream = struct {
     buffer: []mut u8,
     windex: mut u32,
     rindex: mut u32,
-};
 
-pub let init = fn (buffer: []mut u8) -> MemoryStream {
-    return (buffer, 0, 0);
-};
+    pub let init = fn (buffer: []mut u8) -> mut MemoryStream {
+        return (buffer, 0, 0);
+    };
 
-pub let ostream = fn (self: *mut MemoryStream) -> Stream::Output {
-    return (cast(self), write, writeline, writebuffer, oseek, close, flush);
-};
+    pub let ostream = fn (self: *mut MemoryStream) -> Stream::Output {
+        return (cast(self), write, writeline, writebuffer, oseek, close, flush);
+    };
 
-pub let istream = fn (self: *mut MemoryStream) -> Stream::Input {
-    return (cast(self), read, readline, readbuffer, exhaust, iseek, tell, close);
-};
+    pub let istream = fn (self: *mut MemoryStream) -> Stream::Input {
+        return (cast(self), read, readline, readbuffer, exhaust, iseek, tell, close);
+    };
 
-pub let write = fn (ctx: *mut void, ch: u8) -> Stream::Result {
-    let self: *mut MemoryStream = cast(ctx);
+    pub let write = fn (ctx: *mut void, ch: u8) -> Stream::Result {
+        let self: *mut MemoryStream = cast(ctx);
 
-    if self.windex >= self.buffer.len {
-        return @Err;
-    }
-
-    self.buffer[self.windex] = ch;
-    self.windex = self.windex + 1;
-
-    return @Ok;
-};
-
-pub let writeline = fn (ctx: *mut void, buffer: []u8) -> Stream::Result {
-    _ = writebuffer(ctx, buffer);
-    return write(ctx, '\n');
-};
-
-pub let writebuffer = fn (ctx: *mut void, buffer: []u8) -> Stream::Result {
-    let self: *mut MemoryStream = cast(ctx);
-
-    for buffer, |ch| {
         if self.windex >= self.buffer.len {
             return @Err;
         }
 
         self.buffer[self.windex] = ch;
         self.windex = self.windex + 1;
-    }
 
-    return @Ok;
-};
+        return @Ok;
+    };
 
-pub let oseek = fn (ctx: *mut void, off: u32, base: Stream::Base) -> Stream::Result {
-    let self: *mut MemoryStream = cast(ctx);
+    pub let writeline = fn (ctx: *mut void, buffer: []u8) -> Stream::Result {
+        _ = writebuffer(ctx, buffer);
+        return write(ctx, '\n');
+    };
 
-    switch base {
-        @Start -> {
-            if off >= self.buffer.len {
-                return @Err;
-            }
-            
-            self.windex = off;
-        }
-        @Current -> {
-            if off + self.windex >= self.buffer.len {
+    pub let writebuffer = fn (ctx: *mut void, buffer: []u8) -> Stream::Result {
+        let self: *mut MemoryStream = cast(ctx);
+
+        for buffer, |ch| {
+            if self.windex >= self.buffer.len {
                 return @Err;
             }
 
-            self.windex = self.windex + off;
+            self.buffer[self.windex] = ch;
+            self.windex = self.windex + 1;
         }
-        @End -> {
-            if off >= self.buffer.len {
-                return @Err;
+
+        return @Ok;
+    };
+
+    pub let oseek = fn (ctx: *mut void, off: u32, base: Stream::Base) -> Stream::Result {
+        let self: *mut MemoryStream = cast(ctx);
+
+        switch base {
+            @Start -> {
+                if off >= self.buffer.len {
+                    return @Err;
+                }
+                
+                self.windex = off;
             }
+            @Current -> {
+                if off + self.windex >= self.buffer.len {
+                    return @Err;
+                }
 
-            self.windex = self.buffer.len - 1 - off;
+                self.windex = self.windex + off;
+            }
+            @End -> {
+                if off >= self.buffer.len {
+                    return @Err;
+                }
+
+                self.windex = self.buffer.len - 1 - off;
+            }
         }
-    }
 
-    return @Ok;
-};
+        return @Ok;
+    };
 
-pub let close = fn (ctx: *mut void) -> Stream::Result { return @Ok; };
-pub let flush = fn (ctx: *mut void) -> Stream::Result { return @Ok; };
+    pub let close = fn (ctx: *mut void) -> Stream::Result { return @Ok; };
+    pub let flush = fn (ctx: *mut void) -> Stream::Result { return @Ok; };
 
-pub let read = fn (ctx: *mut void) -> Stream::Input::ReadResult {
-    let self: *mut MemoryStream = cast(ctx);
+    pub let read = fn (ctx: *mut void) -> Stream::Input::ReadResult {
+        let self: *mut MemoryStream = cast(ctx);
 
-    if self.rindex >= self.buffer.len {
-        return (@EOS, ());
-    }
-
-    let ch = self.buffer[self.rindex];
-    self.rindex = self.rindex + 1;
-    return (@Ok, ch);
-};
-
-pub let readline = fn (ctx: *mut void, gpa: Allocator::Allocator) -> Stream::Input::ReadLineResult {
-    let self: *mut MemoryStream = cast(ctx);
-
-    let start = self.rindex;
-    let ch = self.buffer[self.rindex];
-    while ch != '\n' {
         if self.rindex >= self.buffer.len {
             return (@EOS, ());
         }
+
+        let ch = self.buffer[self.rindex];
         self.rindex = self.rindex + 1;
-    }
-    self.rindex = self.rindex + 1;
+        return (@Ok, ch);
+    };
 
-    switch Allocator::Allocator::alloc(u8)(gpa, self.rindex - 1 - start) {
-        @Ok -> |mem| {
-            Memory::copy(u8)(mem, self.buffer[start..self.rindex - 1]);
-            return (@Ok, mem);
+    pub let readline = fn (ctx: *mut void, gpa: Allocator::Allocator) -> Stream::Input::ReadLineResult {
+        let self: *mut MemoryStream = cast(ctx);
+
+        let start = self.rindex;
+        let ch = self.buffer[self.rindex];
+        while ch != '\n' {
+            if self.rindex >= self.buffer.len {
+                return (@EOS, ());
+            }
+            self.rindex = self.rindex + 1;
         }
-        @Err -> return (@Err, ());
-    }
+        self.rindex = self.rindex + 1;
 
-    return unreachable();
-};
+        switch Allocator::Allocator::alloc(u8)(gpa, self.rindex - 1 - start) {
+            @Ok -> |mem| {
+                Memory::copy(u8)(mem, self.buffer[start..self.rindex - 1]);
+                return (@Ok, mem);
+            }
+            @Err -> return (@Err, ());
+        }
 
-pub let readbuffer = fn (ctx: *mut void, buffer: []mut u8) -> Stream::Input::ReadLineResult {
-    let self: *mut MemoryStream = cast(ctx);
+        return unreachable();
+    };
 
-    for 0..buffer.len, |i| {
-        switch read(ctx) {
-            @Ok -> |c| buffer[i] = c;
+    pub let readbuffer = fn (ctx: *mut void, buffer: []mut u8) -> Stream::Input::ReadLineResult {
+        let self: *mut MemoryStream = cast(ctx);
+
+        for 0..buffer.len, |i| {
+            switch read(ctx) {
+                @Ok -> |c| buffer[i] = c;
+                @Err -> return @Err;
+                @EOS -> return @EOS;
+            }
+        }
+
+        return (@Ok, buffer);
+    };
+
+    pub let exhaust = fn (ctx: *mut void, gpa: Allocator::Allocator) -> Stream::Input::ReadLineResult {
+        let self: *mut MemoryStream = cast(ctx);
+
+        switch Allocator::Allocator::alloc(u8)(gpa, self.buffer.len) {
+            @Ok -> |mem| {
+                Memory::copy(u8)(mem, self.buffer);
+                return (@Ok, mem);
+            }
             @Err -> return @Err;
-            @EOS -> return @EOS;
         }
-    }
 
-    return (@Ok, buffer);
-};
+        return unreachable();
+    };
 
-pub let exhaust = fn (ctx: *mut void, gpa: Allocator::Allocator) -> Stream::Input::ReadLineResult {
-    let self: *mut MemoryStream = cast(ctx);
+    pub let iseek = fn (ctx: *mut void, off: u32, base: Stream::Base) -> Stream::Result {
+        let self: *mut MemoryStream = cast(ctx);
 
-    switch Allocator::Allocator::alloc(u8)(gpa, self.buffer.len) {
-        @Ok -> |mem| {
-            Memory::copy(u8)(mem, self.buffer);
-            return (@Ok, mem);
-        }
-        @Err -> return @Err;
-    }
-
-    return unreachable();
-};
-
-pub let iseek = fn (ctx: *mut void, off: u32, base: Stream::Base) -> Stream::Result {
-    let self: *mut MemoryStream = cast(ctx);
-
-    switch base {
-        @Start -> {
-            if off >= self.buffer.len {
-                return @Err;
+        switch base {
+            @Start -> {
+                if off >= self.buffer.len {
+                    return @Err;
+                }
+                
+                self.rindex = off;
             }
-            
-            self.rindex = off;
-        }
-        @Current -> {
-            if off + self.windex >= self.buffer.len {
-                return @Err;
+            @Current -> {
+                if off + self.windex >= self.buffer.len {
+                    return @Err;
+                }
+
+                self.rindex = self.rindex + off;
             }
+            @End -> {
+                if off >= self.buffer.len {
+                    return @Err;
+                }
 
-            self.rindex = self.rindex + off;
-        }
-        @End -> {
-            if off >= self.buffer.len {
-                return @Err;
+                self.rindex = self.buffer.len - 1 - off;
             }
-
-            self.rindex = self.buffer.len - 1 - off;
         }
-    }
 
-    return @Ok;
-};
+        return @Ok;
+    };
 
-pub let tell = fn (ctx: *mut void) -> i32 {
-    let self: *mut MemoryStream = cast(ctx);
-    return unsafeCast(self.rindex);
+    pub let tell = fn (ctx: *mut void) -> i32 {
+        let self: *mut MemoryStream = cast(ctx);
+        return unsafeCast(self.rindex);
+    };
 };

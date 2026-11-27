@@ -11,7 +11,7 @@ pub const BuildInfo = struct {
     isDebug: bool,
     optimization: Optimize,
     backend: Backend,
-    platform: Platform,
+    comptime platform: Platform = if (@import("builtin").target.os.tag == .windows) .Windows else .Unix,
 };
 
 pub const Optimize = enum(u3) {

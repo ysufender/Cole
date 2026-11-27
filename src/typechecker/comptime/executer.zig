@@ -213,6 +213,7 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
 
     self.cache.put(self.arena.allocator(), key, .{ .InProgress = {} })
         catch return Error.AllocatorFailure;
+    errdefer self.cache.putAssumeCapacity(key, .{ .NotEvaluated = {} });
 
     const sign = self.typechecker.typeTable.get(func.signature).Function;
 
@@ -229,6 +230,10 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
     const psrc = self.typechecker.currentFile;
     defer self.typechecker.currentFile = psrc;
     self.typechecker.currentFile = func.source;
+
+    const prevt = self.typechecker.lastToken;
+    self.typechecker.lastToken = 1;
+    defer self.typechecker.lastToken = prevt;
 
     const ast = self.typechecker.context.getAST(func.source);
     const tokens = self.typechecker.context.getTokens(ast.tokens);
@@ -632,7 +637,7 @@ pub fn executeCall(self: *Executer, func: JIR.Function, args: []const Comptime.V
                     break;
                 }
             },
-            .InlineC, .Import => {
+            .InlineCode, .Import => {
                 self.report("'{s}' statements are not allowed in comptime scopes.", .{@tagName(statement.type)});
                 return Error.ComptimeNotPossible;
             },

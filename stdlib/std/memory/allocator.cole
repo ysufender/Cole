@@ -54,7 +54,6 @@ pub let Allocator = struct {
             }
 
             unreachable();
-            return (@Err, @Undefined);
         };
     };
 

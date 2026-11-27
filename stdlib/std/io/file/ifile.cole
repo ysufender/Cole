@@ -1,8 +1,8 @@
-code {
+code if (buildInfo().backend == @C) "
 #header_start
     #include <stdio.h>
 #header_end
-}
+" else "";
 
 import std::memory::allocator as Allocator;
 import std::io::stream as Stream;
@@ -104,7 +104,6 @@ pub let readline = fn (handle: *mut void, allocator: Allocator::Allocator) -> St
     }
 
     unreachable();
-    return undefined;
 };
 
 pub let readbuffer = fn (handle: *mut void, buffer: []mut u8) -> Stream::Input::ReadLineResult {
@@ -162,7 +161,7 @@ pub let close = fn (handle: *mut void) -> Stream::Result {
         else @Err;
 };
 
-let FILE = #(@extern) struct { };
+let FILE = #(@extern, @align, 1, @opaque, 1) struct { };
 
 let fclose = #(@extern) fn (stream: mut *mut FILE) -> mut c_int { };
 let fopen  = #(@extern) fn (path: mut [@c]c_char, mode: mut [@c]c_char) -> mut *mut FILE { };

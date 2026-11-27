@@ -154,5 +154,8 @@ pub const CompilerError = error {
     TooMuchIndirection,
     SizeOfOpaqueType,
     FieldAccessOnOpaqueType,
+    AlignOfOpaqueType,
+    MissingAlignment,
+    InvalidAlignment,
     Terminate,
 };

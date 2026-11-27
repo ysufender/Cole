@@ -8,6 +8,14 @@ fast without sacrificing too much.
 This document briefly describes the overall project structure for
 potential contributors to make sense of the codebase.
 
+# General Notes on Contribution
+
+The Cole Compiler aims to be a learning project, and a fun one at that. Due to this
+goal, AI generated contributions are strongly discouoraged. AI generated tests **MAY**
+be accepted depending on the code quality, and other factors. Please respect this decision.
+
+The overall code quality standards are simple: follow the [Zen of Zig](https://ziglang.org/documentation/master/#Zen).
+
 # The Basic Project Structure
 
 The Cole compiler consists of 4 stages:
@@ -16,7 +24,8 @@ The Cole compiler consists of 4 stages:
 - Lexical Analyzer
 - Parser
 - Typechecker
-- Code Generator
+- Code Generator (Depending on the backend)
+- Backend Call
 
 with each of the stages having no or a couple substeps.
 Their structures look like:
@@ -34,7 +43,20 @@ Their structures look like:
     - Compile Time Executer
     - Compile Time Folder
     - Typechecker
+    - Lowering (JIR)
 - Codegen
+    - C
+        - Codegen
+    - QBE
+        - Loweing (JAIR)
+        - Codegen
+- Backend Call
+    - C
+        - TCC Call
+    - QBE
+        - Assembly Generation
+        - Assembler
+        - Linking
 
 Typechecker is the biggest stage of the compiler, containing almost %60
 of the whole codebase within. Most possibly, according to statistics, it
@@ -50,8 +72,9 @@ The compilation pipeline is ordered as follows:
 - Parser.Prepass
 - Typechecker.Resolver
 - Typechecker.Typechecker
-- Codegen.Codegen
-- Codegen.Compile
+- Typechecker.Lowerer
+- Codegen.Codegen (depending on the backend)
+- Codegen.Compile (depending on the backend)
 
 Note that the other steps of the Typechecker are called from within the
 Typechecker.Typechecker and are not separate steps.
@@ -64,11 +87,11 @@ And the entry points of each stage is as follows:
 - Parser.Prepass         : prepass   @ src/parser/prepass.zig
 - Typechecker.Resolver   : resolve   @ src/typechecker/resolver.zig
 - Typechecker.Typechecker: typechcek @ src/typechecker/typechecker.zig
-- Codegen.Codegen        : codegen   @ src/codegen/c/jir.zig
-- Codegen.Compile        : compile   @ src/codegen/c/backend.zig
+- Typechecker.Lowerer    : doesn't have a concrete entry, called from the typechecker on the fly
+- Codegen.Codegen        : depends on the backend, look under `codegen/`
+- Codegen.Compile        : depends on the backend, look under `codegen/`
 
-Note that the current backend is lowered C, using an embedded TCC.
-Codegen step may change and this document may be out-of-date.
+Currently, there are two backends: QBE and TCC.
 
 # Stage/Step Definitions
 
@@ -122,15 +145,33 @@ definitions it discovers and at the end returns a lowered and typed IR.
 If allowed, folds any compile time executable expression into literals
 by calling to Typechecker.Comptime.Folder and Typechecker.Comptime.Executer.
 
+## Typechecker.Lowerer
+
+This step is intertwined with the typechecking process. It lowers the typechecked
+AST into semi-typed JIR for C code generation and, on QBE, JAIR generation.
+
+It may inline for loops, fold constants, and eliminate dead branches.
+
 ## Codegen.Codegen
 
-Emits a lowered subset of C code from the resulting IR. Technically, any
-errors from now on is the fault of me, the author, and not the programmer.
+Depending on the backend, this step changes behaviour.
 
-The C code consists of two files are ´forward_decl.h´ and ´source.c´ under
-´./build/c/´.
+On the C backend, all codegen does is to generate half-readable, lowered C source
+from the generated JIR.
+
+On the QBE, codegen converts JIR into fully-typed JAIR, and then generates QBE IR source
+from it.
 
 ## Codegen.Compile
 
-Compiles the resulting C code into executable binaries by invoking the embedded
-TCC.
+Depending on the backend, this step changes behaviour.
+
+On the C backend, compilation calls into TCC with the generated source files and compiles the
+program into the final executable. This backend requires the user to have standard C headers
+on their `PATH`.
+
+On the QBE backend, compilation does more jobs. Firstly, it calls into the bundled QBE to generate
+x86_64 assembly source from the QBE IR. Afterwards, it calls into Minias to assemble the generated
+x86_64 assembly source into an object file. Lastly, TCC is reused as the linker to create the final
+executable. This backend does not require the user to have the C headers, but it does require the
+user to have the C standard library to be on their `PATH`.

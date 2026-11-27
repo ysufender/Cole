@@ -61,11 +61,11 @@ pub let write = fn (fmt: []u8, T: type) -> *fn (T, OStream) -> void {
         if escaping {
             escaping = false;
         }
+        else if fmt[i] == '\\' {
+            escaping = true;
+        }
         else if fmt[i] == '%' {
-            if i + 1 < fmt.len and fmt[i + 1] == '%' {
-                escaping = true;
-            }
-            else if index >= strings.len {
+            if index >= strings.len {
                 compileError("Excess format specifiers.");
             }
             else {

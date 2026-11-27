@@ -3,7 +3,7 @@
  * For directories, the modification notification includes child files and directories (non-recursive).
  */
 
-code {
+code if (buildInfo().backend == @C) "
 #header_start
 #   include <stdio.h>
 #   include <time.h>
@@ -13,7 +13,7 @@ code {
 #       include <windows.h>
 #   endif
 #header_end
-}
+" else "";
 
 import std::io::stream as Stream;
 import std::string as String;
@@ -30,11 +30,10 @@ pub let Signal = struct {
 
 pub let FileInfo = struct {
     modify: c_long,
-
-    pub let print = fn (self: *FileInfo, stream: Stream::Output, allocator: Allocator::Allocator) -> void {
-        _ = Stream::Output::writebuffer(stream, "(modify_time = ");
-        _ = Stream::Output::writebuffer(stream, String::intToStr(self.modify, allocator));
-        _ = Stream::Output::writebuffer(stream, " )");
+pub let print = fn (self: *FileInfo, stream: Stream::Output, allocator: Allocator::Allocator) -> void {
+        _ = stream.writebuffer("(modify_time = ");
+        _ = stream.writebuffer(String::intToStr(self.modify, allocator));
+        _ = stream.writebuffer(" )");
     };
 };
 
@@ -54,22 +53,38 @@ pub let poll = fn (self: *mut Watcher) -> bool {
 };
 
 pub let print = fn (self: *Watcher, stream: Stream::Output, allocator: Allocator::Allocator) -> void {
-    _ = Stream::Output::writebuffer(stream, "( file = ");
-    _ = Stream::Output::writebuffer(stream, self.file);
-    _ = Stream::Output::writebuffer(stream, ", info = ");
-    FileInfo::print(self.fileInfo.&, stream, allocator);
-    _ = Stream::Output::writebuffer(stream, " )");
+    _ = stream.writeBuffer("( file = ");
+    _ = stream.writebuffer(self.file);
+    _ = stream.writebuffer(", info = ");
+    self.fileInfo.&.print(stream, allocator);
+    _ = stream.writebuffer(" )");
 };
 
 /*
  * POSIX
  */
-let timespec = #(@extern, @struct, @opaque) struct {
-    tv_sec: c_long,
+let timespec = #(@extern, @struct, @opaque, 16, @align, alignOf(c_long)) struct {
+    tv_sec:  c_long,
+    tv_nsec: c_long,
 };
 
-let stat = #(@extern, @struct, @opaque) struct {
-    st_mtim: timespec,  /* Time of last modification */
+let stat = #(@extern, @struct, @opaque, 144, @align, alignOf(timespec)) struct {
+    st_dev    : c_ulong,
+    st_ino    : c_ulong,
+    st_nlink  : c_ulong,
+    st_mode   : c_uint,
+    st_uid    : c_uint,
+    st_gid    : c_uint,
+    st_rdev   : c_ulong,
+    st_size   : c_long,
+    st_blksize: c_long,
+    st_blocks : c_long,
+    st_atim   : timespec,
+    st_mtim   : timespec,  /* Time of last modification */
+    st_ctim   : timespec,
+    _unused0  : c_long,
+    _unused1  : c_long,
+    _unused2  : c_long,
 
     pub let toFileInfo = fn (self: *stat) -> FileInfo {
         return (self.st_mtim.tv_sec);
@@ -81,13 +96,13 @@ let fileno = #(@extern) fn (file: mut *mut FILE) -> mut c_int { };
 let fopen = #(@extern) fn (pathname: mut [@c]c_char,  mode: mut [@c]c_char) -> mut *mut FILE { };
 let fclose = #(@extern) fn (file: mut *mut FILE) -> mut c_int { };
 
-let FILE = #(@extern) struct { };
+let FILE = #(@extern, @opaque, 1, @align, 1) struct { };
 
 /*
  * WIN32
  */
 
-let HANDLE = #(@extern) struct { };
+let HANDLE = #(@extern, @align, 1, @opaque, 1) struct { };
 let DWORD  = c_ulong;
 let BOOL   = c_int;
 

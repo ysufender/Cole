@@ -1,3 +1,19 @@
+## $open -- Safety Checks on Debug Builds -- #62 -- @ysufender --
+
+Lowering paths lack safety checks on debug builds.
+
+### Reproduction --
+
+...
+
+### Expected --
+
+...
+
+### Received --
+
+...
+
 ## $open -- Helper Functions for SOA Ease of Use -- #57 -- @ysufender --
 
 The project uses SOA intensively to reduce memory footprint and increase cache hits. For this
@@ -22,6 +38,11 @@ Helper functions to do it inline would be nice.
 The compiler is currently tested using the Testy framework, which is a custom stdout comparator
 written in Lua. Some of the parts of the compiler (mainly the Lexer) can still be unit tested,
 otherwise the Testy tests must be improved.
+
+<ul>
+    <li>TC_10 Fixed</li>
+    <li>TC_12 Fixed</li>
+</ul>
 
 ### Reproduction --
 
@@ -104,3 +125,9 @@ Garbled out parts in the generated C files.
 ## $closed -- Generic Definitions Are Last-Call-Win -- #53 -- @ysufender --
 ## $closed -- Single Field Union Construction Bug -- #58 -- @ysufender --
 ## $closed -- External C Array Conversion -- #59 -- @ysufender --
+## $closed -- Type Deduplication Problems -- #60 -- @ysufender --
+## $closed -- QBE Backend -- #61 -- @ysufender --
+## $closed -- Proper Inline Code Syntax -- #63 -- @ysufender --
+## $closed -- Comptime Bugs Again -- #64 -- @ysufender --
+## $closed -- Undefined Aggregate Construction Bug -- #65 -- @ysufender --
+## $closed -- QBE Dereferencing Issue -- #66 -- @ysufender --

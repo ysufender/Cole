@@ -1,0 +1,10 @@
+import std::io::console as Console;
+import std::string as String;
+import std::c as C;
+
+let main = fn (args: [][]u8) -> i32 {
+    let s = "a\tb\\c\"d\x41";
+    Console::log(String::intToStr(s.len, C::Allocator));
+    Console::log(s);
+    return 0;
+};

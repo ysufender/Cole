@@ -4,6 +4,7 @@ const std = @import("std");
 const common = @import("../../core/common.zig");
 const defines = @import("../../core/defines.zig");
 const collections = @import("../../util/collections.zig");
+const escape = @import("../../util/escape.zig");
 const types = @import("../type.zig");
 const backend = @import("../../codegen/backend.zig");
 
@@ -88,7 +89,7 @@ pub fn init(typechecker: *Typechecker, gpa: Allocator) Error!Folder {
 
     var memory = Memory.initCapacity(allocator, 512) catch return Error.AllocatorFailure;
     memory.appendAssumeCapacity(.{ .Type = Builtin.Type("any") });
-    memory.appendAssumeCapacity(.{ .Type = Builtin.Type("$$incomplete") });
+    memory.appendAssumeCapacity(.{ .Type = Builtin.Type("__incomplete") });
     memory.appendAssumeCapacity(.{ .Void = { } });
 
     return .{
@@ -276,6 +277,13 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
             isComptime = true;
         }
 
+        if (self.typechecker.typeTable.get(argType).isZeroBit() and !isComptime) {
+            self.report("Zero bit-sized parameter '{s}' is not allowed.", .{
+                name
+            });
+            return Error.OperationOnZeroBitSize;
+        }
+
         const declPtr = self.typechecker.symbols.lookup.get(.{
             .name = name,
             .scope = oldScope,
@@ -303,13 +311,6 @@ fn evalFunction(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
             .scope = scope,
             .name = name
         }, newDecl) catch return Error.AllocatorFailure;
-
-        if (self.typechecker.typeTable.get(argType).isZeroBit() and !isComptime) {
-            self.report("Zero bit-sized parameter '{s}' is not allowed.", .{
-                name
-            });
-            return Error.OperationOnZeroBitSize;
-        }
     }
 
     const returnType =
@@ -393,6 +394,9 @@ pub fn determineComptimeReturnTypeDirect(
     func: JIR.Function,
     args: []const Comptime.Value.Ptr,
 ) Error!TypeID {
+    const prev = self.setFlag(.ComptimeBanned, false);
+    defer _ = self.setFlag(.ComptimeBanned, prev);
+
     try self.typechecker.executer.stack.push(.{
         .body = &.{},
         .data = .{ .block = {} },
@@ -417,6 +421,10 @@ pub fn determineComptimeReturnTypeDirect(
     self.typechecker.currentFile = func.source;
     defer self.typechecker.currentFile = prevs;
 
+    const prevt = self.typechecker.lastToken;
+    self.typechecker.lastToken = 1;
+    defer self.typechecker.lastToken = prevt;
+
     const prevsc = self.typechecker.currentScope;
     self.typechecker.currentScope = func.scope;
     defer self.typechecker.currentScope = prevsc;
@@ -437,6 +445,9 @@ pub fn determineComptimeReturnType(
     args: []const defines.ExpressionPtr,
     argTypes: []const TypeID,
 ) Error!TypeID {
+    const prev = self.setFlag(.ComptimeBanned, false);
+    defer _ = self.setFlag(.ComptimeBanned, prev);
+
     const func = self.getValue(try self.eval(functionExpr, null)).Function;
 
     try self.typechecker.executer.stack.push(.{
@@ -463,6 +474,10 @@ pub fn determineComptimeReturnType(
     const prevs = self.typechecker.currentFile;
     self.typechecker.currentFile = func.source;
     defer self.typechecker.currentFile = prevs;
+
+    const prevt = self.typechecker.lastToken;
+    self.typechecker.lastToken = 1;
+    defer self.typechecker.lastToken = prevt;
 
     const prevsc = self.typechecker.currentScope;
     self.typechecker.currentScope = func.scope;
@@ -1098,6 +1113,12 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
     defer self.typechecker.currentScope = prevScope;
     defer self.typechecker.currentScope = prevScope;
 
+    const prevInstance = self.currentInstantiation;
+    if (prevInstance == null and decl.kind != .Builtin and self.scopeTypes.contains(decl.scope)) {
+        self.currentInstantiation = decl.scope;
+    }
+    defer self.currentInstantiation = prevInstance;
+
     const sharedFunction =
         decl.kind == .Variable
         and decl.topLevel
@@ -1194,9 +1215,13 @@ pub fn evalDecl(self: *Folder, declPtr: defines.DeclPtr, maybeExpected: ?TypeID)
                         or self.typechecker.hasMetadata(func.expr, "@export"));
                 self.typechecker.currentFile = prevs;
 
+                const prevt = self.typechecker.lastToken;
+                self.typechecker.lastToken = decl.token;
+                defer self.typechecker.lastToken = prevt;
+
                 const cur = self.typechecker.builder.getInternedString(func.name);
                 if (
-                    std.mem.startsWith(u8, cur, "$$")
+                    std.mem.startsWith(u8, cur, "__")
                     and cond
                 ) {
                     const tokens = self.typechecker.context.getTokens(self.typechecker.currentFile);
@@ -1371,7 +1396,7 @@ fn evalLiteral(self: *Folder, tokenPtr: defines.TokenPtr, maybeExpected: ?TypeID
                         if (self.typechecker.isCStr(expected)) .C
                         else .Cole
                     else .Cole,
-                .str = lexeme,
+                .str = try self.unescape(lexeme),
             },
         },
 
@@ -1428,6 +1453,20 @@ fn evalLiteral(self: *Folder, tokenPtr: defines.TokenPtr, maybeExpected: ?TypeID
     return self.castValue(res, maybeExpected orelse rest, false);
 }
 
+pub fn unescape(self: *Folder, raw: []const u8) Error![]const u8 {
+    return escape.unescape(self.arena.allocator(), raw) catch |err| switch (err) {
+        error.OutOfMemory => Error.AllocatorFailure,
+        error.UnknownEscape => {
+            self.report("Unknown escape sequence in string literal.", .{});
+            return Error.InvalidToken;
+        },
+        error.InvalidHexEscape => {
+            self.report("Expected two hex digits in '\\x' escape.", .{});
+            return Error.InvalidToken;
+        },
+    };
+}
+
 fn evalPtrType(
     self: *Folder,
     comptime ptrType: @FieldType(types.Pointer, "size"),
@@ -1471,10 +1510,10 @@ fn evalFuncType(self: *Folder, exprPtr: defines.ExpressionPtr, extraPtr: defines
     for (range.start..range.end) |index| {
         const argType = self.getValue(try self.expectType(ast.extra[@intCast(index)])).Type;
 
-        if (self.typechecker.typeTable.get(argType).isZeroBit()) {
-            self.report("Zero bit sized function parameter '{s}' is not allowed.", .{
-                try self.typechecker.typeName(self.arena.allocator(), argType),
+        if (self.typechecker.typeTable.get(argType).isZeroBit() and !isComptime) {
+            self.report("Zero bit-sized parameters are not allowed.", .{
             });
+            return Error.OperationOnZeroBitSize;
         }
 
         argTypes[realIndex] = argType;
@@ -1602,6 +1641,7 @@ fn evalEnumType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Value
             .definitions = try self.handleScopeDecls(oldScope, scope, ast, tokens, defRange),
             .scope = scope,
             .expr = expr,
+            .source = self.typechecker.currentFile,
         },
     };
 
@@ -1702,6 +1742,7 @@ fn evalStructType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Val
             .scope = scope,
             .expr = expr,
             .isTuple = false,
+            .source = self.typechecker.currentFile,
         },
     };
 
@@ -1796,6 +1837,7 @@ fn evalUnionType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Valu
                 .expr = expr,
             }),
             .expr = expr,
+            .source = self.typechecker.currentFile,
         },
     };
 
@@ -1872,6 +1914,7 @@ fn evalUnionType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Valu
             .definitions = try self.handleScopeDecls(oldScope, scope, ast, tokens, defRange),
             .scope = scope,
             .expr = expr,
+            .source = self.typechecker.currentFile,
         }
     };
 
@@ -1901,7 +1944,7 @@ fn evalUnionType(self: *Folder, expr: defines.ExpressionPtr) Error!Comptime.Valu
         (@as(u128, self.typechecker.currentFile) << 64) | (@as(u128, expr) << 32) | res,
         .{ .Ok = res },
     ) catch return Error.AllocatorFailure;
-    
+
     return res;
 }
 
@@ -2170,12 +2213,12 @@ pub fn evalAlignOf(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Va
 
     if (self.attemptEval(ast.extra[args.at(0)], t)) |res| blk: {
         return self.appendValue(.{ .Int = switch (self.getValue(res)) {
-            .Type => |typeID| self.typechecker.alignOf(typeID),
+            .Type => |typeID| try self.typechecker.alignOf(typeID),
             else => break :blk, 
         }});
     }
 
-    return self.appendValue(.{ .Int = self.typechecker.alignOf(t) });
+    return self.appendValue(.{ .Int = try self.typechecker.alignOf(t) });
 }
 
 pub fn evalBitSizeOf(self: *Folder, extraPtr: defines.OpaquePtr) Error!Comptime.Value.Ptr {
@@ -2266,6 +2309,7 @@ pub fn evalNewTuple(self: *Folder, range: defines.Range) Error!Comptime.Value.Pt
             .mutable = false,
             .scope = 0,
             .isTuple = true,
+            .source = self.typechecker.currentFile,
         },
     };
 
@@ -2980,6 +3024,9 @@ pub fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Type
     const prevs = self.typechecker.currentFile;
     self.typechecker.currentFile = function.source;
 
+    const prevt = self.typechecker.lastToken;
+    self.typechecker.lastToken = 1;
+
     if (self.typechecker.hasMetadata(function.expr, "@extern")) {
         self.typechecker.currentFile = prevs;
         self.report("Attempt to comptime execute external function '{s}'", .{
@@ -2989,6 +3036,7 @@ pub fn evalCall(self: *Folder, extraPtr: defines.OpaquePtr, maybeExpected: ?Type
     }
 
     self.typechecker.currentFile = prevs;
+    self.typechecker.lastToken = prevt;
 
     const signature = self.typechecker.typeTable.get(function.signature).Function;
 
@@ -3230,12 +3278,14 @@ fn expectDefined(self: *Folder, exprPtr: defines.ExpressionPtr, maybeExpected: ?
 
 pub fn constructUndefined(self: *Folder, valueType: TypeID) Error!Comptime.Value.Ptr {
     return res: switch (self.typechecker.typeTable.get(valueType)) {
-        .Enum, .Void, .Function, .Type, .Any, .Noreturn, .EnumLiteral => {
+        .Void, .Type, .Any, .Noreturn, .EnumLiteral => {
             self.report("Given type '{s}' can't be undefined.", .{
                 try self.typechecker.typeName(self.arena.allocator(), valueType)
             });
             return Error.IllegalSyntax;
         },
+        .Function => self.appendValue(.{ .Undefined = valueType }),
+        .Enum => self.appendValue(.{ .Enum = .{ .Type = valueType, .Value = self.typechecker.typeTable.get(valueType).Enum.fields[0].value } }),
         .Bool => self.appendValue(.{ .Bool = false }),
         .CUInt, .CUChar, .CChar, .CLong, .CInt, .CShort, .CSize,
         .CULong, .CUShort, .Integer, .ComptimeInt  => self.appendValue(.{ .Int = 0 }),
@@ -3269,7 +3319,51 @@ pub fn constructUndefined(self: *Folder, valueType: TypeID) Error!Comptime.Value
                 },
             });
         },
-        else => self.appendValue(.{ .Undefined = valueType }),
+        .Struct => |str| {
+            const start: u32 = @intCast(self.memory.items.len);
+            _ = self.memory.addManyAsSlice(self.arena.allocator(), str.fields.len)
+                catch return Error.AllocatorFailure;
+
+            for (start..start + str.fields.len) |ptr| {
+                self.memory.items[ptr] = self.getValue(try self.constructUndefined(str.fields[ptr - start].valueType));
+            }
+
+            break :res self.appendValue(.{
+                .Struct = .{
+                    .Type = valueType,
+                    .Fields = .{
+                        .start = start,
+                        .end = @intCast(start + str.fields.len),
+                    },
+                },
+            });
+        },
+
+        .Union => |uni| {
+            const payloadIndex: usize = @intFromBool(uni.isTagged);
+
+            if (uni.fields.len <= payloadIndex) {
+                self.report("Cannot construct undefined value of empty union '{s}'.", .{
+                    self.typechecker.builder.getInternedString(uni.name),
+                });
+                return Error.IllegalSyntax;
+            }
+
+            const payloadType = uni.fields[payloadIndex].valueType;
+
+            const payload: Comptime.Value.Ptr = switch (self.typechecker.typeTable.get(payloadType)) {
+                .Void => @intFromEnum(Comptime.Value.Implicit.Void),
+                else => try self.constructUndefined(payloadType),
+            };
+
+            break :res self.appendValue(.{
+                .Union = .{
+                    .Type = valueType,
+                    .Tag = 0,
+                    .Value = payload,
+                },
+            });
+        },
     };
 }
 
@@ -3281,7 +3375,7 @@ pub fn generateRandomName(self: *Folder, comptime mode: @TypeOf(.EnumLiteral)) E
 pub fn generateRandomNameString(self: *Folder, comptime mode: @TypeOf(.EnumLiteral)) Error![]u8 {
     const randint = self.rng.next();
 
-    return std.fmt.allocPrint(self.arena.allocator(), "$$anon_"++@tagName(mode)++"_{d}", .{
+    return std.fmt.allocPrint(self.arena.allocator(), "__anon_"++@tagName(mode)++"_{d}", .{
         randint
     }) catch Error.AllocatorFailure;
 }
@@ -3331,7 +3425,7 @@ fn handleScopeDecls(
         defs.appendAssumeCapacity(.{
             .public = sig.public,
             .name = newName,
-            .valueType = comptime Builtin.Type("$$incomplete"),
+            .valueType = comptime Builtin.Type("__incomplete"),
             .isComptime = false,
         });
     }
@@ -3613,7 +3707,7 @@ pub fn isIncomplete(self: *const Folder, typeID: TypeID) bool {
 }
 
 fn isIncompleteImpl(self: *const Folder, typeID: TypeID, visited: *VisitSet) bool {
-    if (typeID == Builtin.Type("$$incomplete")) return true;
+    if (typeID == Builtin.Type("__incomplete")) return true;
     if (visited.visit(typeID)) return false;
 
     return switch (self.typechecker.typeTable.get(typeID)) {
@@ -3638,7 +3732,7 @@ pub fn resolveIncomplete(self: *Folder, typeID: TypeID, resolvedTo: TypeID) Erro
 }
 
 fn resolveIncompleteImpl(self: *Folder, typeID: TypeID, resolvedTo: TypeID, visited: *VisitSet) Error!TypeID {
-    if (typeID == Builtin.Type("$$incomplete")) return resolvedTo;
+    if (typeID == Builtin.Type("__incomplete")) return resolvedTo;
     if (visited.visit(typeID)) return typeID;
 
     const info = self.typechecker.typeTable.get(typeID);
@@ -3923,10 +4017,10 @@ pub const builtinTypes = [_]struct {
     .{ .name = "mut u32", .info = .{ .Integer = .{ .mutable = true, .size = 32, .signed = false, } } },
     // mut any
     .{ .name = "mut any", .info = .{ .Any = true } },
-    // $$incomplete
-    .{ .name = "$$incomplete", .info = .{ .Struct = .{ .mutable = false, .name = Resolver.BuiltinIndex("any") + 2, .fields = &.{}, .definitions = &.{}, .scope = 0, .isTuple = false, .expr = 0, } } },
-    // $$builtin_metadata
-    .{ .name = "$$builtin_metadata", .info = .{ .Enum = .{ .mutable = false, .name = Resolver.BuiltinIndex("any") + 3, .fields = &.{ types.EnumField{ .name = "$$placeholder", .value = 0, } }, .definitions = &.{}, .scope = 0, .expr = 0, } } },
+    // __incomplete
+    .{ .name = "__incomplete", .info = .{ .Struct = .{ .mutable = false, .name = Resolver.BuiltinIndex("any") + 2, .fields = &.{}, .definitions = &.{}, .scope = 0, .isTuple = false, .expr = 0, .source = 0 } } },
+    // __builtin_metadata
+    .{ .name = "__builtin_metadata", .info = .{ .Enum = .{ .mutable = false, .name = Resolver.BuiltinIndex("any") + 3, .fields = &.{ types.EnumField{ .name = "__placeholder", .value = 0, } }, .definitions = &.{}, .scope = 0, .expr = 0, .source = 0 } } },
     // []u8
     .{ .name = "[]u8", .info = .{ .Pointer = .{ .mutable = false, .child = 2, .size = .Slice, }, } },
 };
@@ -3941,4 +4035,5 @@ pub const builtinMetadata = [_][]const u8 {
     "@opaque",
     "@inline",
     "@generic",
+    "@align",
 };

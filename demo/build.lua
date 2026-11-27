@@ -12,7 +12,7 @@ local demos = {
     },
 }
 
-local cole = "cole-fast-v0.1.8-linux-x86_64 "
+local cole = "cole-fast-v0.2.0-linux-x86_64 "
 
 local build_steps = {}
 

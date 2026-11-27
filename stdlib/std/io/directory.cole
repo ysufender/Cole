@@ -1,11 +1,12 @@
-code {
+code "
 #header_start
 #   include <dirent.h>
 #header_end
-}
+";
 
 import std::memory::allocator;
 import std::c::memory;
+import std::memory;
 import std;
 
 let Allocator = std::memory::allocator::Allocator;
@@ -33,7 +34,7 @@ pub let Dir = struct {
         finish: mut bool,
 
         let IntermediaryEntry = struct {
-            name: []c_char,
+            name: []mut c_char,
             type: c_uchar,
         };
 
@@ -49,16 +50,26 @@ pub let Dir = struct {
                 return (@None, ());
             }
 
-            let intermediate = IntermediaryEntry(entry.d_name.ptr, entry.d_type);
+            let end = switch std::memory::find(mut c_char)(entry.d_name.ptr[0..256], '\0') {
+                @Some -> |s| s,
+                else -> 256,
+            };
+
+            let intermediate = IntermediaryEntry(entry.d_name.ptr[0..end], entry.d_type);
 
             return (@Some, cast(intermediate.name), cast(intermediate.type));
+        };
+
+        pub let reset = fn (self: *mut Iterator) -> void {
+            rewinddir(self.handle);
+            self.finish = false;
         };
     };
 
     pub let open = fn (gpa: Allocator, path: mut []u8) -> std::Option(Dir) {
         _ = isWin;
 
-        switch gpa.allocSentinel(u8)(path.len, '\n') {
+        switch gpa.allocSentinel(u8)(path.len, '\0') {
             @Ok -> |mem| {
                 std::c::memory::copy(u8)(mem, path);
                 path = mem;
@@ -81,7 +92,7 @@ pub let Dir = struct {
         _ = closedir(self.handle);
     };
 
-    pub let query = fn (self: Dir, gpa: Allocator) -> Iterator {
+    pub let query = fn (self: Dir, gpa: Allocator) -> mut Iterator {
         return (gpa, self.handle, false);
     };
 };
@@ -89,12 +100,13 @@ pub let Dir = struct {
 /*
  * POSIX
  */
-let DIR = #(@extern, @opaque) struct { };
+let DIR = #(@extern, @opaque, 0, @align, 1) struct { };
 
-let dirent = #(@extern, @struct, @opaque) struct {
+
+let dirent = #(@extern, @struct) struct {
     /* @Beware may have other fields */
     d_type: c_uchar,
-    d_name: [256]c_char,
+    d_name: c_array(256, mut c_char),
 };
 
 let EntryType = enum {
