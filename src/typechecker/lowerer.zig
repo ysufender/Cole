@@ -768,6 +768,13 @@ fn forLoop(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.AST) 
     );
     const idxIdent = try self.typechecker.builder.identifier(idxName, 0, (comptime Comptime.Folder.Builtin.Type("mut u32")));
 
+    const elementType = switch (self.typechecker.typeTable.get(rangeType)) {
+        .Array => |arr| arr.child,
+        .Pointer => |ptr| ptr.child,
+        else => return common.debug.ShouldBeImpossible(undefined, @src()),
+    };
+    const byteOffset = try self.elementOffset(idxIdent, elementType);
+
     const loopBase = try self.typechecker.folder.generateRandomNameString(.For);
     const lloop = self.lastLoop;
     self.lastLoop = loopBase;
@@ -812,11 +819,9 @@ fn forLoop(self: *Lowerer, extraPtr: defines.OpaquePtr, ast: *const Parser.AST) 
         captureType,
         name,
         false,
-        if (ast.extra[extraPtr + 5] == 1)
-            try self.typechecker.builder.add(rangePtr, idxIdent)
-        else
-            try self.typechecker.builder.dereference(
-                try self.typechecker.builder.add(rangePtr, idxIdent),
+        if (ast.extra[extraPtr + 5] == 1) try self.typechecker.builder.add(rangePtr, byteOffset)
+        else try self.typechecker.builder.dereference(
+                try self.typechecker.builder.add(rangePtr, byteOffset),
                 rangePtrType,
             ),
         null,
@@ -1361,9 +1366,19 @@ fn slicing(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JI
         end,
         start,
     );
+
+    const elementType = switch (sliceableInfo) {
+        .Array => |arr| arr.child,
+        .Pointer => |ptr| ptr.child,
+        else => return common.debug.ShouldBeImpossible(undefined, @src()),
+    };
+
+    // @GPT
+    const byteStart = try self.elementOffset(start, elementType);
+
     const index = try self.typechecker.builder.add(
         data,
-        start,
+        byteStart,
     );
 
     const newType = try self.typechecker.registerType(.{ .Pointer =
@@ -1558,13 +1573,7 @@ fn switchExpr(self: *Lowerer, extraPtr: defines.OpaquePtr, ofType: TypeID) Error
     return try typechecker.builder.stmtExpr(resIdent, ops[0 .. 2 + slot]);
 }
 
-fn call(
-    self: *Lowerer,
-    stmt: bool,
-    exprPtr: defines.ExpressionPtr,
-    extraPtr: defines.OpaquePtr,
-    ofType: TypeID,
-) Error!JIR.Ptr {
+fn call(self: *Lowerer, stmt: bool, exprPtr: defines.ExpressionPtr, extraPtr: defines.OpaquePtr, ofType: TypeID) Error!JIR.Ptr {
     const ast = self.typechecker.context.getAST(self.typechecker.currentFile);
 
     const func = ast.extra[extraPtr];
@@ -1613,10 +1622,52 @@ fn call(
     }
 
     for (argsRange.start..argsRange.end, offset..) |ptr, i| {
-        args[i] = try self.expression(ast.extra[@intCast(ptr)], try self.typechecker.typecheckExpression(ast.extra[@intCast(ptr)], switch (fti) {
-            .Function => |function| if (i >= function.argTypes.len) null else function.argTypes[i],
+        const argExpr = ast.extra[@intCast(ptr)];
+
+        const expectedType = switch (fti) {
+            .Function => |function|
+                if (i >= function.argTypes.len) null
+                else function.argTypes[i],
             else => null,
-        }));
+        };
+
+        const argType = try self.typechecker.typecheckExpression(
+            argExpr,
+            expectedType,
+        );
+
+        const arg = try self.expression(argExpr, argType);
+
+        if (self.typechecker.context.settings.buildInfo.backend == .QBE) {
+            if (expectedType) |targetType| {
+                if (argType != targetType) {
+                    const fromScalar = switch (self.typechecker.typeTable.get(argType)) {
+                        .Bool, .Float, .Integer, .CInt, .CUInt,
+                        .CChar, .CUChar, .CDouble, .CLong, .CULong,
+                        .CShort, .CUShort, .CSize,
+                        .ComptimeInt, .ComptimeFloat => true,
+                        else => false,
+                    };
+
+                    const toScalar = switch (self.typechecker.typeTable.get(targetType)) {
+                        .Bool, .Float, .Integer, .CInt, .CUInt,
+                        .CChar, .CUChar, .CDouble, .CLong, .CULong,
+                        .CShort, .CUShort, .CSize => true,
+                        else => false,
+                    };
+
+                    if (fromScalar and toScalar) {
+                        args[i] = try self.typechecker.builder.construct(
+                            targetType,
+                            &.{arg},
+                        );
+                        continue;
+                    }
+                }
+            }
+        }
+
+        args[i] = arg;
     }
 
     return switch (self.typechecker.typeTable.get(funcType)) {
@@ -2035,14 +2086,9 @@ fn indexing(self: *Lowerer, extraPtr: defines.OpaquePtr) Error!JIR.Ptr {
             break :index rawIndex;
         }
 
-        const sizeMultiplier = try self.typechecker.builder.addConstant(.{
-            .Integer = .{ .u32 = @divFloor(try self.typechecker.sizeOf(indexedTypeChild), @bitSizeOf(u8)) },
-        });
-        const sizeMulLit = try self.typechecker.builder.literal(sizeMultiplier);
-
-        break :index try self.typechecker.builder.mul(rawIndex, sizeMulLit);
+        const byteOffset = try self.elementOffset(rawIndex, indexedTypeChild);
+        break :index byteOffset;
     };
-
 
     if (self.typechecker.typeTable.get(typeID) == .Array) {
         return self.typechecker.builder.dereference(
@@ -2278,6 +2324,34 @@ fn literal(self: *Lowerer, exprPtr: defines.ExpressionPtr, ofType: TypeID) Error
 fn report(self: *Lowerer, comptime fmt: []const u8, args: anytype) void {
     _ = self.typechecker.setFlag(.AttemptingEval, false);
     return self.typechecker.report("LOWERER: " ++ fmt, args);
+}
+
+fn elementOffset(self: *Lowerer, rawIndex: JIR.Ptr, elementType: TypeID) Error!JIR.Ptr {
+    if (self.typechecker.context.settings.buildInfo.backend != .QBE) {
+        return rawIndex;
+    }
+
+    const usizeType = comptime Comptime.Folder.Builtin.Type("usize");
+
+    const sizeBits = try self.typechecker.sizeOf(elementType);
+    const strideBytes = (sizeBits + 7) / 8;
+
+    if (strideBytes == 0) return rawIndex;
+
+    const wideIndex = try self.typechecker.builder.construct(
+        usizeType,
+        &.{rawIndex},
+    );
+
+    const strideConstant = try self.typechecker.builder.addConstant(.{
+        .Integer = .{
+            .c_size = @intCast(strideBytes),
+        },
+    });
+
+    const stride = try self.typechecker.builder.literal(strideConstant);
+
+    return self.typechecker.builder.mul(wideIndex, stride);
 }
 
 pub fn handler(self: *Lowerer, comptime name: []const u8, ofType: TypeID) Error!JIR.Ptr {

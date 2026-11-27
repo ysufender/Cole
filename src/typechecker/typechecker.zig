@@ -1319,10 +1319,7 @@ pub fn typecheckIfExpression(self: *Typechecker, extraPtr: defines.OpaquePtr, ma
     const thenBranch = try self.typecheckExpression(conditional.then, maybeExpected);
     const elseBranch = try self.typecheckExpression(conditional.otherwise, maybeExpected);
 
-    if (!(
-        self.suitable(thenBranch, elseBranch)
-        and self.suitable(elseBranch, thenBranch)
-    )) {
+    if (!self.suitable(thenBranch, elseBranch)) {
         self.report("Diverging result types '{s}' and '{s}' in conditional expression.", .{
             try self.typeName(self.arena.allocator(), thenBranch),
             try self.typeName(self.arena.allocator(), elseBranch),
@@ -2453,7 +2450,7 @@ pub fn typecheckDecl(self: *Typechecker, declPtr: defines.DeclPtr, maybeExpected
             },
             .NotChecked => {
                 if (
-                    decl.kind == .Capture and determineExpected(maybeExpected) == null
+                    decl.kind == .Capture
                     and isPresent.value_ptr.result != comptime Comptime.Folder.Builtin.Type("__incomplete")
                 ) {
                     return isPresent.value_ptr.result;

@@ -74,14 +74,12 @@ pub const Constant = union(enum) {
         Type: TypeID,
         Init: []const Constant.Ptr,
     },
-    Nop,
 };
 
 pub const Node = struct {
     pub const List = MultiArrayList(Node);
 
     pub const Type = enum {
-        Nop,
         FunctionDef,
         VariableDef,
         Identifier,
@@ -356,7 +354,6 @@ fn constant(self: *JAIR, out: *Writer, bare: bool, constPtr: Constant.Ptr) Error
                 constPtr,
             });
         },
-        .Nop => {},
     }
 }
 
@@ -683,14 +680,6 @@ fn generateExpr(self: *JAIR, out: *Writer, ptr: Ptr) Error!u32 {
         .Store, .Code, .FunctionDef,
         .VariableDef, .Exit, .JumpIf,
         .Jump, .Label, .Return, .Scope, => return Error.ShouldBeImpossible,
-
-        else => |kind| {
-            common.log.err(
-                "Unsupported JAIR expression: {s}, type ID: {d}",
-                .{ @tagName(kind), node.type },
-            );
-            return Error.ShouldBeImpossible;
-        },
     }
 }
 
@@ -723,7 +712,13 @@ fn construct(self: *JAIR, out: *Writer, node: *const Node) Error!u32 {
                     _ = try self.generateExpr(out, arg);
                     continue;
                 }
-                if (fieldIdx >= agg.fields.len) return Error.ShouldBeImpossible;
+                if (fieldIdx >= agg.fields.len) {
+                    common.log.debug("Field '{d}' is out of bounds on type '{s}'", .{
+                        fieldIdx,
+                        self.strings[self.typeNames.get(node.type).?],
+                    });
+                    return Error.ShouldBeImpossible;
+                }
                 const ft = agg.fields[fieldIdx];
                 fieldIdx += 1;
                 offset = std.mem.alignForward(u32, offset, @max(1, self.alignOf(ft)));
@@ -801,17 +796,18 @@ fn reference(self: *JAIR, out: *Writer, node: *const Node) Error!u32 {
 fn load(self: *JAIR, out: *Writer, node: *const Node) Error!u32 {
     const lvalue = self.data[node.value] == 1;
     const expr = self.data[node.value + 1];
+    const childType = self.data[node.value + 2];
 
     const ptr = try self.generateExpr(out, expr);
 
-    if (lvalue or !self.isScalar(node.type)) return ptr;
+    if (lvalue or !self.isScalar(childType)) return ptr;
 
     const res = self.allocTmp();
 
     try self.write(true, out, "%__tmp{d} =", .{res});
-    try self.typeString(out, true, node.type);
+    try self.typeString(out, true, childType);
     try self.write(false, out, " load", .{});
-    try self.loadTypeString(out, node.type);
+    try self.loadTypeString(out, childType);
     try self.write(false, out, " %__tmp{d}\n", .{ptr});
 
     return res;
@@ -1265,7 +1261,6 @@ fn dataItems(self: *JAIR, out: *Writer, em: *DataEmitter, ptr: Constant.Ptr) Err
         .Word, .Single => 4,
         .Long, .Double, .Function, .String => 8,
         .Aggregate => |a| self.alignOf(a.Type),
-        .Nop => 1,
     };
 
     const aligned = std.mem.alignForward(u32, em.offset, al);
@@ -1281,7 +1276,6 @@ fn dataItems(self: *JAIR, out: *Writer, em: *DataEmitter, ptr: Constant.Ptr) Err
     }
 
     switch (c) {
-        .Nop => return,
         .Aggregate => |agg| {
             const end = em.offset + self.sizeOf(agg.Type);
 
@@ -1352,7 +1346,7 @@ fn dataItems(self: *JAIR, out: *Writer, em: *DataEmitter, ptr: Constant.Ptr) Err
                 break :blk 16;
             },
         },
-        .Nop, .Aggregate => unreachable,
+        .Aggregate => unreachable,
     };
 }
 
