@@ -847,8 +847,13 @@ fn convertConstant(self: *Builder, constant: JIR.Constant.Ptr) Error!JAIR.Consta
             .u8 => |integer| .{ .Byte = .{ @bitCast(integer), false } },
             .c_char => |integer| .{ .Byte = .{ @bitCast(integer), true } },
             .c_uchar => |integer| .{ .Byte = .{ @bitCast(integer), false } },
-            .c_long => |integer| .{ .Long = .{ @bitCast(integer), true } },
-            .c_ulong => |integer| .{ .Long = .{ @bitCast(integer), false } },
+            .c_long => |integer|
+                if (self.typechecker.context.settings.buildInfo.platform == .Windows) .{ .Word = .{ @bitCast(integer), true } }
+                else .{ .Word = .{ @bitCast(integer), true } },
+
+            .c_ulong => |integer|
+                if (self.typechecker.context.settings.buildInfo.platform == .Windows) .{ .Word = .{ @bitCast(integer), false } }
+                else .{ .Word = .{ @bitCast(integer), false } },
             .c_size => |integer| .{ .Long = .{ @bitCast(integer), true } },
             .c_short => |integer| .{ .Half = .{ @bitCast(integer), true } },
             .c_ushort => |integer| .{ .Half = .{ @bitCast(integer), false } },
